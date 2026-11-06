@@ -1,0 +1,56 @@
+:root {
+  --app-bottom-nav: 64px;
+}
+body {
+  background: var(--mantine-color-body);
+  -webkit-tap-highlight-color: transparent;
+}
+.tap-card {
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.tap-card:hover {
+  border-color: var(--mantine-color-blue-5);
+}
+.bottom-nav a {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--mantine-color-dimmed);
+  text-decoration: none;
+  min-height: 56px;
+}
+.bottom-nav a.active {
+  color: var(--mantine-color-blue-filled);
+  font-weight: 600;
+}
+.bottom-nav a.plus {
+  color: var(--mantine-color-white);
+}
+.side-nav a.active {
+  background: var(--mantine-color-blue-light);
+  color: var(--mantine-color-blue-light-color);
+}
+.photo-slot {
+  aspect-ratio: 4 / 3;
+  border: 2px dashed var(--mantine-color-gray-5);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  position: relative;
+}
+.photo-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
