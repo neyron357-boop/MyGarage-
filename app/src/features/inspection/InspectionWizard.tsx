@@ -141,7 +141,7 @@ function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: I
         <Alert color="red" title={t('sign.missingTitle')}>
           <Group gap={6} mt={4}>
             {missing.map((m) => (
-              <Button key={m} size="compact-sm" variant="white" color="red" onClick={() => goTo(MISSING_STEP[m])}>
+              <Button key={m} size="compact-sm" variant="white" color="red" h="auto" py={4} styles={{ label: { whiteSpace: 'normal', textAlign: 'left' } }} onClick={() => goTo(MISSING_STEP[m])}>
                 {t(`missing.${m}`)}
               </Button>
             ))}

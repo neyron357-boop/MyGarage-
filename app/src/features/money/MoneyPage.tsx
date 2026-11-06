@@ -1,5 +1,17 @@
-import { Alert, Badge, Button, Card, Group, Modal, Paper, Progress, SegmentedControl, Select, SimpleGrid, Stack, Table, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { Alert, Avatar, Badge, Box, Button, Group, Modal, Progress, Select, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import {
+  IconArrowDownLeft,
+  IconArrowUpRight,
+  IconBuildingBank,
+  IconCash,
+  IconCashRegister,
+  IconCreditCard,
+  IconLock,
+  IconPlus,
+  IconReceipt2,
+  IconUserDollar,
+  type Icon,
+} from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,8 +24,33 @@ import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
 import { addCashMovement, addExpense, cashState, categoryMonthSpent, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { EmptyState, Money, MoneyInput, PageHeader, Photo, PlateText } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, Photo, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
+import { DateField, MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
+import { initials } from '../customers/CustomersPage';
+
+const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
+
+function MethodPicker({ value, onChange }: { value: PayMethod; onChange: (m: PayMethod) => void }) {
+  const { t } = useTranslation();
+  return (
+    <SimpleGrid cols={3} spacing="xs">
+      {(['cash', 'card', 'transfer'] as const).map((m) => {
+        const I = METHOD_ICON[m];
+        return (
+          <SelectCard key={m} active={value === m} onClick={() => onChange(m)}>
+            <Stack gap={4} align="center">
+              <I size={20} stroke={1.7} />
+              <Text size="sm" fw={600}>
+                {t(`payment.method.${m}`)}
+              </Text>
+            </Stack>
+          </SelectCard>
+        );
+      })}
+    </SimpleGrid>
+  );
+}
 
 function CashTab() {
   const { t } = useTranslation();
@@ -31,51 +68,117 @@ function CashTab() {
   if (!st) return null;
   const diff = actual !== undefined ? actual - st.expected : 0;
   return (
-    <Stack>
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
-        <Paper withBorder p="sm"><Text size="xs" c="dimmed">{t('cash.opening')}</Text><Money fils={st.opening} fw={600} /></Paper>
-        <Paper withBorder p="sm"><Text size="xs" c="dimmed">{t('cash.in')}</Text><Money fils={st.inFils} fw={600} c="green" /></Paper>
-        <Paper withBorder p="sm"><Text size="xs" c="dimmed">{t('cash.out')}</Text><Money fils={st.outFils} fw={600} c="red" /></Paper>
-        <Paper withBorder p="sm"><Text size="xs" c="dimmed">{t('cash.expected')}</Text><Money fils={st.expected} fw={800} size="lg" /></Paper>
-      </SimpleGrid>
-      <Group>
-        <Button onClick={() => setCloseOpen(true)}>{t('cash.closeDay')}</Button>
-        <Button variant="light" onClick={() => setMoveOpen(true)}>{t('cash.addMovement')}</Button>
-      </Group>
-      <Title order={6}>{t('cash.movements')}</Title>
-      {st.movements.length === 0 && <EmptyState>{t('cash.noMovements')}</EmptyState>}
-      {[...st.movements].reverse().map((m) => (
-        <Group key={m.id} justify="space-between" wrap="nowrap">
-          <Text size="sm">{formatDateTime(m.at)} · {t(`cashReason.${m.reason}`)}{m.note ? ` · ${m.note}` : ''}</Text>
-          <Money fils={m.direction === 'in' ? m.amountFils : -m.amountFils} c={m.direction === 'in' ? 'green' : 'red'} size="sm" />
+    <Stack gap="lg">
+      <Box p="lg" style={{ background: 'var(--app-ink)', color: '#fff', borderRadius: 'var(--mantine-radius-lg)' }}>
+        <Text size="11px" fw={700} tt="uppercase" c="var(--app-ink-muted)" style={{ letterSpacing: '0.08em' }}>
+          {t('cash.expected')}
+        </Text>
+        <Text fz={40} lh={1.1} mt={4}>
+          <Money fils={st.expected} display />
+        </Text>
+        <Group gap="lg" mt="sm">
+          <Text size="sm" c="var(--app-ink-muted)">
+            {t('cash.opening')}: <Money fils={st.opening} c="#fff" />
+          </Text>
+          <Text size="sm" c="var(--app-ink-muted)">
+            {t('cash.in')}: <Money fils={st.inFils} c="green.4" />
+          </Text>
+          <Text size="sm" c="var(--app-ink-muted)">
+            {t('cash.out')}: <Money fils={st.outFils} c="red.4" />
+          </Text>
         </Group>
-      ))}
-      <Title order={6} mt="md">{t('cash.history')}</Title>
-      {closings?.map((c) => (
-        <Paper key={c.id} withBorder p="xs">
-          <Group justify="space-between">
-            <Text size="sm">{formatDate(c.date)} · {t('cash.expected')} {formatAed(c.expectedFils)} · {t('cash.actual')} {formatAed(c.actualFils)}</Text>
-            {c.diffFils !== 0 ? <Badge color="red">{formatAed(c.diffFils)}</Badge> : <Badge color="green">OK</Badge>}
-          </Group>
-          <Text size="xs" c="dimmed">{t('payment.method.card')}: {formatAed(c.cardTotalFils)} · {t('payment.method.transfer')}: {formatAed(c.transferTotalFils)}{c.comment ? ` · ${c.comment}` : ''}</Text>
-        </Paper>
-      ))}
+        <Group mt="lg" gap="xs">
+          <Button leftSection={<IconLock size={18} />} onClick={() => setCloseOpen(true)}>
+            {t('cash.closeDay')}
+          </Button>
+          <Button variant="white" color="dark" onClick={() => setMoveOpen(true)}>
+            {t('cash.addMovement')}
+          </Button>
+        </Group>
+        {st.lastClosing && (
+          <Text size="xs" c="var(--app-ink-muted)" mt="sm">
+            {t('cash.lastClosed', { date: formatDateTime(st.lastClosing.closedAt) })}
+          </Text>
+        )}
+      </Box>
+      <Section title={t('cash.movements')} mt={0}>
+        {st.movements.length === 0 ? (
+          <EmptyState icon={IconCashRegister}>{t('cash.noMovements')}</EmptyState>
+        ) : (
+          <List>
+            {[...st.movements].reverse().map((m) => (
+              <ListRow
+                key={m.id}
+                left={
+                  <ThemeIcon variant="light" color={m.direction === 'in' ? 'green' : 'red'} size={38} radius="md">
+                    {m.direction === 'in' ? <IconArrowDownLeft size={19} /> : <IconArrowUpRight size={19} />}
+                  </ThemeIcon>
+                }
+                title={t(`cashReason.${m.reason}`)}
+                subtitle={`${formatDateTime(m.at)}${m.note ? ` · ${m.note}` : ''}`}
+                right={<Money fils={m.direction === 'in' ? m.amountFils : -m.amountFils} c={m.direction === 'in' ? 'green' : 'red'} size="sm" />}
+              />
+            ))}
+          </List>
+        )}
+      </Section>
+      {!!closings?.length && (
+        <Section title={t('cash.history')} mt={0}>
+          <List>
+            {closings.map((c) => (
+              <ListRow
+                key={c.id}
+                title={formatDate(c.date)}
+                subtitle={`${t('cash.expected')} ${formatAed(c.expectedFils)} · ${t('cash.actual')} ${formatAed(c.actualFils)} · ${t('payment.method.card')} ${formatAed(c.cardTotalFils)}${c.comment ? ` · ${c.comment}` : ''}`}
+                right={c.diffFils !== 0 ? <Badge color="red">{formatAed(c.diffFils)}</Badge> : <Badge color="green">OK</Badge>}
+              />
+            ))}
+          </List>
+        </Section>
+      )}
       <Modal opened={moveOpen} onClose={() => setMoveOpen(false)} title={t('cash.addMovement')}>
         <Stack>
-          <SegmentedControl fullWidth value={dir} onChange={(v) => setDir(v as 'in' | 'out')} data={[{ value: 'in', label: t('cash.in') }, { value: 'out', label: t('cash.out') }]} />
+          <SimpleGrid cols={2} spacing="xs">
+            {(['in', 'out'] as const).map((d) => (
+              <SelectCard key={d} active={dir === d} onClick={() => setDir(d)}>
+                <Group gap={6}>
+                  {d === 'in' ? <IconArrowDownLeft size={18} color="var(--mantine-color-green-6)" /> : <IconArrowUpRight size={18} color="var(--mantine-color-red-6)" />}
+                  <Text fw={600} size="sm">
+                    {t(`cash.${d}`)}
+                  </Text>
+                </Group>
+              </SelectCard>
+            ))}
+          </SimpleGrid>
           <Select value={reason} onChange={(v) => v && setReason(v as CashReason)} allowDeselect={false} data={(['collection', 'adjustment', 'other'] as const).map((r) => ({ value: r, label: t(`cashReason.${r}`) }))} />
           <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} />
           <TextInput label={t('common.comment')} value={note} onChange={(e) => setNote(e.currentTarget.value)} description={t('cash.commentHint')} />
-          <Button loading={busy} onClick={() => run(async () => { await addCashMovement({ direction: dir, amountFils: amount ?? 0, reason, note }); setMoveOpen(false); setAmount(undefined); setNote(''); }, 'common.saved')}>{t('common.save')}</Button>
+          <Button loading={busy} onClick={() => run(async () => { await addCashMovement({ direction: dir, amountFils: amount ?? 0, reason, note }); setMoveOpen(false); setAmount(undefined); setNote(''); }, 'common.saved')}>
+            {t('common.save')}
+          </Button>
         </Stack>
       </Modal>
       <Modal opened={closeOpen} onClose={() => setCloseOpen(false)} title={t('cash.closeDay')}>
         <Stack>
-          <Text>{t('cash.shouldBe')}: <b>{formatAed(st.expected)}</b></Text>
+          <Box className="surface-soft" p="md">
+            <div className="eyebrow">{t('cash.shouldBe')}</div>
+            <Text fz={28}>
+              <Money fils={st.expected} display />
+            </Text>
+          </Box>
           <MoneyInput label={t('cash.counted')} value={actual} onChange={setActual} autoFocus />
-          {actual !== undefined && diff !== 0 && <Alert color="red">{t('cash.diff')}: {formatAed(diff)}</Alert>}
-          {actual !== undefined && diff !== 0 && <TextInput label={t('common.comment')} required value={comment} onChange={(e) => setComment(e.currentTarget.value)} />}
-          <Button loading={busy} disabled={actual === undefined} onClick={() => run(async () => { await closeCashDay(actual ?? 0, comment); setCloseOpen(false); setActual(undefined); setComment(''); }, 'cash.closed')}>{t('cash.close')}</Button>
+          {actual !== undefined && diff === 0 && <Alert color="green">{t('cash.match')}</Alert>}
+          {actual !== undefined && diff !== 0 && (
+            <>
+              <Alert color="red" title={t('cash.diff')}>
+                {formatAed(diff)}
+              </Alert>
+              <TextInput label={t('common.comment')} required value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
+            </>
+          )}
+          <Button loading={busy} disabled={actual === undefined} leftSection={<IconLock size={18} />} onClick={() => run(async () => { await closeCashDay(actual ?? 0, comment); setCloseOpen(false); setActual(undefined); setComment(''); }, 'cash.closed')}>
+            {t('cash.close')}
+          </Button>
         </Stack>
       </Modal>
     </Stack>
@@ -102,27 +205,49 @@ function ExpenseModal({ opened, onClose }: { opened: boolean; onClose: () => voi
     if (categoryId) void categoryMonthSpent(categoryId, date.slice(0, 7)).then(setSpent);
   }, [categoryId, date]);
   const overLimit = !!cat && cat.monthlyLimitFils > 0 && spent + (amount ?? 0) > cat.monthlyLimitFils;
-  const reset = () => { setAmount(undefined); setVat(undefined); setVendor(''); setNote(''); setOver(''); setReceipt(undefined); };
+  const reset = () => {
+    setAmount(undefined);
+    setVat(undefined);
+    setVendor('');
+    setNote('');
+    setOver('');
+    setReceipt(undefined);
+  };
   return (
     <Modal opened={opened} onClose={onClose} title={t('expense.add')} size="lg">
       <Stack>
-        <SimpleGrid cols={2}>
-          <TextInput type="date" label={t('common.date')} value={date} onChange={(e) => setDate(e.currentTarget.value)} />
-          <Select label={t('expense.category')} value={categoryId} onChange={setCategoryId} data={(cats ?? []).map((c) => ({ value: c.id, label: lang === 'ru' ? c.nameRu : c.nameEn }))} />
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <Select label={t('expense.category')} placeholder={t('expense.pickCategory')} value={categoryId} onChange={setCategoryId} data={(cats ?? []).map((c) => ({ value: c.id, label: lang === 'ru' ? c.nameRu : c.nameEn }))} />
+          <DateField label={t('common.date')} value={date} onChange={setDate} />
         </SimpleGrid>
         {cat && cat.monthlyLimitFils > 0 && (
-          <div>
-            <Text size="xs" c={overLimit ? 'red' : 'dimmed'}>{t('expense.limitUsage', { spent: formatAed(spent + (amount ?? 0)), limit: formatAed(cat.monthlyLimitFils) })}</Text>
-            <Progress value={Math.min(100, ((spent + (amount ?? 0)) / cat.monthlyLimitFils) * 100)} color={overLimit ? 'red' : 'blue'} />
-          </div>
+          <Box className="surface-soft" p="sm">
+            <Text size="xs" c={overLimit ? 'red' : 'dimmed'} fw={600} mb={4}>
+              {t('expense.limitUsage', { spent: formatAed(spent + (amount ?? 0)), limit: formatAed(cat.monthlyLimitFils) })}
+            </Text>
+            <Progress value={Math.min(100, ((spent + (amount ?? 0)) / cat.monthlyLimitFils) * 100)} color={overLimit ? 'red' : 'cobalt'} />
+          </Box>
         )}
         <SimpleGrid cols={2}>
           <MoneyInput label={t('expense.amountGross')} value={amount} onChange={setAmount} />
-          <MoneyInput label={t('expense.vat')} value={vat} onChange={setVat} description={amount ? <Button size="compact-xs" variant="subtle" onClick={() => setVat(vatOf(netFromGross(amount, 500), 500))}>{t('expense.vatFromGross')}</Button> : undefined} />
+          <MoneyInput
+            label={t('expense.vat')}
+            value={vat}
+            onChange={setVat}
+            description={
+              amount ? (
+                <Text span size="xs" c="cobalt.6" style={{ cursor: 'pointer' }} onClick={() => setVat(vatOf(netFromGross(amount, 500), 500))}>
+                  {t('expense.vatFromGross')}
+                </Text>
+              ) : undefined
+            }
+          />
         </SimpleGrid>
         <TextInput label={t('expense.vendor')} value={vendor} onChange={(e) => setVendor(e.currentTarget.value)} />
-        <SegmentedControl fullWidth value={method} onChange={(v) => setMethod(v as PayMethod)} data={(['cash', 'card', 'transfer'] as const).map((m) => ({ value: m, label: t(`payment.method.${m}`) }))} />
-        <CaptureButton variant="light" camera={false} onFiles={(f) => setReceipt(f[0])}>{receipt ? t('parts.receiptAttached') : t('parts.receiptPhoto')}</CaptureButton>
+        <MethodPicker value={method} onChange={setMethod} />
+        <CaptureButton variant="light" camera={false} leftSection={<IconReceipt2 size={18} />} onFiles={(f) => setReceipt(f[0])}>
+          {receipt ? t('parts.receiptAttached') : t('parts.receiptPhoto')}
+        </CaptureButton>
         <TextInput label={t('common.notes')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
         {overLimit && <TextInput label={t('expense.overLimitComment')} required value={over} onChange={(e) => setOver(e.currentTarget.value)} error={t('expense.overLimit')} />}
         <Button loading={busy} disabled={!categoryId || !amount} onClick={() => run(async () => { await addExpense({ date, categoryId: categoryId!, amountFils: amount ?? 0, vatFils: vat ?? 0, vendor, method, note, overLimitComment: over, receipt }); reset(); onClose(); }, 'common.saved')}>
@@ -145,47 +270,77 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   if (!data) return null;
   const byCat = (id: string) => data.list.filter((e) => e.categoryId === id).reduce((s, e) => s + e.amountFils, 0);
   const total = data.list.reduce((s, e) => s + e.amountFils, 0);
+  const cats = data.cats.filter((c) => c.active && (byCat(c.id) > 0 || c.monthlyLimitFils > 0)).sort((a, b) => byCat(b.id) - byCat(a.id));
   return (
-    <Stack>
-      <Group justify="space-between">
-        <TextInput type="month" value={month} onChange={(e) => setMonth(e.currentTarget.value || monthKey())} w={180} />
-        <Button leftSection={<IconPlus size={18} />} onClick={() => setOpen(true)}>{t('expense.add')}</Button>
+    <Stack gap="lg">
+      <Group justify="space-between" align="flex-end">
+        <MonthField value={month} onChange={setMonth} />
+        <Button leftSection={<IconPlus size={18} />} onClick={() => setOpen(true)}>
+          {t('expense.add')}
+        </Button>
       </Group>
-      <Paper withBorder p="sm">
-        <Group justify="space-between" mb="xs"><Text fw={600}>{t('expense.byCategory')}</Text><Money fils={total} fw={700} /></Group>
-        <Stack gap={6}>
-          {data.cats.filter((c) => c.active).map((c) => {
+      <Box className="surface" p="md">
+        <Group justify="space-between" mb="md">
+          <div>
+            <div className="eyebrow">{t('expense.monthTotal')}</div>
+            <Text fz={28}>
+              <Money fils={total} display />
+            </Text>
+          </div>
+        </Group>
+        <Stack gap="sm">
+          {cats.map((c) => {
             const s = byCat(c.id);
             const pct = c.monthlyLimitFils ? (s / c.monthlyLimitFils) * 100 : 0;
             return (
               <div key={c.id}>
-                <Group justify="space-between">
-                  <Text size="sm">{lang === 'ru' ? c.nameRu : c.nameEn}</Text>
-                  <Text size="sm">{formatAed(s)}{c.monthlyLimitFils ? ` / ${formatAed(c.monthlyLimitFils)}` : ''}</Text>
+                <Group justify="space-between" mb={4} wrap="nowrap">
+                  <Text size="sm" fw={500}>
+                    {lang === 'ru' ? c.nameRu : c.nameEn}
+                  </Text>
+                  <Text size="sm" className="tnum" c={pct > 100 ? 'red' : undefined} fw={600}>
+                    {formatAed(s)}
+                    {c.monthlyLimitFils ? (
+                      <Text span c="dimmed" fw={400} size="xs">
+                        {' '}
+                        / {formatAed(c.monthlyLimitFils)}
+                      </Text>
+                    ) : null}
+                  </Text>
                 </Group>
-                {c.monthlyLimitFils > 0 && <Progress value={Math.min(100, pct)} color={pct > 100 ? 'red' : pct > 80 ? 'orange' : 'blue'} size="sm" />}
+                {c.monthlyLimitFils > 0 && <Progress value={Math.min(100, pct)} color={pct > 100 ? 'red' : pct > 80 ? 'orange' : 'cobalt'} size="sm" />}
               </div>
             );
           })}
         </Stack>
-      </Paper>
-      {data.list.map((e) => {
-        const c = data.cats.find((x) => x.id === e.categoryId);
-        return (
-          <Card key={e.id} withBorder padding="xs">
-            <Group justify="space-between" wrap="nowrap">
-              <div>
-                <Text size="sm" fw={500}>{c ? (lang === 'ru' ? c.nameRu : c.nameEn) : ''}{e.vendor ? ` · ${e.vendor}` : ''}</Text>
-                <Text size="xs" c="dimmed">{formatDate(e.date)} · {t(`payment.method.${e.method}`)}{e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}{e.note ? ` · ${e.note}` : ''}{e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}</Text>
-              </div>
-              <Group gap={4} wrap="nowrap">
-                {e.receiptMediaId && <Photo id={e.receiptMediaId} h={36} />}
-                <Money fils={e.amountFils} fw={600} size="sm" />
-              </Group>
-            </Group>
-          </Card>
-        );
-      })}
+      </Box>
+      {data.list.length === 0 ? (
+        <EmptyState icon={IconReceipt2}>{t('expense.empty')}</EmptyState>
+      ) : (
+        <List>
+          {data.list.map((e) => {
+            const c = data.cats.find((x) => x.id === e.categoryId);
+            const I = METHOD_ICON[e.method];
+            return (
+              <ListRow
+                key={e.id}
+                left={
+                  e.receiptMediaId ? (
+                    <Photo id={e.receiptMediaId} h={40} />
+                  ) : (
+                    <ThemeIcon variant="light" color="gray" size={40} radius="md">
+                      <I size={19} />
+                    </ThemeIcon>
+                  )
+                }
+                title={`${c ? (lang === 'ru' ? c.nameRu : c.nameEn) : ''}${e.vendor ? ` · ${e.vendor}` : ''}`}
+                subtitle={`${formatDate(e.date)} · ${t(`payment.method.${e.method}`)}${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${e.note ? ` · ${e.note}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
+                right={<Money fils={e.amountFils} size="sm" />}
+              />
+            );
+          })}
+        </List>
+      )}
       <ExpenseModal opened={open} onClose={() => setOpen(false)} />
     </Stack>
   );
@@ -201,38 +356,53 @@ function SalariesTab() {
   const [method, setMethod] = useState<PayMethod>('cash');
   if (!data) return null;
   return (
-    <Stack>
-      <TextInput type="month" value={month} onChange={(e) => setMonth(e.currentTarget.value || monthKey())} w={180} />
-      <Table>
-        <Table.Thead>
-          <Table.Tr><Table.Th>{t('customer.name')}</Table.Th><Table.Th>{t('salary.salary')}</Table.Th><Table.Th>{t('salary.paid')}</Table.Th><Table.Th>{t('salary.left')}</Table.Th><Table.Th /></Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {data.emps.map((e) => {
-            const paid = data.pays.filter((p) => p.employeeId === e.id).reduce((s, p) => s + p.amountFils, 0);
-            return (
-              <Table.Tr key={e.id}>
-                <Table.Td>{e.name}</Table.Td>
-                <Table.Td>{formatAed(e.monthlySalaryFils)}</Table.Td>
-                <Table.Td>{formatAed(paid)}</Table.Td>
-                <Table.Td>{formatAed(Math.max(0, e.monthlySalaryFils - paid))}</Table.Td>
-                <Table.Td>
-                  <Group gap={4} wrap="nowrap">
-                    <Button size="compact-xs" variant="light" onClick={() => { setPay({ employeeId: e.id, kind: 'advance' }); setAmount(undefined); }}>{t('salary.kind.advance')}</Button>
-                    <Button size="compact-xs" onClick={() => { setPay({ employeeId: e.id, kind: 'salary' }); setAmount(Math.max(0, e.monthlySalaryFils - paid) || undefined); }}>{t('salary.kind.salary')}</Button>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            );
-          })}
-        </Table.Tbody>
-      </Table>
-      <Text size="xs" c="dimmed">{t('salary.hint')}</Text>
+    <Stack gap="lg">
+      <MonthField value={month} onChange={setMonth} />
+      <List>
+        {data.emps.map((e) => {
+          const paid = data.pays.filter((p) => p.employeeId === e.id).reduce((s, p) => s + p.amountFils, 0);
+          const pct = e.monthlySalaryFils ? Math.min(100, (paid / e.monthlySalaryFils) * 100) : 0;
+          return (
+            <ListRow
+              key={e.id}
+              left={
+                <Avatar color="cobalt" radius="xl">
+                  {initials(e.name)}
+                </Avatar>
+              }
+              title={e.name}
+              subtitle={
+                <Stack gap={4}>
+                  <span>
+                    {t(`role.${e.role}`)} · {t('salary.paid')} {formatAed(paid)} {t('problem.of')} {formatAed(e.monthlySalaryFils)}
+                  </span>
+                  {e.monthlySalaryFils > 0 && <Progress value={pct} size="xs" color={pct >= 100 ? 'green' : 'cobalt'} maw={220} />}
+                </Stack>
+              }
+              right={
+                <Group gap={4} wrap="nowrap">
+                  <Button size="compact-sm" variant="default" onClick={() => { setPay({ employeeId: e.id, kind: 'advance' }); setAmount(undefined); }}>
+                    {t('salary.kind.advance')}
+                  </Button>
+                  <Button size="compact-sm" onClick={() => { setPay({ employeeId: e.id, kind: 'salary' }); setAmount(Math.max(0, e.monthlySalaryFils - paid) || undefined); }}>
+                    {t('salary.kind.salary')}
+                  </Button>
+                </Group>
+              }
+            />
+          );
+        })}
+      </List>
+      <Text size="xs" c="dimmed">
+        {t('salary.hint')}
+      </Text>
       <Modal opened={!!pay} onClose={() => setPay(null)} title={pay ? t(`salary.kind.${pay.kind}`) : ''}>
         <Stack>
-          <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} />
-          <SegmentedControl fullWidth value={method} onChange={(v) => setMethod(v as PayMethod)} data={(['cash', 'card', 'transfer'] as const).map((m) => ({ value: m, label: t(`payment.method.${m}`) }))} />
-          <Button loading={busy} onClick={() => pay && run(async () => { await paySalary({ ...pay, month, amountFils: amount ?? 0, method }); setPay(null); }, 'common.saved')}>{t('common.save')}</Button>
+          <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus />
+          <MethodPicker value={method} onChange={setMethod} />
+          <Button loading={busy} onClick={() => pay && run(async () => { await paySalary({ ...pay, month, amountFils: amount ?? 0, method }); setPay(null); }, 'common.saved')}>
+            {t('common.save')}
+          </Button>
         </Stack>
       </Modal>
     </Stack>
@@ -248,24 +418,39 @@ function DebtsTab() {
     return bundles.filter((b) => bundleAmountDue(b) > 0);
   }, []);
   if (!list) return null;
-  if (!list.length) return <EmptyState>{t('debt.none')}</EmptyState>;
+  if (!list.length) return <EmptyState icon={IconUserDollar} title={t('debt.none')}>{t('debt.noneHint')}</EmptyState>;
+  const total = list.reduce((s, b) => s + bundleAmountDue(b), 0);
   return (
-    <Stack gap="xs">
-      {list.map((b) => {
-        const d = b.debts.find((x) => x.status === 'open');
-        const overdue = d && d.dueDate < dubaiDate();
-        return (
-          <Card key={b.order.id} withBorder padding="sm" className="tap-card" onClick={() => navigate(`/orders/${b.order.id}?tab=payments`)}>
-            <Group justify="space-between">
-              <div>
-                <Group gap={6}><PlateText plate={b.vehicle.plate} size="xs" /><Text fw={600} size="sm">{b.customer.name}</Text></Group>
-                <Text size="xs" c={overdue ? 'red' : 'dimmed'}>№{b.order.number}{d ? ` · ${t('debt.dueDate')} ${formatDate(d.dueDate)}` : ''}</Text>
-              </div>
-              <Money fils={bundleAmountDue(b)} fw={700} c="red" />
-            </Group>
-          </Card>
-        );
-      })}
+    <Stack gap="md">
+      <Box className="surface" p="md">
+        <div className="eyebrow">{t('debt.total')}</div>
+        <Text fz={28} c="red">
+          <Money fils={total} display />
+        </Text>
+      </Box>
+      <List>
+        {list.map((b) => {
+          const d = b.debts.find((x) => x.status === 'open');
+          const overdue = d && d.dueDate < dubaiDate();
+          return (
+            <ListRow
+              key={b.order.id}
+              onClick={() => navigate(`/orders/${b.order.id}?tab=payments`)}
+              chevron
+              left={<PlateText plate={b.vehicle.plate} size="sm" />}
+              title={b.customer.name}
+              subtitle={
+                <Text span size="xs" c={overdue ? 'red' : 'dimmed'}>
+                  №{b.order.number}
+                  {d ? ` · ${t('debt.dueDate')} ${formatDate(d.dueDate)}` : ''}
+                  {overdue ? ` · ${t('debt.overdue')}` : ''}
+                </Text>
+              }
+              right={<Money fils={bundleAmountDue(b)} c="red" size="sm" />}
+            />
+          );
+        })}
+      </List>
     </Stack>
   );
 }
@@ -277,14 +462,16 @@ export function MoneyPage() {
   return (
     <>
       <PageHeader title={t('nav.money')} />
-      <Tabs value={tab} onChange={(v) => setParams({ tab: v ?? 'cash' })} mb="md">
-        <Tabs.List>
-          <Tabs.Tab value="cash">{t('money.cash')}</Tabs.Tab>
-          <Tabs.Tab value="expenses">{t('money.expenses')}</Tabs.Tab>
-          <Tabs.Tab value="salaries">{t('money.salaries')}</Tabs.Tab>
-          <Tabs.Tab value="debts">{t('money.debts')}</Tabs.Tab>
-        </Tabs.List>
-      </Tabs>
+      <ScrollTabs
+        value={tab}
+        onChange={(v) => setParams({ tab: v })}
+        items={[
+          { value: 'cash', label: t('money.cash') },
+          { value: 'expenses', label: t('money.expenses') },
+          { value: 'salaries', label: t('money.salaries') },
+          { value: 'debts', label: t('money.debts') },
+        ]}
+      />
       {tab === 'cash' && <CashTab />}
       {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}
       {tab === 'salaries' && <SalariesTab />}

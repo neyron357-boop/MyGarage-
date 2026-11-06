@@ -168,6 +168,9 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--app-hairline': '#e4e8ef',
     '--app-card': '#ffffff',
     '--app-soft': '#f6f7fa',
+    '--viz-1': '#3f5be9',
+    '--viz-2': '#eb6834',
+    '--viz-3': '#1baf7a',
   },
   dark: {
     '--app-canvas': '#0e1118',
@@ -178,5 +181,8 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--app-hairline': '#262c39',
     '--app-card': '#1b202a',
     '--app-soft': '#202633',
+    '--viz-1': '#5873f4',
+    '--viz-2': '#d95926',
+    '--viz-3': '#199e70',
   },
 });

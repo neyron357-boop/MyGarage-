@@ -1,5 +1,5 @@
-import { Button, Group, Paper, SegmentedControl, SimpleGrid, Stack, Table, Text, TextInput, Title } from '@mantine/core';
-import { IconDownload, IconFileTypePdf, IconShare } from '@tabler/icons-react';
+import { Box, Button, Group, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core';
+import { IconChartBar, IconDownload, IconFileTypePdf, IconShare } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +9,8 @@ import { formatAed } from '../../domain/money';
 import { computeReport } from '../../domain/reports';
 import { downloadBlob, toCsv } from '../../services/backup';
 import { openPdf } from '../../services/documents';
-import { Money, PageHeader } from '../../ui/components';
+import { EmptyState, Kpi, List, ListRow, Money, PageHeader, ScrollTabs, Section } from '../../ui/components';
+import { DateField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 
 type Period = 'today' | 'week' | 'month' | 'custom';
@@ -22,14 +23,84 @@ function range(p: Period, from: string, to: string): [string, string] {
   return [from || today, to || today];
 }
 
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+
+/** One whole split into parts (revenue by kind): segments with a 2px gap, details on hover and in the rows below. */
+function SegmentedBar({ parts }: { parts: { key: string; label: string; value: number; color: string }[] }) {
+  const lang = useLang();
+  const total = parts.reduce((s, p) => s + Math.max(0, p.value), 0);
+  const visible = parts.filter((p) => p.value > 0);
+  return (
+    <Box>
+      <Box style={{ display: 'flex', gap: 2, height: 18 }} role="img" aria-label={visible.map((p) => `${p.label} ${formatAed(p.value, lang)} (${pct(p.value, total)}%)`).join(', ')}>
+        {visible.map((p, i) => (
+          <Tooltip key={p.key} label={`${p.label}: ${formatAed(p.value, lang)} · ${pct(p.value, total)}%`}>
+            <Box
+              tabIndex={0}
+              style={{
+                flex: `${p.value} 1 0`,
+                background: p.color,
+                borderRadius: `${i === 0 ? 4 : 0}px ${i === visible.length - 1 ? 4 : 0}px ${i === visible.length - 1 ? 4 : 0}px ${i === 0 ? 4 : 0}px`,
+                minWidth: 4,
+              }}
+            />
+          </Tooltip>
+        ))}
+        {visible.length === 0 && <Box style={{ flex: 1, background: 'var(--app-hairline)', borderRadius: 4 }} />}
+      </Box>
+      <Stack gap={0} mt="sm">
+        {parts.map((p) => (
+          <Group key={p.key} justify="space-between" py={6} style={{ borderTop: '1px solid var(--app-hairline)' }} wrap="nowrap">
+            <Group gap={8} wrap="nowrap">
+              <span className="stage-dot" style={{ background: p.color, width: 10, height: 10, borderRadius: 3 }} />
+              <Text size="sm">{p.label}</Text>
+            </Group>
+            <Group gap="md" wrap="nowrap">
+              <Text size="xs" c="dimmed" className="tnum" w={40} ta="right">
+                {pct(p.value, total)}%
+              </Text>
+              <Money fils={p.value} size="sm" />
+            </Group>
+          </Group>
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
+/** Single-series horizontal bars, sorted, value at the tip. */
+function HBars({ rows }: { rows: { key: string; label: string; value: number; hint?: string }[] }) {
+  const lang = useLang();
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return (
+    <Stack gap={10}>
+      {rows.map((r) => (
+        <Tooltip key={r.key} label={r.hint ?? formatAed(r.value, lang)} position="top-start">
+          <Box tabIndex={0} style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, 34%) 1fr', alignItems: 'center', gap: 12 }}>
+            <Text size="sm" lineClamp={1}>
+              {r.label}
+            </Text>
+            <Group gap={8} wrap="nowrap">
+              <Box style={{ height: 14, width: `${Math.max(1.5, (r.value / max) * 78)}%`, background: 'var(--viz-1)', borderRadius: '0 4px 4px 0' }} />
+              <Text size="xs" fw={600} className="tnum" style={{ whiteSpace: 'nowrap' }}>
+                {formatAed(r.value, lang)}
+              </Text>
+            </Group>
+          </Box>
+        </Tooltip>
+      ))}
+    </Stack>
+  );
+}
+
 export function ReportsPage() {
   const { t } = useTranslation();
   const lang = useLang();
   const { run, busy } = useAction();
   const [period, setPeriod] = useState<Period>('month');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [f, tt] = range(period, from, to);
+  const [from, setFrom] = useState<string>();
+  const [to, setTo] = useState<string>();
+  const [f, tt] = range(period, from ?? '', to ?? '');
   const data = useLiveQuery(async () => {
     const [orders, invoices, items, expenses, payments, closings, cats] = await Promise.all([
       db.orders.toArray(),
@@ -90,65 +161,91 @@ export function ReportsPage() {
       `payments-${f}-${tt}.csv`,
     );
   };
-  const tile = (label: string, fils: number, color?: string) => (
-    <Paper withBorder p="sm">
-      <Text size="xs" c="dimmed">{label}</Text>
-      <Money fils={fils} fw={700} size="lg" c={color} />
-    </Paper>
-  );
+  const empty = r.revenueGross === 0 && r.expensesNet === 0 && r.ordersReceived === 0;
   return (
     <>
-      <PageHeader title={t('report.title')} />
-      <Stack>
-        <SegmentedControl fullWidth value={period} onChange={(v) => setPeriod(v as Period)} data={(['today', 'week', 'month', 'custom'] as const).map((p) => ({ value: p, label: t(`report.period.${p}`) }))} />
-        {period === 'custom' && (
-          <Group grow>
-            <TextInput type="date" label={t('common.from')} value={from} onChange={(e) => setFrom(e.currentTarget.value)} />
-            <TextInput type="date" label={t('common.to')} value={to} onChange={(e) => setTo(e.currentTarget.value)} />
-          </Group>
-        )}
-        <Text size="sm" c="dimmed">{formatDate(f)} – {formatDate(tt)}</Text>
-        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
-          <Paper withBorder p="sm"><Text size="xs" c="dimmed">{t('report.received')}</Text><Text fw={700} size="lg">{r.ordersReceived}</Text></Paper>
-          <Paper withBorder p="sm"><Text size="xs" c="dimmed">{t('report.delivered')}</Text><Text fw={700} size="lg">{r.ordersDelivered}</Text></Paper>
-          {tile(t('report.revenueGross'), r.revenueGross)}
-          {tile(t('report.avgTicket'), r.averageTicketGross)}
-          {tile(t('report.revenueNet'), r.revenueNet)}
-          {tile(t('report.partsCost'), r.partsCostNet)}
-          {tile(t('report.expensesNet'), r.expensesNet)}
-          {tile(t('report.grossProfit'), r.grossProfit, r.grossProfit >= 0 ? 'green' : 'red')}
+      <PageHeader title={t('report.title')} subtitle={`${formatDate(f)} – ${formatDate(tt)}`} />
+      <ScrollTabs value={period} onChange={(v) => setPeriod(v as Period)} items={(['today', 'week', 'month', 'custom'] as const).map((p) => ({ value: p, label: t(`report.period.${p}`) }))} />
+      {period === 'custom' && (
+        <SimpleGrid cols={2} mb="md">
+          <DateField label={t('common.from')} value={from} onChange={setFrom} />
+          <DateField label={t('common.to')} value={to} onChange={setTo} />
         </SimpleGrid>
-        <Paper withBorder p="sm">
-          <Title order={6} mb="xs">{t('report.breakdown')}</Title>
-          <Table>
-            <Table.Tbody>
-              <Table.Tr><Table.Td>{t('item.kind.labor')}</Table.Td><Table.Td ta="right">{formatAed(r.laborNet, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('item.kind.part')}</Table.Td><Table.Td ta="right">{formatAed(r.partsNet, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('report.other')}</Table.Td><Table.Td ta="right">{formatAed(r.otherNet, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('report.vatOutput')}</Table.Td><Table.Td ta="right">{formatAed(r.vatOutput, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('report.vatInput')}</Table.Td><Table.Td ta="right">{formatAed(r.vatInput, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('report.vatPayable')}</Table.Td><Table.Td ta="right"><b>{formatAed(r.vatOutput - r.vatInput, lang)}</b></Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('payment.method.cash')}</Table.Td><Table.Td ta="right">{formatAed(r.payments.cash, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('payment.method.card')}</Table.Td><Table.Td ta="right">{formatAed(r.payments.card, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('payment.method.transfer')}</Table.Td><Table.Td ta="right">{formatAed(r.payments.transfer, lang)}</Table.Td></Table.Tr>
-              <Table.Tr><Table.Td>{t('report.cashDiff')}</Table.Td><Table.Td ta="right" c={r.cashDiffFils ? 'red' : undefined}>{formatAed(r.cashDiffFils, lang)}</Table.Td></Table.Tr>
-            </Table.Tbody>
-          </Table>
-        </Paper>
-        <Paper withBorder p="sm">
-          <Title order={6} mb="xs">{t('expense.byCategory')}</Title>
-          {r.expensesByCategory.length === 0 && <Text size="sm" c="dimmed">—</Text>}
-          {r.expensesByCategory.map((c) => (
-            <Group key={c.categoryId} justify="space-between"><Text size="sm">{catName(c.categoryId)}</Text><Money fils={c.gross} size="sm" /></Group>
-          ))}
-        </Paper>
-        <Group>
-          <Button leftSection={<IconFileTypePdf size={18} />} loading={busy} onClick={() => run(async () => openPdf(await pdf()))}>PDF</Button>
-          <Button variant="light" leftSection={<IconShare size={18} />} loading={busy} onClick={() => run(share)}>{t('report.sendOwner')}</Button>
-          <Button variant="default" leftSection={<IconDownload size={18} />} onClick={() => run(exportCsv)}>{t('report.exportAccountant')}</Button>
-        </Group>
-        <Text size="xs" c="dimmed">{t('report.note')}</Text>
-      </Stack>
+      )}
+      {empty ? (
+        <EmptyState icon={IconChartBar} title={t('report.emptyTitle')}>
+          {t('report.emptyText')}
+        </EmptyState>
+      ) : (
+        <>
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+            <Kpi label={t('report.revenueGross')} value={<Money fils={r.revenueGross} display />} hint={t('report.invoicesInPeriod')} />
+            <Kpi label={t('report.grossProfit')} value={<Money fils={r.grossProfit} display />} color={r.grossProfit >= 0 ? 'green' : 'red'} hint={t('report.profitHint')} />
+            <Kpi label={t('report.avgTicket')} value={<Money fils={r.averageTicketGross} display />} />
+            <Kpi label={t('report.carsLabel')} value={`${r.ordersReceived} / ${r.ordersDelivered}`} hint={t('report.carsHint')} />
+          </SimpleGrid>
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="xl">
+            <Section title={t('report.revenueSplit')} description={t('report.revenueSplitHint')} mt={0}>
+              <Box className="surface" p="md">
+                <SegmentedBar
+                  parts={[
+                    { key: 'labor', label: t('item.kind.labor'), value: r.laborNet, color: 'var(--viz-1)' },
+                    { key: 'parts', label: t('item.kind.part'), value: r.partsNet, color: 'var(--viz-2)' },
+                    { key: 'other', label: t('report.other'), value: r.otherNet, color: 'var(--viz-3)' },
+                  ]}
+                />
+              </Box>
+            </Section>
+            <Section title={t('report.pnl')} description={t('report.pnlHint')} mt={0}>
+              <List>
+                <ListRow title={t('report.revenueNet')} right={<Money fils={r.revenueNet} size="sm" />} />
+                <ListRow title={`− ${t('report.partsCost')}`} right={<Money fils={r.partsCostNet} size="sm" />} />
+                <ListRow title={`− ${t('report.expensesNet')}`} right={<Money fils={r.expensesNet} size="sm" />} />
+                <ListRow title={<Text fw={800} size="sm">{t('report.grossProfit')}</Text>} right={<Money fils={r.grossProfit} size="sm" fw={800} c={r.grossProfit >= 0 ? 'green' : 'red'} />} />
+              </List>
+            </Section>
+          </SimpleGrid>
+          <Section title={t('expense.byCategory')} description={t('report.expensesHint')}>
+            <Box className="surface" p="md">
+              {r.expensesByCategory.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  {t('report.noExpenses')}
+                </Text>
+              ) : (
+                <HBars rows={r.expensesByCategory.map((c) => ({ key: c.categoryId, label: catName(c.categoryId), value: c.gross, hint: `${catName(c.categoryId)}: ${formatAed(c.gross, lang)} · VAT ${formatAed(c.vat, lang)}` }))} />
+              )}
+            </Box>
+          </Section>
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="xl">
+            <Section title={t('report.vatTitle')} description={t('report.note')} mt={0}>
+              <List>
+                <ListRow title={t('report.vatOutput')} right={<Money fils={r.vatOutput} size="sm" />} />
+                <ListRow title={t('report.vatInput')} right={<Money fils={r.vatInput} size="sm" />} />
+                <ListRow title={<Text fw={800} size="sm">{t('report.vatPayable')}</Text>} right={<Money fils={r.vatOutput - r.vatInput} size="sm" fw={800} />} />
+              </List>
+            </Section>
+            <Section title={t('report.paymentsTitle')} mt={0}>
+              <List>
+                <ListRow title={t('payment.method.cash')} right={<Money fils={r.payments.cash} size="sm" />} />
+                <ListRow title={t('payment.method.card')} right={<Money fils={r.payments.card} size="sm" />} />
+                <ListRow title={t('payment.method.transfer')} right={<Money fils={r.payments.transfer} size="sm" />} />
+                <ListRow title={t('report.cashDiff')} right={<Money fils={r.cashDiffFils} size="sm" c={r.cashDiffFils ? 'red' : undefined} />} />
+              </List>
+            </Section>
+          </SimpleGrid>
+        </>
+      )}
+      <Group mt="xl" gap="xs">
+        <Button leftSection={<IconShare size={18} />} loading={busy} onClick={() => run(share)}>
+          {t('report.sendOwner')}
+        </Button>
+        <Button variant="default" leftSection={<IconFileTypePdf size={18} />} loading={busy} onClick={() => run(async () => openPdf(await pdf()))}>
+          PDF
+        </Button>
+        <Button variant="default" leftSection={<IconDownload size={18} />} onClick={() => run(exportCsv)}>
+          {t('report.exportAccountant')}
+        </Button>
+      </Group>
     </>
   );
 }

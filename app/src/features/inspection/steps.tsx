@@ -153,8 +153,8 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
           </span>
         )}
       </button>
-      <Group justify="space-between" wrap="nowrap" gap={4}>
-        <Text size="xs" fw={600} lineClamp={1}>
+      <Group justify="space-between" wrap="nowrap" gap={4} align="flex-start">
+        <Text size="xs" fw={600} lineClamp={2} lh={1.3}>
           {t(`slot.${slot}`)}
           {required && !photo && !skipped && (
             <Text span c="red" inherit>
@@ -470,6 +470,7 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
           thousandSeparator=" "
           min={0}
           allowDecimal={false}
+          hideControls
           inputMode="numeric"
           value={insp.mileageKm ?? ''}
           disabled={insp.locked}

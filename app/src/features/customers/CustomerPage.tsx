@@ -1,15 +1,16 @@
-import { Badge, Button, Card, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { IconBrandWhatsapp, IconPencil, IconPhone, IconPlus } from '@tabler/icons-react';
+import { Alert, Avatar, Badge, Box, Button, Group, SimpleGrid, Stack, Text } from '@mantine/core';
+import { IconCar, IconNote, IconPencil, IconPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
+import { activeInvoice } from '../../domain/invoice';
 import { formatPhone } from '../../domain/phone';
-import { whatsappUrl } from '../../services/messages';
-import { loadOrderBundle, bundleAmountDue } from '../../services/orders';
-import { Money, PageHeader, PlateText, StageBadge } from '../../ui/components';
+import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
+import { ContactButtons, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PlateText, Section, StageBadge } from '../../ui/components';
+import { initials } from './CustomersPage';
 import { CustomerModal, VehicleModal } from './forms';
 
 export function CustomerPage() {
@@ -20,51 +21,151 @@ export function CustomerPage() {
   const [addCar, setAddCar] = useState(false);
   const data = useLiveQuery(async () => {
     const c = await db.customers.get(id!);
-    if (!c) return undefined;
+    if (!c) return null;
     const [cars, orders] = await Promise.all([db.vehicles.where('customerId').equals(c.id).toArray(), db.orders.where('customerId').equals(c.id).reverse().sortBy('createdAt')]);
-    const bundles = await Promise.all(orders.map((o) => loadOrderBundle(o.id)));
-    const debt = bundles.reduce((s, b) => s + (b && ['delivered', 'closed'].includes(b.order.stage) ? Math.max(0, bundleAmountDue(b)) : 0), 0);
-    return { c, cars, orders, debt };
+    const bundles = (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean);
+    let debt = 0;
+    let spent = 0;
+    for (const b of bundles) {
+      if (!b) continue;
+      if (['delivered', 'closed'].includes(b.order.stage)) debt += Math.max(0, bundleAmountDue(b));
+      spent += activeInvoice(b.invoices)?.totalFils ?? 0;
+    }
+    return { c, cars, orders, debt, spent, vehicles: new Map(cars.map((v) => [v.id, v])) };
   }, [id]);
-  if (!data) return null;
-  const { c, cars, orders, debt } = data;
+  if (data === undefined) return null;
+  if (data === null) return <EmptyState title={t('err.notFound')} />;
+  const { c, cars, orders, debt, spent, vehicles } = data;
+  const displayName = c.type === 'company' && c.companyName ? c.companyName : c.name;
   return (
     <>
       <PageHeader
-        title={c.type === 'company' && c.companyName ? c.companyName : c.name}
-        subtitle={`${formatPhone(c.phone)} · ${t(`lang.${c.docLanguage}`)}`}
         back
-        right={<Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>{t('common.edit')}</Button>}
+        eyebrow={t(c.type === 'company' ? 'customer.company' : 'customer.individual')}
+        title={displayName}
+        right={
+          <Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>
+            {t('common.edit')}
+          </Button>
+        }
       />
-      <Group mb="md">
-        <Button component="a" href={whatsappUrl(c.whatsapp || c.phone, '')} target="_blank" color="green" leftSection={<IconBrandWhatsapp size={18} />}>WhatsApp</Button>
-        <Button component="a" href={`tel:${c.phone}`} variant="default" leftSection={<IconPhone size={18} />}>{t('customer.call')}</Button>
-        {debt > 0 && <Badge color="red" size="lg">{t('flags.debt')}: <Money fils={debt} /></Badge>}
-      </Group>
-      {c.notes && <Text mb="md" c="dimmed">{c.notes}</Text>}
-      {c.trn && <Text mb="md" size="sm">TRN: {c.trn}</Text>}
-      <Group justify="space-between" mb="xs">
-        <Title order={5}>{t('customer.vehicles')}</Title>
-        <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={() => setAddCar(true)}>{t('vehicle.new')}</Button>
-      </Group>
-      <SimpleGrid cols={{ base: 1, sm: 2 }} mb="md">
-        {cars.map((v) => (
-          <Card key={v.id} withBorder padding="sm" className="tap-card" onClick={() => navigate(`/vehicles/${v.id}`)}>
-            <Group gap="xs"><PlateText plate={v.plate} /><Text fw={600}>{v.make} {v.model} {v.year ?? ''}</Text></Group>
-          </Card>
-        ))}
+      <Box className="surface" p="md">
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
+          <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+            <Avatar color={c.type === 'company' ? 'grape' : 'cobalt'} radius="xl" size={52}>
+              {initials(displayName)}
+            </Avatar>
+            <Box style={{ minWidth: 0 }}>
+              <Text fw={700} size="lg" lineClamp={1}>
+                {displayName}
+              </Text>
+              <Text size="sm" c="dimmed" className="tnum">
+                {formatPhone(c.phone)}
+              </Text>
+            </Box>
+          </Group>
+          <ContactButtons phone={c.phone} whatsapp={c.whatsapp} />
+        </Group>
+        <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md" spacing="md">
+          <Field label={t('customer.docLanguage')}>{t(`lang.${c.docLanguage}`)}</Field>
+          <Field label={t('customer.channel')}>{c.preferredChannel === 'call' ? t('customer.call') : c.preferredChannel === 'telegram' ? 'Telegram' : 'WhatsApp'}</Field>
+          <Field label={t('customer.source')}>{c.source ? t(`source.${c.source}`) : '—'}</Field>
+          <Field label="TRN">{c.trn || '—'}</Field>
+        </SimpleGrid>
+        {c.type === 'company' && c.companyName && (
+          <Text size="sm" c="dimmed" mt="sm">
+            {t('customer.contact')}: {c.name}
+            {c.address ? ` · ${c.address}` : ''}
+          </Text>
+        )}
+      </Box>
+      {c.notes && (
+        <Alert mt="md" color="yellow" icon={<IconNote size={18} />}>
+          {c.notes}
+        </Alert>
+      )}
+      <SimpleGrid cols={3} spacing="sm" mt="md">
+        <Kpi label={t('customer.visits')} value={orders.length} />
+        <Kpi label={t('customer.spent')} value={<Money fils={spent} display />} />
+        <Kpi label={t('flags.debt')} value={<Money fils={debt} display />} color={debt ? 'red' : undefined} />
       </SimpleGrid>
-      <Title order={5} mb="xs">{t('customer.orders')}</Title>
-      <Stack gap="xs">
-        {orders.map((o) => (
-          <Card key={o.id} withBorder padding="sm" className="tap-card" onClick={() => navigate(`/orders/${o.id}`)}>
-            <Group justify="space-between">
-              <Text size="sm">№{o.number} · {formatDate(o.createdAt)} · {o.complaint}</Text>
-              <StageBadge stage={o.stage} />
-            </Group>
-          </Card>
-        ))}
-      </Stack>
+      <Section
+        title={t('customer.vehicles')}
+        action={
+          <Button size="compact-sm" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setAddCar(true)}>
+            {t('vehicle.new')}
+          </Button>
+        }
+      >
+        {cars.length === 0 ? (
+          <EmptyState icon={IconCar}>{t('customer.noCars')}</EmptyState>
+        ) : (
+          <List>
+            {cars.map((v) => (
+              <ListRow
+                key={v.id}
+                onClick={() => navigate(`/vehicles/${v.id}`)}
+                chevron
+                left={
+                  <Box w={112} style={{ flexShrink: 0 }}>
+                    <PlateText plate={v.plate} size="sm" />
+                  </Box>
+                }
+                title={`${v.make} ${v.model}${v.year ? ` ${v.year}` : ''}`}
+                subtitle={v.vin ? `VIN ${v.vin}` : undefined}
+                right={
+                  <Button
+                    size="compact-sm"
+                    variant="light"
+                    style={{ flexShrink: 0 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/orders/new?vehicleId=${v.id}`);
+                    }}
+                  >
+                    {t('search.newJob')}
+                  </Button>
+                }
+              />
+            ))}
+          </List>
+        )}
+      </Section>
+      <Section title={t('customer.orders')}>
+        {orders.length === 0 ? (
+          <EmptyState>{t('customer.noOrders')}</EmptyState>
+        ) : (
+          <List>
+            {orders.map((o) => {
+              const v = vehicles.get(o.vehicleId);
+              return (
+                <ListRow
+                  key={o.id}
+                  onClick={() => navigate(`/orders/${o.id}`)}
+                  chevron
+                  title={
+                    <>
+                      №{o.number} · {v ? `${v.make} ${v.model}` : ''}
+                    </>
+                  }
+                  subtitle={
+                    <Stack gap={4}>
+                      <span>
+                        {formatDate(o.createdAt)}
+                        {o.complaint ? ` · ${o.complaint}` : ''}
+                      </span>
+                      <Group gap={6}>
+                        <StageBadge stage={o.stage} size="sm" />
+                        {o.warrantyOfOrderId && <Badge color="grape" size="sm">{t('flags.warranty')}</Badge>}
+                      </Group>
+                    </Stack>
+                  }
+                />
+              );
+            })}
+          </List>
+        )}
+      </Section>
       <CustomerModal opened={edit} onClose={() => setEdit(false)} customer={c} />
       <VehicleModal opened={addCar} onClose={() => setAddCar(false)} customerId={c.id} />
     </>
