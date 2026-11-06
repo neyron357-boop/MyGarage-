@@ -37,6 +37,7 @@ import { CaptureButton } from '../../ui/CaptureButton';
 import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
 import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
 import { DateTimeField } from '../../ui/DateFields';
+import { haptic } from '../../ui/clipboard';
 import { useAction, useLang } from '../../ui/hooks';
 import { LazyTextarea, LazyTextInput } from '../../ui/LazyText';
 
@@ -88,6 +89,7 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
     run(async () => {
       if (photo && !insp.locked) await deleteMedia(photo.id);
       await addInspectionPhoto(insp.id, slot, files[0]);
+      haptic(8);
       setPreview(false);
     });
   return (
@@ -106,6 +108,7 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
       />
       <button
         type="button"
+        disabled={insp.locked && !photo}
         className={`photo-slot${photo ? ' filled' : ''}${skipped && !photo ? ' skipped' : ''}`}
         onClick={() => (photo ? setPreview(true) : !insp.locked && !skipped ? pick() : undefined)}
         aria-label={t(`slot.${slot}`)}
@@ -137,6 +140,13 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
               <IconCamera size={15} /> {t('photos.sameAngle')}
             </span>
           </>
+        ) : insp.locked ? (
+          <Stack align="center" gap={4}>
+            <IconCameraOff size={20} color="var(--mantine-color-gray-5)" />
+            <Text size="xs" c="dimmed">
+              {t('claim.noPhoto')}
+            </Text>
+          </Stack>
         ) : (
           <Stack align="center" gap={2}>
             <AngleHint slot={slot} />

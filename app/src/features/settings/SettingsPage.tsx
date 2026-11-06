@@ -327,20 +327,23 @@ function PricesTab() {
   return (
     <Stack gap="md">
       <Box className="surface" p="md" style={{ borderLeft: `4px solid var(--mantine-color-${s?.pricesReviewed ? 'green' : 'yellow'}-5)` }}>
-        <Group justify="space-between" wrap="nowrap" gap="sm">
-          <div>
+        <Group gap="sm" wrap="nowrap" align="flex-start">
+          <ThemeIcon variant="light" color={s?.pricesReviewed ? 'green' : 'yellow'} radius="xl" size={32} style={{ flexShrink: 0 }}>
+            {s?.pricesReviewed ? <IconCheck size={17} stroke={2.6} /> : <IconAlertTriangle size={16} />}
+          </ThemeIcon>
+          <Box style={{ flex: 1, minWidth: 0 }}>
             <Text size="sm" fw={600}>
               {s?.pricesReviewed ? t('settings.pricesDone') : t('settings.pricesHint')}
             </Text>
-            <Text size="xs" c="dimmed">
+            <Text size="xs" c="dimmed" mt={2}>
               {t('settings.pricesNet')} {s?.pricesReviewed ? '' : t('settings.pricesDoneHint')}
             </Text>
-          </div>
-          {!s?.pricesReviewed && (
-            <Button size="compact-md" variant="light" color="green" leftSection={<IconCheck size={16} />} onClick={() => run(() => saveSettings({ pricesReviewed: true }), 'common.saved')} style={{ flexShrink: 0 }}>
-              {t('settings.pricesDone')}
-            </Button>
-          )}
+            {!s?.pricesReviewed && (
+              <Button mt="sm" size="compact-md" variant="light" color="green" leftSection={<IconCheck size={16} />} onClick={() => run(() => saveSettings({ pricesReviewed: true }), 'common.saved')}>
+                {t('settings.pricesDone')}
+              </Button>
+            )}
+          </Box>
         </Group>
       </Box>
       <Button w="fit-content" leftSection={<IconPlus size={18} />} onClick={() => setEdit({ id: uid(), code: `custom_${Date.now()}`, titleRu: '', titleEn: '', items: [], active: true })}>

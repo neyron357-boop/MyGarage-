@@ -64,7 +64,7 @@ export function CustomerPage() {
               </Text>
             </Box>
           </Group>
-          <ContactButtons phone={c.phone} whatsapp={c.whatsapp} />
+          <ContactButtons phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
         </Group>
         <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md" spacing="md">
           <Field label={t('customer.docLanguage')}>{t(`lang.${c.docLanguage}`)}</Field>

@@ -823,7 +823,7 @@ export function OrderPage() {
                   </Text>
                 </Box>
               </Group>
-              <ContactButtons phone={b.customer.phone} whatsapp={b.customer.whatsapp} />
+              <ContactButtons phone={b.customer.phone} whatsapp={b.customer.whatsapp} telegram={b.customer.telegram} />
             </Group>
             {(flags.waitingClientSince || flags.waitingParts || flags.debt || flags.incident || flags.warranty || flags.storageDays) && (
               <Box mt="md">

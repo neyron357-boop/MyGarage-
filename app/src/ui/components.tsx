@@ -31,7 +31,7 @@ import { formatAed, parseAed } from '../domain/money';
 import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
 import { mediaUrl } from '../services/media';
-import { telegramUrl, whatsappUrl } from '../services/messages';
+import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { haptic } from './clipboard';
 import { useLang } from './hooks';
 
@@ -428,7 +428,7 @@ export function PageSkeleton({ variant = 'list' }: { variant?: 'list' | 'detail'
 }
 
 /** Round contact buttons: WhatsApp, Telegram, call. */
-export function ContactButtons({ phone, whatsapp, size = 38 }: { phone: string; whatsapp?: string; size?: number }) {
+export function ContactButtons({ phone, whatsapp, telegram, size = 38 }: { phone: string; whatsapp?: string; telegram?: string; size?: number }) {
   const { t } = useTranslation();
   return (
     <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -438,7 +438,7 @@ export function ContactButtons({ phone, whatsapp, size = 38 }: { phone: string; 
         </ActionIcon>
       </Tooltip>
       <Tooltip label="Telegram">
-        <ActionIcon component="a" href={telegramUrl('')} target="_blank" rel="noopener" size={size} radius="xl" color="cobalt" variant="light" aria-label="Telegram">
+        <ActionIcon component="a" href={telegramChatUrl(phone, telegram)} target="_blank" rel="noopener" size={size} radius="xl" color="cobalt" variant="light" aria-label="Telegram">
           <IconBrandTelegram size={20} />
         </ActionIcon>
       </Tooltip>

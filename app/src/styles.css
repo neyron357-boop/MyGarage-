@@ -731,6 +731,14 @@ body {
 .photo-slot.filled {
   border: 0;
 }
+.photo-slot:disabled {
+  cursor: default;
+  border-style: solid;
+  border-color: var(--app-hairline);
+}
+.photo-slot:disabled:active {
+  transform: none;
+}
 .photo-slot.skipped {
   border-style: solid;
   border-color: var(--mantine-color-yellow-5);
