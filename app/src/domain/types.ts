@@ -41,6 +41,8 @@ export interface Settings {
   warrantyText: Localized;
   docFooter: Localized;
   setupDone: boolean;
+  /** The manager has gone through the starter price list (setup checklist). */
+  pricesReviewed?: boolean;
 }
 
 export interface Customer {

@@ -76,6 +76,7 @@ import {
   Money,
   MoneyInput,
   PageHeader,
+  PageSkeleton,
   Photo,
   PlateText,
   ScrollTabs,
@@ -320,14 +321,17 @@ function Overview({ b }: { b: OrderBundle }) {
   const [complaint, setComplaint] = useState(b.order.complaint);
   const due = Math.max(0, stageContext(b).amountDueFils);
   const finished = b.order.stage === 'closed' || b.order.stage === 'cancelled';
+  const hasMoney = b.items.some((x) => x.approvalState !== 'cancelled' && x.approvalState !== 'draft') || b.payments.length > 0;
   return (
     <Stack gap="lg">
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
-        <Kpi label={t('order.approved')} value={<Money fils={sum.approvedGross} display />} />
-        <Kpi label={t('order.pending')} value={<Money fils={sum.pendingGross} display />} color={sum.pendingGross ? 'orange' : undefined} />
-        <Kpi label={t('order.declined')} value={<Money fils={sum.declinedGross} display />} />
-        <Kpi label={t('payment.due')} value={<Money fils={due} display />} color={due && ['ready', 'delivered'].includes(b.order.stage) ? 'red' : undefined} />
-      </SimpleGrid>
+      {hasMoney && (
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+          <Kpi label={t('order.approved')} value={<Money fils={sum.approvedGross} display />} />
+          <Kpi label={t('order.pending')} value={<Money fils={sum.pendingGross} display />} color={sum.pendingGross ? 'orange' : undefined} />
+          <Kpi label={t('order.declined')} value={<Money fils={sum.declinedGross} display />} />
+          <Kpi label={t('payment.due')} value={<Money fils={due} display />} color={due && ['ready', 'delivered'].includes(b.order.stage) ? 'red' : !due && b.payments.length > 0 ? 'green' : undefined} />
+        </SimpleGrid>
+      )}
       <Box className="surface" p="md">
         <Stack gap="md">
           <Textarea
@@ -363,7 +367,7 @@ function Overview({ b }: { b: OrderBundle }) {
         <Section title={t('order.atIntake')} description={t('order.atIntakeHint', { date: formatDateTime(i.signedAt) })} mt={0}>
           <Box className="surface" p="md">
             <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" verticalSpacing="md">
-              <Field label={t('intake.mileage')}>{i.mileageKm?.toLocaleString('ru-RU')} km</Field>
+              <Field label={t('intake.mileage')}>{i.mileageKm !== undefined ? `${i.mileageKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'}</Field>
               <Field label={t('intake.fuel')}>{t(`fuel.${i.fuelLevel ?? 0}`)}</Field>
               <Field label={t('intake.lights')}>{i.warningLights.length ? i.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Field>
               <Field label={t('step.obd')}>{i.obdNoCodes ? t('intake.obdNone') : i.obdCodes.join(', ') || i.obdSkipReason || '—'}</Field>
@@ -670,7 +674,7 @@ export function OrderPage() {
   const [decide, setDecide] = useState<EstimateVersion | null>(null);
   const [pay, setPay] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
-  if (b === undefined) return null;
+  if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b) return <EmptyState icon={IconX} title={t('err.notFound')} />;
   const { flags, waitingHours } = orderFlags(b);
   const step = nextStep(b);
@@ -788,17 +792,23 @@ export function OrderPage() {
       <Grid gutter="md">
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Box className="surface" p="md" h="100%">
-            <Group justify="space-between" wrap="nowrap" align="flex-start" mb="md">
+            <Group justify="space-between" wrap="nowrap" align="center" mb="md" gap="sm">
               <PlateText plate={b.vehicle.plate} size="lg" />
-              <UnstyledButton onClick={() => setStageOpen(true)} aria-label={t('order.changeStage')}>
-                <StageBadge stage={b.order.stage} size="lg" />
-              </UnstyledButton>
+              <Text size="xs" c="dimmed" className="tnum" ta="right" style={{ whiteSpace: 'nowrap' }}>
+                {t('order.stepOf', { n: Math.max(1, STAGE_META[b.order.stage].step), total: 8 })}
+              </Text>
             </Group>
             <StageTrack stage={b.order.stage} />
-            <Text size="xs" c="dimmed" mt={6}>
-              {t('order.stepOf', { n: Math.max(1, STAGE_META[b.order.stage].step), total: 8 })}
-              {b.order.outcome === 'repair_declined' ? ` · ${t('order.repairDeclined')}` : ''}
-            </Text>
+            <Group gap={8} mt={10} wrap="wrap">
+              <UnstyledButton onClick={() => setStageOpen(true)} aria-label={t('order.changeStage')} className="stage-btn">
+                <StageBadge stage={b.order.stage} size="lg" chevron={!['closed', 'cancelled'].includes(b.order.stage)} />
+              </UnstyledButton>
+              {b.order.outcome === 'repair_declined' && (
+                <Badge color="gray" size="lg" variant="outline">
+                  {t('order.repairDeclined')}
+                </Badge>
+              )}
+            </Group>
             <Group justify="space-between" wrap="nowrap" mt="md" gap="sm">
               <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => navigate(`/customers/${b.customer.id}`)}>
                 <Avatar color="cobalt" radius="xl" size={42}>
@@ -823,9 +833,14 @@ export function OrderPage() {
           </Box>
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 5 }}>
-          <Box p="md" h="100%" style={{ background: TONE_BG[step.tone], borderRadius: 'var(--mantine-radius-lg)' }}>
-            <div className="eyebrow">{t('next.label')}</div>
-            <Title order={4} mt={4} style={{ textWrap: 'balance' }}>
+          <Box p="md" h="100%" style={{ background: TONE_BG[step.tone], borderRadius: 'var(--mantine-radius-lg)' }} key={step.title} className="fade-enter">
+            <Group gap={8} wrap="nowrap">
+              <ThemeIcon size={22} radius="xl" color={step.tone === 'gray' ? 'gray' : step.tone} variant="filled">
+                <IconArrowRight size={13} stroke={2.6} />
+              </ThemeIcon>
+              <div className="eyebrow">{t('next.label')}</div>
+            </Group>
+            <Title order={4} mt={8} style={{ textWrap: 'balance' }}>
               {stepTitle}
             </Title>
             {step.primary && (
@@ -860,13 +875,15 @@ export function OrderPage() {
             { value: 'journal', label: t('order.tab.journal') },
           ]}
         />
-        {tab === 'overview' && <Overview b={b} />}
-        {tab === 'work' && <WorkTab b={b} />}
-        {tab === 'approvals' && <ApprovalsTab b={b} />}
-        {tab === 'photos' && <PhotosTab b={b} />}
-        {tab === 'docs' && <DocsTab b={b} />}
-        {tab === 'payments' && <PaymentPanel b={b} allowDebt={b.order.stage === 'ready'} />}
-        {tab === 'journal' && <JournalTab b={b} />}
+        <div key={tab} className="fade-enter">
+          {tab === 'overview' && <Overview b={b} />}
+          {tab === 'work' && <WorkTab b={b} />}
+          {tab === 'approvals' && <ApprovalsTab b={b} />}
+          {tab === 'photos' && <PhotosTab b={b} />}
+          {tab === 'docs' && <DocsTab b={b} />}
+          {tab === 'payments' && <PaymentPanel b={b} allowDebt={b.order.stage === 'ready'} />}
+          {tab === 'journal' && <JournalTab b={b} />}
+        </div>
       </Box>
 
       {step.primary && (

@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatPhone } from '../domain/phone';
 import type { Channel, Customer, Lang } from '../domain/types';
+import { notifications } from '@mantine/notifications';
 import { downloadBlob } from '../services/backup';
+import { copyText, haptic } from './clipboard';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
 import { SelectCard } from './components';
 
@@ -23,6 +25,7 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
   const [channel, setChannel] = useState<Channel>(customer.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp');
   const [opened, setOpened] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     if (request) {
@@ -38,13 +41,22 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
 
   const confirm = async () => {
     await logMessage({ orderId: request.orderId, customerId: customer.id, channel, template: request.template, language: request.lang, text });
+    haptic(10);
+    notifications.show({ color: 'green', message: t('send.logged') });
     onSent?.();
     onClose();
   };
 
   const shareFile = async () => {
     if (!request.pdf) return;
-    const { blob, filename } = await request.pdf();
+    setSharing(true);
+    let pdf: { blob: Blob; filename: string };
+    try {
+      pdf = await request.pdf();
+    } finally {
+      setSharing(false);
+    }
+    const { blob, filename } = pdf;
     const file = new File([blob], filename, { type: blob.type });
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
     try {
@@ -103,26 +115,25 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
               variant="default"
               leftSection={copied ? <IconCheck size={18} /> : <IconCopy size={18} />}
               onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(text);
-                  setCopied(true);
+                const ok = await copyText(text);
+                setCopied(ok);
+                if (ok) {
+                  haptic(8);
                   setOpened(true);
-                } catch {
-                  setCopied(false);
                 }
               }}
             >
               {copied ? t('common.copied') : t('common.copy')}
             </Button>
             {request.pdf && (
-              <Button variant="default" leftSection={<IconShare size={18} />} onClick={shareFile}>
+              <Button variant="default" leftSection={<IconShare size={18} />} onClick={shareFile} loading={sharing}>
                 {t('send.pdfShort')}
               </Button>
             )}
           </Group>
         </Stack>
         {opened && (
-          <Group justify="space-between" p="sm" className="surface-soft" wrap="nowrap">
+          <Group justify="space-between" p="sm" className="surface-soft rise-enter" wrap="nowrap">
             <Text size="sm" fw={600}>
               {t('send.wasSent')}
             </Text>

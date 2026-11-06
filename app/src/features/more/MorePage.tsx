@@ -1,8 +1,10 @@
-import { Alert, SimpleGrid, Stack, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconCash, IconChartBar, IconPackage, IconSettings, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import { Group, SimpleGrid, Stack, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { IconCash, IconChartBar, IconChevronRight, IconCloudDownload, IconPackage, IconSettings, IconShieldCheck, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { formatDate, formatDateTime } from '../../domain/dates';
 import { PageHeader } from '../../ui/components';
+import { useBackupAge } from '../../ui/device';
 
 const LINKS: { to: string; icon: Icon; label: string; hint: string; color: string }[] = [
   { to: '/customers', icon: IconUsers, label: 'nav.customers', hint: 'more.customersHint', color: 'cobalt' },
@@ -16,10 +18,11 @@ const LINKS: { to: string; icon: Icon; label: string; hint: string; color: strin
 export function MorePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const backup = useBackupAge();
   return (
     <>
       <PageHeader title={t('nav.more')} />
-      <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="sm">
+      <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="sm" className="stagger">
         {LINKS.map((l) => (
           <UnstyledButton key={l.to} className="surface tap" p="md" onClick={() => navigate(l.to)}>
             <Stack gap={10}>
@@ -36,9 +39,25 @@ export function MorePage() {
           </UnstyledButton>
         ))}
       </SimpleGrid>
-      <Alert mt="xl" color="cobalt" title={t('more.localTitle')}>
-        <Text size="sm">{t('more.localText')}</Text>
-      </Alert>
+      <UnstyledButton className="surface tap" p="md" mt="lg" w="100%" onClick={() => navigate('/settings?tab=data')}>
+        <Group gap="sm" wrap="nowrap">
+          <ThemeIcon variant="light" color={backup.due ? 'orange' : 'green'} size={40} radius="xl">
+            {backup.due ? <IconCloudDownload size={21} /> : <IconShieldCheck size={21} />}
+          </ThemeIcon>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text fw={700} size="sm">
+              {t('more.localTitle')}
+            </Text>
+            <Text size="xs" c="dimmed" lh={1.4}>
+              {backup.at ? t('settings.lastBackup', { date: formatDateTime(backup.at) }) : t('backupReminder.never')}
+            </Text>
+          </div>
+          <IconChevronRight size={18} color="var(--mantine-color-dimmed)" />
+        </Group>
+      </UnstyledButton>
+      <Text size="xs" c="dimmed" ta="center" mt="xl" className="tnum">
+        MyGarage {__APP_VERSION__} · {formatDate(__BUILD_DATE__)}
+      </Text>
     </>
   );
 }

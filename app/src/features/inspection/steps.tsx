@@ -27,6 +27,7 @@ import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { EXTRA_SLOTS, FUEL_LEVELS, FUNCTION_CHECKS, REQUIRED_SLOTS, WARNING_LIGHTS } from '../../domain/inspection';
 import { itemAmounts, itemTitle } from '../../domain/items';
+import { formatPhone } from '../../domain/phone';
 import type { CheckState, DamageMark, DamageType, DamageView, FuelLevel, Inspection, Media } from '../../domain/types';
 import { addDamageMark, addInspectionPhoto, removeDamageMark, updateDamageMark, updateInspection } from '../../services/inspections';
 import { deleteMedia, mediaUrl } from '../../services/media';
@@ -244,7 +245,7 @@ export function VehicleStep({ insp, media, b }: StepProps) {
           </Badge>
         </Group>
         <Text size="sm" mt="sm">
-          {b.customer.name} · {b.customer.phone}
+          {b.customer.name} · {formatPhone(b.customer.phone)}
         </Text>
         <Text size="xs" c="dimmed" mt={4}>
           {t('intake.langHint', { lang: t(`lang.${insp.language}`) })}

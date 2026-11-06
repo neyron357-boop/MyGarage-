@@ -1,3 +1,4 @@
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useState } from 'react';
@@ -7,6 +8,13 @@ import type { Lang } from '../domain/types';
 import { AppError } from '../services/errors';
 import { loadOrderBundle } from '../services/orders';
 import { getSettings } from '../services/settings';
+
+export const PHONE_QUERY = '(max-width: 48em)';
+
+/** True on phone-sized screens (the layout switches at 768 px). */
+export function usePhone(): boolean {
+  return useMediaQuery(PHONE_QUERY, true, { getInitialValueInEffect: false }) ?? true;
+}
 
 export function useLang(): Lang {
   const { i18n } = useTranslation();
@@ -32,6 +40,7 @@ export function useErrorText() {
       }
       if (e instanceof ImmutableError) return t('err.immutable');
       if (e instanceof Error && e.message === 'video_too_large') return t('err.videoTooLarge');
+      if (e instanceof Error && /dynamically imported module|Importing a module script failed|error loading dynamically/i.test(e.message)) return t('crash.updateText');
       return t('err.unexpected', { message: e instanceof Error ? e.message : String(e) });
     },
     [t],

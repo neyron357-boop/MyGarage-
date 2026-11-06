@@ -37,13 +37,14 @@ import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
 import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, itemRangeGross, itemTitle } from '../../domain/items';
-import { roundFils } from '../../domain/money';
+import { formatAed, roundFils } from '../../domain/money';
 import { fromNet, netFromGross } from '../../domain/vat';
 import type { Block, DecisionKind, DecisionVia, EstimateVersion, ItemKind, OrderItem, Settings, Urgency } from '../../domain/types';
-import { addItem, recordDecisions, removeItem, resolveB, setDone, updateItem, type NewItem } from '../../services/estimate';
+import { addItem, recordDecisions, removeItem, resolveB, restoreItem, setDone, updateItem, type NewItem } from '../../services/estimate';
 import { verbalConfirmation } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
-import { Money, MoneyInput, SelectCard } from '../../ui/components';
+import { haptic } from '../../ui/clipboard';
+import { Money, MoneyInput, SelectCard, undoToast } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
 import type { SendRequest } from '../../ui/SendDialog';
 
@@ -243,8 +244,8 @@ export function ItemRow({ item, editable, onEdit, right }: { item: OrderItem; b?
   return (
     <Box className="surface" p="sm" style={{ opacity: muted ? 0.72 : 1 }}>
       <Group wrap="nowrap" align="flex-start" gap="sm">
-        <ThemeIcon variant="light" color={item.done ? 'green' : 'gray'} size={38} radius="md" style={{ flexShrink: 0 }}>
-          {item.done ? <IconCheck size={20} /> : <KI size={19} stroke={1.8} />}
+        <ThemeIcon variant="light" color={item.done ? 'green' : 'gray'} size={38} radius="md" style={{ flexShrink: 0, transition: 'background-color 200ms ease, color 200ms ease' }}>
+          {item.done ? <IconCheck size={20} className="pop-in" /> : <KI size={19} stroke={1.8} />}
         </ThemeIcon>
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
@@ -267,7 +268,7 @@ export function ItemRow({ item, editable, onEdit, right }: { item: OrderItem; b?
             {item.partNumber ? ` · ${item.partNumber}` : ''}
             {item.customerSupplied ? ` · ${t('item.customerSupplied')}` : ''}
             {item.kind === 'part' && item.procurementStatus && !item.customerSupplied ? ` · ${t(`proc.${item.procurementStatus}`)}` : ''}
-            {margin !== undefined ? ` · ${t('item.margin')} ${(margin / 100).toFixed(2)}` : ''}
+            {margin !== undefined ? ` · ${t('item.margin')} ${formatAed(margin, lang, false)}` : ''}
           </Text>
           <Group justify="space-between" mt={8} gap={6}>
             <Group gap={6}>
@@ -283,7 +284,17 @@ export function ItemRow({ item, editable, onEdit, right }: { item: OrderItem; b?
                     </ActionIcon>
                   </Tooltip>
                   <Tooltip label={t('common.delete')}>
-                    <ActionIcon variant="subtle" color="red" onClick={() => run(() => removeItem(item.id))} aria-label={t('common.delete')}>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      aria-label={t('common.delete')}
+                      onClick={() =>
+                        run(async () => {
+                          const removed = await removeItem(item.id);
+                          if (removed) undoToast(t('item.removed', { title: itemTitle(removed, lang) }), t('common.undo'), () => void restoreItem(removed));
+                        })
+                      }
+                    >
                       <IconTrash size={18} />
                     </ActionIcon>
                   </Tooltip>
@@ -306,8 +317,11 @@ export function DoneToggle({ item }: { item: OrderItem }) {
       size="compact-sm"
       variant={item.done ? 'light' : 'filled'}
       color={item.done ? 'green' : 'cobalt'}
-      leftSection={item.done ? <IconCheck size={14} /> : undefined}
-      onClick={() => run(() => setDone(item.id, !item.done))}
+      leftSection={item.done ? <IconCheck size={14} className="pop-in" /> : undefined}
+      onClick={() => {
+        if (!item.done) haptic(10);
+        void run(() => setDone(item.id, !item.done));
+      }}
       aria-pressed={item.done}
     >
       {item.done ? t('item.done') : t('item.markDone')}
@@ -414,13 +428,28 @@ export function DecisionModal({ b, version, opened, onClose, onVerbal }: { b: Or
                     )}
                   </Text>
                 </Group>
-                <Group gap={6} grow>
+                <SimpleGrid cols={opts.length} spacing={6}>
                   {opts.map((o) => (
-                    <Button key={o.v} size="compact-md" variant={c === o.v ? 'filled' : 'default'} color={o.color} onClick={() => setChoices((x) => ({ ...x, [item.id]: c === o.v ? 'skip' : o.v }))}>
+                    <Button
+                      key={o.v}
+                      size="sm"
+                      h="auto"
+                      mih={38}
+                      py={6}
+                      px={6}
+                      variant={c === o.v ? 'filled' : 'default'}
+                      color={o.color}
+                      aria-pressed={c === o.v}
+                      styles={{ label: { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.2 } }}
+                      onClick={() => {
+                        haptic(6);
+                        setChoices((x) => ({ ...x, [item.id]: c === o.v ? 'skip' : o.v }));
+                      }}
+                    >
                       {o.label}
                     </Button>
                   ))}
-                </Group>
+                </SimpleGrid>
               </Box>
             );
           })}

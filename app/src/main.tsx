@@ -14,13 +14,14 @@ import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
 import 'dayjs/locale/ru';
 import './styles.css';
-import './i18n';
+import i18n from './i18n';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { ensureSeed } from './services/seed';
 
 async function start() {
+  document.documentElement.lang = i18n.language;
   try {
     await navigator.storage?.persist?.();
   } catch {

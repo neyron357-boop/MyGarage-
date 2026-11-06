@@ -9,7 +9,7 @@ import { formatAed } from '../../domain/money';
 import { computeReport } from '../../domain/reports';
 import { downloadBlob, toCsv } from '../../services/backup';
 import { openPdf } from '../../services/documents';
-import { EmptyState, Kpi, List, ListRow, Money, PageHeader, ScrollTabs, Section } from '../../ui/components';
+import { EmptyState, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, ScrollTabs, Section } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 
@@ -68,24 +68,24 @@ function SegmentedBar({ parts }: { parts: { key: string; label: string; value: n
   );
 }
 
-/** Single-series horizontal bars, sorted, value at the tip. */
+/** Single-series horizontal bars, sorted: the name and amount on one line, the bar under it (nothing is cut off). */
 function HBars({ rows }: { rows: { key: string; label: string; value: number; hint?: string }[] }) {
   const lang = useLang();
   const max = Math.max(1, ...rows.map((r) => r.value));
   return (
-    <Stack gap={10}>
+    <Stack gap={12}>
       {rows.map((r) => (
-        <Tooltip key={r.key} label={r.hint ?? formatAed(r.value, lang)} position="top-start">
-          <Box tabIndex={0} style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, 34%) 1fr', alignItems: 'center', gap: 12 }}>
-            <Text size="sm" lineClamp={1}>
-              {r.label}
-            </Text>
-            <Group gap={8} wrap="nowrap">
-              <Box style={{ height: 14, width: `${Math.max(1.5, (r.value / max) * 78)}%`, background: 'var(--viz-1)', borderRadius: '0 4px 4px 0' }} />
-              <Text size="xs" fw={600} className="tnum" style={{ whiteSpace: 'nowrap' }}>
-                {formatAed(r.value, lang)}
+        <Tooltip key={r.key} label={r.hint ?? formatAed(r.value, lang)} position="top-start" openDelay={300}>
+          <Box tabIndex={0}>
+            <Group justify="space-between" wrap="nowrap" gap="sm" mb={5}>
+              <Text size="sm" style={{ minWidth: 0 }}>
+                {r.label}
               </Text>
+              <Money fils={r.value} size="sm" />
             </Group>
+            <Box style={{ height: 8, borderRadius: 4, background: 'var(--app-soft)', overflow: 'hidden' }}>
+              <Box className="bar-grow" style={{ height: '100%', width: `${Math.max(1.5, (r.value / max) * 100)}%`, background: 'var(--viz-1)', borderRadius: 4 }} />
+            </Box>
           </Box>
         </Tooltip>
       ))}
@@ -113,7 +113,7 @@ export function ReportsPage() {
     ]);
     return { report: computeReport({ from: f, to: tt, orders, invoices, items, expenses, payments, closings }), invoices, payments, expenses, cats, orders };
   }, [f, tt]);
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
   const r = data.report;
   const catName = (id: string) => {
     const c = data.cats.find((x) => x.id === id);

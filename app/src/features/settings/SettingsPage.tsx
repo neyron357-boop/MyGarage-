@@ -23,8 +23,11 @@ import {
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import {
+  IconAlertTriangle,
   IconBuildingStore,
   IconCategory,
+  IconCheck,
+  IconDeviceMobile,
   IconDatabase,
   IconDownload,
   IconFileText,
@@ -42,15 +45,18 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
-import { dubaiDate } from '../../domain/dates';
+import { dubaiDate, formatDateTime } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import type { Employee, ExpenseCategory, JobTemplate, Settings, TemplateItem } from '../../domain/types';
-import { downloadBlob, exportBackup, importBackup, wipeAll } from '../../services/backup';
+import { importBackup, saveBackupFile, wipeAll } from '../../services/backup';
 import { loadDemoData } from '../../services/demo';
 import { blobToDataUrl } from '../../services/media';
-import { saveSettings } from '../../services/settings';
-import { List, ListRow, MoneyInput, PageHeader, ScrollTabs, StickyBar } from '../../ui/components';
+import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
+import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar } from '../../ui/components';
+import { formatBytes, insecureContext, requestPersistence, useBackupAge, useStorageInfo } from '../../ui/device';
 import { useAction, useLang, useSettings } from '../../ui/hooks';
+import { useInstall } from '../../ui/pwa';
+import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
 import { initials } from '../customers/CustomersPage';
 
 function Card({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
@@ -77,6 +83,7 @@ function useDraft(s: Settings) {
 
 function SaveBar({ dirty, onSave, busy }: { dirty: boolean; onSave: () => void; busy: boolean }) {
   const { t } = useTranslation();
+  useMarkUnsaved(dirty);
   if (!dirty) return null;
   return (
     <StickyBar>
@@ -249,7 +256,7 @@ function StaffTab() {
             <Select label={t('settings.role')} value={edit.role} onChange={(r) => r && setEdit({ ...edit, role: r as Employee['role'] })} data={(['mechanic', 'electrician', 'other'] as const).map((r) => ({ value: r, label: t(`role.${r}`) }))} allowDeselect={false} />
             <MoneyInput label={t('salary.salary')} value={edit.monthlySalaryFils} onChange={(x) => setEdit({ ...edit, monthlySalaryFils: x ?? 0 })} />
             <Switch label={t('settings.active')} checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.currentTarget.checked })} />
-            <Button disabled={!edit.name.trim()} onClick={() => run(async () => { await db.employees.put(edit); setEdit(null); }, 'common.saved')}>
+            <Button disabled={!edit.name.trim()} onClick={() => run(async () => { await saveEmployee(edit); setEdit(null); }, 'common.saved')}>
               {t('common.save')}
             </Button>
           </Stack>
@@ -302,7 +309,7 @@ function TemplateEditor({ tpl, onClose }: { tpl: JobTemplate | null; onClose: ()
             {t('common.total')}: {formatAed(total)} · {t('common.withoutVat')}
           </Text>
         </Group>
-        <Button loading={busy} onClick={() => run(async () => { await db.jobTemplates.put(v); onClose(); }, 'common.saved')}>
+        <Button loading={busy} onClick={() => run(async () => { await saveTemplate(v); onClose(); }, 'common.saved')}>
           {t('common.save')}
         </Button>
       </Stack>
@@ -313,11 +320,29 @@ function TemplateEditor({ tpl, onClose }: { tpl: JobTemplate | null; onClose: ()
 function PricesTab() {
   const { t } = useTranslation();
   const lang = useLang();
+  const { run } = useAction();
+  const s = useSettings();
   const list = useLiveQuery(() => db.jobTemplates.toArray(), []);
   const [edit, setEdit] = useState<JobTemplate | null>(null);
   return (
     <Stack gap="md">
-      <Alert>{t('settings.pricesHint')}</Alert>
+      <Box className="surface" p="md" style={{ borderLeft: `4px solid var(--mantine-color-${s?.pricesReviewed ? 'green' : 'yellow'}-5)` }}>
+        <Group justify="space-between" wrap="nowrap" gap="sm">
+          <div>
+            <Text size="sm" fw={600}>
+              {s?.pricesReviewed ? t('settings.pricesDone') : t('settings.pricesHint')}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {t('settings.pricesNet')} {s?.pricesReviewed ? '' : t('settings.pricesDoneHint')}
+            </Text>
+          </div>
+          {!s?.pricesReviewed && (
+            <Button size="compact-md" variant="light" color="green" leftSection={<IconCheck size={16} />} onClick={() => run(() => saveSettings({ pricesReviewed: true }), 'common.saved')} style={{ flexShrink: 0 }}>
+              {t('settings.pricesDone')}
+            </Button>
+          )}
+        </Group>
+      </Box>
       <Button w="fit-content" leftSection={<IconPlus size={18} />} onClick={() => setEdit({ id: uid(), code: `custom_${Date.now()}`, titleRu: '', titleEn: '', items: [], active: true })}>
         {t('settings.newTemplate')}
       </Button>
@@ -384,7 +409,7 @@ function CategoriesTab() {
             <TextInput label="English" value={edit.nameEn} onChange={(e) => setEdit({ ...edit, nameEn: e.currentTarget.value })} />
             <MoneyInput label={t('settings.monthlyLimit')} description={t('settings.zeroNoLimit')} value={edit.monthlyLimitFils} onChange={(x) => setEdit({ ...edit, monthlyLimitFils: x ?? 0 })} />
             <Switch label={t('settings.active')} checked={edit.active} disabled={edit.code === 'salaries' || edit.code === 'incidents'} onChange={(e) => setEdit({ ...edit, active: e.currentTarget.checked })} />
-            <Button disabled={!edit.nameRu.trim() && !edit.nameEn.trim()} onClick={() => run(async () => { await db.expenseCategories.put(edit); setEdit(null); }, 'common.saved')}>
+            <Button disabled={!edit.nameRu.trim() && !edit.nameEn.trim()} onClick={() => run(async () => { await saveCategory(edit); setEdit(null); }, 'common.saved')}>
               {t('common.save')}
             </Button>
           </Stack>
@@ -394,17 +419,76 @@ function CategoriesTab() {
   );
 }
 
+function DeviceCard() {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const info = useStorageInfo();
+  const install = useInstall();
+  const [persisted, setPersisted] = useState<boolean>();
+  const isPersisted = persisted ?? info?.persisted;
+  const rows: { ok: boolean | undefined; title: string; text: string; action?: ReactNode }[] = [
+    {
+      ok: install.standalone,
+      title: install.standalone ? t('device.installed') : t('device.notInstalled'),
+      text: install.standalone ? t('device.installedText') : install.iosManual ? t('device.iosHow') : t('device.installText'),
+      action: install.canPrompt ? (
+        <Button size="compact-md" leftSection={<IconDeviceMobile size={16} />} onClick={() => void install.install()}>
+          {t('device.install')}
+        </Button>
+      ) : undefined,
+    },
+    {
+      ok: isPersisted,
+      title: isPersisted ? t('device.persisted') : t('device.notPersisted'),
+      text: isPersisted ? t('device.persistedText') : t('device.notPersistedText'),
+      action:
+        isPersisted === false ? (
+          <Button size="compact-md" variant="light" onClick={async () => setPersisted(await requestPersistence())}>
+            {t('device.askPersist')}
+          </Button>
+        ) : undefined,
+    },
+    {
+      ok: !insecureContext(),
+      title: insecureContext() ? t('insecure.title') : t('device.offline'),
+      text: insecureContext() ? t('insecure.text') : t('device.offlineText'),
+    },
+  ];
+  return (
+    <Card title={t('device.title')} description={info?.usageBytes !== undefined ? t('device.usage', { used: formatBytes(info.usageBytes, lang), free: formatBytes(info.quotaBytes !== undefined ? info.quotaBytes - info.usageBytes : undefined, lang) }) : undefined}>
+      <Stack gap="sm">
+        {rows.map((r) => (
+          <Group key={r.title} gap="sm" wrap="nowrap" align="flex-start">
+            <ThemeIcon size={28} radius="xl" variant="light" color={r.ok === undefined ? 'gray' : r.ok ? 'green' : 'orange'} mt={2}>
+              {r.ok ? <IconCheck size={16} stroke={2.6} /> : <IconAlertTriangle size={15} />}
+            </ThemeIcon>
+            <Box style={{ flex: 1, minWidth: 0 }}>
+              <Text size="sm" fw={600}>
+                {r.title}
+              </Text>
+              <Text size="xs" c="dimmed" lh={1.4}>
+                {r.text}
+              </Text>
+              {r.action && <Box mt={6}>{r.action}</Box>}
+            </Box>
+          </Group>
+        ))}
+      </Stack>
+    </Card>
+  );
+}
+
 function DataTab() {
   const { t } = useTranslation();
+  const lang = useLang();
   const { run, busy } = useAction();
   const counts = useLiveQuery(async () => ({ orders: await db.orders.count(), customers: await db.customers.count(), media: await db.media.count() }), []);
+  const backup = useBackupAge();
   const [wipe, setWipe] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
   return (
     <Stack gap="md">
-      <Alert color="cobalt" title={t('more.localTitle')}>
-        {t('settings.dataHint')}
-      </Alert>
       {counts && (
         <SimpleGrid cols={3} spacing="sm">
           <Box className="kpi">
@@ -422,11 +506,24 @@ function DataTab() {
         </SimpleGrid>
       )}
       <Card title={t('settings.backup')} description={t('settings.backupHint')}>
-        <Group>
-          <Button leftSection={<IconDownload size={18} />} loading={busy} onClick={() => run(async () => { await downloadBlob(await exportBackup(), `mygarage-backup-${dubaiDate()}.json`); }, 'settings.backupDone')}>
+        <Group gap="sm" mb="md" wrap="nowrap" className="surface-soft" p="sm">
+          <ThemeIcon size={36} radius="xl" variant="light" color={backup.due ? 'orange' : 'green'}>
+            {backup.due ? <IconAlertTriangle size={18} /> : <IconCheck size={18} stroke={2.6} />}
+          </ThemeIcon>
+          <div>
+            <Text size="sm" fw={600}>
+              {backup.at ? t('settings.lastBackup', { date: formatDateTime(backup.at) }) : t('backupReminder.never')}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {t('settings.backupWhere')}
+            </Text>
+          </div>
+        </Group>
+        <Group gap="xs">
+          <Button leftSection={<IconDownload size={18} />} loading={busy} onClick={() => run(() => saveBackupFile(`mygarage-backup-${dubaiDate()}.mygarage`), 'settings.backupDone')}>
             {t('settings.export')}
           </Button>
-          <FileButton accept="application/json" onChange={(f) => f && run(async () => { await importBackup(f); window.location.reload(); })}>
+          <FileButton onChange={(f) => f && setRestoreFile(f)}>
             {(props) => (
               <Button variant="default" leftSection={<IconUpload size={18} />} {...props}>
                 {t('settings.import')}
@@ -438,9 +535,10 @@ function DataTab() {
           {t('settings.importWarning')}
         </Text>
       </Card>
+      <DeviceCard />
       {counts?.orders === 0 && (
         <Card title={t('settings.demo')} description={t('settings.demoHint')}>
-          <Button variant="light" loading={busy} onClick={() => run(loadDemoData, 'common.saved')}>
+          <Button variant="light" loading={busy} onClick={() => run(loadDemoData, 'settings.demoLoaded')}>
             {t('settings.loadDemo')}
           </Button>
         </Card>
@@ -450,12 +548,38 @@ function DataTab() {
           {t('settings.wipe')}
         </Button>
       </Card>
+      <ConfirmModal
+        opened={!!restoreFile}
+        onClose={() => setRestoreFile(null)}
+        title={t('settings.restoreTitle')}
+        confirmLabel={t('settings.restore')}
+        color="red"
+        icon={<IconUpload size={18} />}
+        onConfirm={() =>
+          run(async () => {
+            if (!restoreFile) return false;
+            await importBackup(restoreFile);
+            window.location.reload();
+            return true;
+          })
+        }
+      >
+        <Box className="surface-soft" p="sm" mb="sm">
+          <Text size="sm" fw={600} style={{ wordBreak: 'break-all' }}>
+            {restoreFile?.name}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {restoreFile ? formatBytes(restoreFile.size, lang) : ''}
+          </Text>
+        </Box>
+        <Text size="sm">{t('settings.restoreText')}</Text>
+      </ConfirmModal>
       <Modal opened={wipe} onClose={() => setWipe(false)} title={t('settings.wipe')}>
         <Text size="sm" mb="sm">
           {t('settings.wipeConfirm')}
         </Text>
-        <TextInput value={confirmText} onChange={(e) => setConfirmText(e.currentTarget.value)} placeholder="DELETE" />
-        <Button mt="md" color="red" fullWidth disabled={confirmText !== 'DELETE'} onClick={() => run(async () => { await wipeAll(); window.location.reload(); })}>
+        <TextInput value={confirmText} onChange={(e) => setConfirmText(e.currentTarget.value)} placeholder="DELETE" autoCapitalize="characters" />
+        <Button mt="md" color="red" fullWidth disabled={confirmText.trim().toUpperCase() !== 'DELETE'} onClick={() => run(async () => { await wipeAll(); window.location.reload(); })}>
           {t('common.delete')}
         </Button>
       </Modal>
@@ -479,9 +603,15 @@ export function SettingsPage() {
   const mobile = useMediaQuery('(max-width: 62em)', true, { getInitialValueInEffect: false });
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? 'business';
-  if (!s) return null;
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
+  const openTab = (v: string) => {
+    if (v === tab) return;
+    if (hasUnsaved()) setPendingTab(v);
+    else setParams({ tab: v });
+  };
+  if (!s) return <PageSkeleton />;
   const content = (
-    <>
+    <div key={tab} className="fade-enter">
       {tab === 'business' && <BusinessTab s={s} />}
       {tab === 'rules' && <RulesTab s={s} />}
       {tab === 'texts' && <TextsTab s={s} />}
@@ -489,14 +619,27 @@ export function SettingsPage() {
       {tab === 'prices' && <PricesTab />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'data' && <DataTab />}
-    </>
+      <ConfirmModal
+        opened={!!pendingTab}
+        onClose={() => setPendingTab(null)}
+        title={t('settings.leaveTitle')}
+        confirmLabel={t('settings.leave')}
+        color="red"
+        onConfirm={async () => {
+          if (pendingTab) setParams({ tab: pendingTab });
+          return true;
+        }}
+      >
+        <Text size="sm">{t('settings.leaveText')}</Text>
+      </ConfirmModal>
+    </div>
   );
   return (
     <>
       <PageHeader title={t('nav.settings')} subtitle={t(`settings.tabHint.${tab}`)} />
       {mobile ? (
         <>
-          <ScrollTabs value={tab} onChange={(v) => setParams({ tab: v })} items={TABS.map((x) => ({ value: x.key, label: t(`settings.tab.${x.key}`) }))} />
+          <ScrollTabs value={tab} onChange={openTab} items={TABS.map((x) => ({ value: x.key, label: t(`settings.tab.${x.key}`) }))} />
           {content}
         </>
       ) : (
@@ -504,7 +647,7 @@ export function SettingsPage() {
           <Grid.Col span={3}>
             <Box className="surface" p={6} style={{ position: 'sticky', top: 'calc(var(--app-header-h) + 16px)' }}>
               {TABS.map((x) => (
-                <NavLink key={x.key} active={tab === x.key} label={t(`settings.tab.${x.key}`)} leftSection={<x.icon size={18} />} onClick={() => setParams({ tab: x.key })} style={{ borderRadius: 10 }} />
+                <NavLink key={x.key} component="button" active={tab === x.key} label={t(`settings.tab.${x.key}`)} leftSection={<x.icon size={18} />} onClick={() => openTab(x.key)} style={{ borderRadius: 10 }} />
               ))}
             </Box>
           </Grid.Col>

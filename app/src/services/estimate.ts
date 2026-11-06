@@ -72,11 +72,20 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
   await db.items.update(id, patch);
 }
 
-export async function removeItem(id: string): Promise<void> {
+/** Delete a draft item; returns it so the screen can offer "Undo". */
+export async function removeItem(id: string): Promise<OrderItem | undefined> {
   const item = await db.items.get(id);
-  if (!item) return;
+  if (!item) return undefined;
   if (item.approvalState !== 'draft') throw new AppError('err.itemSent');
   await db.items.delete(id);
+  return item;
+}
+
+/** Undo for `removeItem`: put the same draft back (only drafts can be removed, so nothing was sent). */
+export async function restoreItem(item: OrderItem): Promise<void> {
+  if (item.approvalState !== 'draft') throw new AppError('err.itemSent');
+  if (await db.items.get(item.id)) return;
+  await db.items.add(item);
 }
 
 function snapshotItem(i: OrderItem, lang: 'ru' | 'en'): SnapshotItem {

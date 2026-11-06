@@ -1,5 +1,6 @@
 import { db } from '../db/db';
-import type { Settings } from '../domain/types';
+import type { Employee, ExpenseCategory, JobTemplate, Settings } from '../domain/types';
+import { AppError } from './errors';
 
 export const DEFAULT_SETTINGS: Settings = {
   id: 'main',
@@ -56,4 +57,23 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   const current = await getSettings();
   await db.settings.put({ ...current, ...patch, id: 'main' });
+}
+
+/** Save a job template; editing the price list ticks "prices reviewed" in the setup checklist. */
+export async function saveTemplate(t: JobTemplate): Promise<void> {
+  if (!t.titleRu.trim() && !t.titleEn.trim()) throw new AppError('err.titleRequired');
+  await db.transaction('rw', db.jobTemplates, db.settings, async () => {
+    await db.jobTemplates.put({ ...t, titleRu: t.titleRu.trim(), titleEn: t.titleEn.trim() });
+    await saveSettings({ pricesReviewed: true });
+  });
+}
+
+export async function saveEmployee(e: Employee): Promise<void> {
+  if (!e.name.trim()) throw new AppError('err.nameRequired');
+  await db.employees.put({ ...e, name: e.name.trim() });
+}
+
+export async function saveCategory(c: ExpenseCategory): Promise<void> {
+  if (!c.nameRu.trim() && !c.nameEn.trim()) throw new AppError('err.nameRequired');
+  await db.expenseCategories.put({ ...c, nameRu: c.nameRu.trim(), nameEn: c.nameEn.trim() });
 }

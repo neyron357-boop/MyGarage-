@@ -9,7 +9,7 @@ import { formatDate } from '../../domain/dates';
 import { activeInvoice } from '../../domain/invoice';
 import { formatPhone } from '../../domain/phone';
 import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
-import { ContactButtons, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PlateText, Section, StageBadge } from '../../ui/components';
+import { ContactButtons, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
 import { initials } from './CustomersPage';
 import { CustomerModal, VehicleModal } from './forms';
 
@@ -33,7 +33,7 @@ export function CustomerPage() {
     }
     return { c, cars, orders, debt, spent, vehicles: new Map(cars.map((v) => [v.id, v])) };
   }, [id]);
-  if (data === undefined) return null;
+  if (data === undefined) return <PageSkeleton variant="detail" />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const { c, cars, orders, debt, spent, vehicles } = data;
   const displayName = c.type === 'company' && c.companyName ? c.companyName : c.name;

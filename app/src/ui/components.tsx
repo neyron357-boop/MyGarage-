@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Group, Image, Loader, Modal, Stack, Text, TextInput, ThemeIcon, Title, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, Image, Loader, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, Tooltip, UnstyledButton } from '@mantine/core';
 import {
   IconAlertTriangle,
   IconArchive,
@@ -8,6 +8,7 @@ import {
   IconCalendarTime,
   IconCash,
   IconChecklist,
+  IconChevronDown,
   IconChevronRight,
   IconCircleCheck,
   IconClipboardList,
@@ -22,7 +23,8 @@ import {
   IconX,
   type Icon,
 } from '@tabler/icons-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { notifications } from '@mantine/notifications';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatAed, parseAed } from '../domain/money';
@@ -30,7 +32,36 @@ import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
 import { mediaUrl } from '../services/media';
 import { telegramUrl, whatsappUrl } from '../services/messages';
+import { haptic } from './clipboard';
 import { useLang } from './hooks';
+
+/* ---------------- Toasts ---------------- */
+
+/** A toast with an "Undo" button (for deletions that can be reverted). */
+export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => void) {
+  const id = `undo-${Date.now()}`;
+  notifications.show({
+    id,
+    color: 'dark',
+    autoClose: 5000,
+    message: (
+      <Group justify="space-between" wrap="nowrap" gap="sm">
+        <Text size="sm" style={{ minWidth: 0 }}>
+          {message}
+        </Text>
+        <UnstyledButton
+          onClick={() => {
+            onUndo();
+            notifications.hide(id);
+          }}
+          style={{ color: 'var(--mantine-color-cobalt-5)', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}
+        >
+          {undoLabel}
+        </UnstyledButton>
+      </Group>
+    ),
+  });
+}
 
 /* ---------------- Money ---------------- */
 
@@ -85,23 +116,24 @@ export const STAGE_META: Record<Stage, { color: string; icon: Icon; step: number
   cancelled: { color: 'red', icon: IconX, step: 0 },
 };
 
-export function StageBadge({ stage, size = 'md' }: { stage: Stage; size?: 'sm' | 'md' | 'lg' }) {
+export function StageBadge({ stage, size = 'md', chevron }: { stage: Stage; size?: 'sm' | 'md' | 'lg'; chevron?: boolean }) {
   const { t } = useTranslation();
   const m = STAGE_META[stage];
   return (
-    <Badge color={m.color} size={size} leftSection={<m.icon size={size === 'lg' ? 15 : 13} stroke={2} />}>
+    <Badge color={m.color} size={size} leftSection={<m.icon size={size === 'lg' ? 15 : 13} stroke={2} />} rightSection={chevron ? <IconChevronDown size={14} stroke={2.2} /> : undefined}>
       {t(`stage.${stage}`)}
     </Badge>
   );
 }
 
-/** Eight-segment progress of a job from check-in to handover. */
+/** Eight-segment progress of a job from check-in to handover (all green once the car is handed over). */
 export function StageTrack({ stage }: { stage: Stage }) {
   const step = STAGE_META[stage].step;
+  const complete = stage === 'delivered' || stage === 'closed';
   return (
-    <div className="stage-track" aria-hidden>
+    <div className={`stage-track${complete ? ' complete' : stage === 'cancelled' ? ' cancelled' : ''}`} aria-hidden>
       {Array.from({ length: 8 }, (_, i) => (
-        <span key={i} className={i + 1 < step ? 'done' : i + 1 === step ? 'now' : ''} />
+        <span key={i} className={complete || i + 1 < step ? 'done' : i + 1 === step ? 'now' : ''} />
       ))}
     </div>
   );
@@ -246,7 +278,7 @@ export function ListRow({
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ') && onClick() : undefined}
+      onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onClick()) : undefined}
     >
       {left}
       <div className="body">
@@ -267,7 +299,13 @@ export function ListRow({
 
 export function Kpi({ label, value, hint, color, onClick }: { label: ReactNode; value: ReactNode; hint?: ReactNode; color?: string; onClick?: () => void }) {
   return (
-    <div className={`kpi${onClick ? ' tap' : ''}`} onClick={onClick} role={onClick ? 'button' : undefined}>
+    <div
+      className={`kpi${onClick ? ' tap' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onClick()) : undefined}
+    >
       <span className="eyebrow">{label}</span>
       <span className="value" style={color ? { color: `var(--mantine-color-${color}-text, var(--mantine-color-${color}-6))` } : undefined}>
         {value}
@@ -300,6 +338,18 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
   );
 }
 
+/** Animated green check for "signed" / "paid" moments. */
+export function SuccessMark({ size = 64 }: { size?: number }) {
+  return (
+    <span className="success-mark" style={{ width: size, height: size, flexShrink: 0 }} aria-hidden>
+      <svg width={size} height={size} viewBox="0 0 64 64">
+        <circle className="circle" cx="32" cy="32" r="32" fill="var(--mantine-color-green-6)" />
+        <path className="tick" d="M19 33.5l8.5 8.5L45.5 24" fill="none" stroke="#fff" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
 /** Primary actions pinned to the bottom of the screen (above the phone tab bar). */
 export function StickyBar({ children }: { children: ReactNode }) {
   return <div className="sticky-bar no-print">{children}</div>;
@@ -311,17 +361,69 @@ export interface TabItem {
   count?: number;
 }
 
-/** Horizontal pill tabs that scroll instead of wrapping. */
+/** Horizontal pill tabs that scroll instead of wrapping; the active one is always scrolled into view. */
 export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: string; onChange: (v: string) => void; items: TabItem[]; mb?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = ref.current;
+    const el = root?.querySelector<HTMLElement>('[data-active="true"]');
+    if (!root || !el) return;
+    const left = el.offsetLeft - root.offsetLeft;
+    if (left < root.scrollLeft + 8 || left + el.offsetWidth > root.scrollLeft + root.clientWidth - 8) {
+      root.scrollTo({ left: Math.max(0, left - 24), behavior: 'smooth' });
+    }
+  }, [value]);
   return (
-    <Box mb={mb} className="scroll-tabs" role="tablist">
+    <Box mb={mb} className="scroll-tabs" role="tablist" ref={ref}>
       {items.map((it) => (
-        <button key={it.value} type="button" role="tab" data-active={it.value === value} aria-selected={it.value === value} onClick={() => onChange(it.value)}>
+        <button
+          key={it.value}
+          type="button"
+          role="tab"
+          data-active={it.value === value}
+          aria-selected={it.value === value}
+          onClick={() => {
+            if (it.value !== value) haptic(6);
+            onChange(it.value);
+          }}
+        >
           {it.label}
           {it.count !== undefined && <span className="count">{it.count}</span>}
         </button>
       ))}
     </Box>
+  );
+}
+
+/** Placeholder while a screen loads from the device database (fades in only if loading is slow). */
+export function PageSkeleton({ variant = 'list' }: { variant?: 'list' | 'detail' }) {
+  return (
+    <div className="skeleton-page" aria-busy="true">
+      <Box className="skeleton" h={12} w={120} mb={10} />
+      <Box className="skeleton" h={26} w="55%" mb={24} />
+      {variant === 'detail' ? (
+        <>
+          <Box className="skeleton" h={150} mb={14} style={{ borderRadius: 'var(--mantine-radius-lg)' }} />
+          <Box className="skeleton" h={90} mb={24} style={{ borderRadius: 'var(--mantine-radius-lg)' }} />
+          <Group gap={8} mb={16}>
+            {[90, 80, 110, 70].map((w, i) => (
+              <Box key={i} className="skeleton" h={36} w={w} style={{ borderRadius: 999 }} />
+            ))}
+          </Group>
+        </>
+      ) : (
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" mb={24}>
+          {[0, 1, 2, 3].map((i) => (
+            <Box key={i} className="skeleton" h={84} style={{ borderRadius: 'var(--mantine-radius-lg)' }} />
+          ))}
+        </SimpleGrid>
+      )}
+      <Stack gap="sm">
+        {[0, 1, 2].map((i) => (
+          <Box key={i} className="skeleton" h={96} style={{ borderRadius: 'var(--mantine-radius-lg)' }} />
+        ))}
+      </Stack>
+    </div>
   );
 }
 
@@ -475,6 +577,64 @@ export function Field({ label, children }: { label: ReactNode; children: ReactNo
         {children}
       </Text>
     </Box>
+  );
+}
+
+/**
+ * Confirmation for actions that cannot be undone (issuing an invoice, approving by the no-call limit).
+ * The confirm button shows progress; the sheet closes only when `onConfirm` resolves to a truthy value
+ * (use `run(async () => { ...; return true; })`, which resolves to undefined on error).
+ */
+export function ConfirmModal({
+  opened,
+  onClose,
+  title,
+  children,
+  confirmLabel,
+  color,
+  icon,
+  onConfirm,
+}: {
+  opened: boolean;
+  onClose: () => void;
+  title: ReactNode;
+  children: ReactNode;
+  confirmLabel: ReactNode;
+  color?: string;
+  icon?: ReactNode;
+  onConfirm: () => Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal opened={opened} onClose={onClose} title={title}>
+      <Stack gap="md">
+        <Box>{children}</Box>
+        <Group grow gap="xs">
+          <Button variant="default" onClick={onClose} disabled={busy}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color={color}
+            leftSection={icon}
+            loading={busy}
+            data-autofocus
+            onClick={async () => {
+              setBusy(true);
+              try {
+                if (await onConfirm()) onClose();
+              } catch {
+                // the action reports its own error
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {confirmLabel}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
 

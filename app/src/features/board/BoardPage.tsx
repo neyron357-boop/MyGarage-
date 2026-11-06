@@ -1,5 +1,4 @@
-import { Badge, Box, Button, Group, ScrollArea, SimpleGrid, Stack, Text, ThemeIcon } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { Badge, Box, Button, Group, SimpleGrid, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core';
 import {
   IconAlarm,
   IconBellRinging,
@@ -14,7 +13,7 @@ import {
   type Icon,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -23,11 +22,12 @@ import { BOARD_STAGES } from '../../domain/stages';
 import type { Stage } from '../../domain/types';
 import { cashState } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
-import { EmptyState, Kpi, List, ListRow, Money, PageHeader, PlateText, ScrollTabs, Section, STAGE_META } from '../../ui/components';
-import { useLang } from '../../ui/hooks';
+import { EmptyState, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs, Section, STAGE_META } from '../../ui/components';
+import { useLang, usePhone } from '../../ui/hooks';
 import { orderFlags } from '../orders/flags';
 import { JobCard } from '../orders/JobCard';
 import { attentionItems, type AttentionItem, type AttentionKind } from './attention';
+import { BackupReminder, InsecureWarning, SetupChecklist } from './BoardNotices';
 
 async function loadBoard() {
   const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
@@ -76,14 +76,80 @@ function AttentionRow({ a }: { a: AttentionItem }) {
 
 type Filter = 'active' | 'waiting' | 'parts' | 'ready' | 'booked' | 'delivered';
 
+/** Fades the edge of a horizontal scroller where more content is hidden. */
+function useEdgeFade() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      el.dataset.fadeLeft = String(el.scrollLeft > 4);
+      el.dataset.fadeRight = String(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      ro.disconnect();
+    };
+  }, []);
+  return ref;
+}
+
+/** PC board: one lane per stage; empty stages fold into thin strips so busy lanes get the width. */
+function Kanban({ byStage }: { byStage: (s: Stage) => OrderBundle[] }) {
+  const { t } = useTranslation();
+  const ref = useEdgeFade();
+  const lanes = BOARD_STAGES.map((s) => ({ s, list: byStage(s) }));
+  const cols = lanes.map((l) => (l.list.length ? 'minmax(236px, 1fr)' : '46px')).join(' ');
+  return (
+    <div className="kanban edge-fade" ref={ref} style={{ gridTemplateColumns: cols, gridAutoFlow: 'initial' }}>
+      {lanes.map(({ s, list }) => {
+        const m = STAGE_META[s];
+        if (!list.length)
+          return (
+            <Tooltip key={s} label={`${t(`stage.${s}`)} · 0`} position="top">
+              <div className="kanban-fold" aria-label={`${t(`stage.${s}`)}: 0`}>
+                <span className="stage-dot" style={{ background: `var(--mantine-color-${m.color}-6)` }} />
+                <span className="fold-label">{t(`stage.${s}`)}</span>
+              </div>
+            </Tooltip>
+          );
+        return (
+          <div key={s} className="kanban-col">
+            <Group justify="space-between" mb="xs" px={4} wrap="nowrap">
+              <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                <span className="stage-dot" style={{ background: `var(--mantine-color-${m.color}-6)` }} />
+                <Text fw={700} size="sm" truncate>
+                  {t(`stage.${s}`)}
+                </Text>
+              </Group>
+              <Badge variant="default" size="sm" radius="xl" className="tnum">
+                {list.length}
+              </Badge>
+            </Group>
+            <div className="lane stagger">
+              {list.map((b) => (
+                <JobCard key={b.order.id} b={b} showStage={false} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function BoardPage() {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
   const data = useLiveQuery(loadBoard, []);
-  const mobile = useMediaQuery('(max-width: 48em)', true, { getInitialValueInEffect: false });
+  const mobile = usePhone();
   const [filter, setFilter] = useState<Filter>('active');
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
   const { bundles } = data;
   const byStage = (s: Stage) => bundles.filter((b) => b.order.stage === s).sort((a, b) => a.order.stageChangedAt.localeCompare(b.order.stageChangedAt));
   const today = dubaiDate();
@@ -94,18 +160,13 @@ export function BoardPage() {
   const ready = byStage('ready');
   const attention = attentionItems(bundles);
 
-  const header = (
-    <PageHeader
-      eyebrow={dateLabel}
-      title={t('board.title')}
-    />
-  );
+  const header = <PageHeader eyebrow={dateLabel} title={t('board.title')} />;
 
   const kpis = (
     <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
-      <Kpi label={t('board.inShop')} value={inShop.length} hint={t('board.inShopHint', { n: arriving.length })} />
-      <Kpi label={t('board.waitingClient')} value={waiting.length} color={waiting.length ? 'orange' : undefined} onClick={waiting.length ? () => setFilter('waiting') : undefined} />
-      <Kpi label={t('board.ready')} value={ready.length} color={ready.length ? 'green' : undefined} onClick={ready.length ? () => setFilter('ready') : undefined} />
+      <Kpi label={t('board.inShop')} value={inShop.length} hint={arriving.length ? t('board.inShopHint', { n: arriving.length }) : undefined} onClick={mobile && inShop.length ? () => setFilter('active') : undefined} />
+      <Kpi label={t('board.waitingClient')} value={waiting.length} color={waiting.length ? 'orange' : undefined} onClick={mobile && waiting.length ? () => setFilter('waiting') : undefined} />
+      <Kpi label={t('board.ready')} value={ready.length} color={ready.length ? 'green' : undefined} onClick={mobile && ready.length ? () => setFilter('ready') : undefined} />
       <Kpi label={t('board.cash')} value={<Money fils={data.cash} display />} onClick={() => navigate('/money?tab=cash')} />
     </SimpleGrid>
   );
@@ -114,6 +175,8 @@ export function BoardPage() {
     return (
       <>
         {header}
+        <InsecureWarning />
+        <SetupChecklist />
         {kpis}
         <Box mt="xl">
           <EmptyState
@@ -141,7 +204,7 @@ export function BoardPage() {
       title={
         <Group gap={8}>
           {t('board.attention')}
-          <Badge color="red" variant="filled" size="sm" circle>
+          <Badge color="red" variant="filled" size="sm" circle className="pop-in">
             {attention.length}
           </Badge>
         </Group>
@@ -158,7 +221,7 @@ export function BoardPage() {
 
   const arrivingBlock = arriving.length > 0 && (
     <Section title={`${t('board.arrivingToday')} · ${arriving.length}`}>
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm" className="stagger">
         {arriving.map((b) => (
           <JobCard key={b.order.id} b={b} showStage={false} />
         ))}
@@ -179,7 +242,12 @@ export function BoardPage() {
     return (
       <>
         {header}
+        <InsecureWarning />
         {kpis}
+        <Box mt="lg">
+          <BackupReminder />
+          <SetupChecklist compact />
+        </Box>
         {attentionBlock}
         {arrivingBlock}
         <Section title={t('board.jobs')}>
@@ -195,7 +263,7 @@ export function BoardPage() {
               { value: 'delivered', label: t('board.tabDebts'), count: lists.delivered.length },
             ]}
           />
-          <Stack gap="sm">
+          <Stack gap="sm" key={filter} className="stagger">
             {list.length === 0 && <EmptyState>{t('board.nothing')}</EmptyState>}
             {list.map((b) => (
               <JobCard key={b.order.id} b={b} />
@@ -209,43 +277,16 @@ export function BoardPage() {
   return (
     <>
       {header}
+      <InsecureWarning />
       {kpis}
+      <Box mt="lg">
+        <BackupReminder />
+        <SetupChecklist compact />
+      </Box>
       {attentionBlock}
       {arrivingBlock}
-      <Section title={t('board.jobs')}>
-        <ScrollArea type="auto" offsetScrollbars>
-          <Group align="flex-start" wrap="nowrap" gap="md" pb="sm">
-            {BOARD_STAGES.map((s) => {
-              const list = byStage(s);
-              const m = STAGE_META[s];
-              return (
-                <Box key={s} w={272} miw={272}>
-                  <Group justify="space-between" mb="xs" px={4}>
-                    <Group gap={8} wrap="nowrap">
-                      <span className="stage-dot" style={{ background: `var(--mantine-color-${m.color}-6)` }} />
-                      <Text fw={700} size="sm">
-                        {t(`stage.${s}`)}
-                      </Text>
-                    </Group>
-                    <Text size="sm" c="dimmed" fw={600} className="tnum">
-                      {list.length}
-                    </Text>
-                  </Group>
-                  <Stack gap="sm" p={6} style={{ background: 'color-mix(in srgb, var(--app-hairline) 45%, transparent)', borderRadius: 16, minHeight: 120 }}>
-                    {list.map((b) => (
-                      <JobCard key={b.order.id} b={b} showStage={false} />
-                    ))}
-                    {list.length === 0 && (
-                      <Text size="xs" c="dimmed" ta="center" py="lg">
-                        —
-                      </Text>
-                    )}
-                  </Stack>
-                </Box>
-              );
-            })}
-          </Group>
-        </ScrollArea>
+      <Section title={t('board.jobs')} description={t('board.kanbanHint')}>
+        <Kanban byStage={byStage} />
       </Section>
     </>
   );

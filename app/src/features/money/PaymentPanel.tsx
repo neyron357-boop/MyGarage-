@@ -21,7 +21,8 @@ import { debtPdf, invoicePdf, openPdf, receiptPdf } from '../../services/documen
 import { simpleMessage } from '../../services/messages';
 import { addPayment, createDebt, issueCreditNote, issueInvoice } from '../../services/money';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
-import { List, ListRow, Money, MoneyInput, Section, SelectCard } from '../../ui/components';
+import { haptic } from '../../ui/clipboard';
+import { ConfirmModal, List, ListRow, Money, MoneyInput, Section, SelectCard } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { useAction } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
@@ -71,7 +72,9 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
         {due > 0 && kind !== 'refund' && (
           <Group gap={6} mt={-8}>
             <Button size="compact-sm" variant="light" onClick={() => setAmount(due)}>
-              {t('payment.fullDue')} · <Money fils={due} />
+              <span>{t('payment.fullDue')}</span>
+              <span style={{ margin: '0 6px', opacity: 0.6 }}>·</span>
+              <Money fils={due} />
             </Button>
           </Group>
         )}
@@ -124,6 +127,7 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
   const [debtOpen, setDebtOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
   const [creditOpen, setCreditOpen] = useState(false);
+  const [issueOpen, setIssueOpen] = useState(false);
   const [creditReason, setCreditReason] = useState('');
   const sum = summarize(b.items);
   const inv = activeInvoice(b.invoices);
@@ -223,7 +227,7 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
               leftSection={<IconFileInvoice size={18} />}
               loading={busy}
               disabled={!hasApproved}
-              onClick={() => run(async () => { const i = await issueInvoice(b.order.id, invType); sendInvoice(i.id, i.number, i.totalFils); }, 'invoice.issued')}
+              onClick={() => setIssueOpen(true)}
             >
               {t('invoice.issue')}
             </Button>
@@ -332,6 +336,41 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
           {t('invoice.issueCredit')}
         </Button>
       </Modal>
+      <ConfirmModal
+        opened={issueOpen}
+        onClose={() => setIssueOpen(false)}
+        title={t('invoice.confirmTitle')}
+        confirmLabel={t('invoice.issue')}
+        icon={<IconFileInvoice size={18} />}
+        onConfirm={() =>
+          run(async () => {
+            const i = await issueInvoice(b.order.id, invType);
+            haptic(12);
+            sendInvoice(i.id, i.number, i.totalFils);
+            return true;
+          }, 'invoice.issued')
+        }
+      >
+        <Box className="surface-soft" p="sm">
+          <Group justify="space-between" wrap="nowrap">
+            <div>
+              <Text size="sm" fw={700}>
+                {t(`invoice.type.${invType}`)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {b.customer.type === 'company' && b.customer.companyName ? b.customer.companyName : b.customer.name}
+                {b.customer.trn ? ` · TRN ${b.customer.trn}` : ''}
+              </Text>
+            </div>
+            <Text fz={22}>
+              <Money fils={sum.approvedGross} display />
+            </Text>
+          </Group>
+        </Box>
+        <Text size="sm" c="dimmed" mt="sm">
+          {t('invoice.confirmText')}
+        </Text>
+      </ConfirmModal>
       <SendDialog customer={b.customer} request={send} onClose={() => setSend(null)} />
     </Stack>
   );

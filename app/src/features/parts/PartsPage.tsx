@@ -24,7 +24,7 @@ import { formatPhone } from '../../domain/phone';
 import type { OrderItem, ProcurementStatus, Supplier, SupplierReturn } from '../../domain/types';
 import { closeReturn, createReturn, saveSupplier, setProcurement } from '../../services/parts';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, Photo, PlateText, ScrollTabs, SelectCard } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateText, ScrollTabs, SelectCard } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 
@@ -184,17 +184,19 @@ export function PartsPage() {
   const navigate = useNavigate();
   const { run } = useAction();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') ?? 'needed';
+  const explicitTab = params.get('tab');
   const [proc, setProc] = useState<OrderItem | null>(null);
   const [supplierEdit, setSupplierEdit] = useState<Partial<Supplier> | null>(null);
   const data = useLiveQuery(loadParts, []);
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
   const { items, byId, vById, suppliers, returns, returnItems } = data;
   const sName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? t('parts.noSupplier');
   const today = dubaiDate();
   const needed = items.filter((i) => (i.procurementStatus ?? 'needed') === 'needed');
   const ordered = items.filter((i) => i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit');
   const pickup = ordered.filter((i) => !i.expectedAt || i.expectedAt <= today);
+  // Without an explicit tab, open the first list that has something to do.
+  const tab = explicitTab ?? (needed.length ? 'needed' : pickup.length ? 'pickup' : ordered.length ? 'ordered' : returns.length ? 'returns' : 'needed');
   const groups = new Map<string, OrderItem[]>();
   for (const i of pickup) groups.set(i.supplierId ?? '', [...(groups.get(i.supplierId ?? '') ?? []), i]);
 
