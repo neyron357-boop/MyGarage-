@@ -28,7 +28,7 @@ async function start() {
     // not supported
   }
   try {
-    await ensureSeed();
+    await ensureSeed(i18n.language === 'en' ? 'en' : 'ru');
   } catch (e) {
     // IndexedDB is unavailable (private mode, blocked site data): the app cannot keep data.
     document.getElementById('root')!.innerHTML =

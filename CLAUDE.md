@@ -18,7 +18,9 @@ PWA для менеджера небольшой автомастерской в
   этапы заказа, инвойсы, касса, отчёты. Всё покрыто тестами.
 - `db/` — схема Dexie и защита неизменяемых записей (хуки `guard`).
 - `services/` — операции с данными (заказы, приёмка, оценка, запчасти, деньги, документы, сообщения, бэкап).
-- `features/` — экраны по разделам; `ui/` — общие компоненты; `i18n/` — `ru.ts`, `en.ts`; `pdf/` — документы.
+- `features/` — экраны по разделам; `ui/` — общие компоненты (`components.tsx`, `pwa.tsx` — установка и обновления,
+  `device.ts` — хранилище и напоминание о копии, `ErrorBoundary`, `unsaved`, `backCloses`/`sheetSwipe` — жесты листов);
+  `i18n/` — `ru.ts`, `en.ts`; `pdf/` — документы.
 
 ## Жёсткие правила
 - Деньги — целые филсы (`*Fils`), никаких float. VAT — базисные пункты (500 = 5 %). Считать только через
@@ -36,6 +38,13 @@ PWA для менеджера небольшой автомастерской в
   и CSS-переменных `--app-*`, готовые блоки из `ui/components.tsx` (PageHeader, Section, List/ListRow, Kpi,
   EmptyState, StickyBar, ScrollTabs, SelectCard, PlateText, Money, StageBadge/StageTrack). Номер машины — `PlateText`,
   суммы — `Money`, числа — шрифт `--font-display`. Никаких случайных hex-цветов в экранах.
+- Движение — только готовыми классами из `styles.css` (`page-enter`, `fade-enter`, `rise-enter`, `step-next/prev`,
+  `pop-in`, `stagger`, `tap`) и токенами `--ease-out`, `--dur-1..3`; при `prefers-reduced-motion` всё отключается само.
+  Окна на телефоне — нижние листы (тема `phoneTheme`); загрузка экрана — `PageSkeleton`, не `return null`.
+- Необратимое действие (выписка инвойса, согласование по лимиту, замена данных из копии) — через `ConfirmModal`;
+  удаление черновика — с «Отменить» (`undoToast`). Формы с кнопкой «Сохранить» отмечают несохранённое (`useMarkUnsaved`).
+- Только то, что работает и без HTTPS: `uid()` из `db.ts`, `sha256Hex` из `services/media.ts`, `copyText` из `ui/clipboard.ts`
+  (по http в локальной сети `crypto.randomUUID`, `crypto.subtle` и `navigator.clipboard` недоступны).
 - Новая таблица Dexie — только новой версией схемы (`this.version(n+1)`), с миграцией данных при необходимости.
 
 ## Команды (в `app/`)
@@ -44,7 +53,7 @@ PWA для менеджера небольшой автомастерской в
 - `npm run typecheck` — TypeScript
 - `npm test` — unit + сквозные тесты сервисов (fake-indexeddb)
 - `npm run e2e` — браузерный сценарий целиком (нужен запущенный `npm run dev -- --port 5173`); скриншоты в `test-results/`
-- `npm run build` — PWA для хостинга (`dist/`)
+- `npm run build` — PWA для хостинга (`dist/`); `npm run preview` — открыть сборку на http://localhost:4173
 - `npm run build:single` — один файл `dist-single/index.html` для превью
 
 ## Определение «готово»

@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate } from '../../domain/dates';
 import { saveBackupFile } from '../../services/backup';
+import { PLACEHOLDER_STAFF } from '../../services/seed';
 import { useAction, useSettings } from '../../ui/hooks';
 import { insecureContext, useBackupAge } from '../../ui/device';
 import { useInstall } from '../../ui/pwa';
@@ -30,7 +31,7 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
   const navigate = useNavigate();
   const s = useSettings();
   const install = useInstall();
-  const staffDefault = useLiveQuery(async () => (await db.employees.toArray()).some((e) => /^Механик \d$/.test(e.name)), []);
+  const staffDefault = useLiveQuery(async () => (await db.employees.toArray()).some((e) => PLACEHOLDER_STAFF.test(e.name)), []);
   const [dismissed, setDismissed] = useState(readDismissed);
   const [open, setOpen] = useState(!compact);
   if (!s || staffDefault === undefined || dismissed) return null;

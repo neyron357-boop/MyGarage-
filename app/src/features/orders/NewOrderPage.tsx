@@ -1,7 +1,7 @@
 import { ActionIcon, Box, Button, Chip, Group, SegmentedControl, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, Title } from '@mantine/core';
 import { IconArrowRight, IconCalendarTime, IconCar, IconPencil, IconSearch, IconUserCheck, IconUserPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -115,6 +115,13 @@ export function NewOrderPage() {
     setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase.toLowerCase()}` : phrase));
   };
   const picked = customer && vehicle;
+  // Once the customer and car are chosen, bring "What happened" into view (phones scroll a lot here).
+  const step2 = useRef<HTMLDivElement>(null);
+  const wasPicked = useRef(!!picked);
+  useEffect(() => {
+    if (picked && !wasPicked.current) window.setTimeout(() => step2.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    wasPicked.current = !!picked;
+  }, [picked]);
 
   return (
     <>
@@ -251,6 +258,7 @@ export function NewOrderPage() {
         </Card>
         {picked && (
           <>
+            <div ref={step2} style={{ scrollMarginTop: 'calc(var(--app-header-h) + 12px)' }} className="rise-enter">
             <Card n={2} title={t('order.complaint')} done={!!complaint.trim()}>
               <Box className="hide-scrollbar" style={{ overflowX: 'auto' }} mb="sm">
                 <Group gap={6} wrap="nowrap">
@@ -263,6 +271,7 @@ export function NewOrderPage() {
               </Box>
               <Textarea placeholder={t('order.complaintHint')} autosize minRows={3} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
             </Card>
+            </div>
             <Card n={3} title={t('newOrder.when')}>
               <SimpleGrid cols={2} spacing="xs">
                 <SelectCard active={when === 'now'} onClick={() => setWhen('now')}>

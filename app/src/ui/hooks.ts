@@ -1,13 +1,15 @@
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useCallback, useState } from 'react';
+import { IconAlertTriangle, IconCheck } from '@tabler/icons-react';
+import { createElement, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ImmutableError } from '../db/db';
 import type { Lang } from '../domain/types';
 import { AppError } from '../services/errors';
 import { loadOrderBundle } from '../services/orders';
 import { getSettings } from '../services/settings';
+import { haptic } from './clipboard';
 
 export const PHONE_QUERY = '(max-width: 48em)';
 
@@ -57,11 +59,12 @@ export function useAction() {
       setBusy(true);
       try {
         const r = await fn();
-        if (successKey) notifications.show({ color: 'green', message: t(successKey) });
+        if (successKey) notifications.show({ color: 'green', message: t(successKey), icon: createElement(IconCheck, { size: 18, stroke: 2.6 }) });
         return r;
       } catch (e) {
         console.error(e);
-        notifications.show({ color: 'red', title: t('common.error'), message: errorText(e), autoClose: 7000 });
+        notifications.show({ color: 'red', title: t('common.error'), message: errorText(e), autoClose: 7000, icon: createElement(IconAlertTriangle, { size: 18 }) });
+        haptic([30, 40, 30]);
         return undefined;
       } finally {
         setBusy(false);
