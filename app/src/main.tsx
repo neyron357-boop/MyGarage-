@@ -1,5 +1,18 @@
+import '@fontsource/golos-text/latin-400.css';
+import '@fontsource/golos-text/latin-500.css';
+import '@fontsource/golos-text/latin-600.css';
+import '@fontsource/golos-text/latin-700.css';
+import '@fontsource/golos-text/cyrillic-400.css';
+import '@fontsource/golos-text/cyrillic-500.css';
+import '@fontsource/golos-text/cyrillic-600.css';
+import '@fontsource/golos-text/cyrillic-700.css';
+import '@fontsource/oswald/latin-500.css';
+import '@fontsource/oswald/latin-600.css';
+import '@fontsource/oswald/cyrillic-600.css';
 import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
+import 'dayjs/locale/ru';
 import './styles.css';
 import './i18n';
 import React from 'react';

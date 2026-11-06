@@ -1,5 +1,17 @@
-import { Alert, Badge, Button, Group, Modal, Paper, SegmentedControl, SimpleGrid, Stack, Text, TextInput, Title } from '@mantine/core';
-import { IconBulb, IconPlus, IconSend, IconTemplate } from '@tabler/icons-react';
+import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import {
+  IconBrandTelegram,
+  IconBrandWhatsapp,
+  IconBulb,
+  IconPhone,
+  IconPlus,
+  IconSearch,
+  IconSend,
+  IconShieldCheck,
+  IconTemplate,
+  IconUser,
+  type Icon,
+} from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,42 +22,61 @@ import type { Block, EstimateVersion, OrderItem, SendVia } from '../../domain/ty
 import { versionPdf } from '../../services/documents';
 import { addTemplate, approveByLimit, limitRemaining, sendVersion } from '../../services/estimate';
 import { limitMessage, versionMessage } from '../../services/messages';
-import { Money, PageHeader, PlateText } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, PageHeader, PlateText, Section, SelectCard, StickyBar } from '../../ui/components';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
-import { DecisionModal, ItemModal, ItemRow, addSuggestion, useSuggestions } from './components';
+import { BlockChip, DecisionModal, ItemModal, ItemRow, addSuggestion, useSuggestions } from './components';
 
-export function TemplateModal({ orderId, opened, onClose }: { orderId: string; opened: boolean; onClose: () => void }) {
+export function TemplateModal({ orderId, opened, onClose, defaultBlock = 'A' }: { orderId: string; opened: boolean; onClose: () => void; defaultBlock?: Block }) {
   const { t } = useTranslation();
   const lang = useLang();
   const { run } = useAction();
   const [q, setQ] = useState('');
-  const [block, setBlock] = useState<Block>('A');
+  const [block, setBlock] = useState<Block>(defaultBlock);
   const templates = useLiveQuery(() => db.jobTemplates.filter((x) => x.active).toArray(), []);
   const list = (templates ?? []).filter((x) => !q || (x.titleRu + x.titleEn).toLowerCase().includes(q.toLowerCase()));
   return (
     <Modal opened={opened} onClose={onClose} title={t('estimate.fromTemplate')} size="lg">
-      <Stack>
-        <SegmentedControl fullWidth value={block} onChange={(v) => setBlock(v as Block)} data={(['A', 'B', 'C'] as const).map((x) => ({ value: x, label: t(`block.${x}.short`) }))} />
-        <TextInput placeholder={t('common.search')} value={q} onChange={(e) => setQ(e.currentTarget.value)} autoFocus />
-        {list.map((tpl) => {
-          const total = tpl.items.reduce((s, i) => s + Math.round(i.qty * i.unitPriceFils), 0);
-          return (
-            <Paper
-              key={tpl.id}
-              withBorder
-              p="sm"
-              className="tap-card"
-              onClick={() => run(async () => { await addTemplate(orderId, tpl.id, block); onClose(); }, 'estimate.added')}
-            >
-              <Group justify="space-between">
-                <Text fw={500}>{lang === 'ru' ? tpl.titleRu : tpl.titleEn}</Text>
-                <Text size="sm" c="dimmed">{t('common.withoutVat')}: <Money fils={total} size="sm" /></Text>
+      <Stack gap="sm">
+        <SimpleGrid cols={3} spacing="xs">
+          {(['A', 'B', 'C'] as const).map((x) => (
+            <SelectCard key={x} active={block === x} onClick={() => setBlock(x)}>
+              <Group gap={6} wrap="nowrap">
+                <BlockChip block={x} />
+                <Text size="sm" fw={700} lineClamp={1}>
+                  {t(`block.${x}.name`)}
+                </Text>
               </Group>
-              <Text size="xs" c="dimmed">{tpl.items.map((i) => (lang === 'ru' ? i.titleRu : i.titleEn)).join(' · ')}</Text>
-            </Paper>
-          );
-        })}
+            </SelectCard>
+          ))}
+        </SimpleGrid>
+        <TextInput leftSection={<IconSearch size={18} />} placeholder={t('estimate.templateSearch')} value={q} onChange={(e) => setQ(e.currentTarget.value)} data-autofocus />
+        <List>
+          {list.map((tpl) => {
+            const total = tpl.items.reduce((s, i) => s + Math.round(i.qty * i.unitPriceFils), 0);
+            return (
+              <ListRow
+                key={tpl.id}
+                onClick={() => run(async () => { await addTemplate(orderId, tpl.id, block); onClose(); }, 'estimate.added')}
+                left={
+                  <ThemeIcon variant="light" color="cobalt" size={38} radius="md">
+                    <IconTemplate size={19} />
+                  </ThemeIcon>
+                }
+                title={lang === 'ru' ? tpl.titleRu : tpl.titleEn}
+                subtitle={tpl.items.map((i) => (lang === 'ru' ? i.titleRu : i.titleEn)).join(' · ')}
+                right={
+                  <Box ta="right" style={{ flexShrink: 0 }}>
+                    <Money fils={total} size="sm" />
+                    <Text size="10px" c="dimmed">
+                      {t('common.withoutVat')}
+                    </Text>
+                  </Box>
+                }
+              />
+            );
+          })}
+        </List>
       </Stack>
     </Modal>
   );
@@ -64,31 +95,41 @@ export function useSendVersion(b: ReturnType<typeof useOrderBundle>) {
   return { send, setSend, decide, setDecide, afterSend };
 }
 
+const VIA_OPTIONS: { value: SendVia; icon: Icon; color: string }[] = [
+  { value: 'whatsapp', icon: IconBrandWhatsapp, color: 'green' },
+  { value: 'telegram', icon: IconBrandTelegram, color: 'cobalt' },
+  { value: 'in_person', icon: IconUser, color: 'gray' },
+  { value: 'phone', icon: IconPhone, color: 'gray' },
+];
+
 export function SendVersionModal({ opened, onClose, orderId, reason, onSent, kind }: { opened: boolean; onClose: () => void; orderId: string; reason?: string; kind?: EstimateVersion['kind']; onSent: (v: EstimateVersion, via: SendVia) => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [via, setVia] = useState<SendVia>('whatsapp');
   return (
     <Modal opened={opened} onClose={onClose} title={t('estimate.sendTitle')}>
-      <Stack>
-        <Text size="sm">{t('estimate.sendExplain')}</Text>
-        <SegmentedControl
-          fullWidth
-          orientation="vertical"
-          value={via}
-          onChange={(v) => setVia(v as SendVia)}
-          data={[
-            { value: 'whatsapp', label: t('sendVia.whatsapp') },
-            { value: 'telegram', label: t('sendVia.telegram') },
-            { value: 'in_person', label: t('sendVia.in_person') },
-            { value: 'phone', label: t('sendVia.phone') },
-          ]}
-        />
-        <Button
-          leftSection={<IconSend size={18} />}
-          loading={busy}
-          onClick={() => run(async () => { const v = await sendVersion(orderId, { via, reason, kind }); onClose(); onSent(v, via); })}
-        >
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          {t('estimate.sendExplain')}
+        </Text>
+        <SimpleGrid cols={2} spacing="xs">
+          {VIA_OPTIONS.map((o) => (
+            <SelectCard key={o.value} active={via === o.value} onClick={() => setVia(o.value)}>
+              <Stack gap={6}>
+                <ThemeIcon variant="light" color={o.color} radius="md">
+                  <o.icon size={18} />
+                </ThemeIcon>
+                <Text size="sm" fw={700}>
+                  {t(`sendViaShort.${o.value}`)}
+                </Text>
+                <Text size="xs" c="dimmed" lh={1.3}>
+                  {t(`sendViaHint.${o.value}`)}
+                </Text>
+              </Stack>
+            </SelectCard>
+          ))}
+        </SimpleGrid>
+        <Button mt="xs" leftSection={<IconSend size={18} />} loading={busy} onClick={() => run(async () => { const v = await sendVersion(orderId, { via, reason, kind }); onClose(); onSent(v, via); })}>
           {t('estimate.freezeAndSend')}
         </Button>
       </Stack>
@@ -123,67 +164,148 @@ export function EstimatePage() {
   return (
     <>
       <PageHeader
-        title={t('estimate.title')}
         back={`/orders/${b.order.id}`}
-        subtitle={<Group gap={6}><PlateText plate={b.vehicle.plate} size="xs" />{b.vehicle.make} {b.vehicle.model} · №{b.order.number} · {t(`lang.${b.order.docLanguage}`)}</Group>}
+        eyebrow={`${t('estimate.title')} · ${t('order.title')} №${b.order.number}`}
+        title={`${b.vehicle.make} ${b.vehicle.model}`}
+        subtitle={
+          <Group gap={8}>
+            <PlateText plate={b.vehicle.plate} size="xs" />
+            <span>
+              {t('estimate.clientLang')}: {t(`lang.${b.order.docLanguage}`)}
+            </span>
+          </Group>
+        }
       />
-      <Paper withBorder p="sm" mb="md" style={{ position: 'sticky', top: 60, zIndex: 5 }} bg="var(--mantine-color-body)">
-        <SimpleGrid cols={3}>
-          <div><Text size="xs" c="dimmed">{t('estimate.fixed')}</Text><Money fils={sum.fixedGross} fw={700} /></div>
-          <div><Text size="xs" c="dimmed">{t('estimate.upTo')}</Text><Money fils={sum.maxGross} fw={700} /></div>
-          <div><Text size="xs" c="dimmed">{t('estimate.recommended')}</Text><Money fils={sum.recommendedGross} fw={700} /></div>
+
+      <Box className="surface" p="md" mb="lg" style={{ position: 'sticky', top: 'calc(var(--app-header-h) + 8px)', zIndex: 20 }}>
+        <SimpleGrid cols={3} spacing="sm">
+          <div>
+            <div className="eyebrow">{t('estimate.fixed')}</div>
+            <Text fz={22} mt={2}>
+              <Money fils={sum.fixedGross} display />
+            </Text>
+          </div>
+          <div>
+            <div className="eyebrow">{t('estimate.upTo')}</div>
+            <Text fz={22} mt={2} c={sum.maxGross > sum.fixedGross ? 'orange' : undefined}>
+              <Money fils={sum.maxGross} display />
+            </Text>
+          </div>
+          <div>
+            <div className="eyebrow">{t('estimate.recommended')}</div>
+            <Text fz={22} mt={2} c="dimmed">
+              <Money fils={sum.recommendedGross} display />
+            </Text>
+          </div>
         </SimpleGrid>
-        <Text size="xs" c="dimmed" mt={4}>{t('estimate.inclVat')} · {t('estimate.marginHidden')}: <Money fils={margin} size="xs" /></Text>
-      </Paper>
-      <Group mb="md" gap="xs">
-        <Button leftSection={<IconTemplate size={18} />} onClick={() => setTplOpen(true)}>{t('estimate.fromTemplate')}</Button>
-        <Button variant="light" leftSection={<IconPlus size={18} />} onClick={() => setEdit({ block: 'A' })}>{t('estimate.addItem')}</Button>
+        <Text size="xs" c="dimmed" mt={6}>
+          {t('estimate.inclVat')} · {t('estimate.marginHidden')}: <Money fils={margin} />
+        </Text>
+      </Box>
+
+      <Group gap="xs">
+        <Button leftSection={<IconTemplate size={18} />} onClick={() => setTplOpen(true)}>
+          {t('estimate.fromTemplate')}
+        </Button>
+        <Button variant="default" leftSection={<IconPlus size={18} />} onClick={() => setEdit({ block: 'A' })}>
+          {t('estimate.addItem')}
+        </Button>
       </Group>
+
       {(['A', 'B', 'C'] as const).map((blk) => {
         const list = visible.filter((i) => i.block === blk);
         return (
-          <Stack key={blk} gap={6} mb="lg">
-            <Group justify="space-between">
-              <div>
-                <Title order={5}>{t(`block.${blk}.title`)}</Title>
-                <Text size="xs" c="dimmed">{t(`block.${blk}.hint`)}</Text>
-              </div>
-              <Button size="xs" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setEdit({ block: blk })}>{t('common.add')}</Button>
-            </Group>
-            {list.length === 0 && <Text size="sm" c="dimmed">—</Text>}
-            {list.map((i) => <ItemRow key={i.id} item={i} b={b} editable onEdit={() => setEdit({ item: i })} />)}
-          </Stack>
+          <Section
+            key={blk}
+            title={
+              <Group gap={8}>
+                <BlockChip block={blk} />
+                {t(`block.${blk}.title`)}
+              </Group>
+            }
+            description={t(`block.${blk}.hint`)}
+            action={
+              <Button size="compact-sm" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setEdit({ block: blk })}>
+                {t('common.add')}
+              </Button>
+            }
+          >
+            <Stack gap="xs">
+              {list.length === 0 && (
+                <Box p="sm" style={{ border: '1.5px dashed var(--app-hairline)', borderRadius: 14 }}>
+                  <Text size="sm" c="dimmed" ta="center">
+                    {t(`block.${blk}.empty`)}
+                  </Text>
+                </Box>
+              )}
+              {list.map((i) => (
+                <ItemRow key={i.id} item={i} b={b} editable onEdit={() => setEdit({ item: i })} />
+              ))}
+            </Stack>
+          </Section>
         );
       })}
+
       {suggestions.length > 0 && (
-        <Paper withBorder p="sm" mb="md" bg="var(--mantine-color-yellow-light)">
-          <Group gap={6} mb={6}><IconBulb size={18} /><Text fw={600}>{t('estimate.suggestTitle')}</Text></Group>
-          <Stack gap={4}>
+        <Section title={<Group gap={8}><IconBulb size={18} color="var(--mantine-color-yellow-6)" />{t('estimate.suggestTitle')}</Group>} description={t('estimate.suggestHint')}>
+          <List>
             {suggestions.map((s) => (
-              <Group key={s.id} justify="space-between" wrap="nowrap">
-                <Text size="sm">{lang === 'ru' ? s.titleRu : s.titleEn} · <Money fils={s.min} size="sm" /> – <Money fils={s.max} size="sm" /></Text>
-                <Button size="compact-sm" variant="white" style={{ flexShrink: 0 }} onClick={() => run(() => addSuggestion(b.order.id, s), 'estimate.added')}>{t('estimate.addToB')}</Button>
-              </Group>
+              <ListRow
+                key={s.id}
+                title={lang === 'ru' ? s.titleRu : s.titleEn}
+                subtitle={
+                  <>
+                    <Money fils={s.min} /> – <Money fils={s.max} /> · {t('common.withoutVat')}
+                  </>
+                }
+                right={
+                  <Button size="compact-sm" variant="light" color="orange" style={{ flexShrink: 0 }} onClick={() => run(() => addSuggestion(b.order.id, s), 'estimate.added')}>
+                    {t('estimate.addToB')}
+                  </Button>
+                }
+              />
             ))}
-          </Stack>
-        </Paper>
+          </List>
+        </Section>
       )}
+
+      {visible.length === 0 && (
+        <Box mt="xl">
+          <EmptyState icon={IconTemplate} title={t('estimate.emptyTitle')}>
+            {t('estimate.emptyText')}
+          </EmptyState>
+        </Box>
+      )}
+
       {drafts.length > 0 ? (
-        <Paper withBorder p="md" mb="md">
-          <Group justify="space-between" mb="xs">
-            <Text fw={600}>{t('estimate.draftCount', { n: drafts.length })}</Text>
-            <Badge>{firstSent ? t('estimate.willBeSupplement', { n: b.versions.length + 1 }) : 'v1'}</Badge>
+        <StickyBar>
+          <Group justify="space-between" wrap="nowrap" gap="sm">
+            <Box style={{ minWidth: 0 }} visibleFrom="xs">
+              <Text size="sm" fw={700}>
+                {t('estimate.draftCount', { n: drafts.length })}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {firstSent ? t('estimate.willBeSupplement', { n: b.versions.length + 1 }) : t('estimate.willBeFirst')} · <Money fils={draftTotal} />
+              </Text>
+            </Box>
+            <Group gap="xs" wrap="nowrap" style={{ flex: 1, justifyContent: 'flex-end' }}>
+              {canLimit && (
+                <Button variant="light" color="teal" leftSection={<IconShieldCheck size={18} />} loading={busy} onClick={() => run(async () => { const v = await approveByLimit(b.order.id); sv.afterSend(v, 'limit'); })}>
+                  {t('estimate.byLimitShort')}
+                </Button>
+              )}
+              <Button leftSection={<IconSend size={18} />} onClick={() => setSendOpen(true)} style={{ flex: canLimit ? undefined : 1, maxWidth: 360 }}>
+                {t('estimate.send')}
+              </Button>
+            </Group>
           </Group>
-          {canLimit && (
-            <Alert color="teal" mb="sm">
-              {t('estimate.withinLimit', { remaining: ((limit?.remaining ?? 0) / 100).toFixed(2) })}
-              <Button mt="xs" size="xs" color="teal" loading={busy} onClick={() => run(async () => { const v = await approveByLimit(b.order.id); sv.afterSend(v, 'limit'); })}>{t('estimate.approveByLimit')}</Button>
-            </Alert>
-          )}
-          <Button fullWidth size="md" leftSection={<IconSend size={18} />} onClick={() => setSendOpen(true)}>{t('estimate.send')}</Button>
-        </Paper>
+        </StickyBar>
       ) : (
-        b.versions.length > 0 && <Button variant="default" fullWidth onClick={() => navigate(`/orders/${b.order.id}?tab=approvals`)}>{t('estimate.toApprovals')}</Button>
+        b.versions.length > 0 && (
+          <Button mt="xl" variant="default" fullWidth onClick={() => navigate(`/orders/${b.order.id}?tab=approvals`)}>
+            {t('estimate.toApprovals')}
+          </Button>
+        )
       )}
       <ItemModal b={b} opened={!!edit} item={edit?.item} block={edit?.block} onClose={() => setEdit(null)} />
       <TemplateModal orderId={b.order.id} opened={tplOpen} onClose={() => setTplOpen(false)} />

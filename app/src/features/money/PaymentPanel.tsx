@@ -1,5 +1,16 @@
-import { Alert, Badge, Button, Group, Modal, Paper, SegmentedControl, Select, Stack, Text, TextInput } from '@mantine/core';
-import { IconCash, IconFileInvoice, IconFileTypePdf, IconSignature } from '@tabler/icons-react';
+import { ActionIcon, Alert, Badge, Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import {
+  IconArrowBackUp,
+  IconBuildingBank,
+  IconCash,
+  IconCreditCard,
+  IconFileInvoice,
+  IconFileTypePdf,
+  IconReceipt2,
+  IconSend,
+  IconSignature,
+  type Icon,
+} from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, dubaiDate, formatDate, formatDateTime, nowIso } from '../../domain/dates';
@@ -10,10 +21,13 @@ import { debtPdf, invoicePdf, openPdf, receiptPdf } from '../../services/documen
 import { simpleMessage } from '../../services/messages';
 import { addPayment, createDebt, issueCreditNote, issueInvoice } from '../../services/money';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
-import { Money, MoneyInput } from '../../ui/components';
+import { List, ListRow, Money, MoneyInput, Section, SelectCard } from '../../ui/components';
+import { DateField } from '../../ui/DateFields';
 import { useAction } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
+
+const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
 
 export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: OrderBundle; opened: boolean; onClose: () => void; kind?: Payment['kind'] }) {
   const { t } = useTranslation();
@@ -21,7 +35,7 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
   const due = bundleAmountDue(b);
   const [kind, setKind] = useState<Payment['kind']>(initialKind ?? 'payment');
   const [method, setMethod] = useState<PayMethod>('cash');
-  const [amount, setAmount] = useState<number | undefined>(due > 0 ? due : undefined);
+  const [amount, setAmount] = useState<number | undefined>(due > 0 && (initialKind ?? 'payment') === 'payment' ? due : undefined);
   const [reference, setReference] = useState('');
   const save = () =>
     run(async () => {
@@ -29,23 +43,42 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
       onClose();
     }, 'payment.saved');
   return (
-    <Modal opened={opened} onClose={onClose} title={t('payment.title')}>
-      <Stack>
-        <SegmentedControl
-          fullWidth
-          value={kind}
-          onChange={(v) => setKind(v as Payment['kind'])}
-          data={(['payment', 'prepayment', 'refund'] as const).map((k) => ({ value: k, label: t(`payment.kind.${k}`) }))}
-        />
-        <SegmentedControl
-          fullWidth
-          value={method}
-          onChange={(v) => setMethod(v as PayMethod)}
-          data={(['cash', 'card', 'transfer'] as const).map((m) => ({ value: m, label: t(`payment.method.${m}`) }))}
-        />
-        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus required description={due > 0 ? `${t('payment.due')}: ${(due / 100).toFixed(2)} AED` : undefined} />
+    <Modal opened={opened} onClose={onClose} title={t(`payment.kind.${kind}`)}>
+      <Stack gap="md">
+        <Group gap={6}>
+          {(['payment', 'prepayment', 'refund'] as const).map((k) => (
+            <Button key={k} size="compact-md" variant={kind === k ? 'filled' : 'default'} color={k === 'refund' ? 'red' : 'cobalt'} onClick={() => setKind(k)}>
+              {t(`payment.kind.${k}`)}
+            </Button>
+          ))}
+        </Group>
+        <SimpleGrid cols={3} spacing="xs">
+          {(['cash', 'card', 'transfer'] as const).map((m) => {
+            const I = METHOD_ICON[m];
+            return (
+              <SelectCard key={m} active={method === m} onClick={() => setMethod(m)}>
+                <Stack gap={4} align="center">
+                  <I size={22} stroke={1.7} />
+                  <Text size="sm" fw={600}>
+                    {t(`payment.method.${m}`)}
+                  </Text>
+                </Stack>
+              </SelectCard>
+            );
+          })}
+        </SimpleGrid>
+        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus required />
+        {due > 0 && kind !== 'refund' && (
+          <Group gap={6} mt={-8}>
+            <Button size="compact-sm" variant="light" onClick={() => setAmount(due)}>
+              {t('payment.fullDue')} · <Money fils={due} />
+            </Button>
+          </Group>
+        )}
         {method !== 'cash' && <TextInput label={t('payment.reference')} value={reference} onChange={(e) => setReference(e.currentTarget.value)} />}
-        <Button onClick={save} loading={busy} disabled={!amount}>{t('common.save')}</Button>
+        <Button onClick={save} loading={busy} disabled={!amount} color={kind === 'refund' ? 'red' : undefined}>
+          {t('payment.save')}
+        </Button>
       </Stack>
     </Modal>
   );
@@ -68,11 +101,17 @@ function DebtModal({ b, opened, onClose }: { b: OrderBundle; opened: boolean; on
     <Modal opened={opened} onClose={onClose} title={t('debt.title')} size="lg">
       <Stack>
         <Alert color="orange">{t('debt.explain', { name: b.customer.name })}</Alert>
-        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} required />
-        <TextInput type="date" label={t('debt.dueDate')} value={date} onChange={(e) => setDate(e.currentTarget.value)} />
-        <Text size="sm" fw={500}>{t('debt.customerSigns')}</Text>
-        <SignatureBox ref={sig} height={160} />
-        <Button onClick={save} loading={busy} leftSection={<IconSignature size={18} />}>{t('debt.sign')}</Button>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} required />
+          <DateField label={t('debt.dueDate')} value={date} onChange={setDate} />
+        </SimpleGrid>
+        <Text size="sm" fw={600}>
+          {t('debt.customerSigns')}
+        </Text>
+        <SignatureBox ref={sig} height={170} />
+        <Button onClick={save} loading={busy} leftSection={<IconSignature size={18} />}>
+          {t('debt.sign')}
+        </Button>
       </Stack>
     </Modal>
   );
@@ -93,6 +132,7 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
   const [invType, setInvType] = useState<Exclude<InvoiceType, 'credit_note'>>(chooseInvoiceType(b.customer));
   const openDebt = b.debts.find((d) => d.status === 'open');
   const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
+  const hasApproved = b.items.some((i) => i.approvalState === 'approved');
 
   const sendInvoice = (invoiceId: string, number: string, total: number) =>
     setSend({
@@ -104,84 +144,183 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
     });
 
   return (
-    <Stack>
-      <Paper withBorder p="md">
-        <Group justify="space-between"><Text>{t('payment.approvedTotal')}</Text><Money fils={sum.approvedGross} fw={600} /></Group>
-        {inv && <Group justify="space-between"><Text>{t('payment.invoiceTotal')} {inv.number}</Text><Money fils={inv.totalFils} fw={600} /></Group>}
-        <Group justify="space-between"><Text>{t('payment.paid')}</Text><Money fils={paid} /></Group>
-        <Group justify="space-between" mt={4}>
-          <Text fw={700}>{due >= 0 ? t('payment.due') : t('payment.overpaid')}</Text>
-          <Money fils={Math.abs(due)} fw={700} size="lg" c={due > 0 ? 'red' : 'green'} />
-        </Group>
-        {openDebt && <Badge color="red" mt="xs">{t('debt.open', { date: formatDate(openDebt.dueDate) })}: <Money fils={openDebt.amountFils} /></Badge>}
-      </Paper>
-      <Group grow>
-        <Button size="sm" leftSection={<IconCash size={16} />} onClick={() => setPayOpen('payment')}>{t('payment.accept')}</Button>
-        <Button size="sm" variant="light" onClick={() => setPayOpen('prepayment')}>{t('payment.kind.prepayment')}</Button>
-      </Group>
-      {!inv ? (
-        <Paper withBorder p="sm">
-          <Text size="sm" mb="xs">{t('invoice.notIssued')}</Text>
-          <Group align="flex-end">
-            <Select
-              style={{ flex: 1 }}
-              value={invType}
-              onChange={(v) => v && setInvType(v as typeof invType)}
-              data={[
-                { value: 'simplified_tax_invoice', label: t('invoice.type.simplified_tax_invoice') },
-                { value: 'tax_invoice', label: t('invoice.type.tax_invoice') },
-              ]}
-              allowDeselect={false}
-            />
+    <Stack gap="lg">
+      <Box className="surface" p="md">
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
+          <div>
+            <div className="eyebrow">{t('payment.approvedTotal')}</div>
+            <Text fz={20} mt={2}>
+              <Money fils={sum.approvedGross} display />
+            </Text>
+          </div>
+          <div>
+            <div className="eyebrow">{inv ? inv.number : t('payment.invoiceTotal')}</div>
+            <Text fz={20} mt={2} c={inv ? undefined : 'dimmed'}>
+              {inv ? <Money fils={inv.totalFils} display /> : '—'}
+            </Text>
+          </div>
+          <div>
+            <div className="eyebrow">{t('payment.paid')}</div>
+            <Text fz={20} mt={2}>
+              <Money fils={paid} display />
+            </Text>
+          </div>
+          <div>
+            <div className="eyebrow">{due >= 0 ? t('payment.due') : t('payment.overpaid')}</div>
+            <Text fz={26} mt={0} c={due > 0 ? 'red' : 'green'}>
+              <Money fils={Math.abs(due)} display />
+            </Text>
+          </div>
+        </SimpleGrid>
+        {openDebt && (
+          <Badge color="red" mt="md" size="lg">
+            {t('debt.open', { date: formatDate(openDebt.dueDate) })} · <Money fils={openDebt.amountFils} />
+          </Badge>
+        )}
+        <Stack mt="md" gap="xs">
+          <Button fullWidth leftSection={<IconCash size={18} />} onClick={() => setPayOpen('payment')} disabled={due <= 0 && hasApproved}>
+            {t('payment.accept')}
+          </Button>
+          <Group gap={6} wrap="wrap">
+            <Button size="compact-md" variant="default" onClick={() => setPayOpen('prepayment')}>
+              {t('payment.kind.prepayment')}
+            </Button>
+            <Button size="compact-md" variant="default" leftSection={<IconArrowBackUp size={16} />} onClick={() => setPayOpen('refund')}>
+              {t('payment.kind.refund')}
+            </Button>
+            {allowDebt && due > 0 && !openDebt && (
+              <Button size="compact-md" variant="light" color="orange" leftSection={<IconSignature size={16} />} onClick={() => setDebtOpen(true)}>
+                {t('debt.give')}
+              </Button>
+            )}
+          </Group>
+        </Stack>
+      </Box>
+
+      <Section title={t('invoice.title')} description={t('invoice.hint')} mt={0}>
+        {!inv ? (
+          <Box className="surface" p="md">
+            <SimpleGrid cols={2} spacing="xs">
+              {(['simplified_tax_invoice', 'tax_invoice'] as const).map((x) => (
+                <SelectCard key={x} active={invType === x} onClick={() => setInvType(x)}>
+                  <Text size="sm" fw={700}>
+                    {t(`invoice.type.${x}`)}
+                  </Text>
+                  <Text size="xs" c="dimmed" mt={2}>
+                    {t(`invoice.typeHint.${x}`)}
+                  </Text>
+                </SelectCard>
+              ))}
+            </SimpleGrid>
+            {invType === 'tax_invoice' && !b.customer.trn && (
+              <Text size="xs" c="orange" mt="xs">
+                {t('invoice.noTrn')}
+              </Text>
+            )}
             <Button
+              mt="md"
+              fullWidth
               leftSection={<IconFileInvoice size={18} />}
               loading={busy}
-              disabled={sum.approvedGross === 0 && !b.items.some((i) => i.approvalState === 'approved')}
+              disabled={!hasApproved}
               onClick={() => run(async () => { const i = await issueInvoice(b.order.id, invType); sendInvoice(i.id, i.number, i.totalFils); }, 'invoice.issued')}
             >
               {t('invoice.issue')}
             </Button>
-          </Group>
-          {invType === 'tax_invoice' && !b.customer.trn && <Text size="xs" c="orange" mt={4}>{t('invoice.noTrn')}</Text>}
-        </Paper>
-      ) : (
-        <Group>
-          <Button variant="default" leftSection={<IconFileTypePdf size={18} />} onClick={() => run(async () => openPdf(await invoicePdf(inv.id)))}>{inv.number}</Button>
-          <Button variant="light" onClick={() => sendInvoice(inv.id, inv.number, inv.totalFils)}>{t('common.send')}</Button>
-          <Button variant="subtle" color="red" onClick={() => setCreditOpen(true)}>{t('invoice.correct')}</Button>
-        </Group>
-      )}
-      {allowDebt && due > 0 && !openDebt && (
-        <Button variant="outline" color="orange" onClick={() => setDebtOpen(true)}>{t('debt.give')}</Button>
-      )}
-      {openDebt && (
-        <Button variant="subtle" leftSection={<IconFileTypePdf size={16} />} onClick={() => run(async () => openPdf(await debtPdf(openDebt.id)))}>{t('debt.document')}</Button>
-      )}
-      {b.payments.length > 0 && (
-        <Stack gap={4}>
-          <Text fw={600} size="sm">{t('payment.history')}</Text>
-          {b.payments.map((p) => (
-            <Group key={p.id} justify="space-between" wrap="nowrap">
-              <Text size="sm">
-                {formatDateTime(p.receivedAt)} · {t(`payment.kind.${p.kind}`)} · {t(`payment.method.${p.method}`)}
+            {!hasApproved && (
+              <Text size="xs" c="dimmed" mt={6} ta="center">
+                {t('invoice.nothingYet')}
               </Text>
-              <Group gap={4} wrap="nowrap">
-                <Money fils={p.kind === 'refund' ? -p.amountFils : p.amountFils} size="sm" />
-                <Button size="compact-xs" variant="subtle" onClick={() => run(async () => openPdf(await receiptPdf(p.id)))}>{p.receiptNumber}</Button>
-              </Group>
-            </Group>
-          ))}
-        </Stack>
+            )}
+          </Box>
+        ) : (
+          <List>
+            <ListRow
+              left={
+                <ThemeIcon variant="light" color="cobalt" size={40} radius="md">
+                  <IconFileInvoice size={21} />
+                </ThemeIcon>
+              }
+              title={inv.number}
+              subtitle={`${t(`invoice.type.${inv.type}`)} · ${formatDate(inv.issuedAt)}`}
+              right={
+                <Group gap={4} wrap="nowrap">
+                  <Money fils={inv.totalFils} size="sm" />
+                  <ActionIcon variant="default" size={32} onClick={() => run(async () => openPdf(await invoicePdf(inv.id)))} aria-label="PDF">
+                    <IconFileTypePdf size={17} />
+                  </ActionIcon>
+                  <ActionIcon variant="light" size={32} onClick={() => sendInvoice(inv.id, inv.number, inv.totalFils)} aria-label={t('common.send')}>
+                    <IconSend size={17} />
+                  </ActionIcon>
+                </Group>
+              }
+            />
+            {b.invoices
+              .filter((i) => i.type === 'credit_note' || i.status === 'credited')
+              .map((i) => (
+                <ListRow key={i.id} title={i.number} subtitle={`${t(`invoice.type.${i.type}`)} · ${formatDateTime(i.issuedAt)}${i.reason ? ` · ${i.reason}` : ''}${i.status === 'credited' ? ` · ${t('invoice.credited')}` : ''}`} />
+              ))}
+          </List>
+        )}
+        {inv && (
+          <Button mt="xs" variant="subtle" color="red" size="compact-sm" onClick={() => setCreditOpen(true)}>
+            {t('invoice.correct')}
+          </Button>
+        )}
+      </Section>
+
+      {(b.payments.length > 0 || openDebt) && (
+        <Section title={t('payment.history')} mt={0}>
+          <List>
+            {b.payments.map((p) => {
+              const I = METHOD_ICON[p.method];
+              return (
+                <ListRow
+                  key={p.id}
+                  left={
+                    <ThemeIcon variant="light" color={p.kind === 'refund' ? 'red' : 'green'} size={40} radius="md">
+                      <I size={20} />
+                    </ThemeIcon>
+                  }
+                  title={`${t(`payment.kind.${p.kind}`)} · ${t(`payment.method.${p.method}`)}`}
+                  subtitle={`${formatDateTime(p.receivedAt)} · ${p.receiptNumber}${p.reference ? ` · ${p.reference}` : ''}`}
+                  right={
+                    <Group gap={4} wrap="nowrap">
+                      <Money fils={p.kind === 'refund' ? -p.amountFils : p.amountFils} size="sm" c={p.kind === 'refund' ? 'red' : undefined} />
+                      <ActionIcon variant="subtle" color="gray" size={32} onClick={() => run(async () => openPdf(await receiptPdf(p.id)))} aria-label={p.receiptNumber}>
+                        <IconReceipt2 size={17} />
+                      </ActionIcon>
+                    </Group>
+                  }
+                />
+              );
+            })}
+            {openDebt && (
+              <ListRow
+                left={
+                  <ThemeIcon variant="light" color="orange" size={40} radius="md">
+                    <IconSignature size={20} />
+                  </ThemeIcon>
+                }
+                title={t('debt.document')}
+                subtitle={`${formatDateTime(openDebt.signedAt)} · ${t('debt.dueDate')} ${formatDate(openDebt.dueDate)}`}
+                right={
+                  <ActionIcon variant="subtle" color="gray" size={32} onClick={() => run(async () => openPdf(await debtPdf(openDebt.id)))} aria-label="PDF">
+                    <IconFileTypePdf size={17} />
+                  </ActionIcon>
+                }
+              />
+            )}
+          </List>
+        </Section>
       )}
-      {b.invoices.filter((i) => i.type === 'credit_note' || i.status === 'credited').map((i) => (
-        <Text key={i.id} size="xs" c="dimmed">
-          {i.number} · {t(`invoice.type.${i.type}`)} · {formatDateTime(i.issuedAt)} {i.reason ? `· ${i.reason}` : ''} {i.status === 'credited' ? `· ${t('invoice.credited')}` : ''}
-        </Text>
-      ))}
+
       {payOpen && <PaymentModal b={b} opened onClose={() => setPayOpen(null)} kind={payOpen} />}
       {debtOpen && <DebtModal b={b} opened onClose={() => setDebtOpen(false)} />}
       <Modal opened={creditOpen} onClose={() => setCreditOpen(false)} title={t('invoice.correct')}>
-        <Text size="sm" mb="sm">{t('invoice.correctExplain')}</Text>
+        <Text size="sm" mb="sm">
+          {t('invoice.correctExplain')}
+        </Text>
         <TextInput label={t('common.reason')} value={creditReason} onChange={(e) => setCreditReason(e.currentTarget.value)} required />
         <Button
           mt="md"

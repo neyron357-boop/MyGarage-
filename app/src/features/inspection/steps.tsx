@@ -1,15 +1,16 @@
 import {
-  ActionIcon,
   Alert,
+  Anchor,
   Badge,
   Box,
   Button,
   Checkbox,
   Chip,
   Group,
+  Loader,
   Modal,
   NumberInput,
-  Paper,
+  Progress,
   SegmentedControl,
   SimpleGrid,
   Stack,
@@ -17,21 +18,24 @@ import {
   TagsInput,
   Text,
   TextInput,
+  ThemeIcon,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconCamera, IconTrash, IconVideo } from '@tabler/icons-react';
-import { useState } from 'react';
+import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleCheck, IconCircleX, IconFileDescription, IconMinus, IconRefresh, IconTrash, IconVideo } from '@tabler/icons-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatDate } from '../../domain/dates';
+import { formatDate, formatDateTime } from '../../domain/dates';
 import { EXTRA_SLOTS, FUEL_LEVELS, FUNCTION_CHECKS, REQUIRED_SLOTS, WARNING_LIGHTS } from '../../domain/inspection';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import type { CheckState, DamageMark, DamageType, DamageView, FuelLevel, Inspection, Media } from '../../domain/types';
 import { addDamageMark, addInspectionPhoto, removeDamageMark, updateDamageMark, updateInspection } from '../../services/inspections';
-import { deleteMedia } from '../../services/media';
+import { deleteMedia, mediaUrl } from '../../services/media';
 import type { OrderBundle } from '../../services/orders';
+import { AngleHint } from '../../ui/AngleHint';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { MediaImage, Money, MoneyInput, Photo } from '../../ui/components';
-import { DAMAGE_COLORS, DamageDiagram, ViewPicker } from '../../ui/DamageDiagram';
+import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
+import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
+import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { LazyTextarea, LazyTextInput } from '../../ui/LazyText';
 
@@ -45,69 +49,150 @@ export interface StepProps {
 
 const save = (insp: Inspection, patch: Partial<Inspection>) => updateInspection(insp.id, patch);
 
-/** One photo slot: shows the photo or a camera button, with "skip with reason". */
+function useMediaUrl(id?: string, thumb = true) {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    let alive = true;
+    if (id) void mediaUrl(id, thumb).then((u) => alive && setUrl(u));
+    else setUrl(undefined);
+    return () => {
+      alive = false;
+    };
+  }, [id, thumb]);
+  return url;
+}
+
+function Card({ children, p = 'md' }: { children: ReactNode; p?: string }) {
+  return (
+    <Box className="surface" p={p}>
+      {children}
+    </Box>
+  );
+}
+
+/** One photo slot: camera-position hint when empty, the photo with time stamp when taken. */
 export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspection; slot: string; media: Media[]; before?: Media; required?: boolean }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
+  const input = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
   const [reason, setReason] = useState('');
   const photo = media.find((m) => m.slot === slot && m.kind === 'photo');
   const skipped = insp.skippedPhotos[slot];
+  const url = useMediaUrl(photo?.id);
+  const beforeUrl = useMediaUrl(before?.id);
+  const pick = () => input.current?.click();
+  const onFiles = (files: File[]) =>
+    run(async () => {
+      if (photo && !insp.locked) await deleteMedia(photo.id);
+      await addInspectionPhoto(insp.id, slot, files[0]);
+      setPreview(false);
+    });
   return (
-    <Paper withBorder p={6} radius="md">
-      <Group justify="space-between" mb={4} wrap="nowrap">
-        <Text size="sm" fw={600} lineClamp={1}>
+    <Stack gap={6}>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          const files = [...(e.currentTarget.files ?? [])];
+          e.currentTarget.value = '';
+          if (files.length) onFiles(files);
+        }}
+      />
+      <button
+        type="button"
+        className={`photo-slot${photo ? ' filled' : ''}${skipped && !photo ? ' skipped' : ''}`}
+        onClick={() => (photo ? setPreview(true) : !insp.locked && !skipped ? pick() : undefined)}
+        aria-label={t(`slot.${slot}`)}
+      >
+        {photo && url ? (
+          <>
+            <img src={url} alt="" />
+            <span className="stamp">{formatDateTime(photo.createdAt).slice(11)}</span>
+            <span className="check">
+              <IconCheck size={14} stroke={3} />
+            </span>
+            {beforeUrl && (
+              <span className="inset">
+                <img src={beforeUrl} alt="" />
+              </span>
+            )}
+          </>
+        ) : skipped ? (
+          <Stack align="center" gap={4} p={8}>
+            <IconCameraOff size={22} color="var(--mantine-color-yellow-8)" />
+            <Text size="xs" ta="center" lineClamp={3} fw={500}>
+              {skipped}
+            </Text>
+          </Stack>
+        ) : beforeUrl ? (
+          <>
+            <img src={beforeUrl} alt="" className="ghost" />
+            <span className="ghost-label">
+              <IconCamera size={15} /> {t('photos.sameAngle')}
+            </span>
+          </>
+        ) : (
+          <Stack align="center" gap={2}>
+            <AngleHint slot={slot} />
+            <Group gap={4} c="cobalt.6">
+              <IconCamera size={15} />
+              <Text size="xs" fw={700} c="cobalt.6">
+                {t('photos.take')}
+              </Text>
+            </Group>
+          </Stack>
+        )}
+        {busy && (
+          <span className="busy">
+            <Loader size="sm" />
+          </span>
+        )}
+      </button>
+      <Group justify="space-between" wrap="nowrap" gap={4}>
+        <Text size="xs" fw={600} lineClamp={1}>
           {t(`slot.${slot}`)}
-          {required && !photo && !skipped ? ' *' : ''}
-        </Text>
-        {photo && !insp.locked && (
-          <ActionIcon size="sm" variant="subtle" color="red" onClick={() => run(() => deleteMedia(photo.id))} aria-label={t('common.delete')}>
-            <IconTrash size={14} />
-          </ActionIcon>
-        )}
-      </Group>
-      <Group gap={4} wrap="nowrap" grow>
-        {before && (
-          <Box>
-            <MediaImage id={before.id} h={90} w="100%" />
-            <Text size="10px" c="dimmed" ta="center">{t('handover.before')}</Text>
-          </Box>
-        )}
-        <Box>
-          {photo ? (
-            <Photo id={photo.id} h={90} w="100%" />
-          ) : skipped ? (
-            <Paper h={90} withBorder bg="var(--mantine-color-yellow-light)" p={4} style={{ overflow: 'hidden' }}>
-              <Text size="xs">{t('photos.skipped')}: {skipped}</Text>
-            </Paper>
-          ) : (
-            <CaptureButton
-              h={90}
-              fullWidth
-              variant="light"
-              loading={busy}
-              disabled={insp.locked}
-              onFiles={(files) => run(async () => { for (const f of files) await addInspectionPhoto(insp.id, slot, f); })}
-            >
-              {t('photos.take')}
-            </CaptureButton>
+          {required && !photo && !skipped && (
+            <Text span c="red" inherit>
+              {' '}
+              *
+            </Text>
           )}
-          {before && <Text size="10px" c="dimmed" ta="center">{t('handover.after')}</Text>}
-        </Box>
-      </Group>
-      {!photo && !insp.locked && (
-        <Group justify="space-between" mt={4}>
-          {skipped ? (
-            <Button size="compact-xs" variant="subtle" onClick={() => { const s = { ...insp.skippedPhotos }; delete s[slot]; void save(insp, { skippedPhotos: s }); }}>
+        </Text>
+        {!insp.locked &&
+          !photo &&
+          (skipped ? (
+            <Anchor component="button" size="xs" onClick={() => { const s = { ...insp.skippedPhotos }; delete s[slot]; void save(insp, { skippedPhotos: s }); }}>
               {t('photos.unskip')}
-            </Button>
+            </Anchor>
           ) : (
-            <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setSkipOpen(true)}>
+            <Anchor component="button" size="xs" c="dimmed" onClick={() => setSkipOpen(true)}>
               {t('photos.skip')}
-            </Button>
+            </Anchor>
+          ))}
+      </Group>
+      <Modal opened={preview} onClose={() => setPreview(false)} title={t(`slot.${slot}`)} size="xl" padding="sm">
+        {photo && <MediaImage id={photo.id} thumb={false} h="62vh" w="100%" />}
+        <Group justify="space-between" mt="sm">
+          <Text size="xs" c="dimmed">
+            {photo && formatDateTime(photo.createdAt)} · SHA-256 {photo?.sha256.slice(0, 12)}
+          </Text>
+          {!insp.locked && (
+            <Group gap="xs">
+              <Button variant="default" color="red" leftSection={<IconTrash size={16} />} onClick={() => photo && run(async () => { await deleteMedia(photo.id); setPreview(false); })}>
+                {t('common.delete')}
+              </Button>
+              <Button leftSection={<IconRefresh size={16} />} onClick={pick}>
+                {t('photos.retake')}
+              </Button>
+            </Group>
           )}
         </Group>
-      )}
+      </Modal>
       <Modal opened={skipOpen} onClose={() => setSkipOpen(false)} title={t('photos.skipReason')}>
         <Group gap={6} mb="sm">
           {['dark', 'dirty', 'noSpace', 'customerRush'].map((r) => (
@@ -117,6 +202,9 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
           ))}
         </Group>
         <TextInput value={reason} onChange={(e) => setReason(e.currentTarget.value)} placeholder={t('common.reason')} />
+        <Text size="xs" c="dimmed" mt={6}>
+          {t('photos.skipHint')}
+        </Text>
         <Button
           fullWidth
           mt="md"
@@ -130,24 +218,47 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
           {t('common.save')}
         </Button>
       </Modal>
-    </Paper>
+    </Stack>
   );
 }
 
 export function VehicleStep({ insp, media, b }: StepProps) {
   const { t } = useTranslation();
   return (
-    <Stack>
-      <Paper withBorder p="md">
-        <Text fw={700}>{b.vehicle.make} {b.vehicle.model} {b.vehicle.year ?? ''}</Text>
-        <Text size="sm">{b.customer.name} · {b.customer.phone}</Text>
-        {b.vehicle.vin && <Text size="sm" c="dimmed">VIN {b.vehicle.vin}</Text>}
-        <Text size="sm" c="dimmed">{t('customer.docLanguage')}: {t(`lang.${insp.language}`)}</Text>
-      </Paper>
-      <Text size="sm" c="dimmed">{t('intake.mulkiyaHint')}</Text>
-      <SimpleGrid cols={2}>
-        <PhotoSlot insp={insp} slot="mulkiya" media={media} />
-      </SimpleGrid>
+    <Stack gap="md">
+      <Card>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <div>
+            <PlateText plate={b.vehicle.plate} size="md" />
+            <Title order={4} mt="sm">
+              {b.vehicle.make} {b.vehicle.model} {b.vehicle.year ?? ''}
+            </Title>
+            {b.vehicle.vin && (
+              <Text size="xs" c="dimmed" ff="monospace" mt={2}>
+                VIN {b.vehicle.vin}
+              </Text>
+            )}
+          </div>
+          <Badge variant="light" size="lg">
+            {t(`lang.${insp.language}`)}
+          </Badge>
+        </Group>
+        <Text size="sm" mt="sm">
+          {b.customer.name} · {b.customer.phone}
+        </Text>
+        <Text size="xs" c="dimmed" mt={4}>
+          {t('intake.langHint', { lang: t(`lang.${insp.language}`) })}
+        </Text>
+      </Card>
+      <Card>
+        <Text fw={700}>{t('slot.mulkiya')}</Text>
+        <Text size="sm" c="dimmed" mb="sm">
+          {t('intake.mulkiyaHint')}
+        </Text>
+        <SimpleGrid cols={{ base: 2, sm: 4 }}>
+          <PhotoSlot insp={insp} slot="mulkiya" media={media} />
+        </SimpleGrid>
+      </Card>
     </Stack>
   );
 }
@@ -159,41 +270,57 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
   const extras = media.filter((m) => m.slot === 'extra' && m.kind === 'photo');
   const video = media.find((m) => m.kind === 'video');
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Text size="sm" c="dimmed">{t('photos.hint')}</Text>
-        <Badge color={done === REQUIRED_SLOTS.length ? 'green' : 'orange'} size="lg">{done} / {REQUIRED_SLOTS.length}</Badge>
-      </Group>
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+    <Stack gap="md">
+      <Card>
+        <Group justify="space-between" mb={6}>
+          <Text size="sm" fw={600}>
+            {insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hint')}
+          </Text>
+          <Text fw={800} className="display" fz={18} c={done === REQUIRED_SLOTS.length ? 'green' : undefined}>
+            {done} / {REQUIRED_SLOTS.length}
+          </Text>
+        </Group>
+        <Progress value={(done / REQUIRED_SLOTS.length) * 100} color={done === REQUIRED_SLOTS.length ? 'green' : 'cobalt'} size="sm" />
+      </Card>
+      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
         {REQUIRED_SLOTS.map((s) => (
           <PhotoSlot key={s} insp={insp} slot={s} media={media} required before={intakeMedia?.find((m) => m.slot === s)} />
         ))}
       </SimpleGrid>
-      <Title order={6}>{t('photos.extra')}</Title>
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+      <Title order={5} mt="sm">
+        {t('photos.extra')}
+      </Title>
+      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
         {EXTRA_SLOTS.filter((s) => s !== 'extra').map((s) => (
           <PhotoSlot key={s} insp={insp} slot={s} media={media} before={intakeMedia?.find((m) => m.slot === s)} />
         ))}
       </SimpleGrid>
       <Group gap="xs">
-        {extras.map((m) => <Photo key={m.id} id={m.id} h={70} />)}
+        {extras.map((m) => (
+          <Photo key={m.id} id={m.id} h={72} />
+        ))}
         {!insp.locked && (
-          <CaptureButton variant="default" size="sm" multiple loading={busy} onFiles={(files) => run(async () => { for (const f of files) await addInspectionPhoto(insp.id, 'extra', f); })}>
+          <CaptureButton variant="default" multiple loading={busy} onFiles={(files) => run(async () => { for (const f of files) await addInspectionPhoto(insp.id, 'extra', f); })}>
             {t('photos.addMore')}
           </CaptureButton>
         )}
         {!insp.locked && !video && (
-          <CaptureButton variant="default" size="sm" accept="video/*" leftSection={<IconVideo size={18} />} loading={busy} onFiles={(files) => run(() => addInspectionPhoto(insp.id, 'video', files[0]))}>
+          <CaptureButton variant="default" accept="video/*" leftSection={<IconVideo size={18} />} loading={busy} onFiles={(files) => run(() => addInspectionPhoto(insp.id, 'video', files[0]))}>
             {t('photos.video')}
           </CaptureButton>
         )}
-        {video && <Badge leftSection={<IconVideo size={12} />}>{t('photos.videoSaved')}</Badge>}
+        {video && (
+          <Badge size="lg" leftSection={<IconVideo size={14} />} color="green">
+            {t('photos.videoSaved')}
+          </Badge>
+        )}
       </Group>
     </Stack>
   );
 }
 
 const DAMAGE_TYPES: DamageType[] = ['scratch', 'dent', 'chip', 'crack', 'rust', 'other'];
+const VIEWS: DamageView[] = ['top', 'left', 'right', 'front', 'rear'];
 
 export function DamageStep({ insp, media, marks }: StepProps) {
   const { t } = useTranslation();
@@ -202,57 +329,90 @@ export function DamageStep({ insp, media, marks }: StepProps) {
   const [editing, setEditing] = useState<DamageMark | null>(null);
   const editPhoto = editing ? media.find((m) => m.id === editing.mediaId) : undefined;
   return (
-    <Stack>
-      <Text size="sm" c="dimmed">{t('damage.hint')}</Text>
-      <ViewPicker value={view} onChange={setView} marks={marks} />
-      <Paper withBorder p="xs">
-        <DamageDiagram
-          view={view}
-          marks={marks}
-          onAdd={insp.locked ? undefined : (x, y) => run(async () => setEditing(await addDamageMark(insp.id, { view, x, y, type: 'scratch' })))}
-          onSelect={setEditing}
+    <Stack gap="md">
+      <Card>
+        <Text size="sm" c="dimmed" mb="sm">
+          {t('damage.hint')}
+        </Text>
+        <SegmentedControl
+          fullWidth
+          value={view}
+          onChange={(v) => setView(v as DamageView)}
+          data={VIEWS.map((v) => {
+            const n = marks.filter((m) => m.view === v).length;
+            return { value: v, label: `${t(`damage.view.${v}`)}${n ? ` · ${n}` : ''}` };
+          })}
         />
-      </Paper>
-      <Group gap={6}>
-        {DAMAGE_TYPES.map((d) => (
-          <Badge key={d} color={DAMAGE_COLORS[d]} variant="dot">{t(`damage.type.${d}`)}</Badge>
-        ))}
-      </Group>
-      {marks.length === 0 && (
-        <Checkbox
-          size="md"
-          label={t('damage.none')}
-          checked={!!insp.noDamage}
-          disabled={insp.locked}
-          onChange={(e) => void save(insp, { noDamage: e.currentTarget.checked })}
-        />
-      )}
-      <Stack gap={4}>
-        {marks.map((m, i) => (
-          <Paper key={m.id} withBorder p="xs" className="tap-card" onClick={() => setEditing(m)}>
-            <Group justify="space-between">
-              <Text size="sm">
-                <b>{i + 1}.</b> {t(`damage.type.${m.type}`)} · {t(`damage.view.${m.view}`)}
-                {m.note ? ` · ${m.note}` : ''}
+        <Box mt="md">
+          <DamageDiagram
+            view={view}
+            marks={marks}
+            height={280}
+            onAdd={insp.locked ? undefined : (x, y) => run(async () => setEditing(await addDamageMark(insp.id, { view, x, y, type: 'scratch' })))}
+            onSelect={setEditing}
+          />
+        </Box>
+        <Group gap={10} mt="sm" justify="center">
+          {DAMAGE_TYPES.map((d) => (
+            <Group key={d} gap={5} wrap="nowrap">
+              <span className="stage-dot" style={{ background: DAMAGE_COLORS[d] }} />
+              <Text size="xs" c="dimmed">
+                {t(`damage.type.${d}`)}
               </Text>
-              {m.mediaId && <IconCamera size={16} />}
             </Group>
-          </Paper>
-        ))}
-      </Stack>
+          ))}
+        </Group>
+      </Card>
+      {marks.length === 0 ? (
+        <SelectCard active={!!insp.noDamage} onClick={() => !insp.locked && void save(insp, { noDamage: !insp.noDamage })}>
+          <Group gap="sm" wrap="nowrap">
+            <Checkbox checked={!!insp.noDamage} onChange={() => undefined} tabIndex={-1} size="md" />
+            <div>
+              <Text fw={700} size="sm">
+                {t('damage.none')}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {t('damage.noneHint')}
+              </Text>
+            </div>
+          </Group>
+        </SelectCard>
+      ) : (
+        <List>
+          {marks.map((m, i) => (
+            <ListRow
+              key={m.id}
+              onClick={() => setEditing(m)}
+              chevron
+              left={
+                <Box w={28} h={28} style={{ borderRadius: '50%', background: DAMAGE_COLORS[m.type], color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
+                  {i + 1}
+                </Box>
+              }
+              title={t(`damage.type.${m.type}`)}
+              subtitle={`${t(`damage.view.${m.view}`)}${m.note ? ` · ${m.note}` : ''}${m.mediaId ? ` · ${t('damage.hasPhoto')}` : ''}`}
+            />
+          ))}
+        </List>
+      )}
       <Modal opened={!!editing} onClose={() => setEditing(null)} title={t('damage.mark')}>
         {editing && (
           <Stack>
-            <Group gap={6}>
+            <SimpleGrid cols={3} spacing="xs">
               {DAMAGE_TYPES.map((d) => (
-                <Chip key={d} checked={editing.type === d} disabled={insp.locked} onChange={() => run(async () => { await updateDamageMark(editing.id, { type: d }); setEditing({ ...editing, type: d }); })}>
-                  {t(`damage.type.${d}`)}
-                </Chip>
+                <SelectCard key={d} active={editing.type === d} onClick={() => !insp.locked && run(async () => { await updateDamageMark(editing.id, { type: d }); setEditing({ ...editing, type: d }); })}>
+                  <Group gap={6} wrap="nowrap">
+                    <span className="stage-dot" style={{ background: DAMAGE_COLORS[d] }} />
+                    <Text size="sm" fw={600}>
+                      {t(`damage.type.${d}`)}
+                    </Text>
+                  </Group>
+                </SelectCard>
               ))}
-            </Group>
-            <LazyTextInput label={t('common.notes')} value={editing.note} disabled={insp.locked} onCommit={(note) => run(async () => { await updateDamageMark(editing.id, { note }); setEditing({ ...editing, note }); })} />
+            </SimpleGrid>
+            <LazyTextInput label={t('common.notes')} placeholder={t('damage.notePlaceholder')} value={editing.note} disabled={insp.locked} onCommit={(note) => run(async () => { await updateDamageMark(editing.id, { note }); setEditing({ ...editing, note }); })} />
             {editPhoto ? (
-              <Photo id={editPhoto.id} h={160} w="100%" />
+              <Photo id={editPhoto.id} h={180} w="100%" />
             ) : (
               !insp.locked && (
                 <CaptureButton
@@ -271,10 +431,12 @@ export function DamageStep({ insp, media, marks }: StepProps) {
               )
             )}
             <Group justify="space-between">
-              {!insp.locked && (
+              {!insp.locked ? (
                 <Button color="red" variant="subtle" leftSection={<IconTrash size={16} />} onClick={() => run(async () => { await removeDamageMark(editing.id); setEditing(null); })}>
                   {t('common.delete')}
                 </Button>
+              ) : (
+                <span />
               )}
               <Button onClick={() => setEditing(null)}>{t('common.done')}</Button>
             </Group>
@@ -291,52 +453,71 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
   const testKm = (b.order.testDriveEndKm ?? 0) - (b.order.testDriveStartKm ?? 0);
   const delta = intake?.mileageKm !== undefined && insp.mileageKm !== undefined ? insp.mileageKm - intake.mileageKm : undefined;
   return (
-    <Stack>
-      <SimpleGrid cols={{ base: 2, sm: 3 }}>
-        <PhotoSlot insp={insp} slot="dashboard" media={media} before={intakeMedia?.find((m) => m.slot === 'dashboard')} />
-      </SimpleGrid>
-      <NumberInput
-        label={t('intake.mileage')}
-        size="lg"
-        suffix=" km"
-        thousandSeparator=" "
-        min={0}
-        allowDecimal={false}
-        value={insp.mileageKm ?? ''}
-        disabled={insp.locked}
-        onChange={(v) => void save(insp, { mileageKm: typeof v === 'number' ? v : undefined })}
-        description={intake?.mileageKm !== undefined ? `${t('handover.atIntake')}: ${intake.mileageKm} km` : undefined}
-      />
-      {delta !== undefined && delta > Math.max(0, testKm) + 10 && (
-        <Alert color="orange" icon={<IconAlertTriangle />}>
-          {t('handover.mileageWarning', { delta, test: Math.max(0, testKm) })}
-        </Alert>
-      )}
-      <div>
-        <Text size="sm" fw={500} mb={4}>{t('intake.fuel')}{intake?.fuelLevel !== undefined ? ` (${t('handover.atIntake')}: ${t(`fuel.${intake.fuelLevel}`)})` : ''}</Text>
+    <Stack gap="md">
+      <Card>
+        <SimpleGrid cols={{ base: 2, sm: 4 }}>
+          <PhotoSlot insp={insp} slot="dashboard" media={media} before={intakeMedia?.find((m) => m.slot === 'dashboard')} />
+        </SimpleGrid>
+        <Text size="xs" c="dimmed" mt="xs">
+          {t('intake.dashboardHint')}
+        </Text>
+      </Card>
+      <Card>
+        <NumberInput
+          label={t('intake.mileage')}
+          size="lg"
+          suffix=" km"
+          thousandSeparator=" "
+          min={0}
+          allowDecimal={false}
+          inputMode="numeric"
+          value={insp.mileageKm ?? ''}
+          disabled={insp.locked}
+          onChange={(v) => void save(insp, { mileageKm: typeof v === 'number' ? v : undefined })}
+          description={intake?.mileageKm !== undefined ? `${t('handover.atIntake')}: ${intake.mileageKm.toLocaleString('ru-RU')} km` : undefined}
+          styles={{ input: { fontFamily: 'var(--font-display)', fontSize: 24, letterSpacing: '0.04em' } }}
+        />
+        {delta !== undefined && delta > Math.max(0, testKm) + 10 && (
+          <Alert mt="sm" color="orange" icon={<IconAlertTriangle size={18} />}>
+            {t('handover.mileageWarning', { delta, test: Math.max(0, testKm) })}
+          </Alert>
+        )}
+        <Text size="sm" fw={600} mt="lg" mb={6}>
+          {t('intake.fuel')}
+          {intake?.fuelLevel !== undefined && (
+            <Text span size="xs" c="dimmed" fw={500}>
+              {' '}
+              · {t('handover.atIntake')}: {t(`fuel.${intake.fuelLevel}`)}
+            </Text>
+          )}
+        </Text>
         <SegmentedControl
           fullWidth
+          size="md"
           disabled={insp.locked}
           value={insp.fuelLevel !== undefined ? String(insp.fuelLevel) : ''}
           onChange={(v) => void save(insp, { fuelLevel: Number(v) as FuelLevel })}
           data={FUEL_LEVELS.map((f) => ({ value: String(f), label: t(`fuel.${f}`) }))}
         />
-      </div>
-      <div>
-        <Text size="sm" fw={500} mb={4}>{t('intake.lights')}</Text>
+      </Card>
+      <Card>
+        <Text size="sm" fw={600} mb={8}>
+          {t('intake.lights')}
+        </Text>
         <Chip.Group multiple value={insp.warningLights} onChange={(v) => void save(insp, { warningLights: v })}>
           <Group gap={6}>
             {WARNING_LIGHTS.map((l) => (
-              <Chip key={l} value={l} color="red" disabled={insp.locked}>
+              <Chip key={l} value={l} color="red" variant="light" disabled={insp.locked}>
                 {t(`light.${l}`)}
               </Chip>
             ))}
           </Group>
         </Chip.Group>
-        {intake && intake.warningLights.length > 0 && (
-          <Text size="xs" c="dimmed" mt={4}>{t('handover.atIntake')}: {intake.warningLights.map((l) => t(`light.${l}`)).join(', ')}</Text>
-        )}
-      </div>
+        <Text size="xs" c="dimmed" mt="sm">
+          {insp.warningLights.length === 0 ? t('intake.noLights') : t('intake.lightsCount', { n: insp.warningLights.length })}
+          {intake && intake.warningLights.length > 0 && ` · ${t('handover.atIntake')}: ${intake.warningLights.map((l) => t(`light.${l}`)).join(', ')}`}
+        </Text>
+      </Card>
     </Stack>
   );
 }
@@ -344,49 +525,81 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
 export function ObdStep({ insp, media }: StepProps) {
   const { t } = useTranslation();
   return (
-    <Stack>
-      <Text size="sm" c="dimmed">{t('intake.obdHint')}</Text>
-      <SimpleGrid cols={{ base: 2, sm: 3 }}>
-        <PhotoSlot insp={insp} slot="obd" media={media} />
-      </SimpleGrid>
-      <TagsInput
-        label={t('intake.obdCodes')}
-        placeholder="P0300"
-        value={insp.obdCodes}
-        disabled={insp.locked || insp.obdNoCodes}
-        onChange={(v) => void save(insp, { obdCodes: v.map((c) => c.toUpperCase().trim()).filter(Boolean) })}
-      />
-      <Checkbox size="md" label={t('intake.obdNone')} checked={!!insp.obdNoCodes} disabled={insp.locked || insp.obdCodes.length > 0} onChange={(e) => void save(insp, { obdNoCodes: e.currentTarget.checked })} />
+    <Stack gap="md">
+      <Card>
+        <Text size="sm" c="dimmed" mb="sm">
+          {t('intake.obdHint')}
+        </Text>
+        <SimpleGrid cols={{ base: 2, sm: 4 }}>
+          <PhotoSlot insp={insp} slot="obd" media={media} />
+        </SimpleGrid>
+      </Card>
+      <Card>
+        <TagsInput
+          label={t('intake.obdCodes')}
+          description={t('intake.obdCodesHint')}
+          placeholder="P0300"
+          value={insp.obdCodes}
+          disabled={insp.locked || insp.obdNoCodes}
+          onChange={(v) => void save(insp, { obdCodes: v.map((c) => c.toUpperCase().trim()).filter(Boolean) })}
+        />
+      </Card>
+      <SelectCard active={!!insp.obdNoCodes} onClick={() => !insp.locked && insp.obdCodes.length === 0 && void save(insp, { obdNoCodes: !insp.obdNoCodes })}>
+        <Group gap="sm" wrap="nowrap">
+          <Checkbox checked={!!insp.obdNoCodes} onChange={() => undefined} tabIndex={-1} size="md" disabled={insp.obdCodes.length > 0} />
+          <Text fw={700} size="sm">
+            {t('intake.obdNone')}
+          </Text>
+        </Group>
+      </SelectCard>
       {!insp.obdNoCodes && insp.obdCodes.length === 0 && (
-        <LazyTextInput label={t('intake.obdSkip')} value={insp.obdSkipReason} disabled={insp.locked} onCommit={(v) => void save(insp, { obdSkipReason: v })} />
+        <LazyTextInput label={t('intake.obdSkip')} placeholder={t('intake.obdSkipPlaceholder')} value={insp.obdSkipReason} disabled={insp.locked} onCommit={(v) => void save(insp, { obdSkipReason: v })} />
       )}
     </Stack>
   );
 }
 
+const CHECK_ICON = { ok: IconCircleCheck, fail: IconCircleX, unchecked: IconMinus } as const;
+
 export function ChecksStep({ insp }: StepProps) {
   const { t } = useTranslation();
+  const set = (c: string, v: CheckState) => void save(insp, { functionChecks: { ...insp.functionChecks, [c]: v } });
   return (
-    <Stack gap="xs">
-      <Text size="sm" c="dimmed">{t('intake.checksHint')}</Text>
-      {FUNCTION_CHECKS.map((c) => (
-        <Group key={c} justify="space-between" wrap="nowrap">
-          <Text size="sm">{t(`check.${c}`)}</Text>
-          <SegmentedControl
-            size="xs"
-            disabled={insp.locked}
-            value={insp.functionChecks[c] ?? 'unchecked'}
-            onChange={(v) => void save(insp, { functionChecks: { ...insp.functionChecks, [c]: v as CheckState } })}
-            data={[
-              { value: 'ok', label: '✓' },
-              { value: 'fail', label: '✗' },
-              { value: 'unchecked', label: '—' },
-            ]}
-            color={insp.functionChecks[c] === 'fail' ? 'red' : insp.functionChecks[c] === 'ok' ? 'green' : undefined}
-          />
-        </Group>
-      ))}
-      <Text size="xs" c="dimmed">✓ {t('check.state.ok')} · ✗ {t('check.state.fail')} · — {t('check.state.unchecked')}</Text>
+    <Stack gap="md">
+      <Group justify="space-between">
+        <Text size="sm" c="dimmed">
+          {t('intake.checksHint')}
+        </Text>
+        {!insp.locked && (
+          <Button size="compact-sm" variant="light" color="green" onClick={() => void save(insp, { functionChecks: Object.fromEntries(FUNCTION_CHECKS.map((c) => [c, insp.functionChecks[c] === 'fail' ? 'fail' : 'ok'])) })}>
+            {t('intake.allWork')}
+          </Button>
+        )}
+      </Group>
+      <List>
+        {FUNCTION_CHECKS.map((c) => {
+          const v = insp.functionChecks[c] ?? 'unchecked';
+          return (
+            <ListRow
+              key={c}
+              title={t(`check.${c}`)}
+              right={
+                <Group gap={4} wrap="nowrap">
+                  {(['ok', 'fail', 'unchecked'] as const).map((s) => {
+                    const I = CHECK_ICON[s];
+                    const color = s === 'ok' ? 'green' : s === 'fail' ? 'red' : 'gray';
+                    return (
+                      <Button key={s} size="compact-md" px={10} variant={v === s ? 'filled' : 'default'} color={color} disabled={insp.locked} onClick={() => set(c, s)} aria-label={t(`check.state.${s}`)}>
+                        <I size={18} />
+                      </Button>
+                    );
+                  })}
+                </Group>
+              }
+            />
+          );
+        })}
+      </List>
     </Stack>
   );
 }
@@ -394,15 +607,21 @@ export function ChecksStep({ insp }: StepProps) {
 export function BelongingsStep({ insp }: StepProps) {
   const { t } = useTranslation();
   return (
-    <Stack>
-      <div>
-        <Text size="sm" fw={500} mb={4}>{t('intake.keys')}</Text>
-        <SegmentedControl fullWidth disabled={insp.locked} value={String(insp.keysCount ?? '')} onChange={(v) => void save(insp, { keysCount: Number(v) })} data={['1', '2', '3']} />
-      </div>
-      <Switch size="md" label={t('intake.spareWheel')} checked={!!insp.spareWheel} disabled={insp.locked} onChange={(e) => void save(insp, { spareWheel: e.currentTarget.checked })} />
-      <Switch size="md" label={t('intake.jack')} checked={!!insp.jack} disabled={insp.locked} onChange={(e) => void save(insp, { jack: e.currentTarget.checked })} />
-      <Switch size="md" label={t('intake.mulkiyaInCar')} checked={!!insp.mulkiyaInCar} disabled={insp.locked} onChange={(e) => void save(insp, { mulkiyaInCar: e.currentTarget.checked })} />
-      <LazyTextarea label={t('intake.belongings')} placeholder={t('intake.belongingsHint')} value={insp.belongings} disabled={insp.locked} onCommit={(v) => void save(insp, { belongings: v })} />
+    <Stack gap="md">
+      <Card>
+        <Text size="sm" fw={600} mb={6}>
+          {t('intake.keys')}
+        </Text>
+        <SegmentedControl size="md" fullWidth disabled={insp.locked} value={String(insp.keysCount ?? '')} onChange={(v) => void save(insp, { keysCount: Number(v) })} data={['1', '2', '3']} />
+      </Card>
+      <List>
+        <ListRow title={t('intake.spareWheel')} right={<Switch checked={!!insp.spareWheel} disabled={insp.locked} onChange={(e) => void save(insp, { spareWheel: e.currentTarget.checked })} />} />
+        <ListRow title={t('intake.jack')} right={<Switch checked={!!insp.jack} disabled={insp.locked} onChange={(e) => void save(insp, { jack: e.currentTarget.checked })} />} />
+        <ListRow title={t('intake.mulkiyaInCar')} right={<Switch checked={!!insp.mulkiyaInCar} disabled={insp.locked} onChange={(e) => void save(insp, { mulkiyaInCar: e.currentTarget.checked })} />} />
+      </List>
+      <Card>
+        <LazyTextarea label={t('intake.belongings')} placeholder={t('intake.belongingsHint')} value={insp.belongings} disabled={insp.locked} onCommit={(v) => void save(insp, { belongings: v })} />
+      </Card>
     </Stack>
   );
 }
@@ -410,19 +629,31 @@ export function BelongingsStep({ insp }: StepProps) {
 export function ComplaintStep({ insp, media }: StepProps) {
   const { t } = useTranslation();
   return (
-    <Stack>
-      <LazyTextarea label={t('order.complaint')} description={t('intake.complaintHint')} value={insp.complaint} disabled={insp.locked} onCommit={(v) => void save(insp, { complaint: v })} minRows={4} />
-      <Paper withBorder p="md">
-        <Switch size="md" label={t('intake.accident')} description={t('intake.accidentHint')} checked={!!insp.accidentRepair} disabled={insp.locked} onChange={(e) => void save(insp, { accidentRepair: e.currentTarget.checked })} />
+    <Stack gap="md">
+      <Card>
+        <LazyTextarea label={t('order.complaint')} description={t('intake.complaintHint')} value={insp.complaint} disabled={insp.locked} onCommit={(v) => void save(insp, { complaint: v })} minRows={4} />
+      </Card>
+      <Card>
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
+          <div>
+            <Text fw={700} size="sm">
+              {t('intake.accident')}
+            </Text>
+            <Text size="xs" c="dimmed" mt={2}>
+              {t('intake.accidentHint')}
+            </Text>
+          </div>
+          <Switch checked={!!insp.accidentRepair} disabled={insp.locked} onChange={(e) => void save(insp, { accidentRepair: e.currentTarget.checked })} />
+        </Group>
         {insp.accidentRepair && (
-          <Stack mt="sm">
-            <LazyTextInput label={t('intake.policeReport')} required value={insp.policeReportNo} disabled={insp.locked} onCommit={(v) => void save(insp, { policeReportNo: v })} />
-            <SimpleGrid cols={2}>
+          <Stack mt="md">
+            <LazyTextInput label={t('intake.policeReport')} required value={insp.policeReportNo} disabled={insp.locked} onCommit={(v) => void save(insp, { policeReportNo: v })} leftSection={<IconFileDescription size={18} />} />
+            <SimpleGrid cols={{ base: 2, sm: 4 }}>
               <PhotoSlot insp={insp} slot="police_report" media={media} required />
             </SimpleGrid>
           </Stack>
         )}
-      </Paper>
+      </Card>
     </Stack>
   );
 }
@@ -433,32 +664,58 @@ export function ConditionsStep({ insp }: StepProps) {
   const set = (patch: Partial<typeof c>) => void save(insp, { conditions: { ...c, ...patch } });
   const presets = [0, 10000, 20000, 50000];
   return (
-    <Stack>
-      <div>
-        <Text size="sm" fw={500}>{t('cond.noCallLimit')}</Text>
-        <Text size="xs" c="dimmed" mb={4}>{t('cond.noCallLimitHint')}</Text>
-        <SegmentedControl
-          fullWidth
-          disabled={insp.locked}
-          value={presets.includes(c.noCallLimitFils) ? String(c.noCallLimitFils) : 'custom'}
-          onChange={(v) => v !== 'custom' && set({ noCallLimitFils: Number(v) })}
-          data={[...presets.map((p) => ({ value: String(p), label: p === 0 ? t('cond.alwaysCall') : `${p / 100}` })), { value: 'custom', label: '…' }]}
-        />
-        <Box mt={6}>
-          <MoneyInput label={t('cond.limitAmount')} value={c.noCallLimitFils} onChange={(f) => set({ noCallLimitFils: f ?? 0 })} />
+    <Stack gap="md">
+      <Card>
+        <Text fw={700} size="sm">
+          {t('cond.noCallLimit')}
+        </Text>
+        <Text size="xs" c="dimmed" mb="sm">
+          {t('cond.noCallLimitHint')}
+        </Text>
+        <Group gap={6} mb="sm">
+          {presets.map((p) => (
+            <Chip key={p} checked={c.noCallLimitFils === p} onChange={() => !insp.locked && set({ noCallLimitFils: p })}>
+              {p === 0 ? t('cond.alwaysCall') : `${p / 100} AED`}
+            </Chip>
+          ))}
+        </Group>
+        <MoneyInput label={t('cond.limitAmount')} value={c.noCallLimitFils} onChange={(f) => set({ noCallLimitFils: f ?? 0 })} />
+      </Card>
+      <Card>
+        <Text fw={700} size="sm" mb="sm">
+          {t('cond.oldParts')}
+        </Text>
+        <SimpleGrid cols={2} spacing="xs">
+          {(['return', 'dispose'] as const).map((o) => (
+            <SelectCard key={o} active={c.oldParts === o} onClick={() => !insp.locked && set({ oldParts: o })}>
+              <Text size="sm" fw={600}>
+                {t(`cond.${o}`)}
+              </Text>
+            </SelectCard>
+          ))}
+        </SimpleGrid>
+        <Group justify="space-between" mt="md" wrap="nowrap">
+          <div>
+            <Text fw={700} size="sm">
+              {t('cond.testDrive')}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {t('cond.testDriveHint')}
+            </Text>
+          </div>
+          <Switch checked={c.testDriveAllowed} disabled={insp.locked} onChange={(e) => set({ testDriveAllowed: e.currentTarget.checked })} />
+        </Group>
+      </Card>
+      <Card>
+        <SimpleGrid cols={{ base: 1, sm: 3 }}>
+          <NumberInput label={t('cond.freeStorage')} min={0} value={c.freeStorageDays} disabled={insp.locked} onChange={(v) => set({ freeStorageDays: Number(v) || 0 })} />
+          <MoneyInput label={t('cond.storageFee')} value={c.storageFeePerDayFils} onChange={(f) => set({ storageFeePerDayFils: f ?? 0 })} />
+          <MoneyInput label={t('cond.diagnosticsFee')} value={c.diagnosticsFeeFils} onChange={(f) => set({ diagnosticsFeeFils: f ?? 0 })} />
+        </SimpleGrid>
+        <Box mt="md">
+          <DateTimeField label={t('cond.promised')} placeholder={t('common.notSet')} disabled={insp.locked} value={c.promisedReadyAt} onChange={(v) => set({ promisedReadyAt: v })} />
         </Box>
-      </div>
-      <div>
-        <Text size="sm" fw={500} mb={4}>{t('cond.oldParts')}</Text>
-        <SegmentedControl fullWidth disabled={insp.locked} value={c.oldParts} onChange={(v) => set({ oldParts: v as 'return' | 'dispose' })} data={[{ value: 'return', label: t('cond.return') }, { value: 'dispose', label: t('cond.dispose') }]} />
-      </div>
-      <Switch size="md" label={t('cond.testDrive')} checked={c.testDriveAllowed} disabled={insp.locked} onChange={(e) => set({ testDriveAllowed: e.currentTarget.checked })} />
-      <SimpleGrid cols={{ base: 1, sm: 3 }}>
-        <NumberInput label={t('cond.freeStorage')} min={0} value={c.freeStorageDays} disabled={insp.locked} onChange={(v) => set({ freeStorageDays: Number(v) || 0 })} />
-        <MoneyInput label={t('cond.storageFee')} value={c.storageFeePerDayFils} onChange={(f) => set({ storageFeePerDayFils: f ?? 0 })} />
-        <MoneyInput label={t('cond.diagnosticsFee')} value={c.diagnosticsFeeFils} onChange={(f) => set({ diagnosticsFeeFils: f ?? 0 })} />
-      </SimpleGrid>
-      <TextInput type="datetime-local" label={t('cond.promised')} disabled={insp.locked} value={c.promisedReadyAt ? c.promisedReadyAt.slice(0, 16) : ''} onChange={(e) => set({ promisedReadyAt: e.currentTarget.value || undefined })} />
+      </Card>
     </Stack>
   );
 }
@@ -471,36 +728,41 @@ export function WorkSummaryStep({ b }: StepProps) {
   const declined = b.items.filter((i) => i.approvalState === 'declined');
   const declinedAt = (id: string) => b.decisions.filter((d) => d.itemId === id && d.decision === 'decline').pop()?.decidedAt;
   return (
-    <Stack>
-      <Title order={6}>{t('handover.done')}</Title>
-      {approved.map((i) => (
-        <Group key={i.id} justify="space-between" wrap="nowrap">
-          <Text size="sm">
-            {i.done ? '✅' : '⬜'} {itemTitle(i, lang)}
-            {i.partNumber ? ` (${i.partNumber})` : ''}
-            {i.customerSupplied ? ` · ${t('item.customerSupplied')}` : ''}
-          </Text>
-          <Money fils={itemAmounts(i).gross} size="sm" />
-        </Group>
-      ))}
+    <Stack gap="md">
+      <List>
+        {approved.map((i) => (
+          <ListRow
+            key={i.id}
+            left={
+              <ThemeIcon variant="light" color={i.done ? 'green' : 'gray'} radius="xl">
+                {i.done ? <IconCheck size={16} /> : <IconMinus size={16} />}
+              </ThemeIcon>
+            }
+            title={itemTitle(i, lang)}
+            subtitle={[i.partNumber, i.customerSupplied ? t('item.customerSupplied') : ''].filter(Boolean).join(' · ') || undefined}
+            right={<Money fils={itemAmounts(i).gross} size="sm" />}
+          />
+        ))}
+      </List>
       {declined.length > 0 && (
-        <>
-          <Title order={6} mt="sm">{t('handover.declined')}</Title>
-          {declined.map((i) => (
-            <Text key={i.id} size="sm" c="orange">
-              ✗ {itemTitle(i, lang)} — {t('handover.declinedOn', { date: formatDate(declinedAt(i.id)) })}
-            </Text>
-          ))}
-        </>
+        <Alert color="orange" title={t('handover.declined')}>
+          <Stack gap={4}>
+            {declined.map((i) => (
+              <Text key={i.id} size="sm">
+                {itemTitle(i, lang)} — {t('handover.declinedOn', { date: formatDate(declinedAt(i.id)) })}
+              </Text>
+            ))}
+          </Stack>
+        </Alert>
       )}
-      <Text size="sm">{t('cond.oldParts')}: {t(`cond.${b.intake?.conditions?.oldParts ?? 'return'}`)}</Text>
-      <Paper withBorder p="sm">
+      <Card>
         <Text size="sm">
-          {(b.settings.warrantyText[lang] ?? '')
-            .replace('{months}', String(b.settings.warrantyLaborMonths))
-            .replace('{km}', String(b.settings.warrantyLaborKm))}
+          <b>{t('cond.oldParts')}:</b> {t(`cond.${b.intake?.conditions?.oldParts ?? 'return'}`)}
         </Text>
-      </Paper>
+        <Text size="sm" mt="sm" c="dimmed">
+          {(b.settings.warrantyText[lang] ?? '').replace('{months}', String(b.settings.warrantyLaborMonths)).replace('{km}', String(b.settings.warrantyLaborKm))}
+        </Text>
+      </Card>
     </Stack>
   );
 }

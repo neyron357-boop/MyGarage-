@@ -1,16 +1,305 @@
-:root {
-  --app-bottom-nav: 64px;
+/* ---------- Base ---------- */
+html,
+body {
+  background: var(--app-canvas);
+  color: var(--mantine-color-text);
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
 }
 body {
-  background: var(--mantine-color-body);
-  -webkit-tap-highlight-color: transparent;
+  font-feature-settings: 'ss01' on;
 }
-.tap-card {
+.mantine-Paper-root[data-with-border],
+.mantine-Card-root[data-with-border] {
+  border-color: var(--app-hairline);
+}
+.mantine-Paper-root,
+.mantine-Card-root {
+  background-color: var(--app-card);
+}
+.tnum,
+.mantine-Table-td {
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible {
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---------- Surfaces ---------- */
+.surface {
+  background: var(--app-card);
+  border-radius: var(--mantine-radius-lg);
+  box-shadow: var(--mantine-shadow-sm);
+}
+.surface-soft {
+  background: var(--app-soft);
+  border-radius: var(--mantine-radius-md);
+}
+.tap {
   cursor: pointer;
-  transition: border-color 120ms ease;
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
 }
-.tap-card:hover {
-  border-color: var(--mantine-color-blue-5);
+.tap:hover {
+  box-shadow: var(--mantine-shadow-md);
+}
+.tap:active {
+  transform: scale(0.995);
+}
+
+/* ---------- Typography helpers ---------- */
+.display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mantine-color-dimmed);
+}
+
+/* ---------- Money ---------- */
+.money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.money .cur {
+  font-size: 0.72em;
+  font-weight: 600;
+  margin-left: 0.28em;
+  color: var(--mantine-color-dimmed);
+  letter-spacing: 0.02em;
+}
+.money.display {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+.money.display .cur {
+  font-family: var(--mantine-font-family);
+  font-size: 0.5em;
+  vertical-align: 0.35em;
+}
+
+/* ---------- UAE number plate ---------- */
+.plate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42em;
+  background: #fff;
+  color: #101318;
+  border: 1.5px solid #101318;
+  border-radius: 5px;
+  padding: 0.12em 0.5em 0.1em;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06), inset 0 0 0 1.5px #fff, inset 0 0 0 2.2px rgba(16, 19, 24, 0.12);
+  font-family: var(--font-display);
+  vertical-align: middle;
+}
+.plate .em {
+  font-family: var(--mantine-font-family);
+  font-size: 0.5em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #2d323c;
+  text-transform: uppercase;
+}
+.plate .code {
+  font-weight: 600;
+}
+.plate .num {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.plate.xs {
+  font-size: 12px;
+}
+.plate.sm {
+  font-size: 14px;
+}
+.plate.md {
+  font-size: 18px;
+}
+.plate.lg {
+  font-size: 24px;
+  border-width: 2px;
+  border-radius: 7px;
+}
+
+/* ---------- Stage track ---------- */
+.stage-track {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+}
+.stage-track span {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--app-hairline);
+}
+.stage-track span.done {
+  background: var(--mantine-color-cobalt-6);
+}
+.stage-track span.now {
+  background: var(--mantine-color-cobalt-4);
+}
+.stage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* ---------- Lists ---------- */
+.list {
+  background: var(--app-card);
+  border-radius: var(--mantine-radius-lg);
+  box-shadow: var(--mantine-shadow-sm);
+  overflow: hidden;
+}
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  min-height: 56px;
+  border-top: 1px solid var(--app-hairline);
+  text-decoration: none;
+  color: inherit;
+}
+.list-row:first-child {
+  border-top: 0;
+}
+.list-row.clickable {
+  cursor: pointer;
+}
+.list-row.clickable:hover {
+  background: var(--app-soft);
+}
+.list-row .body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- KPI ---------- */
+.kpi {
+  background: var(--app-card);
+  border-radius: var(--mantine-radius-lg);
+  box-shadow: var(--mantine-shadow-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.kpi .value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Scrollable tabs ---------- */
+.scroll-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px;
+  margin: 0 -2px;
+}
+.scroll-tabs::-webkit-scrollbar {
+  display: none;
+}
+.scroll-tabs button {
+  flex-shrink: 0;
+  border: 0;
+  background: var(--app-card);
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: var(--mantine-shadow-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  min-height: 38px;
+}
+.scroll-tabs button[data-active='true'] {
+  background: var(--app-ink);
+  color: #fff;
+}
+.scroll-tabs .count {
+  font-size: 12px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--app-soft);
+  color: var(--mantine-color-dimmed);
+  display: inline-grid;
+  place-items: center;
+}
+.scroll-tabs button[data-active='true'] .count {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* ---------- App frame ---------- */
+.app-header {
+  background: var(--app-ink);
+  color: var(--app-ink-text);
+  border-bottom: 0 !important;
+}
+.app-header .mantine-ActionIcon-root {
+  color: var(--app-ink-text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+}
+.app-header .mantine-ActionIcon-root:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.app-nav {
+  background: var(--app-ink) !important;
+  border-right: 0 !important;
+}
+.app-nav a {
+  color: var(--app-ink-muted);
+  border-radius: 10px;
+  margin-bottom: 2px;
+}
+.app-nav a:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--app-ink-text);
+}
+.app-nav a.active {
+  background: rgba(111, 136, 251, 0.18);
+  color: #fff;
+}
+.app-nav .mantine-NavLink-section {
+  color: inherit;
+}
+
+.bottom-nav {
+  display: flex;
+  height: 100%;
+  align-items: stretch;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--app-card);
 }
 .bottom-nav a {
   flex: 1;
@@ -18,36 +307,228 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   font-size: 11px;
+  font-weight: 600;
   color: var(--mantine-color-dimmed);
   text-decoration: none;
-  min-height: 56px;
 }
 .bottom-nav a.active {
-  color: var(--mantine-color-blue-filled);
-  font-weight: 600;
+  color: var(--mantine-color-cobalt-6);
 }
-.bottom-nav a.plus {
-  color: var(--mantine-color-white);
-}
-.side-nav a.active {
-  background: var(--mantine-color-blue-light);
-  color: var(--mantine-color-blue-light-color);
-}
-.photo-slot {
-  aspect-ratio: 4 / 3;
-  border: 2px dashed var(--mantine-color-gray-5);
-  border-radius: 8px;
+.bottom-nav .plus {
+  flex: 1;
   display: grid;
   place-items: center;
-  overflow: hidden;
+}
+.bottom-nav .plus-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  background: var(--mantine-color-cobalt-6);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 16px rgba(63, 91, 233, 0.38);
+  transform: translateY(-10px);
+  border: 4px solid var(--app-canvas);
+  cursor: pointer;
+}
+
+/* Sticky action bar (bottom on phones, end of content on desktop) */
+.sticky-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  margin: 16px calc(-1 * var(--mantine-spacing-md)) 0;
+  padding: 12px var(--mantine-spacing-md) calc(12px + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--app-canvas) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--app-hairline);
+}
+@media (max-width: 48em) {
+  .with-bottom-nav .sticky-bar {
+    bottom: calc(var(--app-bottom-h));
+  }
+}
+
+/* ---------- Photo slots ---------- */
+.photo-slot {
   position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--app-soft);
+  border: 1.5px dashed var(--mantine-color-gray-4);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.photo-slot.filled {
+  border: 0;
+}
+.photo-slot.skipped {
+  border-style: solid;
+  border-color: var(--mantine-color-yellow-5);
+  background: var(--mantine-color-yellow-light);
 }
 .photo-slot img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+.photo-slot .stamp {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(10, 13, 20, 0.62);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.photo-slot .check {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--mantine-color-green-6);
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+
+/* before/after helpers inside a photo slot */
+.photo-slot .inset {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 34%;
+  aspect-ratio: 4 / 3;
+  border: 2px solid #fff;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.photo-slot img.ghost {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  filter: grayscale(0.3);
+}
+.photo-slot .ghost-label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--app-card);
+  color: var(--mantine-color-cobalt-6);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+  box-shadow: var(--mantine-shadow-sm);
+}
+.photo-slot .busy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--app-card) 70%, transparent);
+}
+
+/* ---------- Wizard ---------- */
+.wizard-steps {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.wizard-steps::-webkit-scrollbar {
+  display: none;
+}
+.wizard-steps button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px 6px 6px;
+  border-radius: 999px;
+  background: var(--app-card);
+  color: var(--mantine-color-dimmed);
+  box-shadow: var(--mantine-shadow-xs);
+  cursor: pointer;
+}
+.wizard-steps button .n {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  background: var(--app-soft);
+  color: var(--mantine-color-text);
+}
+.wizard-steps button[data-done='true'] .n {
+  background: var(--mantine-color-green-6);
+  color: #fff;
+}
+.wizard-steps button[data-active='true'] {
+  background: var(--app-ink);
+  color: #fff;
+}
+.wizard-steps button[data-active='true'] .n {
+  background: var(--mantine-color-cobalt-5);
+  color: #fff;
+}
+
+/* Notifications sit below the top bar instead of covering it */
+.mantine-Notifications-root[data-position^='top'] {
+  top: calc(var(--app-header-h) + 8px) !important;
+}
+
+/* ---------- Misc ---------- */
+.dot-sep::before {
+  content: '·';
+  margin: 0 0.4em;
+  color: var(--mantine-color-dimmed);
+}
+.choice-card {
+  border: 1.5px solid var(--app-hairline);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--app-card);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+.choice-card[data-active='true'] {
+  border-color: var(--mantine-color-cobalt-6);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mantine-color-cobalt-6) 18%, transparent);
+}
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 @media print {
   .no-print {
