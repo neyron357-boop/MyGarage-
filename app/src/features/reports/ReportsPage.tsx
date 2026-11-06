@@ -56,12 +56,17 @@ export function ReportsPage() {
     const file = await pdf();
     const fl = new File([file.blob], file.filename, { type: 'application/pdf' });
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
-    if (nav.canShare?.({ files: [fl] })) await navigator.share({ files: [fl], text: `${t('report.title')} ${formatDate(f)} – ${formatDate(tt)}` });
-    else downloadBlob(file.blob, file.filename);
+    try {
+      if (!nav.canShare?.({ files: [fl] })) throw new Error('share unavailable');
+      await navigator.share({ files: [fl], text: `${t('report.title')} ${formatDate(f)} – ${formatDate(tt)}` });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      await downloadBlob(file.blob, file.filename);
+    }
   };
-  const exportCsv = () => {
+  const exportCsv = async () => {
     const inv = data.invoices.filter((i) => dubaiDate(i.issuedAt) >= f && dubaiDate(i.issuedAt) <= tt);
-    downloadBlob(
+    await downloadBlob(
       toCsv([
         ['number', 'type', 'date', 'buyer', 'buyer_trn', 'net_aed', 'vat_aed', 'total_aed', 'status'],
         ...inv.map((i) => [i.number, i.type, formatDate(i.issuedAt), i.buyer.name, i.buyer.trn, (i.subtotalFils / 100).toFixed(2), (i.vatFils / 100).toFixed(2), (i.totalFils / 100).toFixed(2), i.status]),
@@ -69,7 +74,7 @@ export function ReportsPage() {
       `invoices-${f}-${tt}.csv`,
     );
     const ex = data.expenses.filter((e) => e.date >= f && e.date <= tt);
-    downloadBlob(
+    await downloadBlob(
       toCsv([
         ['date', 'category', 'vendor', 'method', 'gross_aed', 'vat_aed', 'note'],
         ...ex.map((e) => [formatDate(e.date), catName(e.categoryId), e.vendor, e.method, (e.amountFils / 100).toFixed(2), (e.vatFils / 100).toFixed(2), e.note]),
@@ -77,7 +82,7 @@ export function ReportsPage() {
       `expenses-${f}-${tt}.csv`,
     );
     const pays = data.payments.filter((p) => dubaiDate(p.receivedAt) >= f && dubaiDate(p.receivedAt) <= tt);
-    downloadBlob(
+    await downloadBlob(
       toCsv([
         ['receipt', 'date', 'order', 'kind', 'method', 'amount_aed', 'reference'],
         ...pays.map((p) => [p.receiptNumber, formatDate(p.receivedAt), data.orders.find((o) => o.id === p.orderId)?.number, p.kind, p.method, (p.amountFils / 100).toFixed(2), p.reference]),
@@ -140,7 +145,7 @@ export function ReportsPage() {
         <Group>
           <Button leftSection={<IconFileTypePdf size={18} />} loading={busy} onClick={() => run(async () => openPdf(await pdf()))}>PDF</Button>
           <Button variant="light" leftSection={<IconShare size={18} />} loading={busy} onClick={() => run(share)}>{t('report.sendOwner')}</Button>
-          <Button variant="default" leftSection={<IconDownload size={18} />} onClick={exportCsv}>{t('report.exportAccountant')}</Button>
+          <Button variant="default" leftSection={<IconDownload size={18} />} onClick={() => run(exportCsv)}>{t('report.exportAccountant')}</Button>
         </Group>
         <Text size="xs" c="dimmed">{t('report.note')}</Text>
       </Stack>

@@ -732,6 +732,10 @@ export const en: typeof ru = {
     wipe: 'Delete all data',
     wipeConfirm: 'All customers, jobs, photos and money records will be deleted from this device. Download a backup first. Type DELETE to confirm.',
   },
+  preview: {
+    title: 'Preview',
+    text: 'This is a trial version inside claude.ai. PDFs, the backup and exports are saved as files after you confirm; Share does not work here. Data stays only in this browser — do not enter real work data. The full version will run on its own address once the cloud is connected.',
+  },
   more: {
     localTitle: '“On this device” mode',
     localText: 'Data is stored in this phone’s/PC’s browser. Make backups in Settings → Data. Cloud storage and sync between devices come in the next stage.',

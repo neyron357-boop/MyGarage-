@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 import type { Media, MediaOwner } from '../domain/types';
 import { AppError } from './errors';
+import { downloadBlob } from './backup';
 import { addMedia, mediaBlob } from './media';
 
 export interface PdfFile {
@@ -59,13 +60,9 @@ export async function debtPdf(debtId: string): Promise<PdfFile> {
   return keep('debt', debtId, `debt-${debtId.slice(0, 8)}.pdf`, async () => (await pdf()).renderDebt(debtId));
 }
 
-export function openPdf(file: PdfFile) {
+/** Open the PDF in a new tab; where tabs are blocked (claude.ai preview) offer it as a file instead. */
+export async function openPdf(file: PdfFile): Promise<void> {
   const url = URL.createObjectURL(file.blob);
   const w = window.open(url, '_blank');
-  if (!w) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.filename;
-    a.click();
-  }
+  if (!w) await downloadBlob(file.blob, file.filename);
 }

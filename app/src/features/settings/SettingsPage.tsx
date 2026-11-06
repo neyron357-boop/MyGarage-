@@ -215,7 +215,7 @@ function DataTab() {
       <Paper withBorder p="md">
         <Title order={6} mb="xs">{t('settings.backup')}</Title>
         <Group>
-          <Button leftSection={<IconDownload size={18} />} loading={busy} onClick={() => run(async () => downloadBlob(await exportBackup(), `mygarage-backup-${dubaiDate()}.json`), 'settings.backupDone')}>{t('settings.export')}</Button>
+          <Button leftSection={<IconDownload size={18} />} loading={busy} onClick={() => run(async () => { await downloadBlob(await exportBackup(), `mygarage-backup-${dubaiDate()}.json`); }, 'settings.backupDone')}>{t('settings.export')}</Button>
           <FileButton accept="application/json" onChange={(f) => f && run(async () => { await importBackup(f); window.location.reload(); })}>
             {(props) => <Button variant="default" leftSection={<IconUpload size={18} />} {...props}>{t('settings.import')}</Button>}
           </FileButton>

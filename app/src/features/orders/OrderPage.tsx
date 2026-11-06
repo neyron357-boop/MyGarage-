@@ -144,10 +144,10 @@ function QcModal({ b, opened, onClose }: { b: OrderBundle; opened: boolean; onCl
             <Text size="sm" c="orange">{t('qc.testDriveForbidden')}</Text>
           )}
         </Paper>
-        <Group grow>
-          <Button variant="default" onClick={() => run(async () => { await saveQc(b.order.id, checks); onClose(); }, 'common.saved')}>{t('common.save')}</Button>
-          <Button disabled={!all} loading={busy} onClick={() => run(async () => { await completeQc(b.order.id, checks); onClose(); }, 'qc.done')}>{t('qc.complete')}</Button>
-        </Group>
+        <Stack gap="xs">
+          <Button fullWidth disabled={!all} loading={busy} onClick={() => run(async () => { await completeQc(b.order.id, checks); onClose(); }, 'qc.done')}>{t('qc.complete')}</Button>
+          <Button fullWidth variant="default" onClick={() => run(async () => { await saveQc(b.order.id, checks); onClose(); }, 'common.saved')}>{t('common.save')}</Button>
+        </Stack>
       </Stack>
     </Modal>
   );

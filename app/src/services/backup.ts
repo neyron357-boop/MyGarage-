@@ -47,7 +47,22 @@ export async function wipeAll(): Promise<void> {
   await GarageDB.delete(name);
 }
 
-export function downloadBlob(blob: Blob, filename: string) {
+type DownloadsApi = { save: (r: { filename: string; data: Blob }) => Promise<unknown> };
+type ClaudeHost = { use?: (name: string) => Promise<DownloadsApi | null> };
+
+/**
+ * Save a file for the user. Inside the claude.ai preview the page cannot download by itself, so the
+ * viewer's "downloads" capability asks the user to confirm; everywhere else a normal download is used.
+ */
+export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  const host = typeof window !== 'undefined' ? (window as unknown as { claude?: ClaudeHost }).claude : undefined;
+  if (host?.use) {
+    const downloads = await host.use('downloads').catch(() => null);
+    if (downloads) {
+      await downloads.save({ filename, data: blob });
+      return;
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

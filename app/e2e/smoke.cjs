@@ -152,6 +152,7 @@ fs.mkdirSync(`${SP}/shots`, { recursive: true });
     await page.getByRole('button', { name: 'Работы выполнены → проверка' }).click();
     await page.getByRole('button', { name: 'Контроль качества' }).click();
     const qc = page.getByRole('dialog').locator('input[type=checkbox]');
+    await qc.first().waitFor();
     for (let i = 0; i < await qc.count(); i++) await qc.nth(i).check();
     await shot('18-qc');
     await page.getByRole('button', { name: 'Проверка пройдена → Готово' }).click();

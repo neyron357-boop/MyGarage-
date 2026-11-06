@@ -1,4 +1,4 @@
-import { ActionIcon, AppShell, Burger, Group, MantineProvider, Menu, NavLink as MNavLink, Text, createTheme, useMantineColorScheme } from '@mantine/core';
+import { ActionIcon, Alert, AppShell, Burger, Group, MantineProvider, Menu, NavLink as MNavLink, Text, createTheme, useMantineColorScheme } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { Notifications } from '@mantine/notifications';
 import {
@@ -17,6 +17,7 @@ import {
   IconTruck,
   IconUsers,
 } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HashRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { BoardPage } from './features/board/BoardPage';
@@ -126,6 +127,37 @@ const SIDE = [
   { to: '/settings', icon: IconSettings, key: 'nav.settings' },
 ];
 
+/** Shown only in the single-file preview build, which runs inside a sandboxed frame. */
+function PreviewNotice() {
+  const { t } = useTranslation();
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem('mygarage.previewNoticeHidden') === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (import.meta.env.MODE !== 'single' || hidden) return null;
+  return (
+    <Alert
+      color="yellow"
+      mb="md"
+      title={t('preview.title')}
+      withCloseButton
+      onClose={() => {
+        setHidden(true);
+        try {
+          localStorage.setItem('mygarage.previewNoticeHidden', '1');
+        } catch {
+          // ignore
+        }
+      }}
+    >
+      {t('preview.text')}
+    </Alert>
+  );
+}
+
 function Shell() {
   const { t } = useTranslation();
   const mobile = useMediaQuery('(max-width: 48em)', true, { getInitialValueInEffect: false });
@@ -154,6 +186,7 @@ function Shell() {
         ))}
       </AppShell.Navbar>
       <AppShell.Main style={{ maxWidth: 1400 }}>
+        <PreviewNotice />
         <Routes>
           <Route path="/" element={<BoardPage />} />
           <Route path="/search" element={<SearchPage />} />

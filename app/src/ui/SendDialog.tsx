@@ -3,6 +3,7 @@ import { IconBrandTelegram, IconBrandWhatsapp, IconCheck, IconCopy, IconShare } 
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Channel, Customer, Lang } from '../domain/types';
+import { downloadBlob } from '../services/backup';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
 
 export interface SendRequest {
@@ -54,14 +55,13 @@ export function SendDialog({
     const { blob, filename } = await request.pdf();
     const file = new File([blob], filename, { type: blob.type });
     const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
-    if (nav.canShare?.({ files: [file] })) {
+    try {
+      if (!nav.canShare?.({ files: [file] })) throw new Error('share unavailable');
       await navigator.share({ files: [file], text });
       setOpened(true);
-    } else {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      a.click();
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return; // user closed the share sheet
+      await downloadBlob(blob, filename).catch(() => undefined);
     }
   };
 
