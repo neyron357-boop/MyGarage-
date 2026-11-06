@@ -1,7 +1,7 @@
 import { db, uid } from '../db/db';
 import { formatDate, nowIso } from '../domain/dates';
 import { formatAed } from '../domain/money';
-import { phoneDigits } from '../domain/phone';
+import { normalizePhone, phoneDigits } from '../domain/phone';
 import { formatPlate } from '../domain/plates';
 import type { Channel, Customer, EstimateVersion, Lang, Order, Vehicle } from '../domain/types';
 import { tFor } from '../i18n';
@@ -12,6 +12,14 @@ export function whatsappUrl(phone: string, text: string): string {
 
 export function telegramUrl(text: string): string {
   return `https://t.me/share/url?url=${encodeURIComponent(' ')}&text=${encodeURIComponent(text)}`;
+}
+
+/** Open a Telegram chat with the customer: by @username if known, otherwise by phone number. */
+export function telegramChatUrl(phone: string, telegram?: string): string {
+  const handle = telegram?.trim();
+  if (handle && /^@?[A-Za-z][A-Za-z0-9_]{3,}$/.test(handle)) return `https://t.me/${handle.replace(/^@/, '')}`;
+  const tgPhone = handle && handle.replace(/\D/g, '').length >= 7 ? normalizePhone(handle) : null;
+  return `https://t.me/+${phoneDigits(tgPhone ?? phone)}`;
 }
 
 export interface MsgContext {

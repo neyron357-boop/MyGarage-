@@ -8,7 +8,7 @@ import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { changeVehicleOwner } from '../../services/customers';
-import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PlateText, Section, StageBadge } from '../../ui/components';
+import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
 import { VehicleModal } from './forms';
 
@@ -36,7 +36,7 @@ export function VehiclePage() {
     const mileage = (orderIds.length ? await db.inspections.where('orderId').anyOf(orderIds).toArray() : []).filter((i) => i.mileageKm !== undefined && i.locked).sort((a, c) => (a.signedAt ?? '').localeCompare(c.signedAt ?? ''));
     return { v, owner, orders, owners, customers, declined, decisions, mileage };
   }, [id]);
-  if (data === undefined) return null;
+  if (data === undefined) return <PageSkeleton variant="detail" />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const { v, owner, orders, owners, customers, declined, decisions, mileage } = data;
   const lastKm = mileage[mileage.length - 1]?.mileageKm;

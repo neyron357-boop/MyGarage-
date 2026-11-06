@@ -1,13 +1,13 @@
 import { ActionIcon, Box, Button, Chip, Group, SegmentedControl, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, Title } from '@mantine/core';
-import { IconArrowRight, IconCalendarTime, IconCar, IconPencil, IconSearch, IconUserPlus } from '@tabler/icons-react';
+import { IconArrowRight, IconCalendarTime, IconCar, IconPencil, IconSearch, IconUserCheck, IconUserPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatPhone } from '../../domain/phone';
 import type { Customer, Vehicle } from '../../domain/types';
-import { createCustomer, createVehicle, type CustomerInput, type VehicleInput } from '../../services/customers';
+import { createCustomer, createVehicle, findCustomerByPhone, findVehicleByPlate, type CustomerInput, type VehicleInput } from '../../services/customers';
 import { createOrder } from '../../services/orders';
 import { List, PageHeader, PlateText, SelectCard, StickyBar } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
@@ -33,6 +33,27 @@ function Card({ n, title, children, done }: { n: number; title: ReactNode; child
   );
 }
 
+function DuplicateHint({ title, text, action, onPick }: { title: string; text: string; action: string; onPick: () => void }) {
+  return (
+    <Group className="surface-soft rise-enter" p="sm" gap="sm" wrap="nowrap" style={{ borderLeft: '3px solid var(--mantine-color-orange-5)' }}>
+      <IconUserCheck size={20} color="var(--mantine-color-orange-6)" style={{ flexShrink: 0 }} />
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <Text size="sm" fw={600} lh={1.3}>
+          {title}
+        </Text>
+        {text && (
+          <Text size="xs" c="dimmed" className="tnum">
+            {text}
+          </Text>
+        )}
+      </Box>
+      <Button size="compact-sm" variant="light" color="orange" onClick={onPick} style={{ flexShrink: 0 }}>
+        {action}
+      </Button>
+    </Group>
+  );
+}
+
 export function NewOrderPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -46,7 +67,7 @@ export function NewOrderPage() {
   const [newC, setNewC] = useState<CustomerInput>(EMPTY_CUSTOMER);
   const [newV, setNewV] = useState<VehicleInput>(EMPTY_VEHICLE);
   const [complaint, setComplaint] = useState('');
-  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [when, setWhen] = useState<'now' | 'later'>(params.get('when') === 'later' ? 'later' : 'now');
   const [bookedFor, setBookedFor] = useState<string>();
 
   const preVehicle = useLiveQuery(async () => {
@@ -62,6 +83,14 @@ export function NewOrderPage() {
       setCustomer(preVehicle.c);
     }
   }, [preVehicle]);
+
+  // Same phone or plate already in the base: offer to pick it instead of creating a duplicate.
+  const dupCustomer = useLiveQuery(() => (mode === 'new' && !customer ? findCustomerByPhone(newC.phone) : undefined), [mode, customer, newC.phone]);
+  const dupVehicle = useLiveQuery(() => (!vehicle ? findVehicleByPlate(newV.plate) : undefined), [vehicle, newV.plate.emirate, newV.plate.code, newV.plate.number]);
+  const pickExisting = (c?: Customer, v?: Vehicle) => {
+    if (c) setCustomer(c);
+    if (v) setVehicle(v);
+  };
 
   const createNew = () =>
     run(async () => {
@@ -86,6 +115,13 @@ export function NewOrderPage() {
     setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase.toLowerCase()}` : phrase));
   };
   const picked = customer && vehicle;
+  // Once the customer and car are chosen, bring "What happened" into view (phones scroll a lot here).
+  const step2 = useRef<HTMLDivElement>(null);
+  const wasPicked = useRef(!!picked);
+  useEffect(() => {
+    if (picked && !wasPicked.current) window.setTimeout(() => step2.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    wasPicked.current = !!picked;
+  }, [picked]);
 
   return (
     <>
@@ -132,7 +168,7 @@ export function NewOrderPage() {
               )}
               {!customer && mode === 'find' && (
                 <>
-                  <TextInput leftSection={<IconSearch size={18} />} placeholder={t('search.placeholder')} value={q} onChange={(e) => setQ(e.currentTarget.value)} data-autofocus autoFocus />
+                  <TextInput leftSection={<IconSearch size={18} />} placeholder={t('search.placeholderShort')} value={q} onChange={(e) => setQ(e.currentTarget.value)} data-autofocus autoFocus />
                   {!!hits?.length && (
                     <List>
                       {hits.map((h) => (
@@ -163,12 +199,30 @@ export function NewOrderPage() {
               {!customer && mode === 'new' && (
                 <Stack gap="lg">
                   <CustomerFields value={newC} onChange={setNewC} compact />
+                  {dupCustomer && (
+                    <DuplicateHint
+                      title={t('newOrder.dupCustomer', { name: dupCustomer.name })}
+                      text={formatPhone(dupCustomer.phone)}
+                      action={t('newOrder.pickThis')}
+                      onPick={() => pickExisting(dupCustomer, dupVehicle?.owner?.id === dupCustomer.id ? dupVehicle.vehicle : undefined)}
+                    />
+                  )}
                   <Box pt="md" style={{ borderTop: '1px solid var(--app-hairline)' }}>
                     <Group gap={8} mb="sm">
                       <IconCar size={18} />
                       <Text fw={700}>{t('newOrder.vehicle')}</Text>
                     </Group>
                     <VehicleFields value={newV} onChange={setNewV} compact />
+                    {dupVehicle && (
+                      <Box mt="sm">
+                        <DuplicateHint
+                          title={t('newOrder.dupVehicle', { car: `${dupVehicle.vehicle.make} ${dupVehicle.vehicle.model}` })}
+                          text={dupVehicle.owner ? `${dupVehicle.owner.name} · ${formatPhone(dupVehicle.owner.phone)}` : ''}
+                          action={t('newOrder.pickThis')}
+                          onPick={() => pickExisting(dupVehicle.owner, dupVehicle.vehicle)}
+                        />
+                      </Box>
+                    )}
                   </Box>
                   <Button onClick={createNew} loading={busy} rightSection={<IconArrowRight size={18} />}>
                     {t('newOrder.saveCustomer')}
@@ -181,6 +235,14 @@ export function NewOrderPage() {
                     <b>{customer.name}</b>: {t('newOrder.addVehicle')}
                   </Text>
                   <VehicleFields value={newV} onChange={setNewV} compact />
+                  {dupVehicle && (
+                    <DuplicateHint
+                      title={t('newOrder.dupVehicle', { car: `${dupVehicle.vehicle.make} ${dupVehicle.vehicle.model}` })}
+                      text={dupVehicle.owner ? `${dupVehicle.owner.name} · ${formatPhone(dupVehicle.owner.phone)}` : ''}
+                      action={t('newOrder.pickThis')}
+                      onPick={() => pickExisting(dupVehicle.owner, dupVehicle.vehicle)}
+                    />
+                  )}
                   <Group grow>
                     <Button variant="default" onClick={() => setCustomer(undefined)}>
                       {t('common.back')}
@@ -196,6 +258,7 @@ export function NewOrderPage() {
         </Card>
         {picked && (
           <>
+            <div ref={step2} style={{ scrollMarginTop: 'calc(var(--app-header-h) + 12px)' }} className="rise-enter">
             <Card n={2} title={t('order.complaint')} done={!!complaint.trim()}>
               <Box className="hide-scrollbar" style={{ overflowX: 'auto' }} mb="sm">
                 <Group gap={6} wrap="nowrap">
@@ -208,6 +271,7 @@ export function NewOrderPage() {
               </Box>
               <Textarea placeholder={t('order.complaintHint')} autosize minRows={3} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
             </Card>
+            </div>
             <Card n={3} title={t('newOrder.when')}>
               <SimpleGrid cols={2} spacing="xs">
                 <SelectCard active={when === 'now'} onClick={() => setWhen('now')}>

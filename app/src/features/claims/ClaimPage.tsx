@@ -10,7 +10,7 @@ import { closeClaim, createWarrantyOrder, openClaim } from '../../services/claim
 import { inspectionPdf, openPdf } from '../../services/documents';
 import { mediaUrl } from '../../services/media';
 import { simpleMessage } from '../../services/messages';
-import { Field, MediaImage, PageHeader, PlateText, ScrollTabs, Section } from '../../ui/components';
+import { Field, MediaImage, PageHeader, PageSkeleton, PlateText, ScrollTabs, Section } from '../../ui/components';
 import { DamageDiagram } from '../../ui/DamageDiagram';
 import { useAction, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
@@ -37,7 +37,7 @@ export function ClaimPage() {
   const [warrantyOpen, setWarrantyOpen] = useState(false);
   const [complaint, setComplaint] = useState('');
   const [send, setSend] = useState<SendRequest | null>(null);
-  if (!b) return null;
+  if (!b) return <PageSkeleton variant="detail" />;
   const before = b.media.find((m) => m.ownerId === b.intake?.id && m.slot === slot);
   const after = b.media.find((m) => m.ownerId === b.handover?.id && m.slot === slot);
   const intakeMarks = b.marks.filter((m) => m.inspectionId === b.intake?.id);

@@ -133,7 +133,7 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
         <Header settings={b.settings} title={t(intake ? 'pdf.intakeTitle' : 'pdf.handoverTitle')} sub={`№${b.order.number} · ${formatDateTime(insp.signedAt ?? insp.createdAt)}`} />
         <Parties customer={b.customer} vehicle={b.vehicle} order={b.order} lang={lang} />
         <View style={s.box}>
-          <Text>{t('intake.mileage')}: <Text style={s.bold}>{insp.mileageKm ?? '—'} km</Text> · {t('intake.fuel')}: <Text style={s.bold}>{insp.fuelLevel !== undefined ? t(`fuel.${insp.fuelLevel}`) : '—'}</Text></Text>
+          <Text>{t('intake.mileage')}: <Text style={s.bold}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US').replace(/\u00a0/g, ' ')} ${t('unit.km')}` : '—'}</Text> · {t('intake.fuel')}: <Text style={s.bold}>{insp.fuelLevel !== undefined ? t(`fuel.${insp.fuelLevel}`) : '—'}</Text></Text>
           <Text>{t('intake.lights')}: {insp.warningLights.length ? insp.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Text>
           {intake && <Text>OBD: {insp.obdNoCodes ? t('intake.obdNone') : insp.obdCodes.join(', ') || `${t('pdf.skipped')}: ${insp.obdSkipReason ?? ''}`}</Text>}
           {intake && <Text>{t('pdf.working')}: {oks.join(', ') || '—'}</Text>}
@@ -142,7 +142,7 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
           {intake && <Text>{t('intake.belongings')}: {insp.belongings || t('pdf.none')}</Text>}
           {intake && <Text>{t('order.complaint')}: {insp.complaint}</Text>}
           {intake && insp.accidentRepair && <Text>{t('intake.policeReport')}: {insp.policeReportNo}</Text>}
-          {!intake && b.order.testDriveStartKm !== undefined && <Text>{t('qc.testDrive')}: {b.order.testDriveStartKm} → {b.order.testDriveEndKm ?? '—'} km</Text>}
+          {!intake && b.order.testDriveStartKm !== undefined && <Text>{t('qc.testDrive')}: {b.order.testDriveStartKm} → {b.order.testDriveEndKm ?? '—'} {t('unit.km')}</Text>}
         </View>
         {intake && (
           <>

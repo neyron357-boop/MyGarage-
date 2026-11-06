@@ -13,7 +13,8 @@ import { inspectionPdf, openPdf } from '../../services/documents';
 import { addAddendum, getOrCreateInspection, inspectionState, signInspection, updateInspection } from '../../services/inspections';
 import { simpleMessage } from '../../services/messages';
 import { bundleAmountDue } from '../../services/orders';
-import { Field, PageHeader, PlateText, Section, StickyBar } from '../../ui/components';
+import { haptic } from '../../ui/clipboard';
+import { Field, PageHeader, PageSkeleton, PlateText, Section, StickyBar, SuccessMark } from '../../ui/components';
 import { useAction, useErrorText, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
@@ -252,17 +253,29 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
   const intakeMedia = useLiveQuery(async () => (kind === 'handover' && b?.intake ? db.media.where('ownerId').equals(b.intake.id).toArray() : undefined), [kind, b?.intake?.id]);
   const steps = kind === 'intake' ? INTAKE_STEPS : HANDOVER_STEPS;
   const [step, setStep] = useState<number | null>(null);
+  const [dir, setDir] = useState<'next' | 'prev'>('next');
+  const [justSigned, setJustSigned] = useState(false);
+  const chips = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (st && step === null) setStep(Math.min(st.insp.step ?? 0, steps.length - 1));
   }, [st, step, steps.length]);
+  // Keep the current step chip visible in the scrolling row.
+  useEffect(() => {
+    const root = chips.current;
+    const el = root?.querySelector<HTMLElement>('[data-active="true"]');
+    if (!root || !el) return;
+    root.scrollTo({ left: Math.max(0, el.offsetLeft - root.offsetLeft - root.clientWidth / 2 + el.offsetWidth / 2), behavior: 'smooth' });
+  }, [step]);
 
   if (error) return <Alert color="red">{error}</Alert>;
-  if (!b || !st || step === null) return null;
+  if (!b || !st || step === null) return <PageSkeleton variant="detail" />;
   const { insp, media, marks } = st;
   const props: StepProps = { insp, media, marks, b, intakeMedia };
   const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
 
   const goto = (n: number) => {
+    if (n === step) return;
+    setDir(n > step ? 'next' : 'prev');
     setStep(n);
     if (!insp.locked) void updateInspection(insp.id, { step: n });
     window.scrollTo({ top: 0 });
@@ -299,11 +312,15 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
       <>
         <PageHeader back={`/orders/${b.order.id}`} eyebrow={`${t('order.title')} №${b.order.number}`} title={title} subtitle={subtitle} />
         <Stack gap="lg">
-          <Box p="md" style={{ background: 'var(--mantine-color-green-light)', borderRadius: 'var(--mantine-radius-lg)' }}>
-            <Group gap="sm" wrap="nowrap" align="flex-start">
-              <ThemeIcon color="green" radius="xl" size={40}>
-                <IconLock size={20} />
-              </ThemeIcon>
+          <Box p="md" style={{ background: 'var(--mantine-color-green-light)', borderRadius: 'var(--mantine-radius-lg)' }} className={justSigned ? 'rise-enter' : undefined}>
+            <Group gap="sm" wrap="nowrap" align={justSigned ? 'center' : 'flex-start'}>
+              {justSigned ? (
+                <SuccessMark size={48} />
+              ) : (
+                <ThemeIcon color="green" radius="xl" size={40}>
+                  <IconLock size={20} />
+                </ThemeIcon>
+              )}
               <div>
                 <Text fw={700}>{t('sign.lockedTitle')}</Text>
                 <Text size="sm">{t('sign.lockedText', { date: formatDateTime(insp.signedAt), name: insp.signerName })}</Text>
@@ -372,7 +389,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
           </Button>
         }
       />
-      <div className="wizard-steps" role="tablist" aria-label={t('intake.stepsLabel', { done: doneCount, total: steps.length })}>
+      <div className="wizard-steps" role="tablist" ref={chips} aria-label={t('intake.stepsLabel', { done: doneCount, total: steps.length })}>
         {steps.map((s, i) => {
           const done = stepDone(s.key, props);
           return (
@@ -383,7 +400,24 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
           );
         })}
       </div>
-      <Box mt="lg">{S.key === 'sign' ? <SignStep props={props} goTo={gotoKey} onSigned={(i) => { offerSend(i); void inspectionPdf(i.id).catch(() => undefined); }} /> : <S.C {...props} />}</Box>
+      <Box mt="lg" key={S.key} className={dir === 'next' ? 'step-next' : 'step-prev'}>
+        {S.key === 'sign' ? (
+          <SignStep
+            props={props}
+            goTo={gotoKey}
+            onSigned={(i) => {
+              haptic([12, 60, 18]);
+              setJustSigned(true);
+              window.scrollTo({ top: 0 });
+              offerSend(i);
+              // Freeze the PDF of the signed act (with its SHA-256) a moment later, after the animation.
+              window.setTimeout(() => void inspectionPdf(i.id).catch(() => undefined), 1500);
+            }}
+          />
+        ) : (
+          <S.C {...props} />
+        )}
+      </Box>
       {S.key !== 'sign' && (
         <StickyBar>
           <Group gap="xs" wrap="nowrap">

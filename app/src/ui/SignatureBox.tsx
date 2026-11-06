@@ -1,5 +1,5 @@
-import { Button, Group, Paper, Text } from '@mantine/core';
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { Button, Group, Paper } from '@mantine/core';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import SignaturePad from 'signature_pad';
 import { dataUrlToBlob } from '../services/media';
@@ -14,6 +14,7 @@ export const SignatureBox = forwardRef<SignatureHandle, { height?: number }>(fun
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const padRef = useRef<SignaturePad>();
+  const [empty, setEmpty] = useState(true);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -22,6 +23,7 @@ export const SignatureBox = forwardRef<SignatureHandle, { height?: number }>(fun
     canvas.height = canvas.offsetHeight * ratio;
     canvas.getContext('2d')!.scale(ratio, ratio);
     const pad = new SignaturePad(canvas, { penColor: '#111', backgroundColor: 'rgb(255,255,255)', minWidth: 1, maxWidth: 2.8 });
+    pad.addEventListener('beginStroke', () => setEmpty(false));
     padRef.current = pad;
     return () => pad.off();
   }, []);
@@ -29,19 +31,33 @@ export const SignatureBox = forwardRef<SignatureHandle, { height?: number }>(fun
   useImperativeHandle(ref, () => ({
     isEmpty: () => padRef.current?.isEmpty() ?? true,
     toBlob: () => dataUrlToBlob(padRef.current!.toDataURL('image/png')),
-    clear: () => padRef.current?.clear(),
+    clear: () => {
+      padRef.current?.clear();
+      setEmpty(true);
+    },
   }));
 
   return (
     <div>
-      <Paper withBorder radius="md" style={{ overflow: 'hidden', background: '#fff' }}>
+      <Paper withBorder radius="md" style={{ overflow: 'hidden', background: '#fff', position: 'relative' }} className="sig-pad" data-empty={empty}>
         <canvas ref={canvasRef} style={{ width: '100%', height, display: 'block', touchAction: 'none' }} />
+        {/* Signature line and a hint, like on paper; they fade away with the first stroke. */}
+        <div className="sig-guide" aria-hidden>
+          <span className="sig-x">×</span>
+          <span className="sig-line" />
+          <span className="sig-hint">{t('sign.hint')}</span>
+        </div>
       </Paper>
-      <Group justify="space-between" mt={4}>
-        <Text size="xs" c="dimmed">
-          {t('sign.hint')}
-        </Text>
-        <Button size="compact-xs" variant="subtle" onClick={() => padRef.current?.clear()}>
+      <Group justify="flex-end" mt={4}>
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          disabled={empty}
+          onClick={() => {
+            padRef.current?.clear();
+            setEmpty(true);
+          }}
+        >
           {t('sign.clear')}
         </Button>
       </Group>

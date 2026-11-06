@@ -1,4 +1,12 @@
 /* ---------- Base ---------- */
+:root {
+  /* Motion: one easing for everything that enters, short durations — a tool, not a show. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 280ms;
+}
 html,
 body {
   background: var(--app-canvas);
@@ -8,6 +16,10 @@ body {
 }
 body {
   font-feature-settings: 'ss01' on;
+  overscroll-behavior-y: none;
+}
+::selection {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-5) 28%, transparent);
 }
 .mantine-Paper-root[data-with-border],
 .mantine-Card-root[data-with-border] {
@@ -25,10 +37,159 @@ body {
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* ---------- Motion ---------- */
+@keyframes mg-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mg-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mg-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mg-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mg-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mg-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes mg-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+@keyframes mg-slide-down {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes mg-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes mg-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+/* Screens slide in a little; tab content and lists fade. Final state has no transform, so sticky and
+   fixed children behave normally after the animation. */
+.page-enter {
+  animation: mg-page-in var(--dur-3) var(--ease-out) both;
+}
+.fade-enter {
+  animation: mg-fade-in var(--dur-2) var(--ease-out) both;
+}
+.rise-enter {
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+.step-next {
+  animation: mg-from-right var(--dur-3) var(--ease-out) both;
+}
+.step-prev {
+  animation: mg-from-left var(--dur-3) var(--ease-out) both;
+}
+.pop-in {
+  animation: mg-pop 320ms var(--ease-out) both;
+}
+/* Staggered list entrance (first items only, so long lists do not wait). */
+.stagger > * {
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 30ms;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 60ms;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 90ms;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 120ms;
+}
+.stagger > *:nth-child(n + 6) {
+  animation-delay: 150ms;
+}
+
+/* ---------- Loading skeletons ---------- */
+/* Appear only if loading takes longer than a blink, so fast screens do not flicker. */
+.skeleton-page {
+  animation: mg-fade-in var(--dur-2) ease 180ms both;
+}
+.skeleton {
+  border-radius: var(--mantine-radius-md);
+  background: linear-gradient(90deg, var(--app-soft) 0%, color-mix(in srgb, var(--app-hairline) 70%, var(--app-soft)) 40%, var(--app-soft) 80%);
+  background-size: 200% 100%;
+  animation: mg-shimmer 1.4s linear infinite;
 }
 
 /* ---------- Surfaces ---------- */
@@ -43,13 +204,23 @@ body {
 }
 .tap {
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), background-color var(--dur-1) ease;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.tap:hover {
-  box-shadow: var(--mantine-shadow-md);
+@media (hover: hover) {
+  .tap:hover {
+    box-shadow: var(--mantine-shadow-md);
+    transform: translateY(-1px);
+  }
 }
 .tap:active {
-  transform: scale(0.995);
+  transform: scale(0.985);
+  box-shadow: var(--mantine-shadow-xs);
+}
+.tap:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
 }
 
 /* ---------- Typography helpers ---------- */
@@ -145,12 +316,19 @@ body {
   height: 5px;
   border-radius: 3px;
   background: var(--app-hairline);
+  transition: background-color 400ms var(--ease-out);
 }
 .stage-track span.done {
   background: var(--mantine-color-cobalt-6);
 }
 .stage-track span.now {
   background: var(--mantine-color-cobalt-4);
+}
+.stage-track.complete span {
+  background: var(--mantine-color-teal-6);
+}
+.stage-track.cancelled span {
+  background: color-mix(in srgb, var(--mantine-color-red-6) 30%, var(--app-hairline));
 }
 .stage-dot {
   width: 8px;
@@ -182,9 +360,21 @@ body {
 }
 .list-row.clickable {
   cursor: pointer;
+  transition: background-color var(--dur-1) ease;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.list-row.clickable:hover {
-  background: var(--app-soft);
+@media (hover: hover) {
+  .list-row.clickable:hover {
+    background: var(--app-soft);
+  }
+}
+.list-row.clickable:active {
+  background: color-mix(in srgb, var(--app-hairline) 60%, var(--app-soft));
+}
+.list-row.clickable:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: -2px;
 }
 .list-row .body {
   flex: 1;
@@ -238,10 +428,23 @@ body {
   gap: 6px;
   cursor: pointer;
   min-height: 38px;
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.scroll-tabs button:active {
+  transform: scale(0.96);
+}
+.scroll-tabs button:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 1px;
 }
 .scroll-tabs button[data-active='true'] {
   background: var(--app-ink);
   color: #fff;
+}
+[data-mantine-color-scheme='dark'] .scroll-tabs button[data-active='true'] {
+  background: var(--mantine-color-cobalt-6);
 }
 .scroll-tabs .count {
   font-size: 12px;
@@ -253,6 +456,8 @@ body {
   color: var(--mantine-color-dimmed);
   display: inline-grid;
   place-items: center;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--dur-2) ease, color var(--dur-2) ease;
 }
 .scroll-tabs button[data-active='true'] .count {
   background: rgba(255, 255, 255, 0.16);
@@ -281,17 +486,65 @@ body {
   color: var(--app-ink-muted);
   border-radius: 10px;
   margin-bottom: 2px;
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
 }
 .app-nav a:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--app-ink-text);
 }
-.app-nav a.active {
+.app-nav a[data-active] {
   background: rgba(111, 136, 251, 0.18);
   color: #fff;
+  position: relative;
+}
+.app-nav a[data-active]::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--mantine-color-cobalt-4);
 }
 .app-nav .mantine-NavLink-section {
   color: inherit;
+}
+.app-nav .nav-primary {
+  background: var(--mantine-color-cobalt-6);
+  color: #fff;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 14px rgba(63, 91, 233, 0.35);
+  transition: background-color var(--dur-1) ease, transform var(--dur-1) var(--ease-out);
+}
+.app-nav .nav-primary:hover {
+  background: var(--mantine-color-cobalt-5);
+  color: #fff;
+}
+.app-nav .nav-primary:active {
+  transform: scale(0.98);
+}
+.app-nav .nav-cash {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  box-shadow: none;
+}
+.app-nav .nav-cash:hover {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: none;
+}
+.header-search input::placeholder {
+  color: var(--app-ink-muted);
+}
+.header-search input:focus {
+  background: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mantine-color-cobalt-4) 60%, transparent);
+}
+.quick-sheet {
+  border-radius: 22px 22px 0 0 !important;
+  height: auto !important;
+  max-height: 88dvh !important;
 }
 
 .bottom-nav {
@@ -307,14 +560,41 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   font-size: 11px;
   font-weight: 600;
   color: var(--mantine-color-dimmed);
   text-decoration: none;
+  transition: color var(--dur-2) var(--ease-out);
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Material-style pill behind the active icon. */
+.bottom-nav .ico {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 30px;
+  border-radius: 15px;
+  transition: background-color var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.bottom-nav a:active .ico {
+  transform: scale(0.9);
 }
 .bottom-nav a.active {
   color: var(--mantine-color-cobalt-6);
+}
+.bottom-nav a.active .ico {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 13%, transparent);
+}
+[data-mantine-color-scheme='dark'] .bottom-nav a.active {
+  color: var(--mantine-color-cobalt-3);
+}
+.bottom-nav a:focus-visible {
+  outline: none;
+}
+.bottom-nav a:focus-visible .ico {
+  outline: 2px solid var(--mantine-color-cobalt-5);
 }
 .bottom-nav .plus {
   flex: 1;
@@ -322,17 +602,72 @@ body {
   place-items: center;
 }
 .bottom-nav .plus-btn {
-  width: 52px;
-  height: 52px;
+  width: 54px;
+  height: 54px;
   border-radius: 18px;
   background: var(--mantine-color-cobalt-6);
   color: #fff;
   display: grid;
   place-items: center;
   box-shadow: 0 6px 16px rgba(63, 91, 233, 0.38);
-  transform: translateY(-10px);
+  transform: translateY(-12px);
   border: 4px solid var(--app-canvas);
   cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), background-color var(--dur-2) ease;
+}
+.bottom-nav .plus-btn svg {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.bottom-nav .plus-btn:active {
+  transform: translateY(-12px) scale(0.92);
+  box-shadow: 0 3px 8px rgba(63, 91, 233, 0.38);
+}
+.bottom-nav .plus-btn[data-open='true'] {
+  background: var(--app-ink);
+}
+.bottom-nav .plus-btn[data-open='true'] svg {
+  transform: rotate(135deg);
+}
+.bottom-nav .plus-btn:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+
+/* Quick actions sheet opened by "+" */
+.quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.quick-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--app-soft);
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--dur-1) var(--ease-out), background-color var(--dur-1) ease;
+}
+.quick-tile:active {
+  transform: scale(0.97);
+}
+.quick-tile.primary {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  background: var(--mantine-color-cobalt-6);
+  color: #fff;
+}
+.quick-tile:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
 }
 
 /* Sticky action bar (bottom on phones, end of content on desktop) */
@@ -346,10 +681,18 @@ body {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid var(--app-hairline);
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
 }
 @media (max-width: 48em) {
   .with-bottom-nav .sticky-bar {
     bottom: calc(var(--app-bottom-h));
+    padding-bottom: 12px;
+  }
+}
+@media (min-width: 48em) {
+  .sticky-bar {
+    margin: 24px 0 0;
+    padding: 14px 0 18px;
   }
 }
 
@@ -369,8 +712,32 @@ body {
   font: inherit;
   color: inherit;
 }
+.photo-slot {
+  transition: transform var(--dur-1) var(--ease-out), border-color var(--dur-2) ease, background-color var(--dur-2) ease;
+}
+.photo-slot:active {
+  transform: scale(0.97);
+}
+.photo-slot:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  .photo-slot:not(.filled):hover {
+    border-color: var(--mantine-color-cobalt-4);
+    background: color-mix(in srgb, var(--mantine-color-cobalt-6) 5%, var(--app-soft));
+  }
+}
 .photo-slot.filled {
   border: 0;
+}
+.photo-slot:disabled {
+  cursor: default;
+  border-style: solid;
+  border-color: var(--app-hairline);
+}
+.photo-slot:disabled:active {
+  transform: none;
 }
 .photo-slot.skipped {
   border-style: solid;
@@ -382,6 +749,7 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
+  animation: mg-fade-in var(--dur-3) ease both;
 }
 .photo-slot .stamp {
   position: absolute;
@@ -406,6 +774,8 @@ body {
   color: #fff;
   display: grid;
   place-items: center;
+  animation: mg-pop 360ms var(--ease-out) 120ms both;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 /* before/after helpers inside a photo slot */
@@ -474,6 +844,16 @@ body {
   color: var(--mantine-color-dimmed);
   box-shadow: var(--mantine-shadow-xs);
   cursor: pointer;
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wizard-steps button:active {
+  transform: scale(0.96);
+}
+.wizard-steps button:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 1px;
 }
 .wizard-steps button .n {
   width: 22px;
@@ -484,6 +864,10 @@ body {
   font-size: 12px;
   background: var(--app-soft);
   color: var(--mantine-color-text);
+  transition: background-color var(--dur-2) ease, color var(--dur-2) ease;
+}
+.wizard-steps button[data-done='true'] .n svg {
+  animation: mg-pop 320ms var(--ease-out) both;
 }
 .wizard-steps button[data-done='true'] .n {
   background: var(--mantine-color-green-6);
@@ -519,10 +903,29 @@ body {
   font: inherit;
   color: inherit;
   width: 100%;
+  transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out), background-color var(--dur-2) ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.choice-card:active:not(:disabled) {
+  transform: scale(0.98);
+}
+@media (hover: hover) {
+  .choice-card:hover:not(:disabled):not([data-active='true']) {
+    border-color: color-mix(in srgb, var(--mantine-color-cobalt-6) 35%, var(--app-hairline));
+  }
+}
+.choice-card:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+.choice-card:disabled {
+  cursor: not-allowed;
 }
 .choice-card[data-active='true'] {
   border-color: var(--mantine-color-cobalt-6);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--mantine-color-cobalt-6) 18%, transparent);
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 4%, var(--app-card));
 }
 .hide-scrollbar {
   scrollbar-width: none;
@@ -534,4 +937,242 @@ body {
   .no-print {
     display: none !important;
   }
+}
+
+/* ---------- Bottom sheets (phones) ---------- */
+@media (max-width: 48em) {
+  .mg-sheet .mantine-Modal-inner {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  .mg-sheet .mantine-Modal-content {
+    flex: 0 0 100% !important;
+    max-height: calc(100dvh - 28px) !important;
+    border-radius: 22px 22px 0 0 !important;
+    box-shadow: 0 -8px 40px rgba(10, 13, 20, 0.22);
+    overscroll-behavior: contain;
+  }
+  .mg-sheet .mantine-Modal-header {
+    padding-top: 22px;
+    border-radius: 22px 22px 0 0;
+    touch-action: none;
+  }
+  /* Grab handle: drag the header down to close. */
+  .mg-sheet .mantine-Modal-header::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 38px;
+    height: 4px;
+    margin-left: -19px;
+    border-radius: 2px;
+    background: var(--mantine-color-gray-4);
+  }
+  [data-mantine-color-scheme='dark'] .mg-sheet .mantine-Modal-header::before {
+    background: var(--mantine-color-dark-3);
+  }
+  .mg-sheet .mantine-Modal-body {
+    padding-bottom: calc(var(--mantine-spacing-md) + env(safe-area-inset-bottom, 0px));
+  }
+}
+.mantine-Modal-content,
+.mantine-Drawer-content {
+  background-color: var(--app-card);
+}
+.mantine-Modal-header {
+  background-color: var(--app-card);
+}
+
+/* ---------- Update banner ---------- */
+.update-bar {
+  position: fixed;
+  z-index: 400;
+  top: calc(var(--app-header-h) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 24px));
+  padding: 10px 10px 10px 12px;
+  border-radius: 16px;
+  background: var(--app-card);
+  box-shadow: var(--mantine-shadow-lg);
+  border: 1px solid var(--app-hairline);
+  animation: mg-slide-down var(--dur-3) var(--ease-out) both;
+}
+
+/* ---------- Success mark (signed, paid) ---------- */
+.success-mark {
+  position: relative;
+  width: 64px;
+  height: 64px;
+}
+.success-mark::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--mantine-color-green-6);
+  animation: mg-ring 900ms var(--ease-out) 200ms both;
+}
+.success-mark svg {
+  position: relative;
+  display: block;
+}
+.success-mark .circle {
+  animation: mg-pop 360ms var(--ease-out) both;
+  transform-origin: 50% 50%;
+}
+.success-mark .tick {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: mg-draw 360ms var(--ease-out) 220ms forwards;
+}
+
+/* ---------- Desktop board ---------- */
+.kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(250px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  scroll-snap-type: x proximity;
+}
+.kanban-col {
+  scroll-snap-align: start;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.kanban-col .lane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 16px;
+  min-height: 140px;
+  background: color-mix(in srgb, var(--app-hairline) 45%, transparent);
+}
+.kanban-fold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-radius: 14px;
+  border: 1.5px dashed var(--app-hairline);
+  color: var(--mantine-color-dimmed);
+  min-height: 180px;
+  align-self: start;
+}
+.kanban-fold .fold-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Setup checklist rows */
+.setup-row {
+  border-top: 1px solid var(--app-hairline);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color var(--dur-1) ease;
+}
+.setup-row:first-child {
+  border-top: 0;
+}
+@media (hover: hover) {
+  .setup-row:hover {
+    background: var(--app-soft);
+  }
+}
+.setup-row:active {
+  background: var(--app-soft);
+}
+
+/* Clickable stage badge on the job card */
+.stage-btn {
+  border-radius: 8px;
+  transition: transform var(--dur-1) var(--ease-out), filter var(--dur-1) ease;
+}
+.stage-btn:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) {
+  .stage-btn:hover {
+    filter: brightness(0.96);
+  }
+}
+.stage-btn:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+
+/* Report bars grow from zero when the period changes */
+@keyframes mg-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.bar-grow {
+  transform-origin: left center;
+  animation: mg-bar 520ms var(--ease-out) both;
+}
+
+/* Horizontal scrollers: fade the side where more content is hidden */
+.edge-fade[data-fade-right='true'] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent);
+}
+.edge-fade[data-fade-left='true'] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 56px), transparent);
+}
+.edge-fade[data-fade-left='true'][data-fade-right='true'] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+.kanban {
+  scrollbar-width: thin;
+}
+
+/* Signature pad: a line to sign on, like on paper */
+.sig-guide {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 34px;
+  pointer-events: none;
+  transition: opacity var(--dur-2) ease;
+}
+.sig-pad[data-empty='false'] .sig-hint {
+  opacity: 0;
+}
+.sig-guide .sig-line {
+  display: block;
+  border-bottom: 1.5px dashed #b8bfcc;
+}
+.sig-guide .sig-x {
+  position: absolute;
+  left: 0;
+  bottom: 4px;
+  font-size: 20px;
+  color: #9aa3b2;
+  font-weight: 600;
+}
+.sig-guide .sig-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #8a93a3;
+  transition: opacity var(--dur-2) ease;
 }

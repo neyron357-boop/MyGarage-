@@ -169,8 +169,21 @@ export function setDb(next: GarageDB) {
   db = next;
 }
 
+/**
+ * Random UUID v4. `crypto.randomUUID` exists only on HTTPS/localhost; when the app is opened from a phone
+ * over the local network (http://192.168…) we build the same kind of id from `getRandomValues`, which
+ * works everywhere.
+ */
 export function uid(): string {
-  return crypto.randomUUID();
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === 'function') return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (typeof c?.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 /** Next value of a named counter (call inside a transaction that includes db.counters). */

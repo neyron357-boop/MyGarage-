@@ -8,6 +8,7 @@ import {
   Chip,
   createTheme,
   Drawer,
+  mergeThemeOverrides,
   Menu,
   Modal,
   NavLink,
@@ -139,18 +140,40 @@ export const theme = createTheme({
     }),
     Tabs: Tabs.extend({ styles: { tab: { fontWeight: 600 } } }),
     Modal: Modal.extend({
-      defaultProps: { radius: 'lg', centered: true, overlayProps: { backgroundOpacity: 0.45, blur: 3 }, transitionProps: { transition: 'pop', duration: 160 } },
-      styles: { title: { fontWeight: 700, fontSize: rem(17) }, header: { paddingBottom: rem(8) } },
+      defaultProps: {
+        radius: 'lg',
+        centered: true,
+        overlayProps: { backgroundOpacity: 0.45, blur: 3 },
+        transitionProps: { transition: 'pop', duration: 180, timingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+      },
+      classNames: { root: 'mg-sheet' },
+      styles: { title: { fontWeight: 700, fontSize: rem(17), lineHeight: 1.3 }, header: { paddingBottom: rem(8) } },
     }),
-    Drawer: Drawer.extend({ defaultProps: { overlayProps: { backgroundOpacity: 0.45, blur: 3 } } }),
-    Menu: Menu.extend({ defaultProps: { shadow: 'lg', radius: 'md', withinPortal: true } }),
+    Drawer: Drawer.extend({
+      defaultProps: { overlayProps: { backgroundOpacity: 0.45, blur: 3 }, transitionProps: { duration: 240, timingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)' } },
+    }),
+    Menu: Menu.extend({ defaultProps: { shadow: 'lg', radius: 'md', withinPortal: true, transitionProps: { transition: 'pop', duration: 140 } } }),
     Tooltip: Tooltip.extend({ defaultProps: { radius: 'sm', withArrow: true } }),
     Alert: Alert.extend({ defaultProps: { radius: 'md', variant: 'light' }, styles: { title: { fontWeight: 700 } } }),
-    Progress: Progress.extend({ defaultProps: { radius: 'xl' } }),
+    Progress: Progress.extend({ defaultProps: { radius: 'xl', transitionDuration: 400 } }),
     NavLink: NavLink.extend({ styles: { label: { fontWeight: 600 } } }),
     Table: Table.extend({ defaultProps: { verticalSpacing: 'sm' } }),
   },
 });
+
+/**
+ * On phones dialogs open as bottom sheets (closer to the thumb): they slide up from the bottom edge.
+ * The sheet geometry itself is in styles.css (`.mg-sheet`).
+ */
+const phoneOverrides = createTheme({
+  components: {
+    Modal: Modal.extend({
+      defaultProps: { transitionProps: { transition: 'slide-up', duration: 260, timingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)' } },
+    }),
+  },
+});
+
+export const phoneTheme = mergeThemeOverrides(theme, phoneOverrides);
 
 /** App-level CSS variables (canvas behind cards, ink frame). */
 export const cssResolver: CSSVariablesResolver = () => ({

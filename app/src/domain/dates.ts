@@ -2,8 +2,24 @@ import type { Lang } from './types';
 
 export const TZ = 'Asia/Dubai';
 
+let clockOffsetMs = 0;
+
 export function nowIso(): string {
-  return new Date().toISOString();
+  return new Date(Date.now() + clockOffsetMs).toISOString();
+}
+
+/**
+ * Demo data only: run `fn` as if the current time were `at`, so sample jobs get realistic history
+ * (sent three hours ago, closed last week). Normal work never shifts the clock.
+ */
+export async function runAt<T>(at: string, fn: () => Promise<T>): Promise<T> {
+  const prev = clockOffsetMs;
+  clockOffsetMs = new Date(at).getTime() - Date.now();
+  try {
+    return await fn();
+  } finally {
+    clockOffsetMs = prev;
+  }
 }
 
 const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });

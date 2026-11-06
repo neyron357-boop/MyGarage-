@@ -109,8 +109,12 @@ const CATEGORIES: Omit<ExpenseCategory, 'id' | 'active'>[] = [
   { code: 'other', nameRu: 'Прочее', nameEn: 'Other', monthlyLimitFils: aed(500) },
 ];
 
+/** Placeholder names of the two starter mechanics (renamed by the manager in Settings → Staff). */
+export const PLACEHOLDER_STAFF = /^(Механик|Mechanic) \d$/;
+
 /** Create default reference data on first start. Safe to call repeatedly. */
-export async function ensureSeed(): Promise<void> {
+export async function ensureSeed(lang: 'ru' | 'en' = 'ru'): Promise<void> {
+  const mechanic = lang === 'en' ? 'Mechanic' : 'Механик';
   await db.transaction('rw', [db.settings, db.jobTemplates, db.relatedRules, db.expenseCategories, db.employees], async () => {
     if (!(await db.settings.get('main'))) await db.settings.put({ ...DEFAULT_SETTINGS });
     if ((await db.jobTemplates.count()) === 0) {
@@ -122,8 +126,8 @@ export async function ensureSeed(): Promise<void> {
     }
     if ((await db.employees.count()) === 0) {
       await db.employees.bulkAdd([
-        { id: uid(), name: 'Механик 1', role: 'mechanic', monthlySalaryFils: 0, active: true },
-        { id: uid(), name: 'Механик 2', role: 'electrician', monthlySalaryFils: 0, active: true },
+        { id: uid(), name: `${mechanic} 1`, role: 'mechanic', monthlySalaryFils: 0, active: true },
+        { id: uid(), name: `${mechanic} 2`, role: 'electrician', monthlySalaryFils: 0, active: true },
       ]);
     }
   });

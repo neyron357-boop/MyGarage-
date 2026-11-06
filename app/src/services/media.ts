@@ -1,13 +1,16 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
+import { sha256Bytes, toHex } from '../domain/sha256';
 import type { Media, MediaOwner } from '../domain/types';
 
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
 export async function sha256Hex(blob: Blob): Promise<string> {
   const buf = await blob.arrayBuffer();
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  // crypto.subtle is only available on HTTPS/localhost; fall back to the plain JS implementation.
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) return toHex(new Uint8Array(await subtle.digest('SHA-256', buf)));
+  return toHex(sha256Bytes(new Uint8Array(buf)));
 }
 
 /** Resize a photo for storage (long side 1920 px) and make a 400 px thumbnail. Browser only. */

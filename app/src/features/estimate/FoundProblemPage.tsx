@@ -9,11 +9,11 @@ import type { Urgency } from '../../domain/types';
 import { approveByLimit, limitRemaining, updateItem } from '../../services/estimate';
 import { addMedia } from '../../services/media';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { Money, PageHeader, Photo, PlateText, StickyBar } from '../../ui/components';
+import { Money, PageHeader, PageSkeleton, Photo, PlateText, StickyBar } from '../../ui/components';
 import { useAction, useOrderBundle } from '../../ui/hooks';
 import { SendDialog } from '../../ui/SendDialog';
 import { DecisionModal, ItemModal, ItemRow, UrgencyPicker } from './components';
-import { SendVersionModal, TemplateModal, useSendVersion } from './EstimatePage';
+import { LimitConfirm, SendVersionModal, TemplateModal, useSendVersion } from './EstimatePage';
 
 const PHRASES = ['tornBoot', 'oilLeak', 'wornDiscs', 'wornPads', 'coolantLeak', 'brokenMount', 'wornBelt', 'corrodedPipe', 'looseLink', 'batteryWeak'];
 
@@ -46,9 +46,10 @@ export function FoundProblemPage() {
   const [itemOpen, setItemOpen] = useState(false);
   const [tplOpen, setTplOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [limitOpen, setLimitOpen] = useState(false);
   const limit = useLiveQuery(() => (id ? limitRemaining(id) : undefined), [id, b?.items.length, b?.decisions.length]);
   const sv = useSendVersion(b);
-  if (!b) return null;
+  if (!b) return <PageSkeleton variant="detail" />;
   const lang = b.order.docLanguage;
   const drafts = b.items.filter((i) => i.approvalState === 'draft');
   const total = drafts.reduce((s, i) => s + itemAmounts(i).gross, 0);
@@ -155,7 +156,7 @@ export function FoundProblemPage() {
       <StickyBar>
         <Group gap="xs" wrap="nowrap">
           {withinLimit && (
-            <Button variant="light" color="teal" leftSection={<IconShieldCheck size={18} />} loading={busy} disabled={!ready} onClick={() => run(async () => { await prepare(); const v = await approveByLimit(b.order.id, reason); sv.afterSend(v, 'limit'); })}>
+            <Button variant="light" color="teal" leftSection={<IconShieldCheck size={18} />} loading={busy} disabled={!ready} onClick={() => setLimitOpen(true)}>
               {t('estimate.byLimitShort')}
             </Button>
           )}
@@ -166,6 +167,22 @@ export function FoundProblemPage() {
       </StickyBar>
       <ItemModal b={b} opened={itemOpen} block="A" extra={{ urgency, block: 'A' }} onClose={() => setItemOpen(false)} />
       <TemplateModal orderId={b.order.id} opened={tplOpen} onClose={() => setTplOpen(false)} />
+      {limit && (
+        <LimitConfirm
+          opened={limitOpen}
+          onClose={() => setLimitOpen(false)}
+          total={total}
+          remaining={limit.remaining}
+          onConfirm={() =>
+            run(async () => {
+              await prepare();
+              const v = await approveByLimit(b.order.id, reason);
+              sv.afterSend(v, 'limit');
+              return true;
+            })
+          }
+        />
+      )}
       <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} reason={reason} kind="supplement" onSent={sv.afterSend} />
       {sv.decide && <DecisionModal b={b} version={sv.decide} opened onClose={() => { sv.setDecide(null); navigate(`/orders/${b.order.id}`); }} onVerbal={sv.setSend} />}
       <SendDialog customer={b.customer} request={sv.send} onClose={() => { sv.setSend(null); navigate(`/orders/${b.order.id}`); }} />

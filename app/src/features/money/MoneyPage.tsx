@@ -24,7 +24,7 @@ import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
 import { addCashMovement, addExpense, cashState, categoryMonthSpent, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, Photo, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
 import { DateField, MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { initials } from '../customers/CustomersPage';
@@ -65,7 +65,7 @@ function CashTab() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [actual, setActual] = useState<number>();
   const [comment, setComment] = useState('');
-  if (!st) return null;
+  if (!st) return <PageSkeleton />;
   const diff = actual !== undefined ? actual - st.expected : 0;
   return (
     <Stack gap="lg">
@@ -267,7 +267,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
     const [list, cats] = await Promise.all([db.expenses.filter((e) => e.date.startsWith(month)).reverse().sortBy('date'), db.expenseCategories.toArray()]);
     return { list, cats };
   }, [month]);
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
   const byCat = (id: string) => data.list.filter((e) => e.categoryId === id).reduce((s, e) => s + e.amountFils, 0);
   const total = data.list.reduce((s, e) => s + e.amountFils, 0);
   const cats = data.cats.filter((c) => c.active && (byCat(c.id) > 0 || c.monthlyLimitFils > 0)).sort((a, b) => byCat(b.id) - byCat(a.id));
@@ -354,7 +354,7 @@ function SalariesTab() {
   const [pay, setPay] = useState<{ employeeId: string; kind: SalaryPayment['kind'] } | null>(null);
   const [amount, setAmount] = useState<number>();
   const [method, setMethod] = useState<PayMethod>('cash');
-  if (!data) return null;
+  if (!data) return <PageSkeleton />;
   return (
     <Stack gap="lg">
       <MonthField value={month} onChange={setMonth} />
@@ -417,7 +417,7 @@ function DebtsTab() {
     const bundles = (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
     return bundles.filter((b) => bundleAmountDue(b) > 0);
   }, []);
-  if (!list) return null;
+  if (!list) return <PageSkeleton />;
   if (!list.length) return <EmptyState icon={IconUserDollar} title={t('debt.none')}>{t('debt.noneHint')}</EmptyState>;
   const total = list.reduce((s, b) => s + bundleAmountDue(b), 0);
   return (
@@ -472,10 +472,12 @@ export function MoneyPage() {
           { value: 'debts', label: t('money.debts') },
         ]}
       />
-      {tab === 'cash' && <CashTab />}
-      {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}
-      {tab === 'salaries' && <SalariesTab />}
-      {tab === 'debts' && <DebtsTab />}
+      <div key={tab} className="fade-enter">
+        {tab === 'cash' && <CashTab />}
+        {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}
+        {tab === 'salaries' && <SalariesTab />}
+        {tab === 'debts' && <DebtsTab />}
+      </div>
     </>
   );
 }

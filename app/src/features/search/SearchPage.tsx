@@ -52,7 +52,9 @@ export function HitRow({ hit, onClick, right }: { hit: Hit; onClick?: () => void
         <Group gap={6}>
           <span>
             {hit.vehicle ? `${hit.customer.name} · ` : ''}
-            {formatPhone(hit.customer.phone)}
+            <span className="tnum" style={{ whiteSpace: 'nowrap' }}>
+              {formatPhone(hit.customer.phone)}
+            </span>
           </span>
           {hit.activeOrder && <StageBadge stage={hit.activeOrder.stage} size="sm" />}
         </Group>
@@ -104,7 +106,7 @@ export function SearchPage() {
         </EmptyState>
       )}
       {q && !!hits?.length && (
-        <List>
+        <List key="hits">
           {hits.map((h) => (
             <HitRow
               key={(h.vehicle?.id ?? '') + h.customer.id}

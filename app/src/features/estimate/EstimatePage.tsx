@@ -22,7 +22,7 @@ import type { Block, EstimateVersion, OrderItem, SendVia } from '../../domain/ty
 import { versionPdf } from '../../services/documents';
 import { addTemplate, approveByLimit, limitRemaining, sendVersion } from '../../services/estimate';
 import { limitMessage, versionMessage } from '../../services/messages';
-import { EmptyState, List, ListRow, Money, PageHeader, PlateText, Section, SelectCard, StickyBar } from '../../ui/components';
+import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, SelectCard, StickyBar } from '../../ui/components';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { BlockChip, DecisionModal, ItemModal, ItemRow, addSuggestion, useSuggestions } from './components';
@@ -137,6 +137,38 @@ export function SendVersionModal({ opened, onClose, orderId, reason, onSent, kin
   );
 }
 
+/** Confirmation before approving items within the customer's no-call limit (cannot be undone). */
+export function LimitConfirm({ opened, onClose, total, remaining, onConfirm }: { opened: boolean; onClose: () => void; total: number; remaining: number; onConfirm: () => Promise<unknown> }) {
+  const { t } = useTranslation();
+  return (
+    <ConfirmModal opened={opened} onClose={onClose} title={t('estimate.limitConfirmTitle')} confirmLabel={t('estimate.approveByLimit')} color="teal" icon={<IconShieldCheck size={18} />} onConfirm={onConfirm}>
+      <SimpleGrid cols={3} spacing="xs">
+        <Box className="surface-soft" p="sm">
+          <div className="eyebrow">{t('common.total')}</div>
+          <Text fw={700} mt={2}>
+            <Money fils={total} />
+          </Text>
+        </Box>
+        <Box className="surface-soft" p="sm">
+          <div className="eyebrow">{t('estimate.limitLeft')}</div>
+          <Text fw={700} mt={2}>
+            <Money fils={remaining} />
+          </Text>
+        </Box>
+        <Box className="surface-soft" p="sm">
+          <div className="eyebrow">{t('estimate.limitAfter')}</div>
+          <Text fw={700} mt={2} c="teal">
+            <Money fils={Math.max(0, remaining - total)} />
+          </Text>
+        </Box>
+      </SimpleGrid>
+      <Text size="sm" c="dimmed" mt="sm">
+        {t('estimate.limitConfirmText')}
+      </Text>
+    </ConfirmModal>
+  );
+}
+
 export function EstimatePage() {
   const { id } = useParams();
   const { t } = useTranslation();
@@ -147,10 +179,11 @@ export function EstimatePage() {
   const [edit, setEdit] = useState<{ item?: OrderItem; block?: Block } | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [limitOpen, setLimitOpen] = useState(false);
   const suggestions = useSuggestions(b);
   const limit = useLiveQuery(() => (id ? limitRemaining(id) : undefined), [id, b?.items.length, b?.decisions.length]);
   const sv = useSendVersion(b);
-  if (!b) return null;
+  if (!b) return <PageSkeleton variant="detail" />;
   const visible = b.items.filter((i) => i.approvalState !== 'cancelled');
   const sum = summarize(visible);
   const drafts = b.items.filter((i) => i.approvalState === 'draft');
@@ -290,7 +323,7 @@ export function EstimatePage() {
             </Box>
             <Group gap="xs" wrap="nowrap" style={{ flex: 1, justifyContent: 'flex-end' }}>
               {canLimit && (
-                <Button variant="light" color="teal" leftSection={<IconShieldCheck size={18} />} loading={busy} onClick={() => run(async () => { const v = await approveByLimit(b.order.id); sv.afterSend(v, 'limit'); })}>
+                <Button variant="light" color="teal" leftSection={<IconShieldCheck size={18} />} loading={busy} onClick={() => setLimitOpen(true)}>
                   {t('estimate.byLimitShort')}
                 </Button>
               )}
@@ -310,6 +343,21 @@ export function EstimatePage() {
       <ItemModal b={b} opened={!!edit} item={edit?.item} block={edit?.block} onClose={() => setEdit(null)} />
       <TemplateModal orderId={b.order.id} opened={tplOpen} onClose={() => setTplOpen(false)} />
       <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} onSent={sv.afterSend} />
+      {limit && (
+        <LimitConfirm
+          opened={limitOpen}
+          onClose={() => setLimitOpen(false)}
+          total={draftTotal}
+          remaining={limit.remaining}
+          onConfirm={() =>
+            run(async () => {
+              const v = await approveByLimit(b.order.id);
+              sv.afterSend(v, 'limit');
+              return true;
+            })
+          }
+        />
+      )}
       {sv.decide && <DecisionModal b={b} version={sv.decide} opened onClose={() => sv.setDecide(null)} onVerbal={sv.setSend} />}
       <SendDialog customer={b.customer} request={sv.send} onClose={() => sv.setSend(null)} />
     </>

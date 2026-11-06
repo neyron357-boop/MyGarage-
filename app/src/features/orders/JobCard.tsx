@@ -24,7 +24,13 @@ export function JobCard({ b, showStage = true }: { b: OrderBundle; showStage?: b
       onClick={() => navigate(`/orders/${b.order.id}`)}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === 'Enter' && navigate(`/orders/${b.order.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          navigate(`/orders/${b.order.id}`);
+        }
+      }}
+      aria-label={`№${b.order.number} ${b.vehicle.make} ${b.vehicle.model}`}
     >
       <Group justify="space-between" wrap="nowrap" gap="xs" mb={8}>
         <PlateText plate={b.vehicle.plate} size="sm" />

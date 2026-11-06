@@ -83,6 +83,22 @@ export async function changeVehicleOwner(vehicleId: string, customerId: string):
   });
 }
 
+/** An existing customer with this phone (to avoid creating the same person twice). */
+export async function findCustomerByPhone(phone: string): Promise<Customer | undefined> {
+  const p = normalizePhone(phone);
+  if (!p) return undefined;
+  return (await db.customers.where('phone').equals(p).toArray()).find((c) => !c.archivedAt);
+}
+
+/** An existing car with this plate in the same emirate, with its owner. */
+export async function findVehicleByPlate(plate: Vehicle['plate']): Promise<{ vehicle: Vehicle; owner?: Customer } | undefined> {
+  const n = normalizePlate(plate);
+  if (!n.number) return undefined;
+  const vehicle = (await db.vehicles.where('plateSearch').equals(plateSearchKey(n)).toArray()).find((v) => !v.archivedAt && v.plate.emirate === n.emirate);
+  if (!vehicle) return undefined;
+  return { vehicle, owner: await db.customers.get(vehicle.customerId) };
+}
+
 export interface SearchHit {
   customer: Customer;
   vehicle?: Vehicle;
