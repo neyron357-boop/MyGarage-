@@ -70,23 +70,23 @@ export function ClaimPage() {
               { label: t('handover.after'), date: b.handover?.signedAt, m: after },
             ].map((x) => (
               <Box key={x.label} className="surface" p={6}>
-                <Group justify="space-between" px={4} pb={6}>
-                  <Badge variant="light" color={x.label === t('handover.before') ? 'gray' : 'cobalt'}>
-                    {x.label}
-                  </Badge>
-                  <Text size="xs" c="dimmed">
-                    {formatDateTime(x.date)}
-                  </Text>
-                </Group>
                 {x.m ? (
-                  <MediaImage id={x.m.id} thumb={false} h={220} w="100%" />
+                  <MediaImage id={x.m.id} thumb={false} h={200} w="100%" />
                 ) : (
-                  <Box h={220} className="surface-soft" style={{ display: 'grid', placeItems: 'center' }}>
+                  <Box h={200} className="surface-soft" style={{ display: 'grid', placeItems: 'center', borderRadius: 'var(--mantine-radius-md)' }}>
                     <Text size="sm" c="dimmed">
                       {t('claim.noPhoto')}
                     </Text>
                   </Box>
                 )}
+                <Stack gap={2} px={4} pt={8} pb={2}>
+                  <Badge variant="light" color={x.label === t('handover.before') ? 'gray' : 'cobalt'} w="fit-content">
+                    {x.label}
+                  </Badge>
+                  <Text size="xs" c="dimmed">
+                    {x.date ? formatDateTime(x.date) : '—'}
+                  </Text>
+                </Stack>
               </Box>
             ))}
           </SimpleGrid>
@@ -119,10 +119,10 @@ export function ClaimPage() {
               {insp ? (
                 <Stack gap="sm">
                   <SimpleGrid cols={2} spacing="sm">
-                    <Field label={t('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} km` : '—'}</Field>
+                    <Field label={t('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'}</Field>
                     <Field label={t('intake.fuel')}>{insp.fuelLevel !== undefined ? t(`fuel.${insp.fuelLevel}`) : '—'}</Field>
                     <Field label={t('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Field>
-                    {idx === 0 && <Field label="OBD">{insp.obdNoCodes ? t('intake.obdNone') : insp.obdCodes.join(', ') || insp.obdSkipReason || '—'}</Field>}
+                    {idx === 0 && <Field label={t('step.obd')}>{insp.obdNoCodes ? t('intake.obdNone') : insp.obdCodes.join(', ') || insp.obdSkipReason || '—'}</Field>}
                   </SimpleGrid>
                   <Field label={t('sign.signedBy')}>
                     {insp.signerName ?? '—'} · {formatDateTime(insp.signedAt)}

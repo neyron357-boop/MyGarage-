@@ -239,8 +239,8 @@ function QcModal({ b, opened, onClose }: { b: OrderBundle; opened: boolean; onCl
           </Text>
           {allowed ? (
             <SimpleGrid cols={2}>
-              <NumberInput label={t('qc.startKm')} suffix=" km" thousandSeparator=" " value={b.order.testDriveStartKm ?? ''} onChange={(v) => run(() => setTestDrive(b.order.id, { testDriveStartKm: Number(v) || undefined }))} />
-              <NumberInput label={t('qc.endKm')} suffix=" km" thousandSeparator=" " value={b.order.testDriveEndKm ?? ''} onChange={(v) => run(() => setTestDrive(b.order.id, { testDriveEndKm: Number(v) || undefined }))} />
+              <NumberInput label={t('qc.startKm')} suffix={` ${t('unit.km')}`} thousandSeparator=" " value={b.order.testDriveStartKm ?? ''} onChange={(v) => run(() => setTestDrive(b.order.id, { testDriveStartKm: Number(v) || undefined }))} />
+              <NumberInput label={t('qc.endKm')} suffix={` ${t('unit.km')}`} thousandSeparator=" " value={b.order.testDriveEndKm ?? ''} onChange={(v) => run(() => setTestDrive(b.order.id, { testDriveEndKm: Number(v) || undefined }))} />
             </SimpleGrid>
           ) : (
             <Text size="sm" c="orange">
@@ -319,6 +319,7 @@ function Overview({ b }: { b: OrderBundle }) {
   const i = b.intake;
   const [complaint, setComplaint] = useState(b.order.complaint);
   const due = Math.max(0, stageContext(b).amountDueFils);
+  const finished = b.order.stage === 'closed' || b.order.stage === 'cancelled';
   return (
     <Stack gap="lg">
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
@@ -334,6 +335,7 @@ function Overview({ b }: { b: OrderBundle }) {
             value={complaint}
             onChange={(e) => setComplaint(e.currentTarget.value)}
             onBlur={() => complaint !== b.order.complaint && run(() => updateOrder(b.order.id, { complaint }), 'common.saved')}
+            readOnly={finished}
             autosize
             minRows={2}
           />
@@ -341,7 +343,8 @@ function Overview({ b }: { b: OrderBundle }) {
             <Select
               label={t('order.mechanic')}
               placeholder={t('order.mechanicPick')}
-              clearable
+              clearable={!finished}
+              disabled={finished}
               value={b.order.mechanicId ?? null}
               onChange={(v) => run(() => assignMechanic(b.order.id, v ?? undefined))}
               data={(employees ?? []).map((e) => ({ value: e.id, label: `${e.name} · ${t(`role.${e.role}`)}` }))}
@@ -349,6 +352,7 @@ function Overview({ b }: { b: OrderBundle }) {
             <DateTimeField
               label={t('cond.promised')}
               placeholder={t('common.notSet')}
+              disabled={finished}
               value={b.order.promisedReadyAt ?? i?.conditions?.promisedReadyAt}
               onChange={(v) => run(() => updateOrder(b.order.id, { promisedReadyAt: v }))}
             />
@@ -362,7 +366,7 @@ function Overview({ b }: { b: OrderBundle }) {
               <Field label={t('intake.mileage')}>{i.mileageKm?.toLocaleString('ru-RU')} km</Field>
               <Field label={t('intake.fuel')}>{t(`fuel.${i.fuelLevel ?? 0}`)}</Field>
               <Field label={t('intake.lights')}>{i.warningLights.length ? i.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Field>
-              <Field label="OBD">{i.obdNoCodes ? t('intake.obdNone') : i.obdCodes.join(', ') || i.obdSkipReason || '—'}</Field>
+              <Field label={t('step.obd')}>{i.obdNoCodes ? t('intake.obdNone') : i.obdCodes.join(', ') || i.obdSkipReason || '—'}</Field>
               <Field label={t('cond.noCallLimit')}>{i.conditions?.noCallLimitFils ? <Money fils={i.conditions.noCallLimitFils} /> : t('cond.alwaysCall')}</Field>
               <Field label={t('cond.testDrive')}>{i.conditions?.testDriveAllowed ? t('common.yes') : t('common.no')}</Field>
               <Field label={t('cond.oldParts')}>{t(`cond.${i.conditions?.oldParts ?? 'return'}`)}</Field>

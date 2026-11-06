@@ -471,9 +471,9 @@ export function VersionCard({ v, b, actions }: { v: EstimateVersion; b: OrderBun
   const decisions = b.decisions.filter((d) => d.versionId === v.id);
   return (
     <Box className="surface" p="md">
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <Group gap="sm" wrap="nowrap">
-          <ThemeIcon radius="xl" size={36} variant="light" color={v.number === 1 ? 'cobalt' : 'orange'}>
+      <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
+        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+          <ThemeIcon radius="xl" size={36} variant="light" color={v.number === 1 ? 'cobalt' : 'orange'} style={{ flexShrink: 0 }}>
             <Text fw={800} size="sm" className="display">
               v{v.number}
             </Text>

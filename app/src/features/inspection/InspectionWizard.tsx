@@ -175,13 +175,13 @@ function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: I
           </Field>
           <Field label={tc('pdf.customer')}>{b.customer.name}</Field>
           <Field label={tc('pdf.photos')}>{media.filter((m) => m.kind === 'photo').length}</Field>
-          <Field label={tc('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} km` : '—'}</Field>
+          <Field label={tc('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} ${tc('unit.km')}` : '—'}</Field>
           <Field label={tc('intake.fuel')}>{insp.fuelLevel !== undefined ? tc(`fuel.${insp.fuelLevel}`) : '—'}</Field>
           <Field label={tc('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => tc(`light.${l}`)).join(', ') : tc('pdf.none')}</Field>
           {insp.kind === 'intake' && (
             <>
               <Field label={tc('pdf.damage')}>{insp.noDamage ? tc('damage.none') : marks.map((m, i) => `${i + 1}. ${tc(`damage.type.${m.type}`)}`).join(', ') || '—'}</Field>
-              <Field label="OBD">{insp.obdNoCodes ? tc('intake.obdNone') : insp.obdCodes.join(', ') || insp.obdSkipReason || '—'}</Field>
+              <Field label={tc('step.obd')}>{insp.obdNoCodes ? tc('intake.obdNone') : insp.obdCodes.join(', ') || insp.obdSkipReason || '—'}</Field>
               <Field label={tc('pdf.notWorking')}>{fails.join(', ') || tc('pdf.none')}</Field>
               <Field label={tc('intake.keys')}>{insp.keysCount ?? '—'}</Field>
               <Field label={tc('intake.belongings')}>{insp.belongings || tc('pdf.none')}</Field>

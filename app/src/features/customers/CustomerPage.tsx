@@ -56,7 +56,7 @@ export function CustomerPage() {
               {initials(displayName)}
             </Avatar>
             <Box style={{ minWidth: 0 }}>
-              <Text fw={700} size="lg" lineClamp={1}>
+              <Text fw={700} size="lg" lineClamp={2} lh={1.25}>
                 {displayName}
               </Text>
               <Text size="sm" c="dimmed" className="tnum">
@@ -106,15 +106,12 @@ export function CustomerPage() {
                 key={v.id}
                 onClick={() => navigate(`/vehicles/${v.id}`)}
                 chevron
-                left={
-                  <Box w={112} style={{ flexShrink: 0 }}>
-                    <PlateText plate={v.plate} size="sm" />
-                  </Box>
-                }
+                left={<PlateText plate={v.plate} size="sm" />}
                 title={`${v.make} ${v.model}${v.year ? ` ${v.year}` : ''}`}
                 subtitle={v.vin ? `VIN ${v.vin}` : undefined}
                 right={
                   <Button
+                    visibleFrom="xs"
                     size="compact-sm"
                     variant="light"
                     style={{ flexShrink: 0 }}

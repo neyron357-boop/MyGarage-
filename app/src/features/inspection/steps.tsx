@@ -466,7 +466,7 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
         <NumberInput
           label={t('intake.mileage')}
           size="lg"
-          suffix=" km"
+          suffix={` ${t('unit.km')}`}
           thousandSeparator=" "
           min={0}
           allowDecimal={false}
@@ -475,7 +475,7 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
           value={insp.mileageKm ?? ''}
           disabled={insp.locked}
           onChange={(v) => void save(insp, { mileageKm: typeof v === 'number' ? v : undefined })}
-          description={intake?.mileageKm !== undefined ? `${t('handover.atIntake')}: ${intake.mileageKm.toLocaleString('ru-RU')} km` : undefined}
+          description={intake?.mileageKm !== undefined ? `${t('handover.atIntake')}: ${intake.mileageKm.toLocaleString('ru-RU')} ${t('unit.km')}` : undefined}
           styles={{ input: { fontFamily: 'var(--font-display)', fontSize: 24, letterSpacing: '0.04em' } }}
         />
         {delta !== undefined && delta > Math.max(0, testKm) + 10 && (

@@ -554,7 +554,7 @@ export const en: typeof ru = {
     state: { draft: 'Not sent', pending: 'Awaiting customer', approved: 'Approved', declined: 'Declined', cancelled: 'Cancelled' },
     bChoice: { do_if_needed: 'Do if needed', call_me: 'Call me' },
   },
-  unit: { pcs: 'pcs', h: 'h', l: 'l', set: 'set' },
+  unit: { pcs: 'pcs', h: 'h', l: 'l', set: 'set', km: 'km' },
   urgency: { red: '🔴 Unsafe to drive', yellow: '🟡 Needed soon', green: '🟢 Can wait' },
   urgencyShort: { red: 'Unsafe to drive', yellow: 'Needed soon', green: 'Can wait' },
   estimate: {
@@ -901,7 +901,7 @@ export const en: typeof ru = {
     inactive: 'inactive',
     employee: 'Employee',
     addLine: 'Add line',
-    lines: 'lines',
+    lines: 'Lines in template: {{n}}',
     noLimit: 'No limit',
     zeroNoLimit: '0 — no limit',
     files: 'Files',

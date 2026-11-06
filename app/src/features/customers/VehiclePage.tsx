@@ -81,7 +81,7 @@ export function VehiclePage() {
       </Box>
       <SimpleGrid cols={2} spacing="sm" mt="md">
         <Kpi label={t('customer.visits')} value={orders.length} />
-        <Kpi label={t('vehicle.lastMileage')} value={lastKm !== undefined ? `${lastKm.toLocaleString('ru-RU')} km` : '—'} />
+        <Kpi label={t('vehicle.lastMileage')} value={lastKm !== undefined ? `${lastKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'} />
       </SimpleGrid>
       {declined.length > 0 && (
         <Section title={t('vehicle.declinedRecs')} description={t('vehicle.declinedHint')}>
@@ -115,7 +115,7 @@ export function VehiclePage() {
           <Box className="surface" p="md">
             <Timeline bulletSize={22} lineWidth={2} active={mileage.length}>
               {mileage.map((m) => (
-                <Timeline.Item key={m.id} bullet={<IconGauge size={12} />} title={`${m.mileageKm?.toLocaleString('ru-RU')} km`}>
+                <Timeline.Item key={m.id} bullet={<IconGauge size={12} />} title={`${m.mileageKm?.toLocaleString('ru-RU')} ${t('unit.km')}`}>
                   <Text size="xs" c="dimmed">
                     {formatDate(m.signedAt)} · {t(m.kind === 'intake' ? 'intake.title' : 'handover.title')}
                   </Text>

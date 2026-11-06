@@ -298,7 +298,7 @@ function Providers({ children }: { children: React.ReactNode }) {
   const mobile = useMediaQuery('(max-width: 48em)', true, { getInitialValueInEffect: false });
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
-      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={3} autoClose={2600} />
+      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={2} autoClose={2600} />
       {children}
     </DatesProvider>
   );

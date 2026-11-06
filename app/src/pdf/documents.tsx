@@ -27,7 +27,7 @@ const s = StyleSheet.create({
   h2: { fontSize: 11, fontWeight: 'bold', marginTop: 10, marginBottom: 4 },
   muted: { color: '#666' },
   box: { borderWidth: 1, borderColor: '#ccc', borderRadius: 3, padding: 6, marginTop: 6 },
-  th: { fontWeight: 'bold', backgroundColor: '#f1f3f5', paddingVertical: 3, paddingHorizontal: 3 },
+  th: { fontWeight: 'bold', backgroundColor: '#eef0f4', paddingVertical: 3, paddingHorizontal: 3 },
   td: { paddingVertical: 2, paddingHorizontal: 3, borderBottomWidth: 0.5, borderColor: '#ddd' },
   footer: { position: 'absolute', bottom: 18, left: 28, right: 28, fontSize: 7, color: '#777', flexDirection: 'row', justifyContent: 'space-between' },
   photo: { width: 120, height: 90, objectFit: 'cover', marginRight: 6, marginBottom: 2 },
@@ -36,7 +36,7 @@ const s = StyleSheet.create({
 
 function Header({ settings, title, sub, right }: { settings: Settings; title: string; sub?: string; right?: ReactNode }) {
   return (
-    <View style={[s.between, { marginBottom: 8, borderBottomWidth: 1.5, borderColor: '#1c7ed6', paddingBottom: 6 }]}>
+    <View style={[s.between, { marginBottom: 8, borderBottomWidth: 1.5, borderColor: '#3f5be9', paddingBottom: 6 }]}>
       <View style={s.row}>
         {settings.logoDataUrl && <Image src={settings.logoDataUrl} style={{ width: 48, height: 48, objectFit: 'contain', marginRight: 8 }} />}
         <View>

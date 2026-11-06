@@ -552,7 +552,7 @@ export const ru = {
     state: { draft: 'Не отправлено', pending: 'Ждём клиента', approved: 'Согласовано', declined: 'Отказ', cancelled: 'Отменено' },
     bChoice: { do_if_needed: 'Делать, если нужно', call_me: 'Позвонить' },
   },
-  unit: { pcs: 'шт', h: 'ч', l: 'л', set: 'компл.' },
+  unit: { pcs: 'шт', h: 'ч', l: 'л', set: 'компл.', km: 'км' },
   urgency: { red: '🔴 Опасно ездить', yellow: '🟡 Скоро понадобится', green: '🟢 Можно отложить' },
   urgencyShort: { red: 'Опасно ездить', yellow: 'Скоро понадобится', green: 'Можно отложить' },
   estimate: {
@@ -899,7 +899,7 @@ export const ru = {
     inactive: 'не работает',
     employee: 'Сотрудник',
     addLine: 'Добавить строку',
-    lines: 'строк',
+    lines: 'Строк в шаблоне: {{n}}',
     noLimit: 'Без нормы',
     zeroNoLimit: '0 — без нормы',
     files: 'Файлов',

@@ -250,7 +250,7 @@ export function ListRow({
     >
       {left}
       <div className="body">
-        <Text fw={600} size="sm" lineClamp={2}>
+        <Text fw={600} size="sm" lineClamp={3} component="div">
           {title}
         </Text>
         {subtitle && (

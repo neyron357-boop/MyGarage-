@@ -333,7 +333,7 @@ function PricesTab() {
               </ThemeIcon>
             }
             title={lang === 'ru' ? tpl.titleRu : tpl.titleEn}
-            subtitle={`${tpl.items.length} ${t('settings.lines')}${tpl.active ? '' : ` · ${t('settings.inactive')}`}`}
+            subtitle={`${t('settings.lines', { n: tpl.items.length })}${tpl.active ? '' : ` · ${t('settings.inactive')}`}`}
             right={
               <Text size="sm" fw={600} className="tnum" style={{ whiteSpace: 'nowrap' }}>
                 {formatAed(tpl.items.reduce((s, i) => s + Math.round(i.qty * i.unitPriceFils), 0))}
