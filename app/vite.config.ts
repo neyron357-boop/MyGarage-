@@ -21,8 +21,8 @@ export default defineConfig(({ mode }) => {
               name: 'MyGarage',
               short_name: 'MyGarage',
               description: 'Garage manager: intake, estimates, approvals, parts, invoices, cash',
-              theme_color: '#1c7ed6',
-              background_color: '#ffffff',
+              theme_color: '#0f1626',
+              background_color: '#f2f4f8',
               display: 'standalone',
               start_url: './',
               icons: [
