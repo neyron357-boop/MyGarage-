@@ -52,7 +52,9 @@ PWA для менеджера небольшой автомастерской в
 - `npm run dev` — разработка (http://localhost:5173)
 - `npm run typecheck` — TypeScript
 - `npm test` — unit + сквозные тесты сервисов (fake-indexeddb)
-- `npm run e2e` — браузерный сценарий целиком (нужен запущенный `npm run dev -- --port 5173`); скриншоты в `test-results/`
+- `npm run e2e` — браузерный сценарий целиком (нужен запущенный `npm run dev -- --port 5173`); скриншоты в `test-results/`.
+  Браузер — Chromium из Playwright, если установлен (`npx playwright install chromium`), иначе Chrome или Edge с компьютера;
+  выбрать явно — `E2E_BROWSER=chromium|chrome|msedge`
 - `npm run build` — PWA для хостинга (`dist/`); `npm run preview` — открыть сборку на http://localhost:4173
 - `npm run build:single` — один файл `dist-single/index.html` для превью
 
