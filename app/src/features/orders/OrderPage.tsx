@@ -35,6 +35,7 @@ import {
   IconStatusChange,
   IconTool,
   IconUser,
+  IconUserPlus,
   IconUserX,
   IconX,
 } from '@tabler/icons-react';
@@ -45,6 +46,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { QC_CHECKS } from '../../domain/inspection';
+import { activeInvoice } from '../../domain/invoice';
 import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, summarize } from '../../domain/items';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
@@ -55,6 +57,7 @@ import { debtPdf, inspectionPdf, invoicePdf, openPdf, receiptPdf, versionPdf } f
 import { simpleMessage, versionMessage } from '../../services/messages';
 import {
   assignMechanic,
+  bundleAmountDue,
   changeStage,
   completeQc,
   declineRepair,
@@ -89,6 +92,7 @@ import {
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
+import { CustomerModal } from '../customers/forms';
 import { DecisionModal, DoneToggle, ItemRow, ResolveBModal, VersionCard } from '../estimate/components';
 import { PaymentModal, PaymentPanel } from '../money/PaymentPanel';
 import { ProcurementModal } from '../parts/PartsPage';
@@ -363,18 +367,25 @@ function Overview({ b }: { b: OrderBundle }) {
           </SimpleGrid>
         </Stack>
       </Box>
-      {i?.locked && (
-        <Section title={t('order.atIntake')} description={t('order.atIntakeHint', { date: formatDateTime(i.signedAt) })} mt={0}>
+      {(i?.locked || i?.completedAt) && (
+        <Section
+          title={t('order.atIntake')}
+          description={i.locked ? t('order.atIntakeHint', { date: formatDateTime(i.signedAt) }) : t('order.atIntakeUnsigned', { date: formatDateTime(i.completedAt) })}
+          mt={0}
+        >
           <Box className="surface" p="md">
             <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" verticalSpacing="md">
               <Field label={t('intake.mileage')}>{i.mileageKm !== undefined ? `${i.mileageKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'}</Field>
-              <Field label={t('intake.fuel')}>{t(`fuel.${i.fuelLevel ?? 0}`)}</Field>
+              <Field label={t('intake.fuel')}>{i.fuelLevel !== undefined ? t(`fuel.${i.fuelLevel}`) : '—'}</Field>
               <Field label={t('intake.lights')}>{i.warningLights.length ? i.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Field>
               <Field label={t('step.obd')}>{i.obdNoCodes ? t('intake.obdNone') : i.obdCodes.join(', ') || i.obdSkipReason || '—'}</Field>
-              <Field label={t('cond.noCallLimit')}>{i.conditions?.noCallLimitFils ? <Money fils={i.conditions.noCallLimitFils} /> : t('cond.alwaysCall')}</Field>
               <Field label={t('cond.testDrive')}>{i.conditions?.testDriveAllowed ? t('common.yes') : t('common.no')}</Field>
-              <Field label={t('cond.oldParts')}>{t(`cond.${i.conditions?.oldParts ?? 'return'}`)}</Field>
-              <Field label={t('intake.keys')}>{i.keysCount ?? '—'}</Field>
+              {/* Terms that only acts signed before the fast check-in have. */}
+              {i.conditions?.noCallLimitFils !== undefined && (
+                <Field label={t('cond.noCallLimit')}>{i.conditions.noCallLimitFils ? <Money fils={i.conditions.noCallLimitFils} /> : t('cond.alwaysCall')}</Field>
+              )}
+              {i.conditions?.oldParts && <Field label={t('cond.oldParts')}>{t(`cond.${i.conditions.oldParts}`)}</Field>}
+              {i.keysCount !== undefined && <Field label={t('intake.keys')}>{i.keysCount}</Field>}
             </SimpleGrid>
             {i.accidentRepair && (
               <Alert mt="md" color="orange" icon={<IconAlertTriangle size={18} />}>
@@ -674,11 +685,40 @@ export function OrderPage() {
   const [decide, setDecide] = useState<EstimateVersion | null>(null);
   const [pay, setPay] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
+  const [customerOpen, setCustomerOpen] = useState(false);
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b) return <EmptyState icon={IconX} title={t('err.notFound')} />;
   const { flags, waitingHours } = orderFlags(b);
   const step = nextStep(b);
   const setTab = (v: string) => setParams({ tab: v }, { replace: true });
+
+  // Quick path (check-in → invoice → payment → close) leads the job unless the detailed
+  // estimate/approval flow is already under way without an invoice.
+  const inv = activeInvoice(b.invoices);
+  const due = Math.max(0, bundleAmountDue(b));
+  const stage = b.order.stage;
+  const working = !['booked', 'closed', 'cancelled', 'delivered'].includes(stage);
+  const quick = stage !== 'booked' && stage !== 'cancelled' && (!!inv || (working && b.versions.length === 0));
+  const drafts = b.items.filter((x) => x.approvalState === 'draft').length;
+  let quickHint = '';
+  let quickPrimary: { label: string; color?: string; onClick: () => void } | undefined;
+  const quickSecondary: { label: string; onClick: () => void }[] = [];
+  if (quick && inv) {
+    quickSecondary.push({ label: t('order.openInvoice'), onClick: () => navigate(`/orders/${b.order.id}/invoice`) });
+    if (stage === 'closed' || (stage === 'delivered' && due <= 0)) quickHint = t('order.quickClosed');
+    else if (due > 0) {
+      quickHint = t('order.quickPay', { number: inv.number });
+      quickPrimary = { label: t('qi.takePayment', { amount: formatAed(due) }), onClick: () => setPay(true) };
+    } else {
+      quickHint = t('order.quickClose');
+      quickPrimary = { label: t('qi.closeOrder'), color: 'green', onClick: () => void run(() => changeStage(b.order.id, 'closed'), 'qi.closedToast') };
+    }
+  } else if (quick) {
+    quickHint = drafts ? t('order.quickDrafts', { n: drafts }) : t('order.quickInvoice');
+    quickPrimary = { label: drafts ? t('order.continueInvoice') : t('order.createInvoice'), onClick: () => navigate(`/orders/${b.order.id}/invoice`) };
+    if (!b.intake?.locked && !b.intake?.completedAt) quickSecondary.push({ label: b.intake ? t('order.continueIntake') : t('order.startIntake'), onClick: () => navigate(`/orders/${b.order.id}/intake`) });
+    quickSecondary.push({ label: t('order.detailedEstimate'), onClick: () => navigate(`/orders/${b.order.id}/estimate`) });
+  }
 
   const act = (a: StepAction) => {
     const oid = b.order.id;
@@ -810,19 +850,26 @@ export function OrderPage() {
               )}
             </Group>
             <Group justify="space-between" wrap="nowrap" mt="md" gap="sm">
-              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => navigate(`/customers/${b.customer.id}`)}>
-                <Avatar color="cobalt" radius="xl" size={42}>
-                  {initials(b.customer.name)}
-                </Avatar>
-                <Box style={{ minWidth: 0 }}>
-                  <Text fw={700} lineClamp={2} lh={1.25}>
-                    {b.customer.type === 'company' && b.customer.companyName ? b.customer.companyName : b.customer.name}
-                  </Text>
-                  <Text size="xs" c="dimmed" className="tnum">
-                    {formatPhone(b.customer.phone)} · {t(`lang.${b.order.docLanguage}`)}
-                  </Text>
-                </Box>
-              </Group>
+              {b.customer.name || b.customer.phone ? (
+                <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => navigate(`/customers/${b.customer.id}`)}>
+                  <Avatar color="cobalt" radius="xl" size={42}>
+                    {b.customer.name ? initials(b.customer.name) : <IconUser size={20} />}
+                  </Avatar>
+                  <Box style={{ minWidth: 0 }}>
+                    <Text fw={600} lineClamp={2} lh={1.25}>
+                      {(b.customer.type === 'company' && b.customer.companyName ? b.customer.companyName : b.customer.name) || t('customer.noName')}
+                    </Text>
+                    <Text size="xs" c="dimmed" className="tnum">
+                      {[b.customer.phone ? formatPhone(b.customer.phone) : '', t(`lang.${b.order.docLanguage}`)].filter(Boolean).join(' · ')}
+                    </Text>
+                  </Box>
+                </Group>
+              ) : (
+                // Checked in with the plate only: the customer can be added any time.
+                <Button variant="light" leftSection={<IconUserPlus size={18} />} onClick={() => setCustomerOpen(true)}>
+                  {t('qi.addCustomer')}
+                </Button>
+              )}
               <ContactButtons phone={b.customer.phone} whatsapp={b.customer.whatsapp} telegram={b.customer.telegram} />
             </Group>
             {(flags.waitingClientSince || flags.waitingParts || flags.debt || flags.incident || flags.warranty || flags.storageDays) && (
@@ -833,6 +880,30 @@ export function OrderPage() {
           </Box>
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 5 }}>
+          {quick ? (
+            <Box p="md" h="100%" className="surface fade-enter" key={quickHint}>
+              <div className="eyebrow">{t('next.label')}</div>
+              <Title order={4} mt={4} style={{ textWrap: 'balance' }}>
+                {quickHint}
+              </Title>
+              {quickPrimary && (
+                <Box mt="md" visibleFrom="sm">
+                  <Button fullWidth color={quickPrimary.color} loading={busy} onClick={quickPrimary.onClick}>
+                    {quickPrimary.label}
+                  </Button>
+                </Box>
+              )}
+              {quickSecondary.length > 0 && (
+                <Group gap={6} mt="sm">
+                  {quickSecondary.map((s) => (
+                    <Button key={s.label} size="compact-md" variant="subtle" onClick={s.onClick}>
+                      {s.label}
+                    </Button>
+                  ))}
+                </Group>
+              )}
+            </Box>
+          ) : (
           <Box p="md" h="100%" style={{ background: TONE_BG[step.tone], borderRadius: 'var(--mantine-radius-lg)' }} key={step.title} className="fade-enter">
             <Group gap={8} wrap="nowrap">
               <ThemeIcon size={22} radius="xl" color={step.tone === 'gray' ? 'gray' : step.tone} variant="filled">
@@ -858,6 +929,7 @@ export function OrderPage() {
               </Group>
             )}
           </Box>
+          )}
         </Grid.Col>
       </Grid>
 
@@ -886,11 +958,22 @@ export function OrderPage() {
         </div>
       </Box>
 
-      {step.primary && (
-        <Box hiddenFrom="sm">
-          <StickyBar>{primaryBtn}</StickyBar>
-        </Box>
-      )}
+      {quick
+        ? quickPrimary && (
+            <Box hiddenFrom="sm">
+              <StickyBar>
+                <Button fullWidth color={quickPrimary.color} loading={busy} onClick={quickPrimary.onClick}>
+                  {quickPrimary.label}
+                </Button>
+              </StickyBar>
+            </Box>
+          )
+        : step.primary && (
+            <Box hiddenFrom="sm">
+              <StickyBar>{primaryBtn}</StickyBar>
+            </Box>
+          )}
+      <CustomerModal opened={customerOpen} onClose={() => setCustomerOpen(false)} customer={b.customer} />
 
       <StageModal b={b} opened={stageOpen} onClose={() => setStageOpen(false)} />
       <QcModal b={b} opened={qc} onClose={() => setQc(false)} />
@@ -898,7 +981,9 @@ export function OrderPage() {
       <ReasonModal title={t('next.noShow')} opened={noShow} onClose={() => setNoShow(false)} onSubmit={(r) => run(() => markNoShow(b.order.id, r))} />
       <Modal opened={decline} onClose={() => setDecline(false)} title={t('order.declineRepair')}>
         <Text size="sm" mb="md">
-          {t('order.declineExplain', { fee: formatAed(b.intake?.conditions?.diagnosticsFeeFils ?? 0) })}
+          {b.intake?.conditions?.diagnosticsFeeFils
+            ? t('order.declineExplain', { fee: formatAed(b.intake.conditions.diagnosticsFeeFils) })
+            : t('order.declineExplainNoFee')}
         </Text>
         <Button color="red" fullWidth onClick={() => run(async () => { await declineRepair(b.order.id); setDecline(false); })}>
           {t('common.confirm')}

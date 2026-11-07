@@ -1,4 +1,4 @@
-import { Alert, Badge, Box, Button, Group, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, Title } from '@mantine/core';
+import { Alert, Badge, Box, Button, Group, SimpleGrid, Stack, Switch, Text, Textarea, TextInput, ThemeIcon, Title } from '@mantine/core';
 import { IconArrowLeft, IconArrowRight, IconCheck, IconFileTypePdf, IconLock, IconSend, IconSignature, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState, type ComponentType } from 'react';
@@ -10,11 +10,12 @@ import { REQUIRED_SLOTS, validateInspection, type MissingKey } from '../../domai
 import { formatAed } from '../../domain/money';
 import type { Inspection } from '../../domain/types';
 import { inspectionPdf, openPdf } from '../../services/documents';
-import { addAddendum, getOrCreateInspection, inspectionState, signInspection, updateInspection } from '../../services/inspections';
+import { addAddendum, completeInspection, getOrCreateInspection, inspectionState, signInspection, updateInspection } from '../../services/inspections';
 import { simpleMessage } from '../../services/messages';
-import { bundleAmountDue } from '../../services/orders';
+import { bundleAmountDue, updateOrder } from '../../services/orders';
 import { haptic } from '../../ui/clipboard';
-import { Field, PageHeader, PageSkeleton, PlateText, Section, StickyBar, SuccessMark } from '../../ui/components';
+import { Field, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
+import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useErrorText, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
@@ -28,7 +29,6 @@ import {
   DashboardStep,
   ObdStep,
   PhotosStep,
-  VehicleStep,
   WorkSummaryStep,
   type StepProps,
 } from './steps';
@@ -54,18 +54,28 @@ function PaymentStep({ b }: StepProps) {
 
 const Empty = () => null;
 
+/**
+ * Fast check-in: six steps, none of them required. The car and customer were taken on the new-job
+ * screen; belongings, a repeated complaint/accident question and the long terms are gone.
+ */
 const INTAKE_STEPS: StepDef[] = [
-  { key: 'vehicle', C: VehicleStep },
   { key: 'photos', C: PhotosStep },
   { key: 'damage', C: DamageStep },
   { key: 'dashboard', C: DashboardStep },
   { key: 'obd', C: ObdStep },
   { key: 'checks', C: ChecksStep },
-  { key: 'belongings', C: BelongingsStep },
-  { key: 'complaint', C: ComplaintStep },
-  { key: 'conditions', C: ConditionsStep },
-  { key: 'sign', C: Empty },
+  { key: 'finish', C: Empty },
 ];
+
+/** Parts of acts signed before the fast check-in, still shown read-only on those acts. */
+function legacySteps(insp: Inspection): StepDef[] {
+  if (insp.kind !== 'intake') return [];
+  return [
+    ...(insp.keysCount !== undefined || insp.belongings ? [{ key: 'belongings', C: BelongingsStep }] : []),
+    ...(insp.accidentRepair || insp.policeReportNo ? [{ key: 'complaint', C: ComplaintStep }] : []),
+    ...(insp.conditions?.noCallLimitFils !== undefined ? [{ key: 'conditions', C: ConditionsStep }] : []),
+  ];
+}
 
 const HANDOVER_STEPS: StepDef[] = [
   { key: 'photos', C: PhotosStep },
@@ -95,11 +105,13 @@ function stepDone(key: string, p: StepProps): boolean {
     case 'vehicle':
       return true;
     case 'photos':
-      return REQUIRED_SLOTS.every((s) => slots.has(s) || insp.skippedPhotos[s]);
+      return insp.kind === 'intake' ? REQUIRED_SLOTS.some((s) => slots.has(s)) : REQUIRED_SLOTS.every((s) => slots.has(s) || insp.skippedPhotos[s]);
     case 'damage':
       return !!insp.noDamage || marks.length > 0;
     case 'dashboard':
-      return insp.mileageKm !== undefined && insp.fuelLevel !== undefined;
+      return insp.kind === 'intake' ? insp.mileageKm !== undefined || insp.fuelLevel !== undefined : insp.mileageKm !== undefined && insp.fuelLevel !== undefined;
+    case 'finish':
+      return insp.locked || !!insp.completedAt;
     case 'obd':
       return !!insp.obdNoCodes || insp.obdCodes.length > 0 || !!insp.obdSkipReason?.trim();
     case 'checks':
@@ -119,6 +131,56 @@ function stepDone(key: string, p: StepProps): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * Last intake step: promised ready time, test drive, and the customer's signature if they give it.
+ * One "Save": with a signature the act is signed and frozen, without it the act stays editable.
+ */
+function FinishStep({ props, onDone }: { props: StepProps; onDone: (i: Inspection, signed: boolean) => void }) {
+  const { t } = useTranslation();
+  const { run, busy } = useAction();
+  const { insp, b } = props;
+  const sig = useRef<SignatureHandle>(null);
+  const [name, setName] = useState(b.customer.name);
+  const c = insp.conditions ?? { testDriveAllowed: true };
+  return (
+    <Stack gap={0}>
+      <div className="group-title">{t('finish.readyTitle')}</div>
+      <RowGroup mt={0}>
+        <Box px="md" py="sm">
+          <DateTimeField label={t('cond.promised')} placeholder={t('common.notSet')} value={b.order.promisedReadyAt} onChange={(v) => void updateOrder(b.order.id, { promisedReadyAt: v })} />
+        </Box>
+        <FormRow label={t('cond.testDrive')}>
+          <Switch checked={c.testDriveAllowed} onChange={(e) => void updateInspection(insp.id, { conditions: { ...c, testDriveAllowed: e.currentTarget.checked } })} aria-label={t('cond.testDrive')} />
+        </FormRow>
+      </RowGroup>
+      <div className="group-title" style={{ marginTop: 22 }}>
+        {t('finish.signTitle')}
+      </div>
+      <Box className="surface" p="md">
+        <TextInput label={t('sign.name')} value={name} onChange={(e) => setName(e.currentTarget.value)} mb="sm" />
+        <SignatureBox ref={sig} height={170} />
+      </Box>
+      <div className="group-note">{t('finish.signNote')}</div>
+      <Button
+        mt="lg"
+        size="lg"
+        h={52}
+        radius="md"
+        loading={busy}
+        onClick={() =>
+          run(async () => {
+            const signed = !!sig.current && !sig.current.isEmpty();
+            const i = signed ? await signInspection(insp.id, name, sig.current!.toBlob()) : await completeInspection(insp.id);
+            onDone(i, signed);
+          }, 'finish.saved')
+        }
+      >
+        {t('finish.save')}
+      </Button>
+    </Stack>
+  );
 }
 
 function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: Inspection) => void; goTo: (key: string) => void }) {
@@ -157,7 +219,7 @@ function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: I
           </Button>
         </Alert>
       )}
-      <Box className="surface" p="lg" style={{ borderTop: '4px solid var(--mantine-color-cobalt-6)' }}>
+      <Box className="surface" p="lg">
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <div>
             <div className="eyebrow">{b.settings.name}</div>
@@ -186,7 +248,7 @@ function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: I
               <Field label={tc('pdf.notWorking')}>{fails.join(', ') || tc('pdf.none')}</Field>
               <Field label={tc('intake.keys')}>{insp.keysCount ?? '—'}</Field>
               <Field label={tc('intake.belongings')}>{insp.belongings || tc('pdf.none')}</Field>
-              {c && <Field label={tc('cond.noCallLimit')}>{c.noCallLimitFils ? formatAed(c.noCallLimitFils, lang) : tc('cond.alwaysCall')}</Field>}
+              {c?.noCallLimitFils !== undefined && <Field label={tc('cond.noCallLimit')}>{c.noCallLimitFils ? formatAed(c.noCallLimitFils, lang) : tc('cond.alwaysCall')}</Field>}
             </>
           )}
         </SimpleGrid>
@@ -338,7 +400,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
               </Button>
             </Group>
           </Box>
-          {steps.slice(0, -1).map((s) => (
+          {[...steps.slice(0, -1), ...legacySteps(insp)].map((s) => (
             <Section key={s.key} title={t(`step.${s.key}`)} mt={0}>
               <s.C {...props} />
             </Section>
@@ -384,9 +446,28 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
         title={t(`step.${S.key}`)}
         subtitle={subtitle}
         right={
-          <Button variant="subtle" color="gray" size="compact-md" leftSection={<IconX size={16} />} onClick={() => navigate(`/orders/${b.order.id}`)}>
-            {t('intake.later')}
-          </Button>
+          kind === 'intake' ? (
+            // "Done" on any step: save what is filled in and go back to the job.
+            <Button
+              variant="subtle"
+              size="compact-md"
+              fz={17}
+              fw={600}
+              loading={busy}
+              onClick={() =>
+                run(async () => {
+                  await completeInspection(insp.id);
+                  navigate(`/orders/${b.order.id}`);
+                }, 'finish.saved')
+              }
+            >
+              {t('intake.done')}
+            </Button>
+          ) : (
+            <Button variant="subtle" color="gray" size="compact-md" leftSection={<IconX size={16} />} onClick={() => navigate(`/orders/${b.order.id}`)}>
+              {t('intake.later')}
+            </Button>
+          )
         }
       />
       <div className="wizard-steps" role="tablist" ref={chips} aria-label={t('intake.stepsLabel', { done: doneCount, total: steps.length })}>
@@ -401,7 +482,19 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
         })}
       </div>
       <Box mt="lg" key={S.key} className={dir === 'next' ? 'step-next' : 'step-prev'}>
-        {S.key === 'sign' ? (
+        {S.key === 'finish' ? (
+          <FinishStep
+            props={props}
+            onDone={(i, signed) => {
+              haptic([12, 60, 18]);
+              if (!signed) return navigate(`/orders/${b.order.id}`);
+              setJustSigned(true);
+              window.scrollTo({ top: 0 });
+              offerSend(i);
+              window.setTimeout(() => void inspectionPdf(i.id).catch(() => undefined), 1500);
+            }}
+          />
+        ) : S.key === 'sign' ? (
           <SignStep
             props={props}
             goTo={gotoKey}
@@ -418,14 +511,14 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
           <S.C {...props} />
         )}
       </Box>
-      {S.key !== 'sign' && (
+      {S.key !== 'sign' && S.key !== 'finish' && (
         <StickyBar>
           <Group gap="xs" wrap="nowrap">
-            <Button variant="default" disabled={step === 0} onClick={() => goto(step - 1)} leftSection={<IconArrowLeft size={18} />}>
+            <Button variant="light" color="gray" disabled={step === 0} onClick={() => goto(step - 1)} leftSection={<IconArrowLeft size={18} />}>
               {t('common.back')}
             </Button>
             <Button style={{ flex: 1 }} onClick={() => goto(step + 1)} rightSection={<IconArrowRight size={18} />}>
-              {step + 1 === steps.length - 1 ? t('intake.toSign') : t('common.next')}
+              {kind === 'handover' && step + 1 === steps.length - 1 ? t('intake.toSign') : t('common.next')}
             </Button>
           </Group>
         </StickyBar>

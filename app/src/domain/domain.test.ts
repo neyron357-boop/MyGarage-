@@ -185,21 +185,22 @@ describe('stage transitions', () => {
   const base = (p: Partial<StageContext> = {}): StageContext => ({
     order: order(),
     items: [],
-    intakeSigned: false,
+    intakeDone: false,
     sentVersions: 0,
     handoverSigned: false,
     amountDueFils: 0,
     debtSigned: false,
     qcComplete: false,
+    invoiced: false,
     ...p,
   });
 
-  it('requires a signed intake act', () => {
+  it('requires a finished intake act', () => {
     expect(checkTransition('intake', 'diagnostics', base()).ok).toBe(false);
-    expect(checkTransition('intake', 'diagnostics', base({ intakeSigned: true })).ok).toBe(true);
+    expect(checkTransition('intake', 'diagnostics', base({ intakeDone: true })).ok).toBe(true);
   });
   it('cannot skip stages', () => {
-    expect(checkTransition('intake', 'ready', base({ intakeSigned: true })).ok).toBe(false);
+    expect(checkTransition('intake', 'ready', base({ intakeDone: true })).ok).toBe(false);
   });
   it('blocks work when parts are missing or nothing approved', () => {
     const part = item({ kind: 'part', approvalState: 'approved', procurementStatus: 'ordered' });
@@ -225,6 +226,13 @@ describe('stage transitions', () => {
       true,
     );
     expect(checkTransition('delivered', 'closed', base({ amountDueFils: 100 })).ok).toBe(false);
+  });
+  it('closes from any working stage once the invoice is paid (quick path)', () => {
+    expect(checkTransition('intake', 'closed', base()).ok).toBe(false);
+    expect(checkTransition('intake', 'closed', base({ invoiced: true, amountDueFils: 100 })).ok).toBe(false);
+    expect(checkTransition('intake', 'closed', base({ invoiced: true, amountDueFils: 0 })).ok).toBe(true);
+    expect(checkTransition('in_progress', 'closed', base({ invoiced: true, amountDueFils: 100, debtSigned: true })).ok).toBe(true);
+    expect(checkTransition('booked', 'closed', base({ invoiced: true })).ok).toBe(false);
   });
   it('declined repair goes straight to ready', () => {
     expect(checkTransition('awaiting_approval', 'ready', base()).ok).toBe(false);

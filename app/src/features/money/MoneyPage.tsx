@@ -69,34 +69,32 @@ function CashTab() {
   const diff = actual !== undefined ? actual - st.expected : 0;
   return (
     <Stack gap="lg">
-      <Box p="lg" style={{ background: 'var(--app-ink)', color: '#fff', borderRadius: 'var(--mantine-radius-lg)' }}>
-        <Text size="11px" fw={700} tt="uppercase" c="var(--app-ink-muted)" style={{ letterSpacing: '0.08em' }}>
-          {t('cash.expected')}
-        </Text>
+      <Box p="lg" className="surface">
+        <div className="eyebrow">{t('cash.expected')}</div>
         <Text fz={40} lh={1.1} mt={4}>
           <Money fils={st.expected} display />
         </Text>
         <Group gap="lg" mt="sm">
-          <Text size="sm" c="var(--app-ink-muted)">
-            {t('cash.opening')}: <Money fils={st.opening} c="#fff" />
+          <Text size="sm" c="dimmed">
+            {t('cash.opening')}: <Money fils={st.opening} />
           </Text>
-          <Text size="sm" c="var(--app-ink-muted)">
-            {t('cash.in')}: <Money fils={st.inFils} c="green.4" />
+          <Text size="sm" c="dimmed">
+            {t('cash.in')}: <Money fils={st.inFils} c="green.7" />
           </Text>
-          <Text size="sm" c="var(--app-ink-muted)">
-            {t('cash.out')}: <Money fils={st.outFils} c="red.4" />
+          <Text size="sm" c="dimmed">
+            {t('cash.out')}: <Money fils={st.outFils} c="red.7" />
           </Text>
         </Group>
         <Group mt="lg" gap="xs">
           <Button leftSection={<IconLock size={18} />} onClick={() => setCloseOpen(true)}>
             {t('cash.closeDay')}
           </Button>
-          <Button variant="white" color="dark" onClick={() => setMoveOpen(true)}>
+          <Button variant="light" onClick={() => setMoveOpen(true)}>
             {t('cash.addMovement')}
           </Button>
         </Group>
         {st.lastClosing && (
-          <Text size="xs" c="var(--app-ink-muted)" mt="sm">
+          <Text size="xs" c="dimmed" mt="sm">
             {t('cash.lastClosed', { date: formatDateTime(st.lastClosing.closedAt) })}
           </Text>
         )}

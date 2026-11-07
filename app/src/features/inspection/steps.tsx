@@ -167,14 +167,16 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
       <Group justify="space-between" wrap="nowrap" gap={4} align="flex-start">
         <Text size="xs" fw={600} lineClamp={2} lh={1.3}>
           {t(`slot.${slot}`)}
-          {required && !photo && !skipped && (
+          {required && insp.kind !== 'intake' && !photo && !skipped && (
             <Text span c="red" inherit>
               {' '}
               *
             </Text>
           )}
         </Text>
+        {/* At check-in a photo is never required, so there is nothing to "skip with a reason". */}
         {!insp.locked &&
+          insp.kind !== 'intake' &&
           !photo &&
           (skipped ? (
             <Anchor component="button" size="xs" onClick={() => { const s = { ...insp.skippedPhotos }; delete s[slot]; void save(insp, { skippedPhotos: s }); }}>
@@ -285,7 +287,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
       <Card>
         <Group justify="space-between" mb={6}>
           <Text size="sm" fw={600}>
-            {insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hint')}
+            {insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hintOptional')}
           </Text>
           <Text fw={800} className="display" fz={18} c={done === REQUIRED_SLOTS.length ? 'green' : undefined}>
             {done} / {REQUIRED_SLOTS.length}
@@ -302,7 +304,8 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
         {t('photos.extra')}
       </Title>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
-        {EXTRA_SLOTS.filter((s) => s !== 'extra').map((s) => (
+        {/* The registration card (Mulkiya) is one of the extra photos at check-in. */}
+        {[...(insp.kind === 'intake' ? ['mulkiya'] : []), ...EXTRA_SLOTS.filter((s) => s !== 'extra')].map((s) => (
           <PhotoSlot key={s} insp={insp} slot={s} media={media} before={intakeMedia?.find((m) => m.slot === s)} />
         ))}
       </SimpleGrid>
@@ -564,8 +567,10 @@ export function ObdStep({ insp, media }: StepProps) {
           </Text>
         </Group>
       </SelectCard>
-      {!insp.obdNoCodes && insp.obdCodes.length === 0 && (
-        <LazyTextInput label={t('intake.obdSkip')} placeholder={t('intake.obdSkipPlaceholder')} value={insp.obdSkipReason} disabled={insp.locked} onCommit={(v) => void save(insp, { obdSkipReason: v })} />
+      {insp.locked && insp.obdSkipReason && (
+        <Text size="sm" c="dimmed">
+          {t('intake.obdSkip')}: {insp.obdSkipReason}
+        </Text>
       )}
     </Stack>
   );
@@ -768,10 +773,12 @@ export function WorkSummaryStep({ b }: StepProps) {
         </Alert>
       )}
       <Card>
-        <Text size="sm">
-          <b>{t('cond.oldParts')}:</b> {t(`cond.${b.intake?.conditions?.oldParts ?? 'return'}`)}
-        </Text>
-        <Text size="sm" mt="sm" c="dimmed">
+        {b.intake?.conditions?.oldParts && (
+          <Text size="sm" mb="sm">
+            <b>{t('cond.oldParts')}:</b> {t(`cond.${b.intake.conditions.oldParts}`)}
+          </Text>
+        )}
+        <Text size="sm" c="dimmed">
           {(b.settings.warrantyText[lang] ?? '').replace('{months}', String(b.settings.warrantyLaborMonths)).replace('{km}', String(b.settings.warrantyLaborKm))}
         </Text>
       </Card>

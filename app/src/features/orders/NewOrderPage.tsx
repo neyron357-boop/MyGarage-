@@ -1,315 +1,385 @@
-import { ActionIcon, Box, Button, Chip, Group, SegmentedControl, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, Title } from '@mantine/core';
-import { IconArrowRight, IconCalendarTime, IconCar, IconPencil, IconSearch, IconUserCheck, IconUserPlus } from '@tabler/icons-react';
+import { Autocomplete, Box, Button, Group, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
+import { IconCar, IconChevronRight, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
+import { CAR_MAKES, canonicalMake, canonicalModel, modelsFor, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone } from '../../domain/phone';
-import type { Customer, Vehicle } from '../../domain/types';
-import { createCustomer, createVehicle, findCustomerByPhone, findVehicleByPlate, type CustomerInput, type VehicleInput } from '../../services/customers';
-import { createOrder } from '../../services/orders';
-import { List, PageHeader, PlateText, SelectCard, StickyBar } from '../../ui/components';
+import { EMIRATES } from '../../domain/plates';
+import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
+import { findVehicleForCheckIn, popularMakes, popularModels, suggestCustomers } from '../../services/customers';
+import { checkIn } from '../../services/orders';
+import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
-import { useAction } from '../../ui/hooks';
-import { CustomerFields, EMPTY_CUSTOMER, EMPTY_VEHICLE, VehicleFields } from '../customers/forms';
-import { HitRow, useSearch } from '../search/SearchPage';
+import { typedOnly, useAction, useLang } from '../../ui/hooks';
 
 const QUICK = ['service', 'brakes', 'ac', 'checkEngine', 'suspension', 'electrics', 'noise', 'battery'];
+const LAST_EMIRATE = 'mygarage.lastEmirate';
 
-function Card({ n, title, children, done }: { n: number; title: ReactNode; children: ReactNode; done?: boolean }) {
+function lastEmirate(): Emirate {
+  try {
+    const e = localStorage.getItem(LAST_EMIRATE);
+    if (e && EMIRATES.some((x) => x.code === e)) return e as Emirate;
+  } catch {
+    // storage unavailable
+  }
+  return 'DXB';
+}
+
+function rememberEmirate(e: Emirate) {
+  try {
+    localStorage.setItem(LAST_EMIRATE, e);
+  } catch {
+    // storage unavailable
+  }
+}
+
+/** A customer with no name yet is shown by phone, or as "no name". */
+function who(c: Customer | undefined, noName: string): string {
+  if (!c) return '';
+  return [c.name || noName, c.phone ? formatPhone(c.phone) : ''].filter(Boolean).join(' · ');
+}
+
+/** Big UAE plate: emirate chips, code and number, live preview. The number is the one thing check-in needs. */
+function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) => void }) {
+  const { t } = useTranslation();
+  const lang = useLang();
   return (
     <Box className="surface" p="md">
-      <Group gap="sm" mb="md" wrap="nowrap">
-        <ThemeIcon radius="xl" size={28} color={done ? 'green' : 'cobalt'} variant={done ? 'filled' : 'light'}>
-          <Text size="sm" fw={800}>
-            {n}
-          </Text>
-        </ThemeIcon>
-        <Title order={5}>{title}</Title>
+      <Box ta="center" mb="md" mt={4}>
+        {plate.number ? (
+          <PlateText plate={plate} size="xl" />
+        ) : (
+          <span className="plate xl" style={{ opacity: 0.28 }} aria-hidden>
+            <span className="em">{EMIRATES.find((e) => e.code === plate.emirate)?.en}</span>
+            <span className="code">A</span>
+            <span className="num">12345</span>
+          </span>
+        )}
+      </Box>
+      <div className="chip-row" role="radiogroup" aria-label={t('vehicle.emirate')}>
+        {EMIRATES.map((e) => (
+          <button key={e.code} type="button" className="chip" role="radio" aria-checked={plate.emirate === e.code} data-active={plate.emirate === e.code} onClick={() => onChange({ ...plate, emirate: e.code })}>
+            {e[lang]}
+          </button>
+        ))}
+      </div>
+      <Group gap="sm" mt="sm" wrap="nowrap" align="flex-start">
+        <TextInput
+          aria-label={t('vehicle.plateCode')}
+          placeholder={t('vehicle.plateCode')}
+          value={plate.code}
+          onChange={(e) => onChange({ ...plate, code: e.currentTarget.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
+          maxLength={3}
+          autoCapitalize="characters"
+          autoComplete="off"
+          size="lg"
+          style={{ flex: '0 0 96px' }}
+          styles={{ input: { fontFamily: 'var(--font-plate)', fontSize: 24, textAlign: 'center', fontWeight: 600 } }}
+        />
+        <TextInput
+          aria-label={t('vehicle.plateNumber')}
+          placeholder={t('vehicle.plateNumber')}
+          value={plate.number}
+          onChange={(e) => onChange({ ...plate, number: e.currentTarget.value.replace(/\D/g, '') })}
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={6}
+          size="lg"
+          autoFocus
+          data-autofocus
+          style={{ flex: 1 }}
+          styles={{ input: { fontFamily: 'var(--font-plate)', fontSize: 24, letterSpacing: '0.08em', fontWeight: 600 } }}
+        />
       </Group>
-      {children}
     </Box>
   );
 }
 
-function DuplicateHint({ title, text, action, onPick }: { title: string; text: string; action: string; onPick: () => void }) {
+/** Make and model: one tap on a chip or a pick from the built-in list; free text still works. */
+function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model: string; onMake: (v: string) => void; onModel: (v: string) => void }) {
+  const { t } = useTranslation();
+  const makes = useLiveQuery(() => popularMakes(POPULAR_MAKES), []) ?? POPULAR_MAKES;
+  const canon = canonicalMake(make);
+  const catalogue = useMemo(() => modelsFor(make), [make]);
+  const models = useLiveQuery(() => popularModels(canon, catalogue), [canon, catalogue]) ?? catalogue.slice(0, 10);
   return (
-    <Group className="surface-soft rise-enter" p="sm" gap="sm" wrap="nowrap" style={{ borderLeft: '3px solid var(--mantine-color-orange-5)' }}>
-      <IconUserCheck size={20} color="var(--mantine-color-orange-6)" style={{ flexShrink: 0 }} />
-      <Box style={{ flex: 1, minWidth: 0 }}>
-        <Text size="sm" fw={600} lh={1.3}>
-          {title}
-        </Text>
-        {text && (
-          <Text size="xs" c="dimmed" className="tnum">
-            {text}
-          </Text>
-        )}
-      </Box>
-      <Button size="compact-sm" variant="light" color="orange" onClick={onPick} style={{ flexShrink: 0 }}>
-        {action}
-      </Button>
-    </Group>
+    <Box className="surface" p="md">
+      <div className="chip-row" aria-label={t('vehicle.make')}>
+        {makes.map((m) => (
+          <button
+            key={m}
+            type="button"
+            className="chip"
+            data-active={canon === m}
+            onClick={() => {
+              if (canon !== m) onModel('');
+              onMake(m);
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      <Autocomplete
+        mt="sm"
+        aria-label={t('vehicle.make')}
+        placeholder={t('newOrder.makePlaceholder')}
+        data={CAR_MAKES}
+        filter={typedOnly}
+        limit={8}
+        value={make}
+        onChange={(v) => {
+          if (canonicalMake(v) !== canon) onModel('');
+          onMake(v);
+        }}
+        autoComplete="off"
+      />
+      {canon && (
+        <Box className="rise-enter">
+          {models.length > 0 && (
+            <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('vehicle.model')}>
+              {models.map((m) => (
+                <button key={m} type="button" className="chip" data-active={canonicalModel(make, model) === m} onClick={() => onModel(m)}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+          <Autocomplete mt="sm" aria-label={t('vehicle.model')} placeholder={t('vehicle.model')} data={catalogue} filter={typedOnly} limit={8} value={model} onChange={onModel} autoComplete="off" />
+        </Box>
+      )}
+    </Box>
   );
 }
 
 export function NewOrderPage() {
   const { t } = useTranslation();
+  const lang = useLang();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { run, busy } = useAction();
-  const [q, setQ] = useState('');
-  const hits = useSearch(q);
-  const [customer, setCustomer] = useState<Customer>();
-  const [vehicle, setVehicle] = useState<Vehicle>();
-  const [mode, setMode] = useState<'find' | 'new'>('find');
-  const [newC, setNewC] = useState<CustomerInput>(EMPTY_CUSTOMER);
-  const [newV, setNewV] = useState<VehicleInput>(EMPTY_VEHICLE);
+  const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
+  const [make, setMake] = useState('');
+  const [model, setModel] = useState('');
+  const [picked, setPicked] = useState<{ vehicle: Vehicle; owner?: Customer; activeOrder?: Order }>();
+  const [pickedCustomer, setPickedCustomer] = useState<Customer>();
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [docLanguage, setDocLanguage] = useState<Lang>(lang);
   const [complaint, setComplaint] = useState('');
-  const [when, setWhen] = useState<'now' | 'later'>(params.get('when') === 'later' ? 'later' : 'now');
+  const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();
 
+  // Opened from a car's page ("New job" for this car).
   const preVehicle = useLiveQuery(async () => {
     const id = params.get('vehicleId');
     if (!id) return undefined;
     const v = await db.vehicles.get(id);
-    const c = v ? await db.customers.get(v.customerId) : undefined;
-    return v && c ? { v, c } : undefined;
+    return v ? findVehicleForCheckIn(v.plate) : undefined;
   }, [params]);
   useEffect(() => {
-    if (preVehicle) {
-      setVehicle(preVehicle.v);
-      setCustomer(preVehicle.c);
-    }
+    if (preVehicle) setPicked(preVehicle);
   }, [preVehicle]);
 
-  // Same phone or plate already in the base: offer to pick it instead of creating a duplicate.
-  const dupCustomer = useLiveQuery(() => (mode === 'new' && !customer ? findCustomerByPhone(newC.phone) : undefined), [mode, customer, newC.phone]);
-  const dupVehicle = useLiveQuery(() => (!vehicle ? findVehicleByPlate(newV.plate) : undefined), [vehicle, newV.plate.emirate, newV.plate.code, newV.plate.number]);
-  const pickExisting = (c?: Customer, v?: Vehicle) => {
-    if (c) setCustomer(c);
-    if (v) setVehicle(v);
-  };
+  // The plate is already in the base: offer that car (and its open job, if any).
+  const match = useLiveQuery(() => (picked ? undefined : findVehicleForCheckIn(plate)), [picked, plate.emirate, plate.code, plate.number]);
+  const suggestions = useLiveQuery(() => (picked || pickedCustomer ? [] : suggestCustomers(phone, name)), [picked, pickedCustomer, phone, name]) ?? [];
+  const owner = picked?.owner ?? pickedCustomer;
 
-  const createNew = () =>
-    run(async () => {
-      const c = await createCustomer(newC);
-      const v = await createVehicle(c.id, newV);
-      setCustomer(c);
-      setVehicle(v);
-    });
-  const addVehicleToCustomer = () =>
-    run(async () => {
-      if (!customer) return;
-      setVehicle(await createVehicle(customer.id, newV));
-    });
-  const submit = () =>
-    run(async () => {
-      if (!customer || !vehicle) return;
-      const o = await createOrder({ customerId: customer.id, vehicleId: vehicle.id, complaint, arrivedNow: when === 'now', bookedFor: when === 'later' ? bookedFor : undefined });
-      navigate(when === 'now' ? `/orders/${o.id}/intake` : `/orders/${o.id}`, { replace: true });
-    });
   const addQuick = (k: string) => {
     const phrase = t(`newOrder.quick.${k}`);
     setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase.toLowerCase()}` : phrase));
   };
-  const picked = customer && vehicle;
-  // Once the customer and car are chosen, bring "What happened" into view (phones scroll a lot here).
-  const step2 = useRef<HTMLDivElement>(null);
-  const wasPicked = useRef(!!picked);
-  useEffect(() => {
-    if (picked && !wasPicked.current) window.setTimeout(() => step2.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
-    wasPicked.current = !!picked;
-  }, [picked]);
 
+  const submit = (target: 'intake' | 'invoice' | 'book') =>
+    run(async () => {
+      const o = await checkIn({
+        vehicleId: picked?.vehicle.id,
+        plate,
+        make: canonicalMake(make),
+        model: canonicalModel(make, model),
+        customerId: owner?.id,
+        name,
+        phone,
+        docLanguage,
+        complaint,
+        arrivedNow: target !== 'book',
+        bookedFor: target === 'book' ? bookedFor : undefined,
+      });
+      if (!picked) rememberEmirate(plate.emirate);
+      navigate(target === 'intake' ? `/orders/${o.id}/intake` : target === 'invoice' ? `/orders/${o.id}/invoice` : `/orders/${o.id}`, { replace: true });
+    });
+
+  const noName = t('customer.noName');
   return (
     <>
-      <PageHeader back title={t('newOrder.title')} subtitle={t('newOrder.subtitle')} />
-      <Stack gap="md">
-        <Card n={1} title={t('newOrder.who')} done={!!picked}>
-          {picked ? (
-            <Group justify="space-between" wrap="nowrap">
+      <PageHeader back title={t('newOrder.title')} />
+      <Stack gap={0}>
+        <div className="group-title">{t('newOrder.vehicle')}</div>
+        {picked ? (
+          <Box className="surface rise-enter" p="md">
+            <Group justify="space-between" wrap="nowrap" gap="sm">
               <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                <PlateText plate={vehicle.plate} size="md" />
+                <PlateText plate={picked.vehicle.plate} size="lg" />
                 <Box style={{ minWidth: 0 }}>
-                  <Text fw={700} lineClamp={1}>
-                    {vehicle.make} {vehicle.model}
+                  <Text fw={600} lineClamp={1}>
+                    {[picked.vehicle.make, picked.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
                   </Text>
                   <Text size="sm" c="dimmed" lineClamp={1}>
-                    {customer.name} · {formatPhone(customer.phone)}
+                    {who(picked.owner, noName)}
                   </Text>
                 </Box>
               </Group>
-              <ActionIcon
-                variant="default"
-                size={38}
-                aria-label={t('common.change')}
-                onClick={() => {
-                  setCustomer(undefined);
-                  setVehicle(undefined);
-                }}
-              >
-                <IconPencil size={18} />
-              </ActionIcon>
+              <Button variant="subtle" size="compact-md" onClick={() => setPicked(undefined)}>
+                {t('newOrder.otherCar')}
+              </Button>
             </Group>
-          ) : (
-            <Stack gap="md">
-              {!customer && (
-                <SegmentedControl
-                  fullWidth
-                  value={mode}
-                  onChange={(v) => setMode(v as 'find' | 'new')}
-                  data={[
-                    { value: 'find', label: t('newOrder.findExisting') },
-                    { value: 'new', label: t('newOrder.newCustomer') },
-                  ]}
-                />
-              )}
-              {!customer && mode === 'find' && (
-                <>
-                  <TextInput leftSection={<IconSearch size={18} />} placeholder={t('search.placeholderShort')} value={q} onChange={(e) => setQ(e.currentTarget.value)} data-autofocus autoFocus />
-                  {!!hits?.length && (
-                    <List>
-                      {hits.map((h) => (
-                        <HitRow
-                          key={(h.vehicle?.id ?? '') + h.customer.id}
-                          hit={h}
-                          onClick={() => {
-                            if (h.activeOrder) return navigate(`/orders/${h.activeOrder.id}`);
-                            setCustomer(h.customer);
-                            setVehicle(h.vehicle);
-                          }}
-                        />
-                      ))}
-                    </List>
-                  )}
-                  {q && hits?.length === 0 && (
-                    <Group justify="space-between" className="surface-soft" p="sm">
-                      <Text size="sm" c="dimmed">
-                        {t('search.noResults')}
-                      </Text>
-                      <Button size="compact-sm" variant="light" leftSection={<IconUserPlus size={16} />} onClick={() => setMode('new')}>
-                        {t('newOrder.newCustomer')}
-                      </Button>
-                    </Group>
-                  )}
-                </>
-              )}
-              {!customer && mode === 'new' && (
-                <Stack gap="lg">
-                  <CustomerFields value={newC} onChange={setNewC} compact />
-                  {dupCustomer && (
-                    <DuplicateHint
-                      title={t('newOrder.dupCustomer', { name: dupCustomer.name })}
-                      text={formatPhone(dupCustomer.phone)}
-                      action={t('newOrder.pickThis')}
-                      onPick={() => pickExisting(dupCustomer, dupVehicle?.owner?.id === dupCustomer.id ? dupVehicle.vehicle : undefined)}
-                    />
-                  )}
-                  <Box pt="md" style={{ borderTop: '1px solid var(--app-hairline)' }}>
-                    <Group gap={8} mb="sm">
-                      <IconCar size={18} />
-                      <Text fw={700}>{t('newOrder.vehicle')}</Text>
-                    </Group>
-                    <VehicleFields value={newV} onChange={setNewV} compact />
-                    {dupVehicle && (
-                      <Box mt="sm">
-                        <DuplicateHint
-                          title={t('newOrder.dupVehicle', { car: `${dupVehicle.vehicle.make} ${dupVehicle.vehicle.model}` })}
-                          text={dupVehicle.owner ? `${dupVehicle.owner.name} · ${formatPhone(dupVehicle.owner.phone)}` : ''}
-                          action={t('newOrder.pickThis')}
-                          onPick={() => pickExisting(dupVehicle.owner, dupVehicle.vehicle)}
-                        />
-                      </Box>
-                    )}
-                  </Box>
-                  <Button onClick={createNew} loading={busy} rightSection={<IconArrowRight size={18} />}>
-                    {t('newOrder.saveCustomer')}
-                  </Button>
-                </Stack>
-              )}
-              {customer && !vehicle && (
-                <Stack>
-                  <Text size="sm">
-                    <b>{customer.name}</b>: {t('newOrder.addVehicle')}
-                  </Text>
-                  <VehicleFields value={newV} onChange={setNewV} compact />
-                  {dupVehicle && (
-                    <DuplicateHint
-                      title={t('newOrder.dupVehicle', { car: `${dupVehicle.vehicle.make} ${dupVehicle.vehicle.model}` })}
-                      text={dupVehicle.owner ? `${dupVehicle.owner.name} · ${formatPhone(dupVehicle.owner.phone)}` : ''}
-                      action={t('newOrder.pickThis')}
-                      onPick={() => pickExisting(dupVehicle.owner, dupVehicle.vehicle)}
-                    />
-                  )}
-                  <Group grow>
-                    <Button variant="default" onClick={() => setCustomer(undefined)}>
-                      {t('common.back')}
-                    </Button>
-                    <Button onClick={addVehicleToCustomer} loading={busy}>
-                      {t('common.next')}
-                    </Button>
-                  </Group>
-                </Stack>
-              )}
-            </Stack>
-          )}
-        </Card>
-        {picked && (
+            {picked.activeOrder && (
+              <button type="button" className="suggest" style={{ marginTop: 12 }} onClick={() => navigate(`/orders/${picked.activeOrder!.id}`)}>
+                <Text size="sm" fw={600} style={{ flex: 1 }}>
+                  {t('newOrder.inWork', { n: picked.activeOrder.number })}
+                </Text>
+                <Text size="sm" c="cobalt.6" fw={600}>
+                  {t('newOrder.openOrder')}
+                </Text>
+              </button>
+            )}
+          </Box>
+        ) : (
           <>
-            <div ref={step2} style={{ scrollMarginTop: 'calc(var(--app-header-h) + 12px)' }} className="rise-enter">
-            <Card n={2} title={t('order.complaint')} done={!!complaint.trim()}>
-              <Box className="hide-scrollbar" style={{ overflowX: 'auto' }} mb="sm">
-                <Group gap={6} wrap="nowrap">
-                  {QUICK.map((k) => (
-                    <Chip key={k} size="sm" checked={complaint.includes(t(`newOrder.quick.${k}`))} onChange={() => addQuick(k)} style={{ flexShrink: 0 }}>
-                      {t(`newOrder.quick.${k}`)}
-                    </Chip>
-                  ))}
-                </Group>
-              </Box>
-              <Textarea placeholder={t('order.complaintHint')} autosize minRows={3} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
-            </Card>
-            </div>
-            <Card n={3} title={t('newOrder.when')}>
-              <SimpleGrid cols={2} spacing="xs">
-                <SelectCard active={when === 'now'} onClick={() => setWhen('now')}>
-                  <Text fw={700} size="sm">
-                    {t('newOrder.arrivedNow')}
+            <PlateBlock plate={plate} onChange={setPlate} />
+            {match && (
+              <button
+                type="button"
+                className="suggest rise-enter"
+                style={{ marginTop: 10 }}
+                onClick={() => (match.activeOrder ? navigate(`/orders/${match.activeOrder.id}`) : setPicked(match))}
+              >
+                <IconCar size={22} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
+                <Box style={{ flex: 1, minWidth: 0 }}>
+                  <Text size="sm" fw={600} lh={1.3}>
+                    {match.activeOrder ? t('newOrder.inWork', { n: match.activeOrder.number }) : t('newOrder.inBase')}
                   </Text>
-                  <Text size="xs" c="dimmed" mt={2}>
-                    {t('newOrder.arrivedNowHint')}
+                  <Text size="xs" c="dimmed" lineClamp={1}>
+                    {[[match.vehicle.make, match.vehicle.model].filter(Boolean).join(' '), who(match.owner, noName)].filter(Boolean).join(' · ')}
                   </Text>
-                </SelectCard>
-                <SelectCard active={when === 'later'} onClick={() => setWhen('later')}>
-                  <Group gap={6}>
-                    <IconCalendarTime size={16} />
-                    <Text fw={700} size="sm">
-                      {t('newOrder.bookLater')}
-                    </Text>
-                  </Group>
-                  <Text size="xs" c="dimmed" mt={2}>
-                    {t('newOrder.bookLaterHint')}
-                  </Text>
-                </SelectCard>
-              </SimpleGrid>
-              {when === 'later' && (
-                <Box mt="md">
-                  <DateTimeField label={t('newOrder.bookedFor')} value={bookedFor} onChange={setBookedFor} />
                 </Box>
-              )}
-            </Card>
+                <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                  {match.activeOrder ? t('newOrder.openOrder') : t('newOrder.useThis')}
+                </Text>
+              </button>
+            )}
+            <div className="group-title" style={{ marginTop: 22 }}>
+              {t('newOrder.makeModel')}
+            </div>
+            <MakeModelBlock make={make} model={model} onMake={setMake} onModel={setModel} />
           </>
         )}
+
+        <div className="group-title" style={{ marginTop: 22 }}>
+          {t('newOrder.customerOptional')}
+        </div>
+        {owner && (owner.name || owner.phone) ? (
+          <Box className="surface rise-enter" p="md">
+            <Group justify="space-between" wrap="nowrap">
+              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                <IconUser size={20} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+                <Text fw={500} lineClamp={1}>
+                  {who(owner, noName)}
+                </Text>
+              </Group>
+              {!picked && (
+                <Button variant="subtle" color="gray" size="compact-md" aria-label={t('common.change')} onClick={() => setPickedCustomer(undefined)}>
+                  <IconX size={18} />
+                </Button>
+              )}
+            </Group>
+          </Box>
+        ) : (
+          <>
+            <RowGroup mt={0}>
+              <FormRow label={t('customer.phone')}>
+                <TextInput aria-label={t('customer.phone')} type="tel" inputMode="tel" placeholder="050 123 4567" value={phone} onChange={(e) => setPhone(e.currentTarget.value)} autoComplete="off" w="100%" />
+              </FormRow>
+              <FormRow label={t('customer.name')}>
+                <TextInput aria-label={t('customer.name')} placeholder={t('newOrder.namePlaceholder')} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="off" w="100%" />
+              </FormRow>
+              <FormRow label={t('newOrder.docs')}>
+                <SegmentedControl
+                  size="xs"
+                  value={docLanguage}
+                  onChange={(v) => setDocLanguage(v === 'en' ? 'en' : 'ru')}
+                  data={[
+                    { value: 'ru', label: 'RU' },
+                    { value: 'en', label: 'EN' },
+                  ]}
+                />
+              </FormRow>
+            </RowGroup>
+            {suggestions.length > 0 && (
+              <Stack gap={8} mt={10}>
+                {suggestions.map((c) => (
+                  <button key={c.id} type="button" className="suggest rise-enter" onClick={() => setPickedCustomer(c)}>
+                    <IconUser size={20} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
+                    <Text size="sm" fw={500} style={{ flex: 1, minWidth: 0 }} lineClamp={1}>
+                      {who(c, noName)}
+                    </Text>
+                    <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                      {t('newOrder.useThis')}
+                    </Text>
+                  </button>
+                ))}
+              </Stack>
+            )}
+            <div className="group-note">{t('newOrder.customerLater')}</div>
+          </>
+        )}
+
+        <div className="group-title" style={{ marginTop: 22 }}>
+          {t('newOrder.complaintOptional')}
+        </div>
+        <Box className="surface" p="md">
+          <div className="chip-row wrap">
+            {QUICK.map((k) => (
+              <button key={k} type="button" className="chip" data-active={complaint.includes(t(`newOrder.quick.${k}`))} onClick={() => addQuick(k)}>
+                {t(`newOrder.quick.${k}`)}
+              </button>
+            ))}
+          </div>
+          <Textarea mt="sm" aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
+        </Box>
+
+        <RowGroup>
+          <FormRow label={t('newOrder.bookLater')}>
+            <Switch checked={later} onChange={(e) => setLater(e.currentTarget.checked)} aria-label={t('newOrder.bookLater')} />
+          </FormRow>
+          {later && (
+            <Box px="md" pb="md" pt={4} className="rise-enter">
+              <DateTimeField label={t('newOrder.bookedFor')} value={bookedFor} onChange={setBookedFor} />
+            </Box>
+          )}
+        </RowGroup>
       </Stack>
-      {picked && (
-        <StickyBar>
-          <Button fullWidth size="lg" onClick={submit} loading={busy} disabled={when === 'later' && !bookedFor} rightSection={<IconArrowRight size={18} />}>
-            {when === 'now' ? t('newOrder.startIntake') : t('newOrder.book')}
+
+      <StickyBar>
+        {later ? (
+          <Button fullWidth onClick={() => submit('book')} loading={busy} disabled={!bookedFor}>
+            {t('newOrder.book')}
           </Button>
-        </StickyBar>
-      )}
+        ) : (
+          <Group grow gap={10} wrap="nowrap">
+            <Button variant="light" onClick={() => submit('invoice')} loading={busy} style={{ fontSize: 16 }}>
+              {t('newOrder.toInvoice')}
+            </Button>
+            <Button onClick={() => submit('intake')} loading={busy} rightSection={<IconChevronRight size={18} />} style={{ fontSize: 16 }}>
+              {t('newOrder.startIntake')}
+            </Button>
+          </Group>
+        )}
+      </StickyBar>
     </>
   );
 }

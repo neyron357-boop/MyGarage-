@@ -210,7 +210,7 @@ export function EstimatePage() {
         }
       />
 
-      <Box className="surface" p="md" mb="lg" style={{ position: 'sticky', top: 'calc(var(--app-header-h) + 8px)', zIndex: 20 }}>
+      <Box className="surface" p="md" mb="lg" style={{ position: 'sticky', top: 'calc(var(--app-nav-h) + env(safe-area-inset-top, 0px) + 8px)', zIndex: 20 }}>
         <SimpleGrid cols={3} spacing="sm">
           <div>
             <div className="eyebrow">{t('estimate.fixed')}</div>

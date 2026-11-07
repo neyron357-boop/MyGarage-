@@ -1,3 +1,4 @@
+import type { ComboboxItem, OptionsFilter } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -74,3 +75,16 @@ export function useAction() {
   );
   return { run, busy };
 }
+
+/**
+ * Autocomplete filter: suggestions appear only once something is typed (an empty field must not
+ * cover the phone screen with a list), best matches — those starting with the text — first.
+ */
+export const typedOnly: OptionsFilter = ({ options, search, limit }) => {
+  const q = search.trim().toLowerCase();
+  if (!q) return [];
+  const items = options.filter((o): o is ComboboxItem => 'value' in o);
+  const starts = items.filter((o) => o.label.toLowerCase().startsWith(q));
+  const contains = items.filter((o) => !o.label.toLowerCase().startsWith(q) && o.label.toLowerCase().includes(q));
+  return [...starts, ...contains].slice(0, limit);
+};

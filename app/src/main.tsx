@@ -1,14 +1,5 @@
-import '@fontsource/golos-text/latin-400.css';
-import '@fontsource/golos-text/latin-500.css';
-import '@fontsource/golos-text/latin-600.css';
-import '@fontsource/golos-text/latin-700.css';
-import '@fontsource/golos-text/cyrillic-400.css';
-import '@fontsource/golos-text/cyrillic-500.css';
-import '@fontsource/golos-text/cyrillic-600.css';
-import '@fontsource/golos-text/cyrillic-700.css';
-import '@fontsource/oswald/latin-500.css';
+// Interface text uses the phone's own system font; Oswald is kept only for the UAE number plate.
 import '@fontsource/oswald/latin-600.css';
-import '@fontsource/oswald/cyrillic-600.css';
 import '@mantine/core/styles.css';
 import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
@@ -20,8 +11,16 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { ensureSeed } from './services/seed';
 
+/** An app, not a web page: iPhone Safari ignores `user-scalable=no`, so pinch-zoom is blocked here. */
+function blockPinchZoom() {
+  const stop = (e: Event) => e.preventDefault();
+  document.addEventListener('gesturestart', stop);
+  document.addEventListener('gesturechange', stop);
+}
+
 async function start() {
   document.documentElement.lang = i18n.language;
+  blockPinchZoom();
   try {
     await navigator.storage?.persist?.();
   } catch {

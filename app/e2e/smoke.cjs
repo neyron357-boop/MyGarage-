@@ -46,23 +46,20 @@ async function launchBrowser() {
     await shot('02-board-demo', true);
   });
   await step('new order', async () => {
+    // Fast check-in: the plate first, make and model from chips, the customer is optional.
     await page.goto(BASE + '#/orders/new');
-    await page.getByText('Новый клиент').first().click();
-    await page.getByLabel('Имя').fill('Сергей Иванов');
-    await page.getByLabel('Телефон').fill('050 777 8899');
-    await page.getByRole('textbox', { name: /^Номер/ }).fill('55555');
     await page.getByLabel('Код').fill('B');
-    await page.getByLabel('Марка').fill('Lexus');
-    await page.getByLabel('Модель').fill('RX 350');
-    await shot('03-new-order');
-    await page.getByRole('button', { name: 'Сохранить и продолжить' }).click();
+    await page.getByLabel('Номер').fill('55555');
+    await page.getByRole('button', { name: 'Lexus', exact: true }).click();
+    await page.getByRole('button', { name: 'RX 350', exact: true }).click();
+    await page.getByLabel('Телефон').fill('050 777 8899');
+    await page.getByLabel('Имя').fill('Сергей Иванов');
     await page.getByPlaceholder('Словами клиента: что беспокоит').fill('Стук спереди справа на неровностях, не холодит кондиционер');
+    await shot('03-new-order', true);
     await page.getByRole('button', { name: 'Начать приёмку' }).click();
-    await page.getByText('Шаг 1 из 10').waitFor();
+    await page.getByText('Шаг 1 из 6').waitFor();
   });
   await step('intake photos', async () => {
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByText('Шаг 2 из 10').waitFor();
     for (let i = 0; i < 8; i++) {
       await page.locator('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
       await page.getByText(`${i + 1} / 8`).waitFor({ timeout: 10000 });
@@ -76,7 +73,7 @@ async function launchBrowser() {
     await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.25);
     await page.getByRole('dialog').getByText('Вмятина').click();
     await page.waitForTimeout(300);
-    await page.getByRole('button', { name: 'Готово' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Готово' }).click();
     await page.waitForTimeout(300);
     await shot('05-intake-damage', true);
   });
@@ -87,30 +84,26 @@ async function launchBrowser() {
     await page.getByText('Check Engine').click();
     await shot('06-intake-dashboard', true);
   });
-  await step('intake obd/checks/belongings/complaint/conditions', async () => {
+  await step('intake obd/checks', async () => {
     await page.getByRole('button', { name: 'Дальше' }).click();
     const tags = page.locator('input[placeholder="P0300"]');
     await tags.fill('P0300');
     await tags.press('Enter');
     await page.getByRole('button', { name: 'Дальше' }).click();
     await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.locator('.mantine-SegmentedControl-root').first().getByText('2', { exact: true }).click();
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await shot('07-intake-conditions', true);
-    await page.getByRole('button', { name: 'К подписи' }).click();
+    await page.getByText('Шаг 6 из 6').waitFor();
+    await shot('07-intake-finish', true);
   });
   await step('intake sign', async () => {
-    await page.getByText('Шаг 10 из 10').waitFor();
     const canvas = page.locator('canvas').first();
     await canvas.scrollIntoViewIfNeeded();
     const c = await canvas.boundingBox();
-    await page.mouse.move(c.x + 30, c.y + 120);
+    await page.mouse.move(c.x + 30, c.y + 110);
     await page.mouse.down();
-    for (let i = 0; i < 20; i++) await page.mouse.move(c.x + 30 + i * 12, c.y + 120 - Math.sin(i / 2) * 40);
+    for (let i = 0; i < 20; i++) await page.mouse.move(c.x + 30 + i * 12, c.y + 110 - Math.sin(i / 2) * 40);
     await page.mouse.up();
     await shot('08-intake-sign', true);
-    await page.getByRole('button', { name: 'Подписать и сохранить' }).click();
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
     await page.getByText('Отправить клиенту').first().waitFor({ timeout: 15000 });
     await page.getByText('Открыть чат').waitFor();
     await shot('09-send-dialog');
@@ -119,7 +112,7 @@ async function launchBrowser() {
     await shot('10-order-after-intake', true);
   });
   await step('estimate', async () => {
-    await page.getByRole('button', { name: 'Составить оценку' }).click();
+    await page.getByRole('button', { name: 'Подробная оценка' }).first().click();
     await page.getByRole('button', { name: 'Из шаблона' }).first().click();
     await page.getByRole('dialog').getByText('Замена передних колодок').click();
     await page.getByText('Обычно вместе с этим меняют').waitFor();
@@ -215,6 +208,35 @@ async function launchBrowser() {
     await page.getByText('Закрыт').first().waitFor();
     await shot('22-order-closed', true);
   });
+  await step('quick invoice path', async () => {
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('31415');
+    await page.getByRole('button', { name: 'Nissan', exact: true }).click();
+    await page.getByRole('button', { name: 'Sunny', exact: true }).click();
+    await shot('30-quick-new-order');
+    await page.getByRole('button', { name: 'Сразу к инвойсу' }).click();
+    await page.getByText('Добавить работу').waitFor();
+    await page.getByText('Добавить работу').click();
+    await page.getByRole('dialog').getByLabel('Что сделали').fill('Замена масла');
+    await page.getByRole('dialog').getByLabel('Цена', { exact: true }).fill('150');
+    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByText('Добавить запчасть').click();
+    await page.getByRole('dialog').getByLabel('Запчасть').fill('Фильтр салона');
+    await page.getByRole('dialog').getByLabel('Кол-во').fill('2');
+    await page.getByRole('dialog').getByLabel('Цена за шт.').fill('30');
+    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
+    await shot('31-quick-invoice', true);
+    await page.getByRole('button', { name: /^Выписать инвойс/ }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByText(/Инвойс INV-/).waitFor();
+    await shot('32-quick-issued', true);
+    await page.getByRole('button', { name: /^Принять оплату/ }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Провести' }).click();
+    await page.getByRole('button', { name: 'Выдать машину и закрыть заказ' }).click();
+    await page.getByText('Заказ закрыт').first().waitFor();
+    await shot('33-quick-closed', true);
+  });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);
     await page.getByText('Было / стало').waitFor();
@@ -256,9 +278,19 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     await page.getByText('Lexus').first().waitFor();
     await shot('16-board-desktop');
-    await page.getByLabel('Язык').click();
+    await page.locator('.app-nav').getByText('English', { exact: true }).click();
     await page.getByText('Workshop', { exact: true }).first().waitFor();
     await shot('17-board-desktop-en');
+  });
+  await step('dark theme', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(BASE + '#/more');
+    await page.getByText(/^(Тёмная|Dark)$/).click();
+    await page.goto(BASE + '#/');
+    await page.waitForTimeout(400);
+    await shot('29-board-dark');
+    await page.goto(BASE + '#/more');
+    await page.getByText(/^(Светлая|Light)$/).click();
   });
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
   await browser.close();
