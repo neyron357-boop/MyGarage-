@@ -2,13 +2,32 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 // Browser smoke test of the whole job flow on a phone-sized screen.
 // Usage: start the dev server (npm run dev -- --port 5173), then: node e2e/smoke.cjs [outDir]
+// Browser: Playwright's Chromium if installed (npx playwright install chromium), otherwise the
+// installed Google Chrome or Microsoft Edge. E2E_BROWSER=chromium|chrome|msedge forces one.
 const path = require('path');
 const SP = process.argv[2] || path.join(__dirname, '..', 'test-results', 'e2e');
 const FIXTURE = path.join(__dirname, 'fixtures', 'car.jpg');
 const BASE = process.env.BASE_URL || 'http://localhost:5173/';
 fs.mkdirSync(`${SP}/shots`, { recursive: true });
+
+async function launchBrowser() {
+  const forced = process.env.E2E_BROWSER;
+  const channels = forced ? [forced] : ['chromium', 'chrome', 'msedge'];
+  const failures = [];
+  for (const channel of channels) {
+    try {
+      const browser = await chromium.launch(channel === 'chromium' ? {} : { channel });
+      console.log(`browser: ${channel} ${browser.version()}`);
+      return browser;
+    } catch (e) {
+      failures.push(`${channel}: ${String(e.message).split('\n')[0]}`);
+    }
+  }
+  throw new Error('no browser for e2e: run "npx playwright install chromium" or install Google Chrome / Microsoft Edge. ' + failures.join('; '));
+}
+
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: false, locale: 'ru-RU' });
   const page = await ctx.newPage();
   const errors = [];
@@ -244,4 +263,4 @@ fs.mkdirSync(`${SP}/shots`, { recursive: true });
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
   await browser.close();
   if (errors.length) process.exit(1);
-})().catch(() => { console.error('E2E FAILED'); process.exit(1); });
+})().catch((e) => { console.error('E2E FAILED:', String((e && e.message) || e).split('\n')[0]); process.exit(1); });
