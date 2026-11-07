@@ -1,9 +1,16 @@
 name: Deploy to GitHub Pages
 
-# Manual: Actions → "Deploy to GitHub Pages" → Run workflow.
-# Needs Settings → Pages → Source: "GitHub Actions" once. Only the app files are published (HTTPS,
-# installable on phones); all garage data stays on the device.
+# Publishes the app to https://neyron357-boop.github.io/MyGarage-/ after every push to main that
+# changes the app (docs-only and e2e-only changes are skipped), or manually: Actions →
+# "Deploy to GitHub Pages" → Run workflow. Settings → Pages → Source is "GitHub Actions".
+# Only the app files are published (HTTPS, installable on phones); all garage data stays on the device.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - '!app/e2e/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -11,9 +18,10 @@ permissions:
   pages: write
   id-token: write
 
+# One deployment at a time: a newer push waits instead of cancelling a deployment halfway.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
