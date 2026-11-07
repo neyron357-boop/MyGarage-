@@ -142,13 +142,17 @@ export interface OrderEvent {
 export type FuelLevel = 0 | 25 | 50 | 75 | 100;
 export type CheckState = 'ok' | 'fail' | 'unchecked';
 
+/**
+ * Terms of an intake act. Since the fast check-in only the test-drive permission (and the ready date,
+ * kept on the order) is asked; the other fields remain for acts signed before.
+ */
 export interface IntakeConditions {
-  noCallLimitFils: number;
-  oldParts: 'return' | 'dispose';
   testDriveAllowed: boolean;
-  freeStorageDays: number;
-  storageFeePerDayFils: number;
-  diagnosticsFeeFils: number;
+  noCallLimitFils?: number;
+  oldParts?: 'return' | 'dispose';
+  freeStorageDays?: number;
+  storageFeePerDayFils?: number;
+  diagnosticsFeeFils?: number;
   promisedReadyAt?: string;
 }
 
@@ -180,6 +184,8 @@ export interface Inspection {
   signerName?: string;
   signatureMediaId?: string;
   signedAt?: string;
+  /** Intake saved by the manager (with or without the customer's signature); the job moves on. */
+  completedAt?: string;
   locked: boolean;
   pdfMediaId?: string;
   pdfSha256?: string;

@@ -165,7 +165,7 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
                 {declined.map((i) => <Text key={i.id}>• {itemTitle(i, lang)} — {t('handover.declinedOn', { date: formatDate(declinedAt(i.id)) })}</Text>)}
               </>
             )}
-            <Text style={{ marginTop: 6 }}>{t('cond.oldParts')}: {t(`cond.${b.intake?.conditions?.oldParts ?? 'return'}`)}</Text>
+            {b.intake?.conditions?.oldParts && <Text style={{ marginTop: 6 }}>{t('cond.oldParts')}: {t(`cond.${b.intake.conditions.oldParts}`)}</Text>}
             <Text style={[s.box, { fontSize: 8 }]}>{warranty}</Text>
           </>
         )}
@@ -186,10 +186,18 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
         {intake && c && (
           <View style={s.box} wrap={false}>
             <Text style={s.bold}>{t('pdf.conditions')}</Text>
-            <Text>{t('cond.noCallLimit')}: {c.noCallLimitFils ? formatAed(c.noCallLimitFils, lang) : t('cond.alwaysCall')}</Text>
-            <Text>{t('cond.oldParts')}: {t(`cond.${c.oldParts}`)} · {t('cond.testDrive')}: {c.testDriveAllowed ? t('common.yes') : t('common.no')}</Text>
-            <Text>{t('cond.freeStorage')}: {c.freeStorageDays} · {t('cond.storageFee')}: {formatAed(c.storageFeePerDayFils, lang)} · {t('cond.diagnosticsFee')}: {formatAed(c.diagnosticsFeeFils, lang)}</Text>
-            {c.promisedReadyAt && <Text>{t('cond.promised')}: {formatDateTime(new Date(c.promisedReadyAt).toISOString())}</Text>}
+            {/* No-call limit, old parts and parking/diagnostics fees exist only on acts signed before the fast check-in. */}
+            {c.noCallLimitFils !== undefined && <Text>{t('cond.noCallLimit')}: {c.noCallLimitFils ? formatAed(c.noCallLimitFils, lang) : t('cond.alwaysCall')}</Text>}
+            <Text>
+              {c.oldParts ? `${t('cond.oldParts')}: ${t(`cond.${c.oldParts}`)} · ` : ''}
+              {t('cond.testDrive')}: {c.testDriveAllowed ? t('common.yes') : t('common.no')}
+            </Text>
+            {c.freeStorageDays !== undefined && (
+              <Text>
+                {t('cond.freeStorage')}: {c.freeStorageDays} · {t('cond.storageFee')}: {formatAed(c.storageFeePerDayFils ?? 0, lang)} · {t('cond.diagnosticsFee')}: {formatAed(c.diagnosticsFeeFils ?? 0, lang)}
+              </Text>
+            )}
+            {(b.order.promisedReadyAt ?? c.promisedReadyAt) && <Text>{t('cond.promised')}: {formatDateTime(new Date((b.order.promisedReadyAt ?? c.promisedReadyAt)!).toISOString())}</Text>}
             <Text style={{ marginTop: 4, fontSize: 7.5, color: '#444' }}>{b.settings.intakeTerms[lang]}</Text>
           </View>
         )}

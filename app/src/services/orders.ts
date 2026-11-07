@@ -14,16 +14,19 @@ import type {
   Inspection,
   Invoice,
   ItemDecision,
+  Lang,
   Media,
   MessageLog,
   Order,
   OrderEvent,
   OrderItem,
   Payment,
+  Plate,
   Settings,
   Stage,
   Vehicle,
 } from '../domain/types';
+import { createCustomer, createVehicle, findCustomerByPhone, updateCustomer, updateVehicle } from './customers';
 import { AppError } from './errors';
 import { getSettings } from './settings';
 
@@ -64,6 +67,53 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     await db.orders.add(order);
     await logEvent(order.id, 'created', { stage: order.stage, warrantyOf: input.warrantyOfOrderId });
     return order;
+  });
+}
+
+export interface CheckInInput {
+  /** An existing car picked by its plate; otherwise a new car is created from plate/make/model. */
+  vehicleId?: string;
+  plate: Plate;
+  make: string;
+  model: string;
+  /** An existing customer picked from the suggestions. */
+  customerId?: string;
+  name: string;
+  phone: string;
+  docLanguage: Lang;
+  complaint: string;
+  arrivedNow: boolean;
+  bookedFor?: string;
+}
+
+/**
+ * Fast check-in in one step and one transaction: the plate is enough. A typed phone that already
+ * belongs to a customer links to that customer; name and phone may stay empty and be added later
+ * (they are filled in on an existing customer only where missing).
+ */
+export async function checkIn(input: CheckInInput): Promise<Order> {
+  return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.counters, db.events], async () => {
+    let vehicle = input.vehicleId ? await db.vehicles.get(input.vehicleId) : undefined;
+    let customer: Customer | undefined;
+    if (vehicle) {
+      customer = await db.customers.get(vehicle.customerId);
+      const patch: { make?: string; model?: string } = {};
+      if (!vehicle.make && input.make.trim()) patch.make = input.make.trim();
+      if (!vehicle.model && input.model.trim()) patch.model = input.model.trim();
+      if (patch.make || patch.model) await updateVehicle(vehicle.id, patch);
+    } else {
+      if (input.customerId) customer = await db.customers.get(input.customerId);
+      if (!customer && input.phone.trim()) customer = await findCustomerByPhone(input.phone);
+      if (!customer)
+        customer = await createCustomer({ name: input.name, phone: input.phone, preferredChannel: 'whatsapp', docLanguage: input.docLanguage, type: 'individual' });
+      vehicle = await createVehicle(customer.id, { plate: input.plate, make: input.make.trim(), model: input.model.trim() });
+    }
+    if (!customer) throw new AppError('err.notFound');
+    const fill: { name?: string; phone?: string } = {};
+    if (!customer.name && input.name.trim()) fill.name = input.name;
+    if (!customer.phone && input.phone.trim()) fill.phone = input.phone;
+    if (fill.name !== undefined || fill.phone !== undefined) await updateCustomer(customer.id, fill);
+    return createOrder({ customerId: customer.id, vehicleId: vehicle.id, complaint: input.complaint, arrivedNow: input.arrivedNow, bookedFor: input.bookedFor });
   });
 }
 
@@ -153,19 +203,23 @@ export function stageContext(b: OrderBundle): StageContext {
   return {
     order: b.order,
     items: b.items,
-    intakeSigned: !!b.intake?.locked,
+    intakeDone: !!b.intake?.locked || !!b.intake?.completedAt,
     sentVersions: b.versions.length,
     handoverSigned: !!b.handover?.locked,
     amountDueFils: bundleAmountDue(b),
     debtSigned: b.debts.some((d) => d.status === 'open'),
     qcComplete: !!b.order.qcDoneAt,
+    invoiced: b.invoices.some((i) => i.status === 'issued'),
   };
 }
 
-/** Storage days beyond the free period while the car waits in "ready". */
+/**
+ * Storage days beyond the free period while the car waits in "ready". Only acts signed before the
+ * fast check-in carry a free-parking term; new jobs have no parking charge.
+ */
 export function storageDaysOver(b: OrderBundle, now = nowIso()): number {
-  if (b.order.stage !== 'ready' || !b.order.readyAt || b.order.storageWaived) return 0;
-  const free = b.intake?.conditions?.freeStorageDays ?? b.settings.freeStorageDays;
+  const free = b.intake?.conditions?.freeStorageDays;
+  if (free === undefined || b.order.stage !== 'ready' || !b.order.readyAt || b.order.storageWaived) return 0;
   const days = Math.floor(hoursBetween(b.order.readyAt, now) / 24);
   return Math.max(0, days - free);
 }
@@ -194,6 +248,11 @@ export async function changeStage(orderId: string, to: Stage, reason?: string): 
     patch.cancelReason = reason;
   }
   if (to === 'delivered' && b.order.outcome === 'in_progress') patch.outcome = 'completed';
+  // Quick close: the car is handed over at the same moment.
+  if (to === 'closed' && from !== 'delivered') {
+    if (!b.order.deliveredAt) patch.deliveredAt = now;
+    if (b.order.outcome === 'in_progress') patch.outcome = 'completed';
+  }
   if (backward && stageIndexOf(to) < stageIndexOf('ready')) patch.qcDoneAt = undefined;
   await db.transaction('rw', db.orders, db.events, async () => {
     await db.orders.update(orderId, patch);

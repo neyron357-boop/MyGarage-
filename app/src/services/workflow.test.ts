@@ -5,9 +5,9 @@ import { REQUIRED_SLOTS } from '../domain/inspection';
 import { createCustomer, createVehicle, search } from './customers';
 import { AppError } from './errors';
 import { addItem, approveByLimit, limitRemaining, recordDecisions, resolveB, sendVersion, setDone, updateItem } from './estimate';
-import { addInspectionPhoto, getOrCreateInspection, signInspection, updateInspection } from './inspections';
-import { addCashMovement, addExpense, addPayment, cashState, closeCashDay, createDebt, issueCreditNote, issueInvoice } from './money';
-import { bundleAmountDue, changeStage, completeQc, createOrder, declineRepair, loadOrderBundle } from './orders';
+import { addInspectionPhoto, completeInspection, getOrCreateInspection, signInspection, updateInspection } from './inspections';
+import { addCashMovement, addExpense, addPayment, cashState, closeCashDay, createDebt, issueCreditNote, issueInvoice, quickInvoice } from './money';
+import { bundleAmountDue, changeStage, checkIn, completeQc, createOrder, declineRepair, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
 import { ensureSeed } from './seed';
 import { versionMessage } from './messages';
@@ -55,10 +55,15 @@ describe('search', () => {
 });
 
 describe('intake act', () => {
-  it('cannot be signed incomplete, and is frozen after signing', async () => {
+  it('can be saved empty without a signature, and is frozen once signed', async () => {
     const { o } = await newOrder();
     const insp = await getOrCreateInspection(o.id, 'intake');
-    await expectAppError(signInspection(insp.id, 'Ahmed', png()), 'err.inspectionIncomplete');
+    // Fast check-in: nothing is required; the job moves on and the act stays editable.
+    const saved = await completeInspection(insp.id);
+    expect(saved.completedAt).toBeTruthy();
+    expect(saved.locked).toBe(false);
+    expect((await db.orders.get(o.id))!.stage).toBe('diagnostics');
+    await updateInspection(insp.id, { mileageKm: 98000 });
     const signed = await signIntake(o.id);
     expect(signed.locked).toBe(true);
     expect((await db.orders.get(o.id))!.stage).toBe('diagnostics');
@@ -68,6 +73,34 @@ describe('intake act', () => {
     const photo = await db.media.where('ownerId').equals(signed.id).first();
     expect(photo?.locked).toBe(true);
     await expect(db.media.delete(photo!.id)).rejects.toBeInstanceOf(ImmutableError);
+  });
+});
+
+describe('fast path', () => {
+  it('checks in a car with no customer details, then invoice, payment and close', async () => {
+    const o = await checkIn({ plate: { emirate: 'SHJ', code: '1', number: '77777' }, make: 'Nissan', model: 'Patrol', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+    let b = (await loadOrderBundle(o.id))!;
+    expect(b.customer.name).toBe('');
+    expect(b.customer.phone).toBe('');
+    expect(b.order.stage).toBe('intake');
+    // Same plate again: the existing car and customer are reused, the missing phone is filled in.
+    const again = await checkIn({ vehicleId: b.vehicle.id, plate: b.vehicle.plate, make: '', model: '', name: 'Omar', phone: '055 111 2222', docLanguage: 'en', complaint: '', arrivedNow: false, bookedFor: new Date().toISOString() });
+    expect(again.vehicleId).toBe(b.vehicle.id);
+    expect((await db.customers.get(b.customer.id))!.phone).toBe('+971551112222');
+    await addItem(o.id, { kind: 'labor', block: 'A', titleRu: 'Замена масла', unitPriceFils: 10000 });
+    await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'Фильтр', qty: 2, unitPriceFils: 2500, costPriceFils: 1500 });
+    const inv = await quickInvoice(o.id);
+    expect(inv.totalFils).toBe(15750); // (100 + 2 × 25) AED + 5 % VAT
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.order.stage).toBe('ready');
+    expect(b.items.every((i) => i.approvalState === 'approved' && i.done)).toBe(true);
+    await expectAppError(changeStage(o.id, 'closed'), 'stageErr.unpaid');
+    await addPayment(o.id, { kind: 'payment', method: 'card', amountFils: 15750 });
+    await changeStage(o.id, 'closed');
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.order.stage).toBe('closed');
+    expect(b.order.deliveredAt).toBeTruthy();
+    expect(b.order.outcome).toBe('completed');
   });
 });
 
@@ -159,7 +192,7 @@ describe('estimate and approvals', () => {
     expect(inv2.number).toMatch(/00002$/);
   });
 
-  it('declined repair keeps only the diagnostics fee', async () => {
+  it('declined repair cancels open items (no diagnostics fee since the fast check-in)', async () => {
     const { o } = await newOrder();
     await signIntake(o.id);
     await addItem(o.id, { kind: 'labor', block: 'A', titleRu: 'Ремонт', unitPriceFils: 100000 });
@@ -168,7 +201,8 @@ describe('estimate and approvals', () => {
     const b = (await loadOrderBundle(o.id))!;
     expect(b.order.stage).toBe('ready');
     expect(b.order.outcome).toBe('repair_declined');
-    expect(bundleAmountDue(b)).toBe(15750); // 150 AED + 5% VAT
+    expect(bundleAmountDue(b)).toBe(0);
+    expect(b.items.every((i) => i.approvalState !== 'pending')).toBe(true);
   });
 
   it('can release a car on credit with a signed debt note', async () => {

@@ -4,8 +4,10 @@ import { dubaiDate, monthKey, nowIso } from '../domain/dates';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from '../domain/invoice';
 import type { CashClosing, CashMovement, CashReason, Debt, Expense, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
 import { AppError } from './errors';
+import { recordDecisions, sendVersion, setDone } from './estimate';
 import { addMedia } from './media';
 import { bundleAmountDue, loadOrderBundle, logEvent, tryStage } from './orders';
+import { setProcurement } from './parts';
 
 const year = () => Number(dubaiDate().slice(0, 4));
 
@@ -60,6 +62,33 @@ async function settleIfPaid(orderId: string) {
   if (bundleAmountDue(b) > 0) return;
   for (const d of b.debts) if (d.status === 'open') await db.debts.update(d.id, { status: 'paid' });
   if (b.order.stage === 'delivered') await tryStage(orderId, 'closed');
+}
+
+/**
+ * Quick invoice: the work and parts typed on the invoice screen are agreed with the customer in person
+ * (a version and decisions are still recorded), marked done — bought parts as received — and the
+ * invoice is issued. The job moves to "ready": it waits only for payment and pickup.
+ */
+export async function quickInvoice(orderId: string): Promise<Invoice> {
+  const drafts = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => i.approvalState === 'draft');
+  if (drafts.length) {
+    const v = await sendVersion(orderId, { via: 'in_person' });
+    await recordDecisions(
+      v.id,
+      drafts.map((i) => ({ itemId: i.id, decision: 'approve' as const })),
+      'in_person',
+    );
+  }
+  const approved = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => i.approvalState === 'approved');
+  for (const i of approved) {
+    if (i.kind === 'part' && !i.customerSupplied && !i.receivedAt && ['needed', 'ordered'].includes(i.procurementStatus ?? 'needed')) {
+      await setProcurement(i.id, { status: 'received' });
+    }
+    if (!i.done) await setDone(i.id, true);
+  }
+  const inv = await issueInvoice(orderId);
+  await tryStage(orderId, 'ready');
+  return inv;
 }
 
 export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 'credit_note'>): Promise<Invoice> {

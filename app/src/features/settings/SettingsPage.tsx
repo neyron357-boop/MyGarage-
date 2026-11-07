@@ -163,13 +163,10 @@ function RulesTab({ s }: { s: Settings }) {
         </SimpleGrid>
       </Card>
       <Card title={t('settings.protection')} description={t('settings.protectionHint')}>
+        {/* No-call limit, parking and diagnostics fees were dropped with the fast check-in. */}
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          <MoneyInput label={t('settings.noCallLimit')} value={v.defaultNoCallLimitFils} onChange={(x) => set({ defaultNoCallLimitFils: x ?? 0 })} />
           <MoneyInput label={t('settings.prepayThreshold')} value={v.prepaymentThresholdFils} onChange={(x) => set({ prepaymentThresholdFils: x ?? 0 })} />
           <NumberInput label={t('settings.validity')} value={v.estimateValidityDays} min={1} onChange={(x) => set({ estimateValidityDays: Number(x) || 7 })} />
-          <MoneyInput label={t('cond.diagnosticsFee')} value={v.diagnosticsFeeFils} onChange={(x) => set({ diagnosticsFeeFils: x ?? 0 })} />
-          <NumberInput label={t('cond.freeStorage')} value={v.freeStorageDays} min={0} onChange={(x) => set({ freeStorageDays: Number(x) || 0 })} />
-          <MoneyInput label={t('cond.storageFee')} value={v.storageFeePerDayFils} onChange={(x) => set({ storageFeePerDayFils: x ?? 0 })} />
         </SimpleGrid>
       </Card>
       <Card title={t('settings.warranty')}>
@@ -648,7 +645,7 @@ export function SettingsPage() {
       ) : (
         <Grid gutter="xl">
           <Grid.Col span={3}>
-            <Box className="surface" p={6} style={{ position: 'sticky', top: 'calc(var(--app-header-h) + 16px)' }}>
+            <Box className="surface" p={6} style={{ position: 'sticky', top: 'calc(var(--app-nav-h) + env(safe-area-inset-top, 0px) + 16px)' }}>
               {TABS.map((x) => (
                 <NavLink key={x.key} component="button" active={tab === x.key} label={t(`settings.tab.${x.key}`)} leftSection={<x.icon size={18} />} onClick={() => openTab(x.key)} style={{ borderRadius: 10 }} />
               ))}

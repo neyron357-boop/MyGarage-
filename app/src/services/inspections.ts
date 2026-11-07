@@ -5,13 +5,13 @@ import type { DamageMark, Inspection } from '../domain/types';
 import { AppError } from './errors';
 import { addMedia, lockMediaOf } from './media';
 import { bundleAmountDue, loadOrderBundle, logEvent, tryStage } from './orders';
-import { getSettings } from './settings';
+
 
 export async function getOrCreateInspection(orderId: string, kind: Inspection['kind']): Promise<Inspection> {
   const find = () => db.inspections.where('orderId').equals(orderId).filter((i) => i.kind === kind).first();
   const existing = await find();
   if (existing) return existing;
-  const [order, settings] = await Promise.all([db.orders.get(orderId), getSettings()]);
+  const order = await db.orders.get(orderId);
   if (!order) throw new AppError('err.notFound');
   const intake = kind === 'handover' ? await db.inspections.where('orderId').equals(orderId).filter((i) => i.kind === 'intake').first() : undefined;
   const draft: Inspection = {
@@ -25,17 +25,8 @@ export async function getOrCreateInspection(orderId: string, kind: Inspection['k
     skippedPhotos: {},
     complaint: kind === 'intake' ? order.complaint : undefined,
     keysCount: intake?.keysCount,
-    conditions:
-      kind === 'intake'
-        ? {
-            noCallLimitFils: settings.defaultNoCallLimitFils,
-            oldParts: 'return',
-            testDriveAllowed: true,
-            freeStorageDays: settings.freeStorageDays,
-            storageFeePerDayFils: settings.storageFeePerDayFils,
-            diagnosticsFeeFils: settings.diagnosticsFeeFils,
-          }
-        : undefined,
+    // Fast check-in asks only for the test drive; no-call limit, parking and diagnostics fees are gone.
+    conditions: kind === 'intake' ? { testDriveAllowed: true } : undefined,
     language: order.docLanguage,
     locked: false,
     createdAt: nowIso(),
@@ -106,6 +97,28 @@ export async function inspectionState(id: string) {
   return { insp, media, marks, slots, policePhoto: media.some((m) => m.slot === 'police_report') };
 }
 
+/** The car is in: move a booked job to intake and on to diagnostics (the act is done). */
+async function intakeDoneMoves(orderId: string) {
+  const order = await db.orders.get(orderId);
+  if (order?.stage === 'booked') await tryStage(orderId, 'intake');
+  await tryStage(orderId, 'diagnostics');
+}
+
+/**
+ * Save the intake without the customer's signature: everything filled stays, nothing is required,
+ * the job moves on. The act stays editable and can still be signed later.
+ */
+export async function completeInspection(id: string): Promise<Inspection> {
+  const insp = await getUnlocked(id);
+  if (insp.kind !== 'intake') throw new AppError('stageErr.notAllowed');
+  if (!insp.completedAt) {
+    await db.inspections.update(id, { completedAt: nowIso() });
+    await logEvent(insp.orderId, 'intake_saved');
+  }
+  await intakeDoneMoves(insp.orderId);
+  return (await db.inspections.get(id))!;
+}
+
 /** Sign and freeze the act: server-side time (device time in local mode), signature, all photos locked. */
 export async function signInspection(id: string, signerName: string, signature: Blob): Promise<Inspection> {
   const { insp, marks, slots, policePhoto } = await inspectionState(id);
@@ -121,12 +134,10 @@ export async function signInspection(id: string, signerName: string, signature: 
   const sig = await addMedia({ ownerType: 'inspection', ownerId: id, slot: 'signature', file: signature, kind: 'signature', compress: false });
   await lockMediaOf([id]);
   const signedAt = nowIso();
-  await db.inspections.update(id, { signerName: signerName.trim(), signatureMediaId: sig.id, signedAt, locked: true });
+  await db.inspections.update(id, { signerName: signerName.trim(), signatureMediaId: sig.id, signedAt, completedAt: insp.completedAt ?? signedAt, locked: true });
   await logEvent(insp.orderId, insp.kind === 'intake' ? 'intake_signed' : 'handover_signed', { signerName });
   if (insp.kind === 'intake') {
-    const order = await db.orders.get(insp.orderId);
-    if (order?.stage === 'booked') await tryStage(insp.orderId, 'intake');
-    await tryStage(insp.orderId, 'diagnostics');
+    await intakeDoneMoves(insp.orderId);
   } else {
     await tryStage(insp.orderId, 'delivered');
     await tryStage(insp.orderId, 'closed');

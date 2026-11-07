@@ -44,7 +44,7 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
   const done = items.filter((i) => i.done).length;
   if (done === items.length) return null;
   return (
-    <Box className="surface rise-enter" p="md" mb="lg" style={{ borderTop: '3px solid var(--mantine-color-cobalt-6)' }}>
+    <Box className="surface rise-enter" p="md" mb="lg">
       <Group justify="space-between" wrap="nowrap" align="flex-start" mb={open ? 'xs' : 0}>
         <UnstyledButton onClick={() => setOpen((o) => !o)} style={{ flex: 1, minWidth: 0 }} aria-expanded={open}>
           <Group gap={6} wrap="nowrap">
@@ -116,7 +116,7 @@ export function BackupReminder() {
   const hasOrders = useLiveQuery(async () => (await db.orders.count()) > 0, []);
   if (!hasOrders || !backup.due) return null;
   return (
-    <Group className="surface rise-enter" p="sm" pl="md" mb="lg" gap="sm" wrap="nowrap" style={{ borderLeft: '4px solid var(--mantine-color-orange-5)' }}>
+    <Group className="surface rise-enter" p="sm" pl="md" mb="lg" gap="sm" wrap="nowrap">
       <ThemeIcon variant="light" color="orange" radius="xl" size={36}>
         <IconCloudDownload size={19} />
       </ThemeIcon>
@@ -139,7 +139,7 @@ export function InsecureWarning() {
   const { t } = useTranslation();
   if (!insecureContext()) return null;
   return (
-    <Group className="surface" p="sm" pl="md" mb="lg" gap="sm" wrap="nowrap" style={{ borderLeft: '4px solid var(--mantine-color-yellow-5)' }}>
+    <Group className="surface" p="sm" pl="md" mb="lg" gap="sm" wrap="nowrap">
       <ThemeIcon variant="light" color="yellow" radius="xl" size={36}>
         <IconLockOpen size={19} />
       </ThemeIcon>

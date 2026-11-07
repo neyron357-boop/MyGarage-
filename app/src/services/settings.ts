@@ -29,13 +29,13 @@ export const DEFAULT_SETTINGS: Settings = {
     ru:
       'Клиент подтверждает, что состояние автомобиля, указанное в акте и на фотографиях, соответствует действительности на момент приёмки. ' +
       'Мастерская не отвечает за повреждения и неисправности, зафиксированные в акте. ' +
-      'Работы сверх согласованных выполняются только с согласия клиента, кроме работ в пределах лимита без звонка. ' +
-      'Мастерская не отвечает за ценные вещи, оставленные в автомобиле и не указанные в акте.',
+      'Работы сверх согласованных выполняются только с согласия клиента. ' +
+      'Мастерская не отвечает за ценные вещи, оставленные в автомобиле.',
     en:
       'The customer confirms that the condition of the vehicle recorded in this act and in the photos is accurate at the time of drop-off. ' +
       'The workshop is not responsible for damage and faults recorded in this act. ' +
-      'Work beyond what was approved is done only with the customer’s consent, except work within the no-call limit. ' +
-      'The workshop is not responsible for valuables left in the vehicle and not listed in this act.',
+      'Work beyond what was approved is done only with the customer’s consent. ' +
+      'The workshop is not responsible for valuables left in the vehicle.',
   },
   warrantyText: {
     ru:

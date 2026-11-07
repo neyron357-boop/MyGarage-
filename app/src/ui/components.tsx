@@ -2,13 +2,13 @@ import { ActionIcon, Badge, Box, Button, Group, Image, Loader, Modal, SimpleGrid
 import {
   IconAlertTriangle,
   IconArchive,
-  IconArrowLeft,
   IconBrandTelegram,
   IconBrandWhatsapp,
   IconCalendarTime,
   IconCash,
   IconChecklist,
   IconChevronDown,
+  IconChevronLeft,
   IconChevronRight,
   IconCircleCheck,
   IconClipboardList,
@@ -89,7 +89,7 @@ const EMIRATE_ON_PLATE: Record<Emirate, string> = {
 };
 
 /** A UAE number plate as it looks on the car: emirate, code, number. */
-export function PlateText({ plate, size = 'sm' }: { plate: Plate; size?: 'xs' | 'sm' | 'md' | 'lg' }) {
+export function PlateText({ plate, size = 'sm' }: { plate: Plate; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' }) {
   const p = normalizePlate(plate);
   return (
     <span className={`plate ${size}`} aria-label={`${EMIRATE_ON_PLATE[p.emirate]} ${p.code} ${p.number}`}>
@@ -199,49 +199,70 @@ export function Flags({ flags, hours, warnHours = 2, alertHours = 24 }: { flags:
 
 /* ---------------- Page structure ---------------- */
 
-export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode }) {
+/** iOS back button: chevron + "Back"; goes to `to` or one step back in history. */
+export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   return (
-    <Group justify="space-between" align="flex-start" mb="lg" wrap="nowrap" gap="sm">
-      <Group gap={6} align="flex-start" wrap="nowrap" style={{ minWidth: 0 }}>
-        {back && (
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size={40}
-            ml={-8}
-            aria-label={t('common.back')}
-            onClick={() => (typeof back === 'string' ? navigate(back) : navigate(-1))}
-          >
-            <IconArrowLeft size={22} />
-          </ActionIcon>
+    <button type="button" className="nav-back" onClick={() => (to ? navigate(to) : navigate(-1))}>
+      <IconChevronLeft size={26} stroke={2.2} style={{ marginRight: -2 }} />
+      {label ?? t('common.back')}
+    </button>
+  );
+}
+
+/**
+ * Screen header like iOS: a translucent navigation bar (back, actions, and the title once it scrolls
+ * away) above a large title.
+ */
+export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode }) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([e]) => setCompact(!e.isIntersecting), { rootMargin: '-52px 0px 0px 0px', threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <>
+      <div className="nav-bar" data-compact={compact}>
+        <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} />}</div>
+        <div className="nav-title" aria-hidden>
+          {title}
+        </div>
+        <div className="nav-right">{right}</div>
+      </div>
+      <header className="page-head">
+        {eyebrow && (
+          <div className="eyebrow" style={{ marginBottom: 2 }}>
+            {eyebrow}
+          </div>
         )}
-        <Box style={{ minWidth: 0 }} pt={back ? 4 : 0}>
-          {eyebrow && <div className="eyebrow" style={{ marginBottom: 2 }}>{eyebrow}</div>}
-          <Title order={2} style={{ textWrap: 'balance' }}>
-            {title}
-          </Title>
-          {subtitle && (
-            <Text size="sm" c="dimmed" component="div" mt={4}>
-              {subtitle}
-            </Text>
-          )}
-        </Box>
-      </Group>
-      {right && <Box style={{ flexShrink: 0 }}>{right}</Box>}
-    </Group>
+        <h1 ref={titleRef} className="large-title">
+          {title}
+        </h1>
+        {subtitle && (
+          <Text size="sm" c="dimmed" component="div" mt={4}>
+            {subtitle}
+          </Text>
+        )}
+      </header>
+    </>
   );
 }
 
 export function Section({ title, description, action, children, mt = 'xl' }: { title: ReactNode; description?: ReactNode; action?: ReactNode; children: ReactNode; mt?: string | number }) {
   return (
     <Box mt={mt}>
-      <Group justify="space-between" align="flex-end" mb="xs" wrap="nowrap" gap="sm">
+      <Group justify="space-between" align="flex-end" mb={8} wrap="nowrap" gap="sm" px={2}>
         <Box style={{ minWidth: 0 }}>
-          <Title order={5}>{title}</Title>
+          <Title order={5} fz={19} lh={1.25}>
+            {title}
+          </Title>
           {description && (
-            <Text size="xs" c="dimmed" mt={2}>
+            <Text size="sm" c="dimmed" mt={2} lh={1.35}>
               {description}
             </Text>
           )}
@@ -250,6 +271,36 @@ export function Section({ title, description, action, children, mt = 'xl' }: { t
       </Group>
       {children}
     </Box>
+  );
+}
+
+/** iOS inset group: an optional small caption above, white rounded block, optional note below. */
+export function RowGroup({ title, note, children, mt = 'lg' }: { title?: ReactNode; note?: ReactNode; children: ReactNode; mt?: string | number }) {
+  return (
+    <Box mt={mt}>
+      {title && <div className="group-title">{title}</div>}
+      <div className="ios-group">{children}</div>
+      {note && <div className="group-note">{note}</div>}
+    </Box>
+  );
+}
+
+/** A row of an iOS group: label on the left, value or field on the right. */
+export function FormRow({ label, children, onClick, align = 'right', chevron }: { label?: ReactNode; children?: ReactNode; onClick?: () => void; align?: 'left' | 'right'; chevron?: boolean }) {
+  return (
+    <div
+      className={`ios-row${align === 'left' ? ' left' : ''}${onClick ? ' clickable' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onClick()) : undefined}
+    >
+      {label !== undefined && <span className="label">{label}</span>}
+      <div className="value" style={align === 'right' ? { display: 'flex', justifyContent: 'flex-end', textAlign: 'right' } : undefined}>
+        {children}
+      </div>
+      {chevron && <IconChevronRight size={18} color="var(--mantine-color-gray-4)" style={{ flexShrink: 0, marginRight: -4 }} />}
+    </div>
   );
 }
 
@@ -282,17 +333,17 @@ export function ListRow({
     >
       {left}
       <div className="body">
-        <Text fw={600} size="sm" lineClamp={3} component="div">
+        <Text fw={500} fz={15} lh={1.35} lineClamp={3} component="div">
           {title}
         </Text>
         {subtitle && (
-          <Text size="xs" c="dimmed" component="div" mt={2}>
+          <Text fz={13} c="dimmed" component="div" mt={2} lh={1.35}>
             {subtitle}
           </Text>
         )}
       </div>
       {right}
-      {chevron && <IconChevronRight size={18} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />}
+      {chevron && <IconChevronRight size={18} color="var(--mantine-color-gray-4)" style={{ flexShrink: 0, marginRight: -4 }} />}
     </div>
   );
 }
@@ -427,9 +478,10 @@ export function PageSkeleton({ variant = 'list' }: { variant?: 'list' | 'detail'
   );
 }
 
-/** Round contact buttons: WhatsApp, Telegram, call. */
+/** Round contact buttons: WhatsApp, Telegram, call (nothing while the customer has no phone yet). */
 export function ContactButtons({ phone, whatsapp, telegram, size = 38 }: { phone: string; whatsapp?: string; telegram?: string; size?: number }) {
   const { t } = useTranslation();
+  if (!phone && !whatsapp) return null;
   return (
     <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
       <Tooltip label="WhatsApp">
@@ -451,19 +503,17 @@ export function ContactButtons({ phone, whatsapp, telegram, size = 38 }: { phone
   );
 }
 
-export function Logo({ size = 28, inverted = true }: { size?: number; inverted?: boolean }) {
+export function Logo({ size = 28 }: { size?: number }) {
   return (
-    <Group gap={8} wrap="nowrap">
+    <Group gap={9} wrap="nowrap">
       <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
-        <rect width="32" height="32" rx="9" fill="#3f5be9" />
+        <rect width="32" height="32" rx="8" fill="#007aff" />
         <path d="M6.5 19.5l2.2-5.6a3 3 0 012.8-1.9h9a3 3 0 012.8 1.9l2.2 5.6v4.2a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H10.5v1a1 1 0 01-1 1h-2a1 1 0 01-1-1z" fill="#fff" />
-        <path d="M9.6 17.2l1.5-3.4a1 1 0 01.9-.6h8a1 1 0 01.9.6l1.5 3.4z" fill="#3f5be9" />
-        <circle cx="11" cy="20.3" r="1.4" fill="#3f5be9" />
-        <circle cx="21" cy="20.3" r="1.4" fill="#3f5be9" />
+        <path d="M9.6 17.2l1.5-3.4a1 1 0 01.9-.6h8a1 1 0 01.9.6l1.5 3.4z" fill="#007aff" />
+        <circle cx="11" cy="20.3" r="1.4" fill="#007aff" />
+        <circle cx="21" cy="20.3" r="1.4" fill="#007aff" />
       </svg>
-      <span className="display" style={{ fontSize: size * 0.68, letterSpacing: '0.06em', textTransform: 'uppercase', color: inverted ? '#fff' : 'inherit' }}>
-        MyGarage
-      </span>
+      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: size * 0.64, letterSpacing: '-0.01em' }}>MyGarage</span>
     </Group>
   );
 }
@@ -512,6 +562,8 @@ export function MoneyInput({
       value={text}
       error={error}
       autoFocus={autoFocus}
+      // Tapping a filled amount selects it, so typing replaces the old price instead of appending.
+      onFocus={(e) => e.currentTarget.select()}
       styles={{ input: { fontVariantNumeric: 'tabular-nums' } }}
       onChange={(e) => {
         setText(e.currentTarget.value);

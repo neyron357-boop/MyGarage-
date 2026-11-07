@@ -2,24 +2,28 @@ import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { normalizePhone } from '../domain/phone';
 import { normalizePlate, plateMatches, plateSearchKey } from '../domain/plates';
-import type { Customer, Vehicle } from '../domain/types';
+import type { Customer, Order, Vehicle } from '../domain/types';
 import { AppError } from './errors';
 
 export type CustomerInput = Omit<Customer, 'id' | 'createdAt' | 'archivedAt'>;
 export type VehicleInput = Omit<Vehicle, 'id' | 'createdAt' | 'archivedAt' | 'plateSearch' | 'customerId'>;
 
+/**
+ * Name and phone may stay empty: the car is what gets checked in, the customer can be completed later.
+ * A phone that is typed must be a valid one.
+ */
 function cleanCustomer(input: Partial<CustomerInput>): Partial<CustomerInput> {
   const out: Partial<CustomerInput> = { ...input };
   if (input.phone !== undefined) {
-    const p = normalizePhone(input.phone);
-    if (!p) throw new AppError('err.phoneInvalid');
-    out.phone = p;
+    if (!input.phone.trim()) out.phone = '';
+    else {
+      const p = normalizePhone(input.phone);
+      if (!p) throw new AppError('err.phoneInvalid');
+      out.phone = p;
+    }
   }
   if (input.whatsapp) out.whatsapp = normalizePhone(input.whatsapp) ?? undefined;
-  if (input.name !== undefined) {
-    out.name = input.name.trim();
-    if (!out.name) throw new AppError('err.nameRequired');
-  }
+  if (input.name !== undefined) out.name = input.name.trim();
   if (input.trn !== undefined) out.trn = input.trn.replace(/\s/g, '') || undefined;
   return out;
 }
@@ -97,6 +101,44 @@ export async function findVehicleByPlate(plate: Vehicle['plate']): Promise<{ veh
   const vehicle = (await db.vehicles.where('plateSearch').equals(plateSearchKey(n)).toArray()).find((v) => !v.archivedAt && v.plate.emirate === n.emirate);
   if (!vehicle) return undefined;
   return { vehicle, owner: await db.customers.get(vehicle.customerId) };
+}
+
+/** The car with this plate, its owner and the job it is in right now (if any) — for check-in. */
+export async function findVehicleForCheckIn(plate: Vehicle['plate']): Promise<{ vehicle: Vehicle; owner?: Customer; activeOrder?: Order } | undefined> {
+  const found = await findVehicleByPlate(plate);
+  if (!found) return undefined;
+  const orders = await db.orders.where('vehicleId').equals(found.vehicle.id).toArray();
+  const activeOrder = orders.find((o) => !['delivered', 'closed', 'cancelled'].includes(o.stage));
+  return { ...found, activeOrder };
+}
+
+/** Existing customers matching what is being typed (3+ phone digits or 2+ letters of the name). */
+export async function suggestCustomers(phone: string, name: string, limit = 3): Promise<Customer[]> {
+  const digits = phone.replace(/\D/g, '').replace(/^00/, '').replace(/^0/, '');
+  const n = name.trim().toLowerCase();
+  if (digits.length < 3 && n.length < 2) return [];
+  const all = await db.customers.toArray();
+  return all
+    .filter((c) => !c.archivedAt && ((digits.length >= 3 && c.phone.replace(/\D/g, '').includes(digits)) || (n.length >= 2 && c.name.toLowerCase().includes(n))))
+    .slice(0, limit);
+}
+
+/** Makes this garage sees most often first, then the usual UAE list (one-tap chips at check-in). */
+export async function popularMakes(defaults: string[], limit = 12): Promise<string[]> {
+  const counts = new Map<string, number>();
+  for (const v of await db.vehicles.toArray()) if (v.make) counts.set(v.make, (counts.get(v.make) ?? 0) + 1);
+  const own = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m);
+  return [...new Set([...own, ...defaults])].slice(0, limit);
+}
+
+/** Models of this make seen in the garage first, then the catalogue order. */
+export async function popularModels(make: string, catalogue: string[], limit = 10): Promise<string[]> {
+  if (!make.trim()) return [];
+  const m = make.trim().toLowerCase();
+  const counts = new Map<string, number>();
+  for (const v of await db.vehicles.toArray()) if (v.make.toLowerCase() === m && v.model) counts.set(v.model, (counts.get(v.model) ?? 0) + 1);
+  const own = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([x]) => x);
+  return [...new Set([...own, ...catalogue])].slice(0, limit);
 }
 
 export interface SearchHit {

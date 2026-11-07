@@ -37,24 +37,22 @@ export type MissingKey =
   | 'conditions'
   | 'signer';
 
-/** What is still missing before an inspection act can be signed. */
+/**
+ * What is still missing before an act can be signed.
+ * Intake (fast check-in): nothing is mandatory — old cars are often taken in with no photos at all.
+ * Handover keeps its rules: eight photos (or a reason), mileage, fuel and the signer's name.
+ */
 export function validateInspection(
   insp: Inspection,
   photoSlots: Set<string>,
-  marks: DamageMark[],
+  _marks: DamageMark[],
   opts: { signerName?: string; policePhoto?: boolean } = {},
 ): MissingKey[] {
+  if (insp.kind === 'intake') return [];
   const missing: MissingKey[] = [];
   if (REQUIRED_SLOTS.some((s) => !photoSlots.has(s) && !insp.skippedPhotos[s]?.trim())) missing.push('photos');
   if (insp.mileageKm === undefined || insp.mileageKm < 0) missing.push('mileage');
   if (insp.fuelLevel === undefined) missing.push('fuel');
-  if (insp.kind === 'intake') {
-    if (!insp.noDamage && marks.length === 0) missing.push('damage');
-    if (!insp.obdNoCodes && insp.obdCodes.length === 0 && !insp.obdSkipReason?.trim()) missing.push('obd');
-    if (!insp.complaint?.trim()) missing.push('complaint');
-    if (insp.accidentRepair && (!insp.policeReportNo?.trim() || !opts.policePhoto)) missing.push('policeReport');
-    if (!insp.conditions) missing.push('conditions');
-  }
   if (opts.signerName !== undefined && !opts.signerName.trim()) missing.push('signer');
   return missing;
 }
