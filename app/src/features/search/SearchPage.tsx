@@ -8,7 +8,7 @@ import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { matchJobs, splitWords, wordMatches, type JobMatch, type Term } from '../../domain/search';
-import type { Customer, Stage } from '../../domain/types';
+import type { Customer, Plate, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
 import { loadJobIndex, type JobHitData } from '../../services/search';
 import { EmptyState, List, ListRow, PageHeader, PlateText, SearchField, Section, StageBadge } from '../../ui/components';
@@ -38,20 +38,29 @@ function useCustomerName() {
   return (c: Customer | undefined) => (c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) || t('customer.noName') : '');
 }
 
-/** A search result: the car (plate first) and its owner. */
+/** The small plate and a line of text after it (the way the board lists cars). */
+function PlateLine({ plate, children }: { plate?: Plate; children: React.ReactNode }) {
+  return (
+    <Group gap={6} wrap="nowrap" className="plate-line">
+      {plate && <PlateText plate={plate} size="xs" />}
+      <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
+        {children}
+      </Text>
+    </Group>
+  );
+}
+
+/** A search result: the car and its owner, the plate in the line under it (the text keeps the width). */
 export function HitRow({ hit, onClick, right }: { hit: Hit; onClick?: () => void; right?: React.ReactNode }) {
   const nameOf = useCustomerName();
   const name = nameOf(hit.customer);
+  const phone = hit.customer.phone ? formatPhone(hit.customer.phone) : '';
   return (
     <ListRow
       onClick={onClick}
       chevron={!right}
       left={
-        hit.vehicle ? (
-          <Box w={112} style={{ flexShrink: 0 }}>
-            <PlateText plate={hit.vehicle.plate} size="sm" />
-          </Box>
-        ) : (
+        hit.vehicle ? undefined : (
           <Avatar color="cobalt" radius="xl">
             {initials(hit.customer.name)}
           </Avatar>
@@ -59,18 +68,10 @@ export function HitRow({ hit, onClick, right }: { hit: Hit; onClick?: () => void
       }
       title={hit.vehicle ? `${hit.vehicle.make} ${hit.vehicle.model}${hit.vehicle.year ? ` ${hit.vehicle.year}` : ''}` : name}
       subtitle={
-        <Group gap={6}>
-          <span>
-            {hit.vehicle ? name : ''}
-            {hit.vehicle && hit.customer.phone ? ' · ' : ''}
-            {hit.customer.phone && (
-              <span className="tnum" style={{ whiteSpace: 'nowrap' }}>
-                {formatPhone(hit.customer.phone)}
-              </span>
-            )}
-          </span>
+        <Stack gap={4} align="flex-start">
+          <PlateLine plate={hit.vehicle?.plate}>{[hit.vehicle ? name : '', phone].filter(Boolean).join(' · ')}</PlateLine>
           {hit.activeOrder && <StageBadge stage={hit.activeOrder.stage} size="sm" />}
-        </Group>
+        </Stack>
       }
       right={right}
     />
@@ -106,7 +107,6 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
     <ListRow
       onClick={onClick}
       chevron
-      left={v ? <Box w={112} style={{ flexShrink: 0 }}><PlateText plate={v.plate} size="sm" /></Box> : undefined}
       title={
         m.byNumber ? (
           car || nameOf(c) || `№${o.number}`
@@ -124,10 +124,17 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
         )
       }
       subtitle={
-        <Group gap={6}>
-          <span>{[`№${o.number}`, formatDate(o.createdAt), !m.byNumber && car, nameOf(c)].filter(Boolean).join(' · ')}</span>
-          <StageBadge stage={o.stage} size="sm" />
-        </Group>
+        <Stack gap={4} align="flex-start">
+          <PlateLine plate={v?.plate}>{[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}</PlateLine>
+          <Group gap={6} wrap="nowrap" style={{ maxWidth: '100%' }}>
+            {(!m.byNumber && car) || nameOf(c) ? (
+              <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
+                {[!m.byNumber && car, nameOf(c)].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
+            <StageBadge stage={o.stage} size="sm" />
+          </Group>
+        </Stack>
       }
     />
   );
@@ -228,15 +235,12 @@ export function SearchPage() {
                     key={o.id}
                     onClick={() => navigate(`/orders/${o.id}`)}
                     chevron
-                    left={v ? <Box w={112} style={{ flexShrink: 0 }}><PlateText plate={v.plate} size="sm" /></Box> : undefined}
                     title={v ? `${v.make} ${v.model}` : `№${o.number}`}
                     subtitle={
-                      <Group gap={6}>
-                        <span>
-                          {[`№${o.number}`, nameOf(c), formatDate(o.createdAt)].join(' · ')}
-                        </span>
+                      <Stack gap={4} align="flex-start">
+                        <PlateLine plate={v?.plate}>{[`№${o.number}`, nameOf(c), formatDate(o.createdAt)].join(' · ')}</PlateLine>
                         <StageBadge stage={o.stage} size="sm" />
-                      </Group>
+                      </Stack>
                     }
                   />
                 ))}

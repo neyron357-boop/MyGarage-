@@ -74,25 +74,29 @@ function CashTab() {
         <Text fz={40} lh={1.1} mt={4}>
           <Money fils={st.expected} display />
         </Text>
-        <Group gap="lg" mt="sm">
-          <Text size="sm" c="dimmed">
-            {t('cash.opening')}: <Money fils={st.opening} />
-          </Text>
-          <Text size="sm" c="dimmed">
-            {t('cash.in')}: <Money fils={st.inFils} c="green.7" />
-          </Text>
-          <Text size="sm" c="dimmed">
-            {t('cash.out')}: <Money fils={st.outFils} c="red.7" />
-          </Text>
-        </Group>
-        <Group mt="lg" gap="xs">
-          <Button leftSection={<IconLock size={18} />} onClick={() => setCloseOpen(true)}>
+        {/* How the figure is made up: rows of "label — amount", as on an iPhone receipt. */}
+        <div className="kv-rows">
+          <div className="kv-row">
+            <span>{t('cash.opening')}</span>
+            <Money fils={st.opening} />
+          </div>
+          <div className="kv-row">
+            <span>{t('cash.in')}</span>
+            <Money fils={st.inFils} c="green.7" />
+          </div>
+          <div className="kv-row">
+            <span>{t('cash.out')}</span>
+            <Money fils={st.outFils} c="red.7" />
+          </div>
+        </div>
+        <Stack mt="lg" gap="xs">
+          <Button fullWidth leftSection={<IconLock size={18} />} onClick={() => setCloseOpen(true)}>
             {t('cash.closeDay')}
           </Button>
-          <Button variant="light" onClick={() => setMoveOpen(true)}>
+          <Button fullWidth variant="light" onClick={() => setMoveOpen(true)}>
             {t('cash.addMovement')}
           </Button>
-        </Group>
+        </Stack>
         {st.lastClosing && (
           <Text size="xs" c="dimmed" mt="sm">
             {t('cash.lastClosed', { date: formatDateTime(st.lastClosing.closedAt) })}
