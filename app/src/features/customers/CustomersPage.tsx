@@ -1,12 +1,12 @@
-import { Avatar, Box, Button, Text, TextInput } from '@mantine/core';
-import { IconPlus, IconSearch, IconUsers } from '@tabler/icons-react';
+import { Avatar, Box, Button, Text } from '@mantine/core';
+import { IconPlus, IconUsers } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatPhone } from '../../domain/phone';
-import { EmptyState, List, ListRow, PageHeader } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, SearchField } from '../../ui/components';
 import { CustomerModal } from './forms';
 
 export function initials(name: string) {
@@ -42,7 +42,9 @@ export function CustomersPage() {
           </Button>
         }
       />
-      <TextInput leftSection={<IconSearch size={18} />} placeholder={t('customer.searchPlaceholder')} value={q} onChange={(e) => setQ(e.currentTarget.value)} mb="md" />
+      <Box mb="md">
+        <SearchField placeholder={t('customer.searchPlaceholder')} value={q} onChange={setQ} />
+      </Box>
       {list && list.length === 0 ? (
         <EmptyState icon={IconUsers} title={q ? t('search.noResults') : t('customer.empty')} />
       ) : (

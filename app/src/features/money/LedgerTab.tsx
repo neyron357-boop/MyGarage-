@@ -1,5 +1,5 @@
 import { Box, Button, Group, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPencil, IconSearch } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPencil } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +10,7 @@ import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger'
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory, IncomeCategory } from '../../domain/types';
 import { loadLedger, setOpeningBalances, updateExpense, updateIncome, voidExpense, voidIncome, type Links } from '../../services/ledger';
-import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, Photo, PlateText } from '../../ui/components';
+import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, Photo, PlateText, SearchField } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { EntrySheet, INCOME_CATEGORIES, LinkPicker, type EntryPreset } from './MoneyEntry';
@@ -292,7 +292,7 @@ export function LedgerTab() {
             </button>
           ))}
         </div>
-        <TextInput leftSection={<IconSearch size={16} />} placeholder={t('ledger.search')} value={q} onChange={(e) => setQ(e.currentTarget.value)} />
+        <SearchField placeholder={t('ledger.search')} value={q} onChange={setQ} />
       </Stack>
 
       {rows.length === 0 ? (

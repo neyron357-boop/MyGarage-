@@ -160,8 +160,7 @@ a {
 .mantine-ActionIcon-root[data-variant='default']:active:not([data-disabled]) {
   background: var(--app-press);
 }
-.mantine-Button-root[data-variant='filled'][data-disabled],
-.mantine-Button-root[data-variant='filled']:disabled {
+.mantine-Button-root:is([data-variant='filled'], :not([data-variant])):is([data-disabled], :disabled) {
   background: var(--app-fill);
   color: var(--app-label-3);
 }
@@ -1195,7 +1194,8 @@ html.kb .tab-bar-wrap {
   border-radius: 50%;
   color: var(--mantine-color-text);
 }
-.screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root:not([data-variant='filled'])) {
+/* (Mantine marks only the variants it is given: a plain Button — the filled one — has no data-variant.) */
+.screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root[data-variant]:not([data-variant='filled'])) {
   border: 0;
   background: var(--glass-bg);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1211,17 +1211,13 @@ html.kb .tab-bar-wrap {
   font-weight: 600;
   border-radius: 999px;
 }
-.screen-nav .nav-bar .mantine-Button-root:not([data-variant='filled']) {
+.screen-nav .nav-bar .mantine-Button-root[data-variant]:not([data-variant='filled']) {
   color: var(--mantine-color-text);
 }
-.screen-nav .nav-bar .mantine-Button-root[data-variant='filled'] {
-  background: var(--mantine-color-cobalt-6);
+:root .screen-nav .nav-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])) {
+  background: var(--button-bg, var(--mantine-primary-color-filled));
   color: #fff;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--mantine-color-cobalt-6) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-}
-[data-mantine-color-scheme='dark'] .screen-nav .nav-bar .mantine-Button-root[data-variant='filled'] {
-  background: var(--mantine-color-cobalt-5);
-  color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--button-bg, var(--mantine-primary-color-filled)) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 .screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root):active:not(:disabled) {
   transform: scale(0.9);
@@ -1302,11 +1298,11 @@ html.kb .tab-bar-wrap {
   padding-inline: 6px;
   font-size: 17px;
 }
-.nav-bar .mantine-Button-root[data-variant='filled'] {
+.nav-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])) {
   background: var(--mantine-color-cobalt-light);
   color: var(--mantine-color-cobalt-6);
 }
-[data-mantine-color-scheme='dark'] .nav-bar .mantine-Button-root[data-variant='filled'] {
+[data-mantine-color-scheme='dark'] .nav-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])) {
   color: var(--mantine-color-cobalt-4);
 }
 .nav-bar .mantine-ActionIcon-root {
@@ -1806,11 +1802,10 @@ html.kb .tab-bar-wrap {
 html.kb .screen-bottom > .sticky-bar {
   padding-bottom: 8px;
 }
-.screen-bottom > .sticky-bar .mantine-Button-root[data-variant='filled'] {
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--mantine-color-cobalt-6) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+.screen-bottom > .sticky-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])) {
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--button-bg, var(--mantine-primary-color-filled)) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
-.screen-bottom > .sticky-bar .mantine-Button-root[data-variant='filled'][data-disabled],
-.screen-bottom > .sticky-bar .mantine-Button-root[data-variant='filled']:disabled {
+.screen-bottom > .sticky-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])):is([data-disabled], :disabled) {
   box-shadow: none;
 }
 /* The other actions of the bar: clear glass with the tint (or the colour of the button). */

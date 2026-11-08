@@ -448,9 +448,8 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
         subtitle={subtitle}
         right={
           kind === 'intake' ? (
-            // "Done" on any step: save what is filled in and go back to the job.
+            // "Done" on any step: save what is filled in and go back to the job (the tinted confirm button).
             <Button
-              variant="subtle"
               size="compact-md"
               fz={17}
               fw={600}
