@@ -2715,10 +2715,13 @@ html.kb .screen-bottom > .sticky-bar {
   left: 50%;
   transform: translateX(-50%);
   width: min(460px, calc(100vw - 24px));
-  padding: 10px 10px 10px 12px;
-  border-radius: 16px;
-  background: var(--app-card);
-  box-shadow: var(--mantine-shadow-lg);
+  padding: 12px 12px 12px 14px;
+  /* A glass banner like the notifications of iOS 26. */
+  border-radius: 26px;
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
   animation: mg-slide-down var(--dur-3) var(--ease-out) both;
 }
 
