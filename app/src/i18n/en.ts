@@ -203,6 +203,8 @@ export const en: typeof ru = {
     noName: 'Customer without a name',
     contact: 'Contact person',
     visits: 'visits',
+    visitsTitle: 'Visits',
+    noPhone: 'No phone yet',
     spent: 'Spent',
     noCars: 'No cars yet',
     noOrders: 'No jobs yet',

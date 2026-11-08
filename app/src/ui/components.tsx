@@ -103,6 +103,23 @@ export function PlateText({ plate, size = 'sm' }: { plate: Plate; size?: 'xs' | 
   );
 }
 
+/**
+ * A small plate and a line of text after it, for the line under a row's title (the way the board
+ * lists cars): the title keeps the whole width instead of sharing it with a plate column.
+ */
+export function PlateLine({ plate, children, c }: { plate?: Plate; children?: ReactNode; c?: string }) {
+  return (
+    <Group gap={6} wrap="nowrap" style={{ maxWidth: '100%' }}>
+      {plate && <PlateText plate={plate} size="xs" />}
+      {children && (
+        <Text span inherit c={c} lineClamp={1} style={{ minWidth: 0 }}>
+          {children}
+        </Text>
+      )}
+    </Group>
+  );
+}
+
 /* ---------------- Stage ---------------- */
 
 export const STAGE_META: Record<Stage, { color: string; icon: Icon; step: number }> = {

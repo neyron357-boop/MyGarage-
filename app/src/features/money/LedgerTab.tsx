@@ -305,7 +305,7 @@ export function LedgerTab() {
           return (
             <Box key={day}>
               <Group justify="space-between" px={4} mb={6}>
-                <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+                <Text size="sm" fw={600} c="dimmed" className="tnum">
                   {formatDate(day)}
                 </Text>
                 <Text size="xs" fw={600} c={net >= 0 ? 'green.7' : 'red.7'} className="tnum">

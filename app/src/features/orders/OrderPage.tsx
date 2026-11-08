@@ -723,7 +723,9 @@ export function OrderPage() {
   const navigate = useNavigate();
   const { run, busy } = useAction();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') ?? 'overview';
+  // An old or mistyped link (or a board tip) opens the overview, not an empty tab.
+  const asked = params.get('tab') ?? 'overview';
+  const tab = ['overview', 'work', 'approvals', 'photos', 'payments', 'docs', 'journal'].includes(asked) ? asked : 'overview';
   const b = useOrderBundle(id);
   const [incident, setIncident] = useState(false);
   const [stageOpen, setStageOpen] = useState(false);
@@ -1026,7 +1028,9 @@ export function OrderPage() {
               </StickyBar>
             </Box>
           )
-        : step.primary && (
+        : step.primary &&
+          // "To the work" while the Work tab is already open would lead where you are.
+          !(tab === 'work' && (step.primary.action === 'toWork' || step.primary.action === 'toParts')) && (
             <Box hiddenFrom="sm">
               <StickyBar>{primaryBtn}</StickyBar>
             </Box>

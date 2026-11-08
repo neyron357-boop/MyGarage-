@@ -201,6 +201,8 @@ export const ru = {
     noName: 'Клиент без имени',
     contact: 'Контактное лицо',
     visits: 'визитов',
+    visitsTitle: 'Визиты',
+    noPhone: 'Телефон не указан',
     spent: 'Потратил',
     noCars: 'У клиента пока нет машин',
     noOrders: 'Заказов пока нет',

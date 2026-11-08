@@ -22,7 +22,7 @@ import { formatAed } from '../../domain/money';
 import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
-import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateLine, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { initials } from '../customers/CustomersPage';
@@ -379,14 +379,17 @@ function DebtsTab() {
               key={b.order.id}
               onClick={() => navigate(`/orders/${b.order.id}?tab=payments`)}
               chevron
-              left={<PlateText plate={b.vehicle.plate} size="sm" />}
-              title={b.customer.name}
+              title={b.customer.name || t('customer.noName')}
               subtitle={
-                <Text span size="xs" c={overdue ? 'red' : 'dimmed'}>
-                  №{b.order.number}
-                  {d ? ` · ${t('debt.dueDate')} ${formatDate(d.dueDate)}` : ''}
-                  {overdue ? ` · ${t('debt.overdue')}` : ''}
-                </Text>
+                <Stack gap={2} align="flex-start">
+                  <PlateLine plate={b.vehicle.plate}>{`№${b.order.number}`}</PlateLine>
+                  {d && (
+                    <Text span inherit c={overdue ? 'red' : undefined}>
+                      {`${t('debt.dueDate')} ${formatDate(d.dueDate)}`}
+                      {overdue ? ` · ${t('debt.overdue')}` : ''}
+                    </Text>
+                  )}
+                </Stack>
               }
               right={<Money fils={bundleAmountDue(b)} c="red" size="sm" />}
             />
@@ -397,10 +400,14 @@ function DebtsTab() {
   );
 }
 
+const MONEY_TABS = ['book', 'cash', 'expenses', 'salaries', 'debts'];
+
 export function MoneyPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') ?? 'book';
+  // An old or mistyped link opens the book, not an empty screen.
+  const asked = params.get('tab') ?? 'book';
+  const tab = MONEY_TABS.includes(asked) ? asked : 'book';
   return (
     <>
       <PageHeader title={t('nav.money')} />

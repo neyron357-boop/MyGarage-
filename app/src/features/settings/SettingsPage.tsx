@@ -610,7 +610,9 @@ export function SettingsPage() {
   const s = useSettings();
   const mobile = useMediaQuery('(max-width: 62em)', true, { getInitialValueInEffect: false });
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') ?? 'business';
+  // An old or mistyped link opens the first tab, not an empty screen.
+  const asked = params.get('tab') ?? 'business';
+  const tab = ['business', 'rules', 'texts', 'staff', 'prices', 'categories', 'data'].includes(asked) ? asked : 'business';
   const [pendingTab, setPendingTab] = useState<string | null>(null);
   const openTab = (v: string) => {
     if (v === tab) return;

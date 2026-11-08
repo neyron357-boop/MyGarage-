@@ -8,10 +8,10 @@ import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { matchJobs, splitWords, wordMatches, type JobMatch, type Term } from '../../domain/search';
-import type { Customer, Plate, Stage } from '../../domain/types';
+import type { Customer, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
 import { loadJobIndex, type JobHitData } from '../../services/search';
-import { EmptyState, List, ListRow, PageHeader, PlateText, SearchField, Section, StageBadge } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, StageBadge } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
 
 export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage } };
@@ -36,18 +36,6 @@ function initials(name: string) {
 function useCustomerName() {
   const { t } = useTranslation();
   return (c: Customer | undefined) => (c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) || t('customer.noName') : '');
-}
-
-/** The small plate and a line of text after it (the way the board lists cars). */
-function PlateLine({ plate, children }: { plate?: Plate; children: React.ReactNode }) {
-  return (
-    <Group gap={6} wrap="nowrap" className="plate-line">
-      {plate && <PlateText plate={plate} size="xs" />}
-      <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
-        {children}
-      </Text>
-    </Group>
-  );
 }
 
 /** A search result: the car and its owner, the plate in the line under it (the text keeps the width). */

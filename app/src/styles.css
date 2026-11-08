@@ -1034,6 +1034,26 @@ html.kb .tab-bar-wrap {
 .kpi .value .money .cur {
   font-family: var(--mantine-font-family);
 }
+/* Three tiles in a row on a phone: an amount shrinks to the tile and its currency goes under it
+   (a count keeps its size), so "1 102,50 AED" is never cut at the tile's edge. */
+.kpi {
+  container-type: inline-size;
+}
+@container (max-width: 130px) {
+  .kpi .value:has(> .money) {
+    font-size: clamp(15px, 21cqi, 22px);
+  }
+  .kpi .value .money {
+    white-space: normal;
+  }
+  .kpi .value .money.display .cur {
+    display: block;
+    margin: 2px 0 0;
+    vertical-align: 0;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+}
 
 /* ---------- Scrollable filter pills ---------- */
 .scroll-tabs {

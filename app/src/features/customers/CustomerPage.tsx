@@ -51,17 +51,20 @@ export function CustomerPage() {
         }
       />
       <Box className="surface" p="md">
+        {/* The name is the large title above: the card starts with how to reach the customer. */}
         <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
           <Avatar color={c.type === 'company' ? 'grape' : 'cobalt'} radius="xl" size={52}>
             {initials(displayName)}
           </Avatar>
           <Box style={{ minWidth: 0 }}>
-            <Text fw={700} size="lg" lineClamp={2} lh={1.25}>
-              {displayName}
+            <Text fz={17} fw={600} className="tnum selectable" c={c.phone ? undefined : 'dimmed'}>
+              {c.phone ? formatPhone(c.phone) : t('customer.noPhone')}
             </Text>
-            <Text size="sm" c="dimmed" className="tnum">
-              {formatPhone(c.phone)}
-            </Text>
+            {c.type === 'company' && c.companyName && c.name && (
+              <Text fz={15} c="dimmed" lineClamp={1}>
+                {t('customer.contact')}: {c.name}
+              </Text>
+            )}
           </Box>
         </Group>
         <ContactTiles phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
@@ -71,10 +74,9 @@ export function CustomerPage() {
           <Field label={t('customer.source')}>{c.source ? t(`source.${c.source}`) : '—'}</Field>
           <Field label="TRN">{c.trn || '—'}</Field>
         </SimpleGrid>
-        {c.type === 'company' && c.companyName && (
+        {c.address && (
           <Text size="sm" c="dimmed" mt="sm">
-            {t('customer.contact')}: {c.name}
-            {c.address ? ` · ${c.address}` : ''}
+            {c.address}
           </Text>
         )}
       </Box>
@@ -84,7 +86,7 @@ export function CustomerPage() {
         </Alert>
       )}
       <SimpleGrid cols={3} spacing="sm" mt="md">
-        <Kpi label={t('customer.visits')} value={orders.length} />
+        <Kpi label={t('customer.visitsTitle')} value={orders.length} />
         <Kpi label={t('customer.spent')} value={<Money fils={spent} display />} />
         <Kpi label={t('flags.debt')} value={<Money fils={debt} display />} color={debt ? 'red' : undefined} />
       </SimpleGrid>

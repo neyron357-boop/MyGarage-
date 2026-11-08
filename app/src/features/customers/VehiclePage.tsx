@@ -81,7 +81,7 @@ export function VehiclePage() {
         </SimpleGrid>
       </Box>
       <SimpleGrid cols={2} spacing="sm" mt="md">
-        <Kpi label={t('customer.visits')} value={orders.length} />
+        <Kpi label={t('customer.visitsTitle')} value={orders.length} />
         <Kpi label={t('vehicle.lastMileage')} value={lastKm !== undefined ? `${lastKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'} />
       </SimpleGrid>
       {declined.length > 0 && (

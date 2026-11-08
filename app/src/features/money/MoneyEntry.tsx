@@ -177,7 +177,7 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
   return (
     <Box>
       <Group justify="space-between" mb={6} px={4} wrap="nowrap">
-        <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+        <Text size="sm" fw={500} c="dimmed">
           {t('ledger.linkedTitle')}
         </Text>
         <Text size="xs" c="dimmed" className="tnum">
