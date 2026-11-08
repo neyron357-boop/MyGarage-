@@ -615,7 +615,8 @@ export function SettingsPage() {
   const openTab = (v: string) => {
     if (v === tab) return;
     if (hasUnsaved()) setPendingTab(v);
-    else setParams({ tab: v });
+    // Tabs inside a screen are not history steps: "Back" leaves the screen, as on iPhone.
+    else setParams({ tab: v }, { replace: true });
   };
   if (!s) return <PageSkeleton />;
   const content = (
@@ -634,7 +635,7 @@ export function SettingsPage() {
         confirmLabel={t('settings.leave')}
         color="red"
         onConfirm={async () => {
-          if (pendingTab) setParams({ tab: pendingTab });
+          if (pendingTab) setParams({ tab: pendingTab }, { replace: true });
           return true;
         }}
       >

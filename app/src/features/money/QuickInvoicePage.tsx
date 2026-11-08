@@ -19,6 +19,7 @@ import { bundleAmountDue, changeStage, type OrderBundle } from '../../services/o
 import { haptic } from '../../ui/haptics';
 import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, StickyBar, SuccessMark, undoToast } from '../../ui/components';
 import { typedOnly, useAction, useLang, useOrderBundle } from '../../ui/hooks';
+import { scrollToTop } from '../../ui/stack';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { PriceInput } from '../estimate/components';
 import { CustomerModal } from '../customers/forms';
@@ -446,7 +447,7 @@ export function QuickInvoicePage() {
           run(async () => {
             await quickInvoice(b.order.id);
             haptic('success');
-            window.scrollTo({ top: 0 });
+            scrollToTop();
             return true;
           }, 'invoice.issued')
         }

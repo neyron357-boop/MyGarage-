@@ -103,11 +103,6 @@ a {
     transition: none !important;
     animation: none !important;
   }
-  ::view-transition-group(*),
-  ::view-transition-old(*),
-  ::view-transition-new(*) {
-    animation: none !important;
-  }
 }
 
 /* ---------- Controls, iOS-like ---------- */
@@ -337,112 +332,10 @@ a {
     opacity: 0;
   }
 }
-/* Screens rise in a little where the browser cannot animate the navigation stack (see below); tab
-   content and lists fade. Final state has no transform, so sticky and fixed children behave normally. */
+/* PC: screens rise in a little; tab content and lists fade. Final state has no transform, so sticky
+   and fixed children behave normally. (Phones have the navigation stack below.) */
 .page-enter {
   animation: mg-page-in var(--dur-3) var(--ease-out) both;
-}
-
-/* ---------- Navigation stack (View Transitions) ---------- */
-/* The screen is one picture, the tab bar and the action bar are their own: a new screen slides in
-   from the right over the old one (which steps back and dims), "Back" slides it out again, the tabs
-   cross-fade. `--swipe-p` is how far the back swipe already moved the screen (0 … 1). */
-@media (max-width: 48em) {
-  .page-shell {
-    view-transition-name: page;
-  }
-  .tab-bar {
-    view-transition-name: tab-bar;
-  }
-  body > .sticky-bar {
-    view-transition-name: sticky-bar;
-  }
-}
-::view-transition-group(root),
-::view-transition-old(root),
-::view-transition-new(root),
-::view-transition-group(page),
-::view-transition-group(tab-bar),
-::view-transition-group(sticky-bar),
-::view-transition-old(tab-bar),
-::view-transition-new(tab-bar),
-::view-transition-old(sticky-bar),
-::view-transition-new(sticky-bar) {
-  animation: none;
-  mix-blend-mode: normal;
-}
-::view-transition-new(tab-bar):only-child,
-::view-transition-new(sticky-bar):only-child {
-  animation: mg-fade-in 220ms ease both;
-}
-::view-transition-old(tab-bar):only-child,
-::view-transition-old(sticky-bar):only-child {
-  animation: mg-fade-out 160ms ease both;
-}
-::view-transition-old(page),
-::view-transition-new(page) {
-  mix-blend-mode: normal;
-  animation-duration: var(--vt-dur, 380ms);
-  animation-timing-function: var(--ease-ios);
-  animation-fill-mode: both;
-  background: var(--app-canvas);
-}
-html[data-nav='push']::view-transition-old(page) {
-  animation-name: vt-step-back;
-}
-html[data-nav='push']::view-transition-new(page) {
-  animation-name: vt-slide-in;
-  box-shadow: -1px 0 0 rgba(0, 0, 0, 0.06), -12px 0 32px rgba(0, 0, 0, 0.18);
-}
-html[data-nav='pop']::view-transition-old(page) {
-  animation-name: vt-slide-out;
-  box-shadow: -1px 0 0 rgba(0, 0, 0, 0.06), -12px 0 32px rgba(0, 0, 0, 0.18);
-  z-index: 1;
-}
-html[data-nav='pop']::view-transition-new(page) {
-  animation-name: vt-step-forward;
-}
-html[data-nav='tab']::view-transition-old(page) {
-  animation: mg-fade-out 140ms ease both;
-}
-html[data-nav='tab']::view-transition-new(page) {
-  animation: mg-fade-in 200ms ease both;
-}
-@keyframes vt-slide-in {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: none;
-  }
-}
-@keyframes vt-step-back {
-  from {
-    transform: none;
-    filter: brightness(1);
-  }
-  to {
-    transform: translateX(-28%);
-    filter: brightness(0.86);
-  }
-}
-@keyframes vt-slide-out {
-  from {
-    transform: translateX(calc(var(--swipe-p, 0) * 100%));
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
-@keyframes vt-step-forward {
-  from {
-    transform: translateX(calc(-28% * (1 - var(--swipe-p, 0))));
-    filter: brightness(0.86);
-  }
-  to {
-    transform: none;
-    filter: brightness(1);
-  }
 }
 @keyframes mg-fade-out {
   from {
@@ -453,29 +346,180 @@ html[data-nav='tab']::view-transition-new(page) {
   }
 }
 
-/* ---------- The screen itself ---------- */
-/* One opaque sheet of canvas colour per screen (so it can slide as a whole), with the iOS gutter. */
+/* ---------- PC page ---------- */
 .page-shell {
   position: relative;
   background: var(--app-canvas);
   padding: var(--page-pad);
-  min-height: calc(100dvh - var(--app-shell-footer-offset, 0rem));
+  min-height: 100dvh;
 }
-/* While the back swipe holds it: a shadow on its edge, the uncovered side dims less as it opens. */
-.page-shell.swiping {
-  z-index: 70;
-  box-shadow: -1px 0 0 rgba(0, 0, 0, 0.06), -12px 0 32px rgba(0, 0, 0, 0.18);
-  will-change: transform;
+
+/* ---------- Phone: the app as a native one (ui/stack.tsx) ---------- */
+/* The document never scrolls: a fixed root holds the screens and the tab bar, every screen scrolls
+   itself. Nothing is dragged by the rubber band or carried away by the keyboard. */
+html.phone-shell,
+html.phone-shell body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
-.page-shell.swiping::before {
-  content: '';
+/* An app has no selectable labels or callouts; fields and texts meant for copying stay selectable. */
+html.phone-shell body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.phone-shell input,
+html.phone-shell textarea,
+html.phone-shell [contenteditable],
+html.phone-shell .selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.app-root {
+  position: fixed;
+  inset: 0;
+  overflow: clip;
+  background: var(--app-canvas);
+}
+/* The keyboard is up (or iOS moved the visible area): the app covers exactly what is visible. */
+html.vv .app-root {
+  top: var(--vv-top, 0px);
+  bottom: auto;
+  height: var(--vv-h, 100%);
+}
+.stack {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+}
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  background: var(--app-canvas);
+  z-index: 2;
+}
+/* The screen under the one in front: kept with its state and scroll position, not painted. */
+.screen[data-role='below'] {
+  z-index: 1;
+  visibility: hidden;
+}
+.stack[data-out='above'] > .screen[data-role='out'] {
+  z-index: 3;
+}
+.stack[data-out='below'] > .screen[data-role='out'] {
+  z-index: 1;
+}
+/* The edge shadow of a screen that slides over another. */
+.screen.moving {
+  box-shadow: -0.5px 0 0 rgba(0, 0, 0, 0.08), -10px 0 28px rgba(0, 0, 0, 0.16);
+}
+.screen[data-modal].moving {
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.16);
+}
+.screen-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* Room for the navigation bar above, the tab bar (or the home indicator) below. */
+.screen-body {
+  min-height: 100%;
+  padding: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h)) var(--page-pad) calc(env(safe-area-inset-bottom, 0px) + var(--page-pad));
+}
+.screen[data-tabbar='true'] .screen-body {
+  padding-bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px) + var(--page-pad) + 8px);
+}
+.screen:has(> .screen-bottom > .sticky-bar) .screen-body {
+  padding-bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px) + 96px);
+}
+.screen[data-tabbar='false']:has(> .screen-bottom > .sticky-bar) .screen-body {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+}
+.screen-nav {
   position: absolute;
   top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+}
+.screen-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
   bottom: 0;
-  right: 100%;
-  width: 100vw;
+  z-index: 4;
+}
+.screen[data-tabbar='true'] > .screen-bottom {
+  bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
+}
+/* While typing, the action bar sits right on the keyboard. */
+html.kb .screen > .screen-bottom {
+  bottom: 0;
+}
+/* The shade over a screen that another one covers (iOS dims the screen underneath). */
+.screen-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: rgba(0, 0, 0, 0.12);
+  opacity: 0;
   pointer-events: none;
-  background: rgba(0, 0, 0, calc(0.14 * (1 - var(--swipe-p, 0))));
+}
+[data-mantine-color-scheme='dark'] .screen-dim {
+  background: rgba(0, 0, 0, 0.45);
+}
+/* The tab bar stands still; it steps away for work at the car and while typing. */
+.tab-bar-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  height: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
+  transition: transform 320ms var(--ease-ios);
+}
+.app-root:has(> .stack > .screen[data-role='top'][data-tabbar='false']) > .tab-bar-wrap,
+html.kb .tab-bar-wrap {
+  transform: translate3d(0, 105%, 0);
+}
+
+/* ---------- Haptics (ui/haptics.ts) ---------- */
+/* A transparent label over each control: the finger lands on it, the control still gets the click,
+   and the label gives the iPhone's own tap through a hidden switch. */
+.haptic-labels :is(.chip, .scroll-tabs > button, .wizard-steps > button, .tab-bar button, .suggest, .choice-card, .tab-plus, .mantine-SegmentedControl-control) {
+  position: relative;
+}
+.haptic-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  cursor: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.haptic-switch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  border-radius: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.no-haptics .haptic-hit,
+.no-haptics .haptic-switch,
+:disabled > .haptic-hit,
+[data-disabled] > .haptic-hit,
+[data-loading] > .haptic-hit {
+  display: none;
 }
 .fade-enter {
   animation: mg-fade-in var(--dur-2) var(--ease-out) both;
@@ -788,16 +832,16 @@ html[data-nav='tab']::view-transition-new(page) {
 .kpi {
   background: var(--app-card);
   border-radius: var(--radius-group);
-  padding: 13px 15px 12px;
+  padding: 11px 14px 11px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .kpi .value {
   font-family: var(--font-rounded);
   font-weight: 700;
-  font-size: 30px;
+  font-size: 28px;
   line-height: 1.1;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -904,6 +948,17 @@ html[data-nav='tab']::view-transition-new(page) {
   padding: env(safe-area-inset-top, 0px) var(--page-pad) 0;
   margin: calc(-1 * var(--page-pad)) calc(-1 * var(--page-pad)) 0;
 }
+/* Phone: the bar sits over the screen, outside its scroll view (it never bounces with the content). */
+.screen-nav > .nav-bar {
+  position: relative;
+  top: auto;
+  margin: 0;
+}
+/* The large title starts right under the bar there (the screen already keeps room for the bar). */
+.screen-body > :first-child > .page-head:first-child,
+.screen-body .page-head {
+  margin-top: 2px;
+}
 .nav-bar::before {
   content: '';
   position: absolute;
@@ -993,6 +1048,19 @@ html[data-nav='tab']::view-transition-new(page) {
 .nav-back .nav-back-label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.nav-back.nav-cancel {
+  margin-left: 0;
+  padding-left: 0;
+}
+/* Touch screens: no focus rings on tapped buttons (an iPhone has no keyboard focus to show). */
+@media (hover: none) and (pointer: coarse) {
+  button:focus-visible,
+  [role='button']:focus-visible,
+  .mantine-Modal-close:focus-visible,
+  .mantine-UnstyledButton-root:focus-visible {
+    outline: none;
+  }
 }
 .nav-back:active {
   opacity: 0.35;
@@ -1300,42 +1368,46 @@ html[data-nav='tab']::view-transition-new(page) {
   backdrop-filter: saturate(180%) blur(20px);
   box-shadow: 0 -0.5px 0 var(--app-hairline);
 }
-.tab-bar a {
+.tab-bar button[data-href] {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding-top: 2px;
+  border: 0;
+  background: none;
+  margin: 0;
+  padding: 2px 0 0;
+  font: inherit;
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.01em;
   color: var(--app-tab-idle);
-  text-decoration: none;
+  cursor: pointer;
   transition: color var(--dur-1) ease;
   -webkit-user-select: none;
   user-select: none;
 }
-.tab-bar a svg {
+.tab-bar button[data-href] svg {
   width: 27px;
   height: 27px;
   transition: transform 360ms var(--spring), stroke-width var(--dur-1) ease;
 }
-.tab-bar a:active svg {
+.tab-bar button[data-href]:active svg {
   transform: scale(0.86);
   transition-duration: 80ms;
 }
-.tab-bar a.active {
+.tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-6);
 }
-.tab-bar a.active svg {
+.tab-bar button[data-href].active svg {
   stroke-width: 2.1;
 }
-[data-mantine-color-scheme='dark'] .tab-bar a.active {
+[data-mantine-color-scheme='dark'] .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-5);
 }
-.tab-bar a:focus-visible {
+.tab-bar button[data-href]:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: -2px;
   border-radius: 10px;
@@ -1391,27 +1463,16 @@ html[data-nav='tab']::view-transition-new(page) {
   border-radius: 14px;
   font-size: 17px;
 }
-@media (max-width: 48em) {
-  .with-bottom-nav .sticky-bar {
-    bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
-    padding-bottom: 10px;
-  }
-  /* The action bar always sits at the very bottom, where the thumb is — also on a short screen
-     (no button floating mid-screen with empty space under it); the page keeps room for it. */
-  body > .sticky-bar {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    margin: 0;
-  }
-  body:has(.with-bottom-nav) > .sticky-bar {
-    bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
-    padding-bottom: 10px;
-  }
-  body:has(> .sticky-bar) .page-shell {
-    padding-bottom: calc(var(--page-pad) + 88px + env(safe-area-inset-bottom, 0px));
-  }
+/* Phone: the bar belongs to its screen, pinned to the bottom edge (above the tab bar, or on the
+   keyboard), always where the thumb is — also on a short screen. */
+.screen-bottom > .sticky-bar {
+  position: relative;
+  bottom: auto;
+  margin: 0;
+}
+.screen[data-tabbar='true'] > .screen-bottom > .sticky-bar,
+html.kb .screen-bottom > .sticky-bar {
+  padding-bottom: 10px;
 }
 @media (min-width: 48em) {
   .sticky-bar {
@@ -2230,6 +2291,18 @@ html[data-nav='tab']::view-transition-new(page) {
   }
   .mg-sheet .mantine-Modal-body {
     padding-bottom: calc(var(--mantine-spacing-md) + env(safe-area-inset-bottom, 0px));
+  }
+  /* With the keyboard up the sheet rises above it (and fits the space left), as iOS sheets do. */
+  html.vv .mg-sheet .mantine-Modal-inner {
+    top: var(--vv-top, 0px) !important;
+    bottom: auto !important;
+    height: var(--vv-h, 100%) !important;
+  }
+  html.vv .mg-sheet .mantine-Modal-content {
+    max-height: calc(var(--vv-h, 100dvh) - 12px) !important;
+  }
+  html.kb .mg-sheet .mantine-Modal-body {
+    padding-bottom: var(--mantine-spacing-md);
   }
   .mg-sheet .mantine-Modal-close {
     width: 30px;

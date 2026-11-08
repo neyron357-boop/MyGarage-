@@ -8,6 +8,7 @@ export const ru = {
     appearance: 'Оформление',
     haptics: 'Виброотклик',
     hapticsHint: 'Лёгкие отклики на нажатия, как в системных приложениях iPhone. «Авто» — тема как в системе.',
+    hapticsNeedsIos: 'Отклик на нажатия в веб-приложениях iPhone работает с iOS 18 (у вас iOS {{version}}). «Авто» — тема как в системе.',
   },
   lang: { ru: 'Русский', en: 'English' },
   nav: {

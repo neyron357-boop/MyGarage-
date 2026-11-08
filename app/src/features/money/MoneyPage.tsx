@@ -402,7 +402,7 @@ export function MoneyPage() {
       <PageHeader title={t('nav.money')} />
       <ScrollTabs
         value={tab}
-        onChange={(v) => setParams({ tab: v })}
+        onChange={(v) => setParams({ tab: v }, { replace: true })}
         items={[
           { value: 'book', label: t('money.book') },
           { value: 'cash', label: t('money.cash') },

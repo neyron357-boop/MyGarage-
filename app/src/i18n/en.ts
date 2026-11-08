@@ -10,6 +10,7 @@ export const en: typeof ru = {
     appearance: 'Appearance',
     haptics: 'Haptics',
     hapticsHint: 'Light taps on controls, like the iPhone’s own apps. “Auto” follows the system theme.',
+    hapticsNeedsIos: 'Tap feedback for iPhone web apps needs iOS 18 (this one runs iOS {{version}}). “Auto” follows the system theme.',
   },
   lang: { ru: 'Русский', en: 'English' },
   nav: {

@@ -49,9 +49,10 @@ export function UnsavedGuard() {
     };
     const click = (e: MouseEvent) => {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
-      const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
-      const href = a?.getAttribute('href') ?? '';
-      if (!a || !href.startsWith('#/') || a.target === '_blank') return;
+      // In-app links, and the phone tab bar (buttons with the path in data-href).
+      const el = (e.target as HTMLElement | null)?.closest?.('a[href], [data-href]') as HTMLElement | null;
+      const href = el?.getAttribute('data-href') ? `#${el.getAttribute('data-href')}` : (el?.getAttribute('href') ?? '');
+      if (!el || !href.startsWith('#/') || (el as HTMLAnchorElement).target === '_blank') return;
       e.preventDefault();
       e.stopPropagation();
       setTarget(href.slice(1));

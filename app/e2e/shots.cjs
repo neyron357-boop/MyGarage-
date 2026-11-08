@@ -31,7 +31,8 @@ async function launchBrowser() {
   const settle = async (ms = 900) => page.waitForTimeout(ms);
   const shot = async (name, opts = {}) => {
     if (opts.scroll !== undefined) {
-      await page.evaluate((y) => window.scrollTo(0, y), opts.scroll);
+      // Phone screens scroll themselves (the document does not).
+      await page.evaluate((y) => (document.querySelector('.screen[data-role="top"] .screen-scroll') || document.scrollingElement).scrollTo(0, y), opts.scroll);
       await settle(350);
     }
     // Screens slide in (View Transitions): wait for that and any other animation before the picture.
@@ -52,18 +53,18 @@ async function launchBrowser() {
     await go('#/');
     await shot(`${prefix}-01-board`);
     await shot(`${prefix}-01b-board-scrolled`, { scroll: 520 });
-    await page.locator('.surface.tap').first().click();
+    await page.locator('.screen[data-role="top"] .surface.tap').first().click();
     await settle(900);
     const order = await page.evaluate(() => location.hash);
     await shot(`${prefix}-02-order`);
     await shot(`${prefix}-02b-order-scrolled`, { scroll: 380 });
     // The "…" menu and the stage sheet of the job.
-    await page.locator('.nav-bar .mantine-ActionIcon-root').first().click();
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').first().click();
     await settle(500);
     await shot(`${prefix}-02c-order-menu`);
     await page.keyboard.press('Escape');
     await settle(300);
-    await page.locator('.stage-btn').first().click();
+    await page.locator('.screen[data-role="top"] .stage-btn').first().click();
     await settle(700);
     await shot(`${prefix}-02d-stage-sheet`);
     await page.keyboard.press('Escape');
@@ -95,11 +96,11 @@ async function launchBrowser() {
 
   await tour('phone-light');
   await go('#/more');
-  await page.getByText(/^(Тёмная|Dark)$/).click();
+  await page.locator('.screen[data-role="top"]').getByText(/^(Тёмная|Dark)$/).click();
   await settle(400);
   await tour('phone-dark');
   await go('#/more');
-  await page.getByText(/^(Светлая|Light)$/).click();
+  await page.locator('.screen[data-role="top"]').getByText(/^(Светлая|Light)$/).click();
 
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, locale: 'ru-RU' });
   const dp = await desk.newPage();

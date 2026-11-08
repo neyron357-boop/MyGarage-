@@ -34,6 +34,7 @@ import type { Emirate, Plate, Stage } from '../domain/types';
 import { mediaUrl } from '../services/media';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
+import { useScreen, useScreenTitle, useStack } from './stack';
 import { createPortal } from 'react-dom';
 import { PhotoViewer } from './PhotoViewer';
 
@@ -202,33 +203,44 @@ export function Flags({ flags, hours, warnHours = 2, alertHours = 24 }: { flags:
 /* ---------------- Page structure ---------------- */
 
 /**
- * iOS back button: chevron + "Back". Goes to `to`, or one step back in history — and to the board
- * when the screen was opened from a link and there is no step back.
+ * iOS back button: chevron + the name of the screen it leads to. On a phone it goes back through the
+ * stack (the previous screen returns as it was); with nothing behind (a screen opened from a link) it
+ * goes to `to`, or the board.
  */
 export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const stack = useStack();
+  const screen = useScreen();
+  const title = useScreenTitle();
   const go = () => {
-    if (to) return navigate(to);
+    if (stack) return stack.back(to);
     if ((window.history.state?.idx ?? 0) > 0) return navigate(-1);
-    navigate('/');
+    navigate(to ?? '/');
   };
+  // A screen presented from the bottom is left with "Cancel", like a new message on iPhone.
+  if (screen?.modal)
+    return (
+      <button type="button" className="nav-back nav-cancel" onClick={go}>
+        <span className="nav-back-label">{label ?? t('common.cancel')}</span>
+      </button>
+    );
+  const name = label ?? (stack?.previous ? title(stack.previous.pathname) : to ? title(to) : t('common.back'));
   return (
-    <button type="button" className="nav-back" onClick={go} aria-label={typeof label === 'string' ? label : t('common.back')}>
+    <button type="button" className="nav-back" onClick={go} aria-label={typeof name === 'string' ? name : t('common.back')}>
       <IconChevronLeft size={28} stroke={2.4} style={{ marginLeft: -4, marginRight: -3, flexShrink: 0 }} />
-      <span className="nav-back-label">{label ?? t('common.back')}</span>
+      <span className="nav-back-label">{name}</span>
     </button>
   );
 }
 
 /**
  * Screen header like iOS: a translucent navigation bar (back, actions, and the title once the large
- * one has scrolled under it) above a large title that fades as it goes.
+ * one has scrolled under it) above a large title that fades as it goes. On a phone the bar lives
+ * outside the screen's scroll view, so it never moves when the content bounces.
  */
 export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode }) {
-  const { t } = useTranslation();
-  // iOS names the screen "Back" leads to: the board, the job.
-  const backLabel = typeof back === 'string' ? (back === '/' ? t('nav.board') : /^\/orders\/[^/]+$/.test(back) ? t('order.title') : undefined) : undefined;
+  const screen = useScreen();
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -237,6 +249,7 @@ export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: R
     const title = titleRef.current;
     const head = headRef.current;
     if (!title || !head) return;
+    const target: HTMLElement | Window = screen?.scroller.current ?? window;
     let frame = 0;
     const update = () => {
       frame = 0;
@@ -250,23 +263,26 @@ export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: R
       if (!frame) frame = requestAnimationFrame(update);
     };
     update();
-    window.addEventListener('scroll', schedule, { passive: true });
+    target.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('resize', schedule);
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', schedule);
+      target.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
     };
-  }, []);
+  }, [screen]);
+  const bar = (
+    <div className="nav-bar" data-compact={compact} ref={barRef}>
+      <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} />}</div>
+      <div className="nav-title" aria-hidden>
+        {title}
+      </div>
+      <div className="nav-right">{right}</div>
+    </div>
+  );
   return (
     <>
-      <div className="nav-bar" data-compact={compact} ref={barRef}>
-        <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} label={backLabel} />}</div>
-        <div className="nav-title" aria-hidden>
-          {title}
-        </div>
-        <div className="nav-right">{right}</div>
-      </div>
+      {screen ? createPortal(bar, screen.nav) : bar}
       <header className="page-head" ref={headRef}>
         {eyebrow && (
           <div className="eyebrow" style={{ marginBottom: 2 }}>
@@ -518,14 +534,14 @@ export function SuccessMark({ size = 64 }: { size?: number }) {
 }
 
 /**
- * Primary actions pinned to the bottom of the screen (above the phone tab bar). On a phone the bar
- * lives outside the page (the page's entrance animation must not carry it), so it is at the very
- * bottom from the first frame, also on a short screen; on a PC it closes the content.
+ * Primary actions pinned to the bottom of the screen (above the phone tab bar, or on the keyboard
+ * while typing). On a phone the bar belongs to its screen but sits outside its scroll view, so it is
+ * at the very bottom from the first frame and moves with the screen; on a PC it closes the content.
  */
 export function StickyBar({ children }: { children: ReactNode }) {
-  const phone = usePhone();
+  const screen = useScreen();
   const bar = <div className="sticky-bar no-print">{children}</div>;
-  return phone ? createPortal(bar, document.body) : bar;
+  return screen ? createPortal(bar, screen.bottom) : bar;
 }
 
 export interface TabItem {

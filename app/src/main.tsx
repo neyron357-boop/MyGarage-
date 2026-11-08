@@ -26,6 +26,8 @@ async function start() {
   html.classList.toggle('ios', isApple());
   html.classList.toggle('standalone', window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
   blockPinchZoom();
+  // iPhone shows the pressed state (:active) of buttons and rows only when the page listens to touches.
+  document.addEventListener('touchstart', () => undefined, { passive: true });
   installHaptics();
   try {
     await navigator.storage?.persist?.();

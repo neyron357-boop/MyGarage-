@@ -56,7 +56,7 @@ export function MorePage() {
         </List>
       </Box>
       <AppearanceRows />
-      <Text size="xs" c="dimmed" ta="center" mt="xl" className="tnum">
+      <Text size="xs" c="dimmed" ta="center" mt="xl" className="tnum selectable">
         MyGarage {__APP_VERSION__} · {formatDate(__BUILD_DATE__)}
       </Text>
     </>

@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setLang } from '../i18n';
 import { FormRow, RowGroup } from './components';
-import { hapticsAvailable, useHaptics } from './haptics';
+import { hapticsAvailable, iosVersion, isApple, useHaptics } from './haptics';
 import { useLang } from './hooks';
 
 function useAppearance() {
@@ -44,8 +44,11 @@ export function AppearanceRows() {
   const { t } = useTranslation();
   const a = useAppearance();
   const [haptics, setHaptics] = useHaptics();
+  const ios = iosVersion();
+  // An iPhone older than iOS 18 has no haptics for web apps at all: say so instead of a dead switch.
+  const note = hapticsAvailable() ? t('app.hapticsHint') : isApple() && ios !== undefined && ios < 18 ? t('app.hapticsNeedsIos', { version: Math.floor(ios) }) : undefined;
   return (
-    <RowGroup title={t('app.appearance')} note={hapticsAvailable() ? t('app.hapticsHint') : undefined}>
+    <RowGroup title={t('app.appearance')} note={note}>
       <FormRow label={t('app.language')}>
         <SegmentedControl value={a.lang} onChange={a.setLang} aria-label={t('app.language')} data={a.langData} />
       </FormRow>

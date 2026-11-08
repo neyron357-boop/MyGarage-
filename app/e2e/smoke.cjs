@@ -29,10 +29,34 @@ async function launchBrowser() {
 (async () => {
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: false, locale: 'ru-RU' });
+  // E2E_HAPTIC_LABELS=1: lay the iPhone's haptic labels over the controls (they must not get in the way).
+  // A segment is covered by its haptic switch, as the finger will be: a click that Playwright refuses as
+  // "covered" is repeated at the same point (the switch gets it and picks the segment, like a tap).
+  if (process.env.E2E_HAPTIC_LABELS === '1') {
+    await ctx.addInitScript(() => localStorage.setItem('mygarage.hapticLabels', '1'));
+    const proto = Object.getPrototypeOf((await ctx.newPage()).locator('body'));
+    const click = proto.click;
+    proto.click = async function (opts = {}) {
+      try {
+        return await click.call(this, { timeout: 4000, ...opts });
+      } catch (e) {
+        if (!/intercepts pointer events|Timeout/.test(String(e))) throw e;
+        return click.call(this, { ...opts, force: true });
+      }
+    };
+  }
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 300)); });
+  // Phone: the screen under the one in front stays mounted (hidden) to come back instantly — text and
+  // label lookups mean the visible screen. (Role lookups skip hidden elements by themselves.)
+  // The screen in front, sheets and toasts (portals), the PC page.
+  const visibleArea = () => page.locator('.screen[data-role="top"], .page-shell, [data-portal]');
+  for (const m of ['getByText', 'getByLabel', 'getByPlaceholder']) {
+    page[m] = (...a) => visibleArea()[m](...a).filter({ visible: true });
+  }
+  const front = (sel) => page.locator(`.screen[data-role="top"] ${sel}, .page-shell ${sel}`);
   // Screens slide in (View Transitions): wait for that and any other animation before the picture.
   const settled = () => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
   const shot = async (n, full = false) => {
@@ -76,14 +100,14 @@ async function launchBrowser() {
   });
   await step('intake photos', async () => {
     for (let i = 0; i < 8; i++) {
-      await page.locator('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
+      await front('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
       await page.getByText(`${i + 1} / 8`).waitFor({ timeout: 10000 });
     }
     await shot('04-intake-photos', true);
   });
   await step('intake damage', async () => {
     await page.getByRole('button', { name: 'Дальше' }).click();
-    const svg = page.locator('svg[role=img]').first();
+    const svg = front('svg[role=img]').first();
     const box = await svg.boundingBox();
     await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.25);
     await page.getByRole('dialog').getByText('Вмятина').click();
@@ -110,7 +134,7 @@ async function launchBrowser() {
     await shot('07-intake-finish', true);
   });
   await step('intake sign', async () => {
-    const canvas = page.locator('canvas').first();
+    const canvas = front('canvas').first();
     await canvas.scrollIntoViewIfNeeded();
     const c = await canvas.boundingBox();
     await page.mouse.move(c.x + 30, c.y + 110);
@@ -188,7 +212,7 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Выдача машины' }).click();
     await page.getByText('Шаг 1 из 5').waitFor();
     for (let i = 0; i < 8; i++) {
-      await page.locator('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
+      await front('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
       await page.getByText(`${i + 1} / 8`).waitFor({ timeout: 10000 });
     }
     await shot('19-handover-photos', true);
@@ -210,7 +234,7 @@ async function launchBrowser() {
     await page.getByText('Оплачено (или оформлен долг) — можно подписывать').waitFor();
     await shot('21-handover-payment', true);
     await page.getByRole('button', { name: 'К подписи' }).click();
-    const canvas = page.locator('canvas').first();
+    const canvas = front('canvas').first();
     await canvas.scrollIntoViewIfNeeded();
     const c = await canvas.boundingBox();
     await page.mouse.move(c.x + 30, c.y + 100); await page.mouse.down();

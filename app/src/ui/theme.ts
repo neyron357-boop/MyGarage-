@@ -138,12 +138,12 @@ export const theme = createTheme({
   cursorType: 'pointer',
   focusRing: 'auto',
   components: {
-    // iOS buttons: 46 pt tall (50 for the main action), 12 pt corners, semibold label.
+    // iOS buttons: 44 pt tall (50 for the main action), 12 pt corners, semibold label.
     Button: Button.extend({
       defaultProps: { size: 'md' },
       vars: (_theme, props) => {
         if (props.size === 'lg') return { root: { '--button-height': rem(50), '--button-fz': rem(17), '--button-radius': rem(14), '--button-padding-x': rem(20) } };
-        if (props.size === 'md' || !props.size) return { root: { '--button-height': rem(46), '--button-fz': rem(16), '--button-radius': rem(12), '--button-padding-x': rem(18) } };
+        if (props.size === 'md' || !props.size) return { root: { '--button-height': rem(44), '--button-fz': rem(16), '--button-radius': rem(12), '--button-padding-x': rem(18) } };
         return { root: {} };
       },
       styles: { root: { fontWeight: 600 }, label: { overflow: 'visible' } },

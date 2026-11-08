@@ -248,7 +248,7 @@ export function PartsPage() {
       <PageHeader title={t('nav.parts')} subtitle={t('parts.subtitle')} />
       <ScrollTabs
         value={tab}
-        onChange={(v) => setParams({ tab: v })}
+        onChange={(v) => setParams({ tab: v }, { replace: true })}
         items={[
           { value: 'needed', label: t('parts.tabNeeded'), count: needed.length },
           { value: 'ordered', label: t('parts.tabOrdered'), count: ordered.length },

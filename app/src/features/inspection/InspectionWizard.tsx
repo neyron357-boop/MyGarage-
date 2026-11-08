@@ -17,6 +17,7 @@ import { haptic } from '../../ui/haptics';
 import { Field, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useErrorText, useOrderBundle } from '../../ui/hooks';
+import { scrollToTop } from '../../ui/stack';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
 import { PaymentPanel } from '../money/PaymentPanel';
@@ -340,7 +341,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
     setDir(n > step ? 'next' : 'prev');
     setStep(n);
     if (!insp.locked) void updateInspection(insp.id, { step: n });
-    window.scrollTo({ top: 0 });
+    scrollToTop();
   };
   const gotoKey = (key: string) => {
     const i = steps.findIndex((s) => s.key === key);
@@ -489,7 +490,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
               haptic('success');
               if (!signed) return navigate(`/orders/${b.order.id}`);
               setJustSigned(true);
-              window.scrollTo({ top: 0 });
+              scrollToTop();
               offerSend(i);
               window.setTimeout(() => void inspectionPdf(i.id).catch(() => undefined), 1500);
             }}
@@ -501,7 +502,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
             onSigned={(i) => {
               haptic('success');
               setJustSigned(true);
-              window.scrollTo({ top: 0 });
+              scrollToTop();
               offerSend(i);
               // Freeze the PDF of the signed act (with its SHA-256) a moment later, after the animation.
               window.setTimeout(() => void inspectionPdf(i.id).catch(() => undefined), 1500);
