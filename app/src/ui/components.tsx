@@ -18,6 +18,7 @@ import {
   IconParking,
   IconPhone,
   IconRepeat,
+  IconSearch,
   IconStethoscope,
   IconTool,
   IconX,
@@ -32,7 +33,6 @@ import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
 import { mediaUrl } from '../services/media';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
-import { haptic } from './clipboard';
 import { useLang, usePhone } from './hooks';
 import { createPortal } from 'react-dom';
 import { PhotoViewer } from './PhotoViewer';
@@ -201,42 +201,70 @@ export function Flags({ flags, hours, warnHours = 2, alertHours = 24 }: { flags:
 
 /* ---------------- Page structure ---------------- */
 
-/** iOS back button: chevron + "Back"; goes to `to` or one step back in history. */
+/**
+ * iOS back button: chevron + "Back". Goes to `to`, or one step back in history — and to the board
+ * when the screen was opened from a link and there is no step back.
+ */
 export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const go = () => {
+    if (to) return navigate(to);
+    if ((window.history.state?.idx ?? 0) > 0) return navigate(-1);
+    navigate('/');
+  };
   return (
-    <button type="button" className="nav-back" onClick={() => (to ? navigate(to) : navigate(-1))}>
-      <IconChevronLeft size={26} stroke={2.2} style={{ marginRight: -2 }} />
-      {label ?? t('common.back')}
+    <button type="button" className="nav-back" onClick={go} aria-label={typeof label === 'string' ? label : t('common.back')}>
+      <IconChevronLeft size={28} stroke={2.4} style={{ marginLeft: -4, marginRight: -3, flexShrink: 0 }} />
+      <span className="nav-back-label">{label ?? t('common.back')}</span>
     </button>
   );
 }
 
 /**
- * Screen header like iOS: a translucent navigation bar (back, actions, and the title once it scrolls
- * away) above a large title.
+ * Screen header like iOS: a translucent navigation bar (back, actions, and the title once the large
+ * one has scrolled under it) above a large title that fades as it goes.
  */
 export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [compact, setCompact] = useState(false);
   useEffect(() => {
-    const el = titleRef.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver(([e]) => setCompact(!e.isIntersecting), { rootMargin: '-52px 0px 0px 0px', threshold: 0 });
-    io.observe(el);
-    return () => io.disconnect();
+    const title = titleRef.current;
+    const head = headRef.current;
+    if (!title || !head) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const barBottom = barRef.current?.getBoundingClientRect().bottom ?? 44;
+      // How much of the large title is still below the bar: it fades over its last 28 px.
+      const left = title.getBoundingClientRect().bottom - barBottom;
+      head.style.setProperty('--title-o', Math.max(0, Math.min(1, left / 28)).toFixed(3));
+      setCompact(left <= 8);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
   }, []);
   return (
     <>
-      <div className="nav-bar" data-compact={compact}>
+      <div className="nav-bar" data-compact={compact} ref={barRef}>
         <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} />}</div>
         <div className="nav-title" aria-hidden>
           {title}
         </div>
         <div className="nav-right">{right}</div>
       </div>
-      <header className="page-head">
+      <header className="page-head" ref={headRef}>
         {eyebrow && (
           <div className="eyebrow" style={{ marginBottom: 2 }}>
             {eyebrow}
@@ -260,7 +288,7 @@ export function Section({ title, description, action, children, mt = 'xl' }: { t
     <Box mt={mt}>
       <Group justify="space-between" align="flex-end" mb={8} wrap="nowrap" gap="sm" px={2}>
         <Box style={{ minWidth: 0 }}>
-          <Title order={5} fz={19} lh={1.25}>
+          <Title order={5} fz={20} lh={1.25} style={{ letterSpacing: '-0.015em' }}>
             {title}
           </Title>
           {description && (
@@ -335,17 +363,100 @@ export function ListRow({
     >
       {left}
       <div className="body">
-        <Text fw={500} fz={15} lh={1.35} lineClamp={3} component="div">
+        <Text className="title" lineClamp={3} component="div">
           {title}
         </Text>
         {subtitle && (
-          <Text fz={13} c="dimmed" component="div" mt={2} lh={1.35}>
+          <Text className="subtitle" component="div">
             {subtitle}
           </Text>
         )}
       </div>
       {right}
-      {chevron && <IconChevronRight size={18} color="var(--mantine-color-gray-4)" style={{ flexShrink: 0, marginRight: -4 }} />}
+      {chevron && <IconChevronRight size={18} stroke={2.4} className="chevron" aria-hidden />}
+    </div>
+  );
+}
+
+/**
+ * The iOS search bar: a grey rounded field with a magnifier, a clear button once there is text and,
+ * on a phone, "Cancel" while it is in use.
+ */
+export function SearchField({
+  value,
+  onChange,
+  placeholder,
+  autoFocus,
+  onSubmit,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  autoFocus?: boolean;
+  onSubmit?: () => void;
+}) {
+  const { t } = useTranslation();
+  const phone = usePhone();
+  const ref = useRef<HTMLInputElement>(null);
+  const [focus, setFocus] = useState(false);
+  return (
+    <div className="search-bar">
+      <label className="search-field">
+        <IconSearch size={18} stroke={2.2} aria-hidden />
+        <input
+          ref={ref}
+          type="search"
+          enterKeyHint="search"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          autoComplete="off"
+          placeholder={placeholder}
+          aria-label={placeholder}
+          autoFocus={autoFocus}
+          value={value}
+          onChange={(e) => onChange(e.currentTarget.value)}
+          onFocus={() => setFocus(true)}
+          onBlur={() => setFocus(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              onSubmit?.();
+              if (phone) ref.current?.blur();
+            }
+            if (e.key === 'Escape') {
+              onChange('');
+              ref.current?.blur();
+            }
+          }}
+        />
+        {value && (
+          <button
+            type="button"
+            className="search-clear"
+            aria-label={t('common.clear')}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              onChange('');
+              ref.current?.focus();
+            }}
+          >
+            <IconX size={13} stroke={3} />
+          </button>
+        )}
+      </label>
+      {phone && (focus || value) && (
+        <button
+          type="button"
+          className="search-cancel"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            onChange('');
+            ref.current?.blur();
+          }}
+        >
+          {t('common.cancel')}
+        </button>
+      )}
     </div>
   );
 }
@@ -441,10 +552,7 @@ export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: strin
           role="tab"
           data-active={it.value === value}
           aria-selected={it.value === value}
-          onClick={() => {
-            if (it.value !== value) haptic(6);
-            onChange(it.value);
-          }}
+          onClick={() => onChange(it.value)}
         >
           {it.label}
           {it.count !== undefined && <span className="count">{it.count}</span>}

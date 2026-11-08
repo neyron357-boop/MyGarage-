@@ -1,7 +1,16 @@
 import type { ru } from './ru';
 
 export const en: typeof ru = {
-  app: { language: 'Language', theme: 'Theme', themeLight: 'Light', themeDark: 'Dark', appearance: 'Appearance' },
+  app: {
+    language: 'Language',
+    theme: 'Theme',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    themeAuto: 'Auto',
+    appearance: 'Appearance',
+    haptics: 'Haptics',
+    hapticsHint: 'Light taps on controls, like the iPhone’s own apps. “Auto” follows the system theme.',
+  },
   lang: { ru: 'Русский', en: 'English' },
   nav: {
     menu: 'Menu',
@@ -24,6 +33,7 @@ export const en: typeof ru = {
   },
   common: {
     close: 'Close',
+    clear: 'Clear',
     undo: 'Undo',
     later: 'Later',
     save: 'Save',

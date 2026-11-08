@@ -10,6 +10,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { ensureSeed } from './services/seed';
+import { installHaptics, isApple } from './ui/haptics';
 
 /** An app, not a web page: iPhone Safari ignores `user-scalable=no`, so pinch-zoom is blocked here. */
 function blockPinchZoom() {
@@ -19,8 +20,13 @@ function blockPinchZoom() {
 }
 
 async function start() {
-  document.documentElement.lang = i18n.language;
+  const html = document.documentElement;
+  html.lang = i18n.language;
+  // Platform hooks for the stylesheet: the iPhone keeps its rubber band, an installed app its own chrome.
+  html.classList.toggle('ios', isApple());
+  html.classList.toggle('standalone', window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
   blockPinchZoom();
+  installHaptics();
   try {
     await navigator.storage?.persist?.();
   } catch {

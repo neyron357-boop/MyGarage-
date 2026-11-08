@@ -16,7 +16,7 @@ import { addItem, removeItem, restoreItem, updateItem } from '../../services/est
 import { simpleMessage } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
 import { bundleAmountDue, changeStage, type OrderBundle } from '../../services/orders';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, StickyBar, SuccessMark, undoToast } from '../../ui/components';
 import { typedOnly, useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
@@ -100,7 +100,7 @@ function LineSheet({
     setTitle(name);
     setPicked(s);
     if (s?.price) setPrice(s.price);
-    haptic(6);
+    haptic('selection');
   };
   const save = () =>
     run(async () => {
@@ -110,7 +110,7 @@ function LineSheet({
       if (kind === 'part') patch.costPriceFils = cost;
       if (item) await updateItem(item.id, patch);
       else await addItem(b.order.id, { kind, block: 'A', ...patch });
-      haptic(8);
+      haptic('light');
       onClose();
     });
   return (
@@ -258,7 +258,7 @@ function IssuedView({ b }: { b: OrderBundle }) {
               onClick={() =>
                 run(async () => {
                   await changeStage(b.order.id, 'closed');
-                  haptic([12, 60, 18]);
+                  haptic('success');
                   navigate(`/orders/${b.order.id}`, { replace: true });
                 }, 'qi.closedToast')
               }
@@ -445,7 +445,7 @@ export function QuickInvoicePage() {
         onConfirm={() =>
           run(async () => {
             await quickInvoice(b.order.id);
-            haptic([12, 60, 18]);
+            haptic('success');
             window.scrollTo({ top: 0 });
             return true;
           }, 'invoice.issued')

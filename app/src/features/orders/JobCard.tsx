@@ -20,7 +20,7 @@ export function JobCard({ b, showStage = true }: { b: OrderBundle; showStage?: b
   return (
     <Box
       className="surface tap"
-      p="sm"
+      p="md"
       onClick={() => navigate(`/orders/${b.order.id}`)}
       role="button"
       tabIndex={0}
@@ -32,38 +32,38 @@ export function JobCard({ b, showStage = true }: { b: OrderBundle; showStage?: b
       }}
       aria-label={`№${b.order.number} ${b.vehicle.make} ${b.vehicle.model}`}
     >
-      <Group justify="space-between" wrap="nowrap" gap="xs" mb={8}>
+      <Group justify="space-between" wrap="nowrap" gap="xs" mb={10}>
         <PlateText plate={b.vehicle.plate} size="sm" />
-        <Text size="xs" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
+        <Text size="sm" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
           №{b.order.number} · {shortDuration(hoursBetween(b.order.stageChangedAt), lang)}
         </Text>
       </Group>
-      <Text fw={700} lineClamp={1}>
+      <Text fw={600} fz={17} lh={1.3} lineClamp={1} style={{ letterSpacing: '-0.01em' }}>
         {b.vehicle.make} {b.vehicle.model}
-        {b.vehicle.year ? <Text span c="dimmed" fw={500}> {b.vehicle.year}</Text> : null}
+        {b.vehicle.year ? <Text span c="dimmed" fw={400}> {b.vehicle.year}</Text> : null}
       </Text>
-      <Text size="sm" c="dimmed" lineClamp={1}>
-        {b.customer.name}
+      <Text fz={15} c="dimmed" lineClamp={1}>
+        {b.customer.name || t('customer.noName')}
         {b.mechanic ? ` · ${b.mechanic.name}` : ''}
       </Text>
       {b.order.stage === 'booked' && b.order.bookedFor ? (
-        <Text size="sm" mt={6} fw={600}>
+        <Text fz={15} mt={6} fw={600}>
           {formatDateTime(b.order.bookedFor)}
         </Text>
       ) : (
         b.order.complaint && (
-          <Text size="sm" mt={6} lineClamp={2}>
+          <Text fz={15} mt={6} lineClamp={2} lh={1.35}>
             {b.order.complaint}
           </Text>
         )
       )}
-      <Stack gap={8} mt={10}>
+      <Stack gap={8} mt={12}>
         {b.order.stage !== 'booked' && <StageTrack stage={b.order.stage} />}
         <Group justify="space-between" wrap="nowrap" gap="xs">
           {showStage ? (
             <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
               <span className="stage-dot" style={{ background: `var(--mantine-color-${meta.color}-6)` }} />
-              <Text size="xs" fw={600} lineClamp={1}>
+              <Text fz={13} fw={600} lineClamp={1}>
                 {t(`stage.${b.order.stage}`)}
               </Text>
             </Group>

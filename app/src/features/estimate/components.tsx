@@ -43,7 +43,7 @@ import type { Block, DecisionKind, DecisionVia, EstimateVersion, ItemKind, Order
 import { addItem, recordDecisions, removeItem, resolveB, restoreItem, setDone, updateItem, type NewItem } from '../../services/estimate';
 import { verbalConfirmation } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { Money, MoneyInput, SelectCard, undoToast } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
 import type { SendRequest } from '../../ui/SendDialog';
@@ -319,7 +319,7 @@ export function DoneToggle({ item }: { item: OrderItem }) {
       color={item.done ? 'green' : 'cobalt'}
       leftSection={item.done ? <IconCheck size={14} className="pop-in" /> : undefined}
       onClick={() => {
-        if (!item.done) haptic(10);
+        if (!item.done) haptic('light');
         void run(() => setDone(item.id, !item.done));
       }}
       aria-pressed={item.done}
@@ -442,7 +442,7 @@ export function DecisionModal({ b, version, opened, onClose, onVerbal }: { b: Or
                       aria-pressed={c === o.v}
                       styles={{ label: { whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.2 } }}
                       onClick={() => {
-                        haptic(6);
+                        haptic('selection');
                         setChoices((x) => ({ ...x, [item.id]: c === o.v ? 'skip' : o.v }));
                       }}
                     >

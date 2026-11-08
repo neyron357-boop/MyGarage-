@@ -10,7 +10,7 @@ import type { Lang } from '../domain/types';
 import { AppError } from '../services/errors';
 import { loadOrderBundle } from '../services/orders';
 import { getSettings } from '../services/settings';
-import { haptic } from './clipboard';
+import { haptic } from './haptics';
 
 export const PHONE_QUERY = '(max-width: 48em)';
 
@@ -65,7 +65,7 @@ export function useAction() {
       } catch (e) {
         console.error(e);
         notifications.show({ color: 'red', title: t('common.error'), message: errorText(e), autoClose: 7000, icon: createElement(IconAlertTriangle, { size: 18 }) });
-        haptic([30, 40, 30]);
+        haptic('error');
         return undefined;
       } finally {
         setBusy(false);

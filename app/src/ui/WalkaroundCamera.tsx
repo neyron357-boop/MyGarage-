@@ -9,7 +9,7 @@ import { addInspectionPhoto } from '../services/inspections';
 import { mediaUrl } from '../services/media';
 import { AngleHint, hasAngleHint, WalkMap } from './AngleHint';
 import { CAMERA_NOT_READY, cameraErrorKind, captureFrame, openBackCamera, setTorch, torchSupported, waitForFrames, type CameraError } from './camera';
-import { haptic } from './clipboard';
+import { haptic } from './haptics';
 import { useHistoryLayer, useLockScroll } from './historyLayer';
 import { useErrorText } from './hooks';
 import { SuccessMark } from './components';
@@ -198,7 +198,7 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, b
     const box = finder.current?.getBoundingClientRect();
     if (phase !== 'live' || shooting || !v || !box) return;
     setShooting(true);
-    haptic(10);
+    haptic('medium');
     setFlash((n) => n + 1);
     const slot = current;
     try {
@@ -234,7 +234,7 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, b
       const next = nextAfter(slot, taken);
       if (next) setCurrent(next);
       else if (slots.includes(slot)) {
-        haptic([10, 50, 14]);
+        haptic('success');
         setPhase('done');
       }
     } catch (e) {

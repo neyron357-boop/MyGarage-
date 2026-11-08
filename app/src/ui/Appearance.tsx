@@ -1,37 +1,63 @@
-import { SegmentedControl, Stack, useComputedColorScheme, useMantineColorScheme } from '@mantine/core';
+import { SegmentedControl, Stack, Switch, useComputedColorScheme, useMantineColorScheme } from '@mantine/core';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setLang } from '../i18n';
+import { FormRow, RowGroup } from './components';
+import { hapticsAvailable, useHaptics } from './haptics';
 import { useLang } from './hooks';
 
-/** Language and light/dark switches (sidebar on a PC, "More" on a phone). */
-export function AppearanceControls() {
+function useAppearance() {
   const { t } = useTranslation();
   const lang = useLang();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
+  return {
+    lang,
+    langData: [
+      { value: 'ru', label: 'Русский' },
+      { value: 'en', label: 'English' },
+    ],
+    setLang: (v: string) => setLang(v === 'en' ? 'en' : 'ru'),
+    scheme: colorScheme === 'dark' ? 'dark' : colorScheme === 'auto' ? 'auto' : 'light',
+    schemeData: [
+      { value: 'light', label: t('app.themeLight') },
+      { value: 'dark', label: t('app.themeDark') },
+      { value: 'auto', label: t('app.themeAuto') },
+    ],
+    setScheme: (v: string) => setColorScheme(v === 'dark' ? 'dark' : v === 'auto' ? 'auto' : 'light'),
+  };
+}
+
+/** Language and appearance switches, stacked (the PC sidebar). */
+export function AppearanceControls() {
+  const { t } = useTranslation();
+  const a = useAppearance();
   return (
     <Stack gap={8}>
-      <SegmentedControl
-        fullWidth
-        value={lang}
-        onChange={(v) => setLang(v === 'en' ? 'en' : 'ru')}
-        aria-label={t('app.language')}
-        data={[
-          { value: 'ru', label: 'Русский' },
-          { value: 'en', label: 'English' },
-        ]}
-      />
-      <SegmentedControl
-        fullWidth
-        value={colorScheme === 'dark' ? 'dark' : 'light'}
-        onChange={(v) => setColorScheme(v === 'dark' ? 'dark' : 'light')}
-        aria-label={t('app.theme')}
-        data={[
-          { value: 'light', label: t('app.themeLight') },
-          { value: 'dark', label: t('app.themeDark') },
-        ]}
-      />
+      <SegmentedControl fullWidth value={a.lang} onChange={a.setLang} aria-label={t('app.language')} data={a.langData} />
+      <SegmentedControl fullWidth value={a.scheme} onChange={a.setScheme} aria-label={t('app.theme')} data={a.schemeData} />
     </Stack>
+  );
+}
+
+/** The same as rows of an iOS settings group ("More" on a phone), with the haptics switch where the phone has them. */
+export function AppearanceRows() {
+  const { t } = useTranslation();
+  const a = useAppearance();
+  const [haptics, setHaptics] = useHaptics();
+  return (
+    <RowGroup title={t('app.appearance')} note={hapticsAvailable() ? t('app.hapticsHint') : undefined}>
+      <FormRow label={t('app.language')}>
+        <SegmentedControl value={a.lang} onChange={a.setLang} aria-label={t('app.language')} data={a.langData} />
+      </FormRow>
+      <FormRow label={t('app.theme')}>
+        <SegmentedControl value={a.scheme} onChange={a.setScheme} aria-label={t('app.theme')} data={a.schemeData} />
+      </FormRow>
+      {hapticsAvailable() && (
+        <FormRow label={t('app.haptics')}>
+          <Switch checked={haptics} onChange={(e) => setHaptics(e.currentTarget.checked)} aria-label={t('app.haptics')} />
+        </FormRow>
+      )}
+    </RowGroup>
   );
 }
 

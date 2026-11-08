@@ -3,7 +3,7 @@ import { IconCash, IconChartBar, IconCloudDownload, IconPackage, IconSettings, I
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
-import { AppearanceControls } from '../../ui/Appearance';
+import { AppearanceRows } from '../../ui/Appearance';
 import { List, ListRow, PageHeader } from '../../ui/components';
 import { useBackupAge } from '../../ui/device';
 
@@ -55,12 +55,7 @@ export function MorePage() {
           />
         </List>
       </Box>
-      <div className="group-title" style={{ marginTop: 'var(--mantine-spacing-lg)' }}>
-        {t('app.appearance')}
-      </div>
-      <Box className="surface" p="sm">
-        <AppearanceControls />
-      </Box>
+      <AppearanceRows />
       <Text size="xs" c="dimmed" ta="center" mt="xl" className="tnum">
         MyGarage {__APP_VERSION__} · {formatDate(__BUILD_DATE__)}
       </Text>

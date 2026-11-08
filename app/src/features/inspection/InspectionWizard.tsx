@@ -13,7 +13,7 @@ import { inspectionPdf, openPdf } from '../../services/documents';
 import { addAddendum, completeInspection, getOrCreateInspection, inspectionState, signInspection, updateInspection } from '../../services/inspections';
 import { simpleMessage } from '../../services/messages';
 import { bundleAmountDue, updateOrder } from '../../services/orders';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { Field, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useErrorText, useOrderBundle } from '../../ui/hooks';
@@ -486,7 +486,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
           <FinishStep
             props={props}
             onDone={(i, signed) => {
-              haptic([12, 60, 18]);
+              haptic('success');
               if (!signed) return navigate(`/orders/${b.order.id}`);
               setJustSigned(true);
               window.scrollTo({ top: 0 });
@@ -499,7 +499,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
             props={props}
             goTo={gotoKey}
             onSigned={(i) => {
-              haptic([12, 60, 18]);
+              haptic('success');
               setJustSigned(true);
               window.scrollTo({ top: 0 });
               offerSend(i);

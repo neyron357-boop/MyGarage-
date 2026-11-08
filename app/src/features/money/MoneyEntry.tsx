@@ -15,7 +15,7 @@ import { addExpense, categoryMonthSpent } from '../../services/money';
 import { CaptureButton } from '../../ui/CaptureButton';
 import { MoneyInput, PlateText } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 
 export const INCOME_CATEGORIES: IncomeCategory[] = ['service', 'sales', 'other'];
@@ -295,7 +295,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           receipt,
           ...link,
         });
-      haptic(10);
+      haptic('success');
       onClose();
     }, kind === 'in' ? 'ledger.savedIn' : 'ledger.savedOut');
 

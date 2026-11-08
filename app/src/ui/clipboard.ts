@@ -25,12 +25,3 @@ export async function copyText(text: string): Promise<boolean> {
     return false;
   }
 }
-
-/** Short vibration on phones that support it (Android). Silently ignored elsewhere. */
-export function haptic(pattern: number | number[] = 12) {
-  try {
-    navigator.vibrate?.(pattern);
-  } catch {
-    // not supported
-  }
-}

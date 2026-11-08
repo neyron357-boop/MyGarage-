@@ -1,5 +1,14 @@
 export const ru = {
-  app: { language: 'Язык', theme: 'Тема', themeLight: 'Светлая', themeDark: 'Тёмная', appearance: 'Оформление' },
+  app: {
+    language: 'Язык',
+    theme: 'Тема',
+    themeLight: 'Светлая',
+    themeDark: 'Тёмная',
+    themeAuto: 'Авто',
+    appearance: 'Оформление',
+    haptics: 'Виброотклик',
+    hapticsHint: 'Лёгкие отклики на нажатия, как в системных приложениях iPhone. «Авто» — тема как в системе.',
+  },
   lang: { ru: 'Русский', en: 'English' },
   nav: {
     menu: 'Меню',
@@ -22,6 +31,7 @@ export const ru = {
   },
   common: {
     close: 'Закрыть',
+    clear: 'Очистить',
     undo: 'Отменить',
     later: 'Позже',
     save: 'Сохранить',

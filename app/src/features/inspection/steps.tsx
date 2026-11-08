@@ -40,7 +40,7 @@ import { WalkaroundCamera } from '../../ui/WalkaroundCamera';
 import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
 import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
 import { DateTimeField } from '../../ui/DateFields';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 import { LazyTextarea, LazyTextInput } from '../../ui/LazyText';
 
@@ -148,7 +148,7 @@ export function PhotoSlot({
   const onFiles = (files: File[]) =>
     run(async () => {
       await addInspectionPhoto(insp.id, slot, files[0], { replace: true });
-      haptic(8);
+      haptic('light');
       setPreview(false);
     });
   return (

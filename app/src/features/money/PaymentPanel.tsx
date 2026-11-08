@@ -22,7 +22,7 @@ import { debtPdf, invoicePdf, openPdf, receiptPdf } from '../../services/documen
 import { simpleMessage } from '../../services/messages';
 import { addPayment, createDebt, issueCreditNote, issueInvoice } from '../../services/money';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { ConfirmModal, List, ListRow, Money, MoneyInput, Section, SelectCard } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { useAction } from '../../ui/hooks';
@@ -348,7 +348,7 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
         onConfirm={() =>
           run(async () => {
             const i = await issueInvoice(b.order.id, invType);
-            haptic(12);
+            haptic('success');
             sendInvoice(i.id, i.number, i.totalFils);
             return true;
           }, 'invoice.issued')

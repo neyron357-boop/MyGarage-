@@ -15,7 +15,7 @@ import {
   type EaglecartExport,
   type ImportPlan,
 } from '../../services/eaglecart';
-import { haptic } from '../../ui/clipboard';
+import { haptic } from '../../ui/haptics';
 import { ConfirmModal, List, ListRow } from '../../ui/components';
 import { useAction, useErrorText, useLang } from '../../ui/hooks';
 
@@ -118,7 +118,7 @@ export function EaglecartImportCard() {
                 onClick={() =>
                   run(async () => {
                     const s = await importEaglecart(file.data, { activeSince: continueRecent ? recentSince(file.data) : undefined });
-                    haptic([12, 60, 18]);
+                    haptic('success');
                     setFile(null);
                     return s;
                   }, 'ec.done')

@@ -33,14 +33,15 @@ import {
 import { DatePickerInput, DateTimePicker, MonthPickerInput } from '@mantine/dates';
 
 /*
- * MyGarage design tokens — "light, like iOS".
- * Grey grouped canvas, white rounded groups without borders or shadows, one blue accent,
- * the phone's own system font (SF Pro on iPhone, Roboto on Android, Segoe UI on Windows),
- * large screen titles, translucent bars. Status colours are semantic only.
- * The palette keeps the key "cobalt" for the primary colour so existing code keeps working.
+ * MyGarage design tokens — a native iPhone app, built with the web.
+ * The iOS system palette: grouped grey canvas, white inset groups with 12 px corners and no borders
+ * or shadows, hairline separators, one blue tint, semantic colours for status only. Type is the
+ * phone's own system face (SF Pro on iPhone, Roboto on Android, Segoe UI on Windows) at the iOS
+ * sizes: 34 large title, 17 body, 15 secondary, 13 footnote. Bars are translucent and blurred.
+ * The palette keeps the key "cobalt" for the tint so existing code keeps working.
  */
 
-// Primary: iOS system blue (#007AFF light, #0A84FF dark).
+// Tint: iOS system blue (#007AFF light, #0A84FF dark).
 const cobalt: MantineColorsTuple = [
   '#e8f2ff',
   '#d0e5ff',
@@ -88,12 +89,17 @@ const red: MantineColorsTuple = ['#ffeceb', '#ffd9d7', '#ffb1ad', '#ff8780', '#f
 const orange: MantineColorsTuple = ['#fff4e5', '#ffe9cc', '#ffd399', '#ffbd66', '#ffaa3d', '#ff9f24', '#ff9500', '#e08200', '#bd6d00', '#9a5800'];
 
 export const FONT_UI = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-/** Numbers use the same system face with tabular figures (SF Pro digits on iPhone). */
+/** Headings and large numbers: the same system face (SF Pro Display on iPhone). */
 export const FONT_DISPLAY = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+/** Big figures (cash, counts): the rounded system face where the phone has one (SF Rounded). */
+export const FONT_ROUNDED = 'ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif';
 /** Only the UAE number plate keeps a condensed face, like the real plate. */
 export const FONT_PLATE = 'Oswald, "Arial Narrow", sans-serif';
 
-const inputStyles = { label: { fontWeight: 500, marginBottom: rem(6) }, description: { marginTop: 0 } };
+/** The push and sheet curve of UIKit. */
+export const EASE_IOS = 'cubic-bezier(0.32, 0.72, 0, 1)';
+
+const inputStyles = { label: { fontWeight: 500, marginBottom: rem(6) }, description: { marginTop: 0 }, input: { borderRadius: rem(10) } };
 const inputDefaults = { size: 'md', variant: 'filled' } as const;
 
 export const theme = createTheme({
@@ -107,18 +113,19 @@ export const theme = createTheme({
     fontFamily: FONT_DISPLAY,
     fontWeight: '700',
     sizes: {
-      h1: { fontSize: rem(32), lineHeight: '1.12' },
-      h2: { fontSize: rem(26), lineHeight: '1.18' },
-      h3: { fontSize: rem(20), lineHeight: '1.25' },
-      h4: { fontSize: rem(18), lineHeight: '1.3' },
+      h1: { fontSize: rem(34), lineHeight: '1.18' },
+      h2: { fontSize: rem(28), lineHeight: '1.2' },
+      h3: { fontSize: rem(22), lineHeight: '1.25' },
+      h4: { fontSize: rem(20), lineHeight: '1.25' },
       h5: { fontSize: rem(17), lineHeight: '1.3' },
-      h6: { fontSize: rem(14), lineHeight: '1.4' },
+      h6: { fontSize: rem(15), lineHeight: '1.35' },
     },
   },
-  // 16 px body text: also stops iPhone Safari from zooming into a focused input.
+  // 16 px body on a PC; on a phone every field is 17 px (styles.css) — iPhone Safari zooms into smaller ones.
   fontSizes: { xs: rem(12), sm: rem(14), md: rem(16), lg: rem(18), xl: rem(21) },
   lineHeights: { xs: '1.35', sm: '1.4', md: '1.45', lg: '1.45', xl: '1.35' },
-  radius: { xs: rem(6), sm: rem(8), md: rem(12), lg: rem(16), xl: rem(22) },
+  // iOS corners: 10 for fields and small cards, 12 for inset groups, 18 for sheets and big cards.
+  radius: { xs: rem(6), sm: rem(8), md: rem(10), lg: rem(12), xl: rem(18) },
   defaultRadius: 'md',
   spacing: { xs: rem(8), sm: rem(12), md: rem(16), lg: rem(20), xl: rem(28) },
   shadows: {
@@ -131,8 +138,14 @@ export const theme = createTheme({
   cursorType: 'pointer',
   focusRing: 'auto',
   components: {
+    // iOS buttons: 46 pt tall (50 for the main action), 12 pt corners, semibold label.
     Button: Button.extend({
       defaultProps: { size: 'md' },
+      vars: (_theme, props) => {
+        if (props.size === 'lg') return { root: { '--button-height': rem(50), '--button-fz': rem(17), '--button-radius': rem(14), '--button-padding-x': rem(20) } };
+        if (props.size === 'md' || !props.size) return { root: { '--button-height': rem(46), '--button-fz': rem(16), '--button-radius': rem(12), '--button-padding-x': rem(18) } };
+        return { root: {} };
+      },
       styles: { root: { fontWeight: 600 }, label: { overflow: 'visible' } },
     }),
     ActionIcon: ActionIcon.extend({ defaultProps: { radius: 'xl' } }),
@@ -146,35 +159,39 @@ export const theme = createTheme({
     PasswordInput: PasswordInput.extend({ defaultProps: inputDefaults, styles: inputStyles }),
     Textarea: Textarea.extend({ defaultProps: inputDefaults, styles: inputStyles }),
     NumberInput: NumberInput.extend({ defaultProps: { ...inputDefaults, hideControls: true }, styles: inputStyles }),
-    Select: Select.extend({ defaultProps: { ...inputDefaults, comboboxProps: { shadow: 'lg', radius: 'md' } }, styles: inputStyles }),
-    Autocomplete: Autocomplete.extend({ defaultProps: { ...inputDefaults, comboboxProps: { shadow: 'lg', radius: 'md' } }, styles: inputStyles }),
+    Select: Select.extend({ defaultProps: { ...inputDefaults, comboboxProps: { shadow: 'lg', radius: 'lg' } }, styles: inputStyles }),
+    Autocomplete: Autocomplete.extend({ defaultProps: { ...inputDefaults, comboboxProps: { shadow: 'lg', radius: 'lg' } }, styles: inputStyles }),
     TagsInput: TagsInput.extend({ defaultProps: inputDefaults, styles: inputStyles }),
     DateTimePicker: DateTimePicker.extend({ defaultProps: inputDefaults, styles: inputStyles }),
     DatePickerInput: DatePickerInput.extend({ defaultProps: inputDefaults, styles: inputStyles }),
     MonthPickerInput: MonthPickerInput.extend({ defaultProps: inputDefaults, styles: inputStyles }),
     Checkbox: Checkbox.extend({ defaultProps: { radius: 'sm' } }),
-    // iOS switches are green when on.
-    Switch: Switch.extend({ defaultProps: { size: 'md', color: 'green' } }),
+    // iOS switches: 51 × 31, green when on.
+    Switch: Switch.extend({ defaultProps: { size: 'lg', color: 'green' } }),
     Chip: Chip.extend({ defaultProps: { radius: 'xl' } }),
     SegmentedControl: SegmentedControl.extend({
-      defaultProps: { radius: 'md', size: 'sm' },
-      styles: { root: { padding: 3 }, label: { fontWeight: 600 } },
+      defaultProps: { radius: 9, size: 'sm' },
+      styles: { root: { padding: 2 }, label: { fontWeight: 600, fontSize: rem(13) } },
     }),
     Tabs: Tabs.extend({ styles: { tab: { fontWeight: 600 } } }),
     Modal: Modal.extend({
       defaultProps: {
-        radius: 'lg',
+        radius: 'xl',
         centered: true,
-        overlayProps: { backgroundOpacity: 0.35, blur: 2 },
-        transitionProps: { transition: 'pop', duration: 180, timingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)' },
+        overlayProps: { backgroundOpacity: 0.4, blur: 0 },
+        transitionProps: { transition: 'pop', duration: 200, timingFunction: EASE_IOS },
       },
       classNames: { root: 'mg-sheet' },
-      styles: { title: { fontWeight: 700, fontSize: rem(18), lineHeight: 1.3 }, header: { paddingBottom: rem(8) } },
+      styles: { title: { fontWeight: 600, fontSize: rem(17), lineHeight: 1.3 }, header: { paddingBottom: rem(8) } },
     }),
     Drawer: Drawer.extend({
-      defaultProps: { overlayProps: { backgroundOpacity: 0.35, blur: 2 }, transitionProps: { duration: 240, timingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)' } },
+      defaultProps: { overlayProps: { backgroundOpacity: 0.4, blur: 0 }, transitionProps: { duration: 320, timingFunction: EASE_IOS } },
     }),
-    Menu: Menu.extend({ defaultProps: { shadow: 'lg', radius: 'md', withinPortal: true, transitionProps: { transition: 'pop', duration: 140 } } }),
+    // Context menus: rounded, blurred, 17 pt rows, like the iOS ones.
+    Menu: Menu.extend({
+      defaultProps: { shadow: 'lg', radius: 'lg', withinPortal: true, transitionProps: { transition: 'pop-top-right', duration: 160, timingFunction: EASE_IOS } },
+      styles: { dropdown: { padding: 4 }, item: { fontSize: rem(16), padding: `${rem(10)} ${rem(12)}`, borderRadius: rem(9) }, divider: { marginBlock: 4 } },
+    }),
     Tooltip: Tooltip.extend({ defaultProps: { radius: 'sm', withArrow: true } }),
     Alert: Alert.extend({ defaultProps: { radius: 'lg', variant: 'light' }, styles: { title: { fontWeight: 600 } } }),
     Progress: Progress.extend({ defaultProps: { radius: 'xl', transitionDuration: 400 } }),
@@ -184,35 +201,41 @@ export const theme = createTheme({
 });
 
 /**
- * On phones dialogs open as bottom sheets (closer to the thumb): they slide up from the bottom edge.
- * The sheet geometry itself is in styles.css (`.mg-sheet`).
+ * On phones dialogs open as bottom sheets (closer to the thumb): they rise from the bottom edge on
+ * UIKit's curve. The sheet geometry itself is in styles.css (`.mg-sheet`).
  */
 const phoneOverrides = createTheme({
   components: {
     Modal: Modal.extend({
-      defaultProps: { transitionProps: { transition: 'slide-up', duration: 260, timingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)' } },
+      defaultProps: { transitionProps: { transition: 'slide-up', duration: 440, exitDuration: 280, timingFunction: EASE_IOS } },
     }),
   },
 });
 
 export const phoneTheme = mergeThemeOverrides(theme, phoneOverrides);
 
-/** App-level CSS variables: grouped canvas, white groups, hairlines, translucent bars. */
+/** App-level CSS variables: the iOS system colours in both appearances. */
 export const cssResolver: CSSVariablesResolver = () => ({
   variables: {
     '--font-display': FONT_DISPLAY,
+    '--font-rounded': FONT_ROUNDED,
     '--font-plate': FONT_PLATE,
-    '--app-bottom-h': '60px',
-    '--app-nav-h': '48px',
+    '--app-bottom-h': '50px',
+    '--app-nav-h': '44px',
+    '--radius-group': '12px',
   },
   light: {
     '--app-canvas': '#f2f2f7',
     '--app-card': '#ffffff',
     '--app-soft': '#f2f2f7',
-    '--app-fill': '#efeff4',
-    '--app-hairline': 'rgba(60, 60, 67, 0.14)',
+    '--app-fill': 'rgba(118, 118, 128, 0.12)',
+    '--app-press': 'rgba(60, 60, 67, 0.1)',
+    '--app-hairline': 'rgba(60, 60, 67, 0.2)',
     '--app-label-2': 'rgba(60, 60, 67, 0.6)',
-    '--app-bar': 'rgba(249, 249, 251, 0.86)',
+    '--app-label-3': 'rgba(60, 60, 67, 0.3)',
+    '--app-tab-idle': '#8e8e93',
+    '--app-grabber': 'rgba(60, 60, 67, 0.3)',
+    '--app-bar': 'rgba(249, 249, 249, 0.84)',
     '--app-pill': '#1c1c1e',
     '--app-pill-text': '#ffffff',
     '--viz-1': '#007aff',
@@ -223,10 +246,14 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--app-canvas': '#000000',
     '--app-card': '#1c1c1e',
     '--app-soft': '#2c2c2e',
-    '--app-fill': '#2c2c2e',
-    '--app-hairline': 'rgba(84, 84, 88, 0.55)',
+    '--app-fill': 'rgba(118, 118, 128, 0.24)',
+    '--app-press': 'rgba(235, 235, 245, 0.12)',
+    '--app-hairline': 'rgba(84, 84, 88, 0.6)',
     '--app-label-2': 'rgba(235, 235, 245, 0.6)',
-    '--app-bar': 'rgba(22, 22, 24, 0.84)',
+    '--app-label-3': 'rgba(235, 235, 245, 0.3)',
+    '--app-tab-idle': '#7d7d82',
+    '--app-grabber': 'rgba(235, 235, 245, 0.3)',
+    '--app-bar': 'rgba(22, 22, 24, 0.82)',
     '--app-pill': '#f2f2f7',
     '--app-pill-text': '#000000',
     '--viz-1': '#0a84ff',

@@ -6,7 +6,8 @@ import { formatPhone } from '../domain/phone';
 import type { Channel, Customer, Lang } from '../domain/types';
 import { notifications } from '@mantine/notifications';
 import { downloadBlob } from '../services/backup';
-import { copyText, haptic } from './clipboard';
+import { copyText } from './clipboard';
+import { haptic } from './haptics';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
 import { SelectCard } from './components';
 
@@ -41,7 +42,7 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
 
   const confirm = async () => {
     await logMessage({ orderId: request.orderId, customerId: customer.id, channel, template: request.template, language: request.lang, text });
-    haptic(10);
+    haptic('light');
     notifications.show({ color: 'green', message: t('send.logged') });
     onSent?.();
     onClose();
@@ -118,7 +119,7 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
                 const ok = await copyText(text);
                 setCopied(ok);
                 if (ok) {
-                  haptic(8);
+                  haptic('selection');
                   setOpened(true);
                 }
               }}

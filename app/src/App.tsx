@@ -6,7 +6,7 @@ import { IconCash, IconChartBar, IconDots, IconLayoutKanban, IconPackage, IconPl
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HashRouter, Link, NavLink, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
+import { Link, NavLink, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { ClaimPage } from './features/claims/ClaimPage';
 import { BoardPage } from './features/board/BoardPage';
 import { CustomerPage } from './features/customers/CustomerPage';
@@ -26,13 +26,14 @@ import { SearchPage } from './features/search/SearchPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
-import { haptic } from './ui/clipboard';
 import { Logo, Money } from './ui/components';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useLang, usePhone } from './ui/hooks';
 import { PwaUpdater } from './ui/pwa';
+import { AppRouter, viewTransitionsSupported } from './ui/router';
 import { useBackClosesSheets } from './ui/backCloses';
 import { useSheetSwipe } from './ui/sheetSwipe';
+import { useSwipeBack } from './ui/swipeBack';
 import { UnsavedGuard } from './ui/unsaved';
 import { cssResolver, phoneTheme, theme } from './ui/theme';
 
@@ -149,41 +150,41 @@ function SideNav() {
   );
 }
 
-/** Phone tab bar. "+" opens a new job straight away: the car is the first thing to record. */
+/**
+ * Phone tab bar. "+" opens a new job straight away: the car is the first thing to record.
+ * Tapping the tab you are on scrolls its screen to the top, as iOS tab bars do.
+ */
 function TabBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const moreActive = ['/more', '/customers', '/vehicles', '/parts', '/reports', '/settings'].some((p) => location.pathname.startsWith(p));
+  const retap = (to: string) => (e: React.MouseEvent) => {
+    if (location.pathname !== to) return;
+    e.preventDefault();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   return (
     <nav className="tab-bar" aria-label={t('nav.menu')}>
-      <NavLink to="/" end>
-        <IconLayoutKanban size={26} stroke={1.7} />
+      <NavLink to="/" end onClick={retap('/')}>
+        <IconLayoutKanban stroke={1.7} />
         {t('nav.board')}
       </NavLink>
-      <NavLink to="/search">
-        <IconSearch size={26} stroke={1.7} />
+      <NavLink to="/search" onClick={retap('/search')}>
+        <IconSearch stroke={1.7} />
         {t('nav.search')}
       </NavLink>
       <div className="tab-plus-wrap">
-        <button
-          type="button"
-          className="tab-plus"
-          aria-label={t('nav.newOrder')}
-          onClick={() => {
-            haptic(8);
-            navigate('/orders/new');
-          }}
-        >
+        <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} onClick={() => navigate('/orders/new')}>
           <IconPlus size={26} stroke={2.4} />
         </button>
       </div>
-      <NavLink to="/money">
-        <IconCash size={26} stroke={1.7} />
+      <NavLink to="/money" onClick={retap('/money')}>
+        <IconCash stroke={1.7} />
         {t('nav.money')}
       </NavLink>
-      <NavLink to="/more" className={({ isActive }) => (isActive || moreActive ? 'active' : '')}>
-        <IconDots size={26} stroke={1.7} />
+      <NavLink to="/more" className={({ isActive }) => (isActive || moreActive ? 'active' : '')} onClick={retap('/more')}>
+        <IconDots stroke={1.7} />
         {t('nav.more')}
       </NavLink>
     </nav>
@@ -259,8 +260,15 @@ function ScrollManager() {
     current.current = location.key;
     notifications.cleanQueue();
     const saved = positions.current.get(location.key);
-    if (type === 'POP' && saved !== undefined) requestAnimationFrame(() => window.scrollTo(0, saved));
-    else window.scrollTo(0, 0);
+    if (type === 'POP' && saved !== undefined) {
+      // At once (so the screen is captured there for the back animation), and again once the list
+      // has loaded and the page is tall enough.
+      window.scrollTo(0, saved);
+      const timers = [60, 220].map((ms) => window.setTimeout(() => window.scrollY !== saved && window.scrollTo(0, saved), ms));
+      return () => timers.forEach(clearTimeout);
+    }
+    window.scrollTo(0, 0);
+    return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
   return null;
@@ -273,14 +281,18 @@ function Shell() {
   // Check-in, intake, handover and the quick invoice get the whole screen: no tab bar under their buttons.
   const focus = /^\/orders\/(new|[^/]+\/(intake|handover|invoice))$/.test(location.pathname);
   const showBottom = mobile && !focus;
+  const pageRef = useRef<HTMLDivElement>(null);
   useSheetSwipe(mobile);
   useBackClosesSheets(mobile);
+  useSwipeBack(pageRef, mobile);
   useStatusBarColor();
+  // Where the browser animates the navigation stack (router.tsx) screens slide; elsewhere they rise in.
+  const rise = !(mobile && viewTransitionsSupported());
   return (
     <AppShell
       navbar={mobile ? undefined : { width: 256, breakpoint: 0 }}
       footer={showBottom ? { height: 'calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px))' } : undefined}
-      padding={mobile ? 'md' : 'xl'}
+      padding={0}
     >
       <ScrollManager />
       {!mobile && (
@@ -289,34 +301,36 @@ function Shell() {
         </AppShell.Navbar>
       )}
       <AppShell.Main className={showBottom ? 'with-bottom-nav' : undefined}>
-        <Box maw={1320} mx="auto">
-          <PreviewNotice />
-          <ErrorBoundary resetKey={location.pathname}>
-            <div key={location.pathname} className="page-enter">
-              <Routes location={location}>
-                <Route path="/" element={<BoardPage />} />
-                <Route path="/search" element={<SearchPage />} />
-                <Route path="/orders/new" element={<NewOrderPage />} />
-                <Route path="/orders/:id" element={<OrderPage />} />
-                <Route path="/orders/:id/intake" element={<InspectionWizard kind="intake" />} />
-                <Route path="/orders/:id/handover" element={<InspectionWizard kind="handover" />} />
-                <Route path="/orders/:id/invoice" element={<QuickInvoicePage />} />
-                <Route path="/orders/:id/estimate" element={<EstimatePage />} />
-                <Route path="/orders/:id/problem" element={<FoundProblemPage />} />
-                <Route path="/orders/:id/claim" element={<ClaimPage />} />
-                <Route path="/customers" element={<CustomersPage />} />
-                <Route path="/customers/:id" element={<CustomerPage />} />
-                <Route path="/vehicles/:id" element={<VehiclePage />} />
-                <Route path="/parts" element={<PartsPage />} />
-                <Route path="/money" element={<MoneyPage />} />
-                <Route path="/reports" element={<ReportsPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/more" element={<MorePage />} />
-                <Route path="*" element={<BoardPage />} />
-              </Routes>
-            </div>
-          </ErrorBoundary>
-        </Box>
+        <div ref={pageRef} className="page-shell">
+          <Box maw={1320} mx="auto">
+            <PreviewNotice />
+            <ErrorBoundary resetKey={location.pathname}>
+              <div key={location.pathname} className={rise ? 'page-enter' : undefined}>
+                <Routes location={location}>
+                  <Route path="/" element={<BoardPage />} />
+                  <Route path="/search" element={<SearchPage />} />
+                  <Route path="/orders/new" element={<NewOrderPage />} />
+                  <Route path="/orders/:id" element={<OrderPage />} />
+                  <Route path="/orders/:id/intake" element={<InspectionWizard kind="intake" />} />
+                  <Route path="/orders/:id/handover" element={<InspectionWizard kind="handover" />} />
+                  <Route path="/orders/:id/invoice" element={<QuickInvoicePage />} />
+                  <Route path="/orders/:id/estimate" element={<EstimatePage />} />
+                  <Route path="/orders/:id/problem" element={<FoundProblemPage />} />
+                  <Route path="/orders/:id/claim" element={<ClaimPage />} />
+                  <Route path="/customers" element={<CustomersPage />} />
+                  <Route path="/customers/:id" element={<CustomerPage />} />
+                  <Route path="/vehicles/:id" element={<VehiclePage />} />
+                  <Route path="/parts" element={<PartsPage />} />
+                  <Route path="/money" element={<MoneyPage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/more" element={<MorePage />} />
+                  <Route path="*" element={<BoardPage />} />
+                </Routes>
+              </div>
+            </ErrorBoundary>
+          </Box>
+        </div>
       </AppShell.Main>
       {showBottom && (
         <AppShell.Footer withBorder={false} style={{ background: 'transparent' }}>
@@ -334,7 +348,7 @@ function Providers({ children }: { children: React.ReactNode }) {
   const mobile = usePhone();
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
-      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={2} autoClose={2600} transitionDuration={220} />
+      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={2} autoClose={2600} transitionDuration={260} />
       {children}
     </DatesProvider>
   );
@@ -345,9 +359,9 @@ export function App() {
   return (
     <MantineProvider theme={mobile ? phoneTheme : theme} cssVariablesResolver={cssResolver} defaultColorScheme="light">
       <Providers>
-        <HashRouter>
+        <AppRouter animated={mobile}>
           <Shell />
-        </HashRouter>
+        </AppRouter>
       </Providers>
     </MantineProvider>
   );

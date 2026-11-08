@@ -1,5 +1,5 @@
-import { Avatar, Box, Button, Group, Stack, Text, TextInput } from '@mantine/core';
-import { IconPlus, IconSearch, IconUserSearch } from '@tabler/icons-react';
+import { Avatar, Box, Button, Group, Stack, Text } from '@mantine/core';
+import { IconPlus, IconUserSearch } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { matchJobs, splitWords, wordMatches, type JobMatch, type Term } from '..
 import type { Customer, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
 import { loadJobIndex, type JobHitData } from '../../services/search';
-import { EmptyState, List, ListRow, PageHeader, PlateText, Section, StageBadge } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, PlateText, SearchField, Section, StageBadge } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
 
 export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage } };
@@ -158,16 +158,9 @@ export function SearchPage() {
   return (
     <>
       <PageHeader title={t('search.title')} />
-      <TextInput
-        size="lg"
-        autoFocus
-        leftSection={<IconSearch size={20} />}
-        placeholder={t('search.placeholder')}
-        value={q}
-        onChange={(e) => setQ(e.currentTarget.value)}
-        mb="lg"
-        radius="lg"
-      />
+      <Box mb="lg">
+        <SearchField autoFocus placeholder={t('search.placeholder')} value={q} onChange={setQ} />
+      </Box>
       {q && hits?.length === 0 && jobs?.total === 0 && (
         <EmptyState
           icon={IconUserSearch}
