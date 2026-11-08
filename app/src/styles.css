@@ -1004,6 +1004,10 @@ html.kb .tab-bar-wrap {
   font-size: 17px;
   font-weight: 500;
   background: none !important;
+  color: var(--mantine-color-cobalt-6);
+}
+[data-mantine-color-scheme='dark'] .tip-actions .mantine-Button-root {
+  color: var(--mantine-color-cobalt-5);
 }
 .tip-actions .mantine-Button-root:active:not([data-disabled]) {
   opacity: 0.4;
@@ -1791,6 +1795,9 @@ html.kb .tab-bar-wrap {
   backdrop-filter: none;
   box-shadow: none;
   padding-top: 6px;
+  /* It arrives with its screen. (A fade of the bar would also stop its glass buttons from blurring
+     the content: an element whose opacity animates becomes the edge of what they can see.) */
+  animation: none;
 }
 .screen[data-tabbar='true'] > .screen-bottom > .sticky-bar,
 html.kb .screen-bottom > .sticky-bar {

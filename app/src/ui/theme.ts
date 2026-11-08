@@ -270,6 +270,12 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--app-bar': 'rgba(22, 22, 24, 0.82)',
     '--app-pill': '#f2f2f7',
     '--app-pill-text': '#000000',
+    // Tinted words in the dark (text buttons, tinted buttons, badges) are the saturated system colours
+    // of iOS, not Mantine's near-white shades.
+    '--mantine-color-cobalt-light-color': 'var(--mantine-color-cobalt-4)',
+    '--mantine-color-green-light-color': 'var(--mantine-color-green-5)',
+    '--mantine-color-red-light-color': 'var(--mantine-color-red-4)',
+    '--mantine-color-orange-light-color': 'var(--mantine-color-orange-5)',
     '--glass-bg': 'rgba(48, 48, 52, 0.6)',
     '--glass-bg-strong': 'rgba(40, 40, 44, 0.86)',
     '--glass-rim': 'rgba(255, 255, 255, 0.16)',
