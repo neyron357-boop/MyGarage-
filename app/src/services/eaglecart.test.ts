@@ -127,6 +127,9 @@ describe('Eaglecart import', () => {
     expect(active.vehicle.plate.number).toBe('');
     expect(await db.orders.get('ec-o-105')).toBeUndefined(); // empty job
 
+    // New jobs continue Eaglecart's numbering.
+    expect((await db.counters.get('order'))?.value).toBe(6);
+
     const counts = async () => ({ c: await db.customers.count(), v: await db.vehicles.count(), o: await db.orders.count(), i: await db.items.count(), own: await db.ownerships.count() });
     const before = await counts();
     const again = await importEaglecart(sample(), opts);

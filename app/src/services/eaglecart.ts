@@ -407,13 +407,17 @@ export async function previewEaglecartImport(data: EaglecartExport, opts: Import
 }
 
 export async function importEaglecart(data: EaglecartExport, opts: ImportOptions = {}): Promise<ImportPlan['stats']> {
-  return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.items], async () => {
+  return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.items, db.counters], async () => {
     const plan = planEaglecartImport(data, await loadExisting(), opts);
     await db.customers.bulkAdd(plan.customers);
     await db.vehicles.bulkAdd(plan.vehicles);
     await db.ownerships.bulkPut(plan.ownerships);
     await db.orders.bulkAdd(plan.orders);
     await db.items.bulkPut(plan.items);
+    // New jobs continue Eaglecart's numbering (job 259 → next 260) unless MyGarage is already further.
+    const last = Math.max(0, ...data.jobs.map((j) => Number(j.no) || 0));
+    const counter = await db.counters.get('order');
+    if (last && (!counter || counter.value < last)) await db.counters.put({ name: 'order', value: last });
     return plan.stats;
   });
 }

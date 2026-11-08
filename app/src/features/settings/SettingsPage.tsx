@@ -133,6 +133,9 @@ function BusinessTab({ s }: { s: Settings }) {
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <TextInput label={t('settings.name')} value={v.name} onChange={(e) => set({ name: e.currentTarget.value })} />
           <TextInput label="TRN" description={t('settings.trnHint')} value={v.trn} onChange={(e) => set({ trn: e.currentTarget.value })} />
+          {/* The right-hand side of the document header, as on the garage's invoices. */}
+          <TextInput label={t('settings.nameAr')} dir="rtl" value={v.nameAr ?? ''} onChange={(e) => set({ nameAr: e.currentTarget.value })} />
+          <TextInput label={t('settings.addressAr')} dir="rtl" value={v.addressAr ?? ''} onChange={(e) => set({ addressAr: e.currentTarget.value })} />
         </SimpleGrid>
       </Card>
       <Card title={t('settings.contacts')}>
@@ -206,6 +209,9 @@ function TextsTab({ s }: { s: Settings }) {
       {pair('intakeTerms')}
       {pair('warrantyText')}
       {pair('docFooter')}
+      <Card title={t('settings.docFooterAr')}>
+        <Textarea dir="rtl" autosize minRows={2} value={v.docFooterAr ?? ''} onChange={(e) => setV({ ...v, docFooterAr: e.currentTarget.value })} />
+      </Card>
       <SaveBar dirty={dirty} busy={busy} onSave={() => run(() => saveSettings(v), 'common.saved')} />
     </Stack>
   );

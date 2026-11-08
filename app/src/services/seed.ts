@@ -1,6 +1,6 @@
 import { db, uid } from '../db/db';
 import type { ExpenseCategory, JobTemplate, RelatedRule, TemplateItem } from '../domain/types';
-import { DEFAULT_SETTINGS } from './settings';
+import { DEFAULT_SETTINGS, withGarageIdentity } from './settings';
 
 const aed = (n: number) => Math.round(n * 100);
 
@@ -116,7 +116,13 @@ export const PLACEHOLDER_STAFF = /^(Механик|Mechanic) \d$/;
 export async function ensureSeed(lang: 'ru' | 'en' = 'ru'): Promise<void> {
   const mechanic = lang === 'en' ? 'Mechanic' : 'Механик';
   await db.transaction('rw', [db.settings, db.jobTemplates, db.relatedRules, db.expenseCategories, db.employees], async () => {
-    if (!(await db.settings.get('main'))) await db.settings.put({ ...DEFAULT_SETTINGS });
+    const current = await db.settings.get('main');
+    if (!current) await db.settings.put({ ...DEFAULT_SETTINGS });
+    else {
+      // Installs from before the garage's own documents: fill its details and the Arabic header.
+      const patch = withGarageIdentity({ ...DEFAULT_SETTINGS, ...current });
+      if (patch) await db.settings.put({ ...current, ...patch });
+    }
     if ((await db.jobTemplates.count()) === 0) {
       await db.jobTemplates.bulkAdd(TEMPLATES.map((t) => ({ ...t, id: uid(), active: true })));
       await db.relatedRules.bulkAdd(RELATED.map((r) => ({ ...r, id: uid() })));

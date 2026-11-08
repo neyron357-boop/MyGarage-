@@ -108,7 +108,7 @@ export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 
       type: invType,
       orderId,
       issuedAt: nowIso(),
-      seller: { name: s.name, address: s.address, trn: s.trn, phone: s.phone, email: s.email },
+      seller: { name: s.name, nameAr: s.nameAr, address: s.address, addressAr: s.addressAr, trn: s.trn, phone: s.phone, email: s.email },
       buyer: {
         name: c.type === 'company' && c.companyName ? c.companyName : c.name,
         address: c.address,

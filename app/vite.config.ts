@@ -58,6 +58,8 @@ export default defineConfig(({ mode }) => {
       }),
       ...(single ? [viteSingleFile()] : []),
     ],
+    // Pre-bundled at dev-server start: discovered later (on the first PDF) they would reload the page.
+    optimizeDeps: { include: ['qrcode', 'jsbarcode/bin/barcodes/CODE128/CODE128B'] },
     build: single
       ? { outDir: 'dist-single', assetsInlineLimit: 100_000_000, chunkSizeWarningLimit: 20000 }
       : { outDir: 'dist', chunkSizeWarningLimit: 4000 },

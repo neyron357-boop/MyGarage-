@@ -11,7 +11,7 @@ import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { fromNet, sumAmounts } from '../../domain/vat';
 import type { Lang, OrderItem } from '../../domain/types';
-import { invoicePdf, openPdf } from '../../services/documents';
+import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, updateItem } from '../../services/estimate';
 import { simpleMessage } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
@@ -288,6 +288,7 @@ export function QuickInvoicePage() {
   const [sheet, setSheet] = useState<{ kind: Kind; item?: OrderItem } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
+  const [send, setSend] = useState<SendRequest | null>(null);
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b) return <EmptyState title={t('err.notFound')} />;
 
@@ -396,6 +397,29 @@ export function QuickInvoicePage() {
             </List>
           </Box>
           {lines.length === 0 && <div className="group-note">{t('qi.emptyHint')}</div>}
+          {lines.length > 0 && (
+            // A quotation of these lines for the customer before the invoice (the garage's quotation form).
+            <Group grow gap="sm" mt="md">
+              <Button
+                variant="light"
+                leftSection={<IconSend size={18} />}
+                onClick={() =>
+                  setSend({
+                    text: simpleMessage('documents', { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name }, b.order.docLanguage),
+                    template: 'quotation',
+                    lang: b.order.docLanguage,
+                    orderId: b.order.id,
+                    pdf: () => quotationPdf(b.order.id),
+                  })
+                }
+              >
+                {t('qi.sendQuotation')}
+              </Button>
+              <Button variant="light" color="gray" leftSection={<IconFileTypePdf size={18} />} loading={busy} onClick={() => run(async () => openPdf(await quotationPdf(b.order.id)))}>
+                {t('qi.quotationPdf')}
+              </Button>
+            </Group>
+          )}
           <StickyBar>
             <Button fullWidth disabled={lines.length === 0} loading={busy} onClick={() => setConfirm(true)}>
               {t('invoice.issue')} · {formatAed(sum.gross)}
@@ -433,6 +457,7 @@ export function QuickInvoicePage() {
         </Text>
       </ConfirmModal>
       <CustomerModal opened={customerOpen} onClose={() => setCustomerOpen(false)} customer={c} />
+      <SendDialog customer={b.customer} request={send} onClose={() => setSend(null)} />
     </>
   );
 }

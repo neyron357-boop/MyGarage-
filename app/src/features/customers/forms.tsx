@@ -11,7 +11,8 @@ export const EMPTY_CUSTOMER: CustomerInput = {
   name: '',
   phone: '',
   preferredChannel: 'whatsapp',
-  docLanguage: 'ru',
+  // Documents for customers are in English unless the customer asks for Russian.
+  docLanguage: 'en',
   type: 'individual',
 };
 

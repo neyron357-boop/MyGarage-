@@ -1,26 +1,28 @@
 import { Document, Font, Image, Page, pdf, StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { ReactNode } from 'react';
 import { db } from '../db/db';
-import { formatDate, formatDateTime } from '../domain/dates';
+import { addDays, formatDate, formatDateTime, formatDocDate, nowIso } from '../domain/dates';
 import { REQUIRED_SLOTS } from '../domain/inspection';
-import { paidNet } from '../domain/invoice';
 import { itemAmounts, itemTitle } from '../domain/items';
 import { formatAed } from '../domain/money';
 import { formatPhone } from '../domain/phone';
-import { formatPlate } from '../domain/plates';
+import { formatPlate, normalizePlate } from '../domain/plates';
 import type { Report } from '../domain/reports';
-import type { Customer, ExpenseCategory, Lang, Order, Settings, Vehicle } from '../domain/types';
+import type { Customer, ExpenseCategory, Lang, Order, PayMethod, Settings, Vehicle } from '../domain/types';
 import { tFor } from '../i18n';
 import { mediaDataUrl } from '../services/media';
 import { loadOrderBundle } from '../services/orders';
 import { getSettings } from '../services/settings';
-import bold from './fonts/NotoSans-Bold.ttf?url';
-import regular from './fonts/NotoSans-Regular.ttf?url';
+import tinosBold from './fonts/Tinos-Bold.ttf?url';
+import tinosRegular from './fonts/Tinos-Regular.ttf?url';
+import arabicBold from './fonts/MarkaziText-Bold.ttf?url';
+import arabicRegular from './fonts/MarkaziText-Regular.ttf?url';
+import { aed, AR_LABEL, BiLine, BlockLabel, Codes, COLOR, GarageFooter, GarageHeader, ItemsTable, Signatures, TitleBar, Totals, type DocRow } from './garage';
 
 Font.registerHyphenationCallback((w) => [w]);
 
 const s = StyleSheet.create({
-  page: { fontSize: 9, padding: 28, paddingBottom: 48, color: '#111' },
+  page: { fontSize: 9, paddingTop: 42, paddingHorizontal: 34.5, paddingBottom: 48, color: '#000' },
   row: { flexDirection: 'row' },
   between: { flexDirection: 'row', justifyContent: 'space-between' },
   h1: { fontSize: 15, fontWeight: 'bold', marginBottom: 2 },
@@ -34,31 +36,41 @@ const s = StyleSheet.create({
   bold: { fontWeight: 'bold' },
 });
 
-function Header({ settings, title, sub, right }: { settings: Settings; title: string; sub?: string; right?: ReactNode }) {
+/** Arabic titles of the documents that are not invoices or quotations. */
+const AR_TITLE = {
+  intake: 'تقرير استلام المركبة',
+  handover: 'تقرير تسليم المركبة',
+  receipt: 'إيصال استلام دفعة',
+  debt: 'إقرار بالمديونية',
+  report: 'تقرير',
+};
+
+/** The garage's header (English · logo · Arabic) and grey title bar, then the document's own line. */
+function Header({ settings, title, ar, sub, right, compact }: { settings: Settings; title: string; ar: string; sub?: string; right?: ReactNode; compact?: boolean }) {
   return (
-    <View style={[s.between, { marginBottom: 8, borderBottomWidth: 1.5, borderColor: '#3f5be9', paddingBottom: 6 }]}>
-      <View style={s.row}>
-        {settings.logoDataUrl && <Image src={settings.logoDataUrl} style={{ width: 48, height: 48, objectFit: 'contain', marginRight: 8 }} />}
-        <View>
-          <Text style={[s.bold, { fontSize: 12 }]}>{settings.name}</Text>
-          {settings.address ? <Text style={s.muted}>{settings.address}</Text> : null}
-          <Text style={s.muted}>{[settings.phone && formatPhone(settings.phone), settings.email].filter(Boolean).join(' · ')}</Text>
-          {settings.trn ? <Text style={s.muted}>TRN: {settings.trn}</Text> : null}
+    <View style={{ marginBottom: 8 }}>
+      <GarageHeader s={settings} compact={compact} />
+      <TitleBar en={title.toUpperCase()} ar={ar} />
+      {(sub || right) && (
+        <View style={[s.between, { marginTop: 6 }]}>
+          <Text style={{ fontSize: 9 }}>{settings.trn ? `TRN: ${settings.trn}` : ''}</Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            {sub ? <Text style={{ fontSize: 9 }}>{sub}</Text> : null}
+            {right}
+          </View>
         </View>
-      </View>
-      <View style={{ alignItems: 'flex-end', maxWidth: 240 }}>
-        <Text style={s.h1}>{title}</Text>
-        {sub ? <Text>{sub}</Text> : null}
-        {right}
-      </View>
+      )}
     </View>
   );
 }
 
+/** Page footer of the multi-page documents: the garage's thank-you line and page numbers. */
 function Footer({ settings, lang }: { settings: Settings; lang: Lang }) {
   return (
-    <View style={s.footer} fixed>
-      <Text>{settings.docFooter[lang] ?? ''}</Text>
+    <View style={[s.footer, { borderTopWidth: 0.75, borderColor: COLOR.rowRule, paddingTop: 3, color: COLOR.footer, fontSize: 6.8 }]} fixed>
+      <Text>
+        {settings.name}: {settings.docFooter[lang] ?? ''}
+      </Text>
       <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
     </View>
   );
@@ -95,9 +107,12 @@ let fontSeq = 0;
 function render(build: (fontFamily: string) => ReactNode): Promise<Blob> {
   const run = queue.then(() => {
     fontSeq += 1;
-    const family = `Noto${fontSeq}`;
-    Font.register({ family, fonts: [{ src: regular }, { src: bold, fontWeight: 'bold' }] });
-    return pdf(build(family) as React.ReactElement).toBlob();
+    // Times-like text (Tinos) with Arabic (Markazi Text) as the fallback for Arabic letters.
+    const latin = `Tinos${fontSeq}`;
+    const arabic = `Arabic${fontSeq}`;
+    Font.register({ family: latin, fonts: [{ src: tinosRegular }, { src: tinosBold, fontWeight: 'bold' }] });
+    Font.register({ family: arabic, fonts: [{ src: arabicRegular }, { src: arabicBold, fontWeight: 'bold' }] });
+    return pdf(build([latin, arabic] as unknown as string) as React.ReactElement).toBlob();
   });
   queue = run.catch(() => undefined);
   return run;
@@ -130,7 +145,7 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
   return render((fam) => (
     <Document title={`${t(intake ? 'pdf.intakeTitle' : 'pdf.handoverTitle')} ${b.order.number}`}>
       <Page size="A4" style={[s.page, { fontFamily: fam }]}>
-        <Header settings={b.settings} title={t(intake ? 'pdf.intakeTitle' : 'pdf.handoverTitle')} sub={`№${b.order.number} · ${formatDateTime(insp.signedAt ?? insp.createdAt)}`} />
+        <Header settings={b.settings} title={t(intake ? 'pdf.intakeTitle' : 'pdf.handoverTitle')} ar={intake ? AR_TITLE.intake : AR_TITLE.handover} sub={`№${b.order.number} · ${formatDateTime(insp.signedAt ?? insp.createdAt)}`} />
         <Parties customer={b.customer} vehicle={b.vehicle} order={b.order} lang={lang} />
         <View style={s.box}>
           <Text>{t('intake.mileage')}: <Text style={s.bold}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US').replace(/\u00a0/g, ' ')} ${t('unit.km')}` : '—'}</Text> · {t('intake.fuel')}: <Text style={s.bold}>{insp.fuelLevel !== undefined ? t(`fuel.${insp.fuelLevel}`) : '—'}</Text></Text>
@@ -216,131 +231,215 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
   ));
 }
 
+/* ---------------- Quotation and tax invoice, as the garage's own documents ---------------- */
+
+const METHOD_EN: Record<PayMethod, string> = { cash: 'Cash', card: 'Card', transfer: 'Bank transfer' };
+
+/** "CC 78728", "5 / 87920" (a number code, as Abu Dhabi plates were written there). */
+const plateText = (v: Vehicle) => {
+  const p = normalizePlate(v.plate);
+  return [p.code, p.number].filter(Boolean).join(/^\d+$/.test(p.code) ? ' / ' : ' ');
+};
+
+function SellerBlock({ s, lines }: { s: { name: string; phone?: string; email?: string; trn?: string }; lines: ReactNode }) {
+  return (
+    <View style={{ width: 290, paddingLeft: 3.7 }}>
+      <BlockLabel en="SELLER" ar={AR_LABEL.seller} />
+      <Text style={{ fontSize: 12, marginBottom: 5 }}>{s.name}</Text>
+      {s.phone ? <BiLine en="Telephone" ar={AR_LABEL.telephone} value={formatPhone(s.phone)} /> : null}
+      {s.email ? <BiLine en="Email" ar={AR_LABEL.email} value={s.email} /> : null}
+      <BiLine en="Tax ID" ar={AR_LABEL.taxId} value={`(TRN): ${s.trn || '—'}`} colon={false} />
+      {lines}
+    </View>
+  );
+}
+
+/** "BILL TO" / "QUOTATION TO": the customer and the car, right-aligned. */
+function CustomerBlock({ en, ar, party, vehicle }: { en: string; ar: string; party: { name: string; phone?: string; email?: string; trn?: string; address?: string }; vehicle: Vehicle }) {
+  const car = [vehicle.make, vehicle.model].filter(Boolean).join(' ');
+  const plate = plateText(vehicle);
+  return (
+    <View style={{ width: 236, alignItems: 'flex-end', paddingRight: 3.7 }}>
+      <BlockLabel en={en} ar={ar} right />
+      <Text style={{ fontSize: 12, textAlign: 'right', marginBottom: 3 }}>{party.name || '—'}</Text>
+      {party.phone ? <Text style={{ fontSize: 9.8, marginBottom: 3 }}>{formatPhone(party.phone)}</Text> : null}
+      {party.email ? <Text style={{ fontSize: 9.8, marginBottom: 3 }}>{party.email}</Text> : null}
+      {party.trn ? <BiLine right en="Tax ID" ar={AR_LABEL.taxId} value={`(TRN): ${party.trn}`} colon={false} /> : null}
+      {party.address ? <Text style={{ fontSize: 9, textAlign: 'right', marginBottom: 3 }}>{party.address}</Text> : null}
+      {car ? <Text style={{ fontSize: 9, marginTop: 3, marginBottom: 3 }}>{car}</Text> : null}
+      {plate ? <BiLine right en="PLATE" ar={AR_LABEL.plate} value={plate} /> : null}
+      {vehicle.vin ? <BiLine right en="VIN / Chassis Num  (VIN)" ar={AR_LABEL.vin} value={vehicle.vin} /> : null}
+    </View>
+  );
+}
+
+/** Customer of a quotation (the invoice keeps its own snapshot of the buyer). */
+const partyOf = (c: Customer) => ({ name: c.type === 'company' && c.companyName ? c.companyName : c.name, phone: c.phone, email: c.email, trn: c.trn, address: c.address });
+
+function QuotationDocument({ fam, settings, customer, vehicle, number, date, validUntil, rows, totals, note }: {
+  fam: string;
+  settings: Settings;
+  customer: Customer;
+  vehicle: Vehicle;
+  number: string;
+  date: string;
+  validUntil?: string;
+  rows: DocRow[];
+  totals: { gross: number; vat: number; text?: string };
+  note?: string;
+}) {
+  const party = partyOf(customer);
+  return (
+    <Page size="A4" style={[s.page, { fontFamily: fam }]}>
+      <GarageHeader s={settings} />
+      <TitleBar en="Quotation" ar={AR_LABEL.quotation} spaced={false} />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+        <SellerBlock
+          s={settings}
+          lines={
+            <>
+              <BiLine en="Quotation Number" ar={AR_LABEL.quotationNumber} value={number} />
+              <BiLine en="Date" ar={AR_LABEL.date} value={formatDocDate(date)} />
+              {validUntil ? <BiLine en="Valid until" ar={AR_LABEL.validUntil} value={formatDate(validUntil)} /> : null}
+            </>
+          }
+        />
+        <CustomerBlock en="QUOTATION TO" ar={AR_LABEL.quotationTo} party={party} vehicle={vehicle} />
+      </View>
+      <ItemsTable rows={rows} />
+      <Totals
+        qty={rows.reduce((a, r) => a + (r.total < 0 ? 0 : r.qty), 0)}
+        subtotal={totals.gross}
+        vat={totals.vat}
+        total={totals.gross}
+        totalText={totals.text}
+        notes={note ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 2 }}>{note}</Text> : undefined}
+      />
+      <Signatures company={settings.name} customer={party.name || '—'} />
+      <GarageFooter s={settings} />
+    </Page>
+  );
+}
+
+/** Quotation of a sent estimate version (detailed path): its frozen lines and prices. */
 export async function renderVersion(versionId: string): Promise<Blob> {
   const v = await db.versions.get(versionId);
   if (!v) throw new Error('not found');
   const b = (await loadOrderBundle(v.orderId))!;
-  const lang = v.language;
-  const t = tFor(lang);
-  const thumbs = (await Promise.all(v.mediaIds.map((id) => mediaDataUrl(id, true)))).filter(Boolean) as string[];
-  const price = (i: (typeof v.items)[number]) =>
-    i.minGross !== undefined && i.maxGross !== undefined && i.minGross !== i.maxGross ? `${formatAed(i.minGross, lang)} – ${formatAed(i.maxGross, lang)}` : formatAed(i.gross, lang);
+  const t = tFor(v.language);
+  const ranged = (i: (typeof v.items)[number]) => i.minGross !== undefined && i.maxGross !== undefined && i.minGross !== i.maxGross;
+  const rows: DocRow[] = v.items.map((i) =>
+    ranged(i)
+      ? { description: i.title, qty: i.qty, total: i.maxGross!, totalText: `${aed(i.minGross!)} – ${formatAed(i.maxGross!, 'en', false)}` }
+      : { description: i.title + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round(i.net / (i.qty || 1)), vat: i.vat, qty: i.qty, total: i.gross },
+  );
+  const vat = v.items.filter((i) => !ranged(i)).reduce((a, i) => a + i.vat, 0);
+  const upTo = v.maxGross !== v.fixedGross;
+  const note = [v.reason, v.items.some((i) => i.block === 'B') ? t('msg.bExplain') : ''].filter(Boolean).join(' ');
   return render((fam) => (
-    <Document title={`${t('estimate.title')} ${b.order.number} v${v.number}`}>
-      <Page size="A4" style={[s.page, { fontFamily: fam }]}>
-        <Header settings={b.settings} title={v.number === 1 ? t('pdf.estimateTitle') : t('pdf.supplementTitle')} sub={`№${b.order.number} · v${v.number} · ${formatDateTime(v.sentAt)}`} />
-        <Parties customer={b.customer} vehicle={b.vehicle} order={b.order} lang={lang} />
-        {v.reason && <Text style={[s.box, s.bold]}>{v.reason}</Text>}
-        {(['A', 'B', 'C'] as const).map((blk) => {
-          const list = v.items.filter((i) => i.block === blk);
-          if (!list.length) return null;
-          return (
-            <View key={blk}>
-              <Text style={s.h2}>{t(`block.${blk}.title`)}</Text>
-              <Text style={[s.muted, { marginBottom: 3 }]}>{t(`block.${blk}.hint`)}</Text>
-              {list.map((i) => (
-                <View key={i.itemId} style={[s.between, s.td]} wrap={false}>
-                  <View style={{ flex: 1 }}>
-                    <Text>{i.urgency ? `[${t(`urgency.${i.urgency}`)}] ` : ''}{i.title} × {i.qty}{i.customerSupplied ? ` — ${t('item.customerSupplied')}` : ''}</Text>
-                    {i.ifNotDone ? <Text style={s.muted}>{t('item.ifNotDone')}: {i.ifNotDone}</Text> : null}
-                  </View>
-                  <Text style={s.bold}>{price(i)}</Text>
-                </View>
-              ))}
-            </View>
-          );
-        })}
-        <View style={[s.box, { marginTop: 10 }]} wrap={false}>
-          <View style={s.between}><Text>{t('estimate.fixed')}</Text><Text style={s.bold}>{formatAed(v.fixedGross, lang)}</Text></View>
-          {v.maxGross !== v.fixedGross && <View style={s.between}><Text>{t('estimate.upTo')}</Text><Text style={s.bold}>{formatAed(v.maxGross, lang)}</Text></View>}
-          {v.recommendedGross > 0 && <View style={s.between}><Text>{t('estimate.recommended')}</Text><Text>{formatAed(v.recommendedGross, lang)}</Text></View>}
-          <Text style={s.muted}>{t('estimate.inclVat')} · {t('version.validUntil')} {formatDate(v.validUntil)}</Text>
-        </View>
-        {v.items.some((i) => i.block === 'B') && <Text style={{ marginTop: 6 }}>{t('msg.bExplain')}</Text>}
-        {thumbs.length > 0 && (
-          <>
-            <Text style={s.h2}>{t('pdf.photos')}</Text>
-            <View style={[s.row, { flexWrap: 'wrap' }]}>{thumbs.map((u, i) => <Image key={i} src={u} style={s.photo} />)}</View>
-          </>
-        )}
-        <Text style={{ marginTop: 10 }}>{t('pdf.estimateNote')}</Text>
-        <Footer settings={b.settings} lang={lang} />
-      </Page>
+    <Document title={`Quotation ${b.order.number}${v.number > 1 ? `-v${v.number}` : ''}`}>
+      <QuotationDocument
+        fam={fam}
+        settings={b.settings}
+        customer={b.customer}
+        vehicle={b.vehicle}
+        number={`${b.order.number}${v.number > 1 ? `-v${v.number}` : ''}`}
+        date={v.sentAt}
+        validUntil={v.validUntil}
+        rows={rows}
+        totals={{ gross: v.fixedGross, vat, text: upTo ? `${aed(v.fixedGross)} – ${formatAed(v.maxGross, 'en', false)}` : undefined }}
+        note={note || undefined}
+      />
     </Document>
   ));
 }
 
+/** Quotation of the job's current lines (quick path), before the invoice is issued. */
+export async function renderQuotation(orderId: string): Promise<Blob> {
+  const b = (await loadOrderBundle(orderId))!;
+  const items = b.items.filter((i) => ['draft', 'pending', 'approved'].includes(i.approvalState));
+  const rows: DocRow[] = items.map((i) => {
+    const a = itemAmounts(i);
+    return { description: itemTitle(i, 'en') + (i.customerSupplied ? ' (customer supplied part)' : ''), price: i.kind === 'discount' ? -Math.abs(i.unitPriceFils) : i.unitPriceFils, vat: a.vat, qty: i.qty, total: a.gross };
+  });
+  const gross = rows.reduce((x, r) => x + r.total, 0);
+  const vat = rows.reduce((x, r) => x + (r.vat ?? 0), 0);
+  const now = nowIso();
+  return render((fam) => (
+    <Document title={`Quotation ${b.order.number}`}>
+      <QuotationDocument
+        fam={fam}
+        settings={b.settings}
+        customer={b.customer}
+        vehicle={b.vehicle}
+        number={String(b.order.number)}
+        date={now}
+        validUntil={addDays(now, b.settings.estimateValidityDays)}
+        rows={rows}
+        totals={{ gross, vat }}
+      />
+    </Document>
+  ));
+}
+
+/**
+ * Tax invoice (and credit note) as the garage's own: seller with TRN, invoice and job numbers,
+ * the customer with the car, lines with price excl. VAT and VAT, totals incl. VAT, barcodes and a QR
+ * code with the invoice summary. Always in English with Arabic labels (UAE tax invoice).
+ */
 export async function renderInvoice(invoiceId: string): Promise<Blob> {
   const inv = await db.invoices.get(invoiceId);
   if (!inv) throw new Error('not found');
   const b = (await loadOrderBundle(inv.orderId))!;
-  const ru = b.order.docLanguage === 'ru';
-  const L = (en: string, rus: string) => (ru ? `${en} / ${rus}` : en);
-  const title =
-    inv.type === 'tax_invoice' ? L('TAX INVOICE', 'Налоговый инвойс') : inv.type === 'simplified_tax_invoice' ? L('SIMPLIFIED TAX INVOICE', 'Упрощённый налоговый инвойс') : L('TAX CREDIT NOTE', 'Кредит-нота');
+  const credit = inv.type === 'credit_note';
   const original = inv.originalInvoiceId ? await db.invoices.get(inv.originalInvoiceId) : undefined;
-  const paid = paidNet(b.payments);
-  const cols = [3.4, 0.6, 1.1, 1.1, 0.6, 0.9, 1.2];
-  const head = ['Description', 'Qty', 'Unit price', 'Taxable amount', 'VAT %', 'VAT', 'Total incl. VAT'];
-  const aed = (f: number) => formatAed(f, 'en', false);
+  // The seller as it was when the invoice was issued; Arabic name/address from settings for older invoices.
+  const seller = { ...inv.seller, nameAr: inv.seller.nameAr ?? b.settings.nameAr, addressAr: inv.seller.addressAr ?? b.settings.addressAr };
+  const head: Settings = { ...b.settings, name: seller.name, address: seller.address ?? '', phone: seller.phone ?? '', nameAr: seller.nameAr, addressAr: seller.addressAr };
+  const rows: DocRow[] = inv.lines.map((l) => ({
+    description: l.description + (l.customerSupplied ? ' (customer supplied part)' : ''),
+    price: l.unitPriceFils,
+    vat: l.vat,
+    qty: l.qty,
+    total: l.gross,
+  }));
+  const qty = inv.lines.filter((l) => l.kind !== 'discount').reduce((a, l) => a + l.qty, 0);
+  const methods = [...new Set(b.payments.filter((p) => p.kind !== 'refund').map((p) => METHOD_EN[p.method]))].join(', ');
+  const qrText = [seller.name, `TRN ${seller.trn || '-'}`, `${credit ? 'Tax Credit Note' : 'Tax Invoice'} ${inv.number}`, formatDocDate(inv.issuedAt), `Total ${aed(inv.totalFils)}`, `VAT ${aed(inv.vatFils)}`].join('\n');
   return render((fam) => (
     <Document title={inv.number}>
       <Page size="A4" style={[s.page, { fontFamily: fam }]}>
-        <Header settings={b.settings} title={title} sub={`No. ${inv.number}`} right={<Text>{L('Date', 'Дата')}: {formatDate(inv.issuedAt)}</Text>} />
-        <View style={[s.row, { gap: 8 }]}>
-          <View style={[s.box, { flex: 1 }]}>
-            <Text style={s.muted}>{L('Supplier', 'Поставщик')}</Text>
-            <Text style={s.bold}>{inv.seller.name}</Text>
-            {inv.seller.address ? <Text>{inv.seller.address}</Text> : null}
-            <Text>TRN: {inv.seller.trn || '—'}</Text>
-          </View>
-          <View style={[s.box, { flex: 1 }]}>
-            <Text style={s.muted}>{L('Customer', 'Клиент')}</Text>
-            <Text style={s.bold}>{inv.buyer.name}</Text>
-            {inv.buyer.address ? <Text>{inv.buyer.address}</Text> : null}
-            {inv.buyer.trn ? <Text>TRN: {inv.buyer.trn}</Text> : null}
-            {inv.buyer.phone ? <Text>{formatPhone(inv.buyer.phone)}</Text> : null}
-          </View>
+        <GarageHeader s={head} />
+        <TitleBar en={credit ? 'TAX CREDIT NOTE' : 'TAX INVOICE'} ar={credit ? AR_LABEL.creditNote : AR_LABEL.taxInvoice} />
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+          <SellerBlock
+            s={seller}
+            lines={
+              <>
+                <BiLine en={credit ? 'Credit Note Number' : 'Invoice Number'} ar={credit ? AR_LABEL.creditNumber : AR_LABEL.invoiceNumber} value={inv.number} />
+                {original ? <BiLine en="Reference" ar={AR_LABEL.reference} value={`${original.number}${inv.reason ? ` — ${inv.reason}` : ''}`} /> : null}
+                <BiLine en="Order#" ar={AR_LABEL.order} value={String(b.order.number)} />
+                <BiLine en="Date" ar={AR_LABEL.date} value={formatDocDate(inv.issuedAt)} />
+              </>
+            }
+          />
+          <CustomerBlock en="BILL TO" ar={AR_LABEL.billTo} party={inv.buyer} vehicle={b.vehicle} />
         </View>
-        <Text style={{ marginTop: 6 }}>
-          {L('Vehicle', 'Автомобиль')}: {b.vehicle.make} {b.vehicle.model} · {formatPlate(b.vehicle.plate, 'en')}{b.vehicle.vin ? ` · VIN ${b.vehicle.vin}` : ''} · {L('Job card', 'Заказ')} {b.order.number}
-        </Text>
-        {original && <Text style={[s.box, s.bold]}>{L('Credit note for invoice', 'Кредит-нота к инвойсу')} {original.number} ({formatDate(original.issuedAt)}). {L('Reason', 'Причина')}: {inv.reason}</Text>}
-        <View style={{ marginTop: 8 }}>
-          <View style={s.row}>
-            {head.map((h, i) => <Text key={h} style={[s.th, { flex: cols[i], textAlign: i === 0 ? 'left' : 'right' }]}>{h}</Text>)}
-          </View>
-          {inv.lines.map((l, idx) => (
-            <View key={idx} style={s.row} wrap={false}>
-              <Text style={[s.td, { flex: cols[0] }]}>{l.description}{l.customerSupplied ? ' (customer supplied part)' : ''}</Text>
-              <Text style={[s.td, { flex: cols[1], textAlign: 'right' }]}>{l.qty}</Text>
-              <Text style={[s.td, { flex: cols[2], textAlign: 'right' }]}>{aed(l.unitPriceFils)}</Text>
-              <Text style={[s.td, { flex: cols[3], textAlign: 'right' }]}>{aed(l.net)}</Text>
-              <Text style={[s.td, { flex: cols[4], textAlign: 'right' }]}>{(l.vatRateBp / 100).toFixed(0)}%</Text>
-              <Text style={[s.td, { flex: cols[5], textAlign: 'right' }]}>{aed(l.vat)}</Text>
-              <Text style={[s.td, { flex: cols[6], textAlign: 'right' }]}>{aed(l.gross)}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={{ alignSelf: 'flex-end', width: 240, marginTop: 8 }} wrap={false}>
-          <View style={s.between}><Text>{L('Total excl. VAT', 'Итого без VAT')}</Text><Text>{aed(inv.subtotalFils)} AED</Text></View>
-          <View style={s.between}><Text>{L('VAT', 'VAT')} 5%</Text><Text>{aed(inv.vatFils)} AED</Text></View>
-          <View style={[s.between, { borderTopWidth: 1, borderColor: '#333', marginTop: 2, paddingTop: 2 }]}>
-            <Text style={s.bold}>{L('Total amount payable', 'К оплате')}</Text>
-            <Text style={s.bold}>{aed(inv.totalFils)} AED</Text>
-          </View>
-          {inv.type !== 'credit_note' && (
+        <ItemsTable rows={rows} />
+        <Totals
+          qty={qty}
+          subtotal={inv.totalFils}
+          vat={inv.vatFils}
+          total={inv.totalFils}
+          notes={
             <>
-              <View style={s.between}><Text>{L('Paid', 'Оплачено')}</Text><Text>{aed(paid)} AED</Text></View>
-              <View style={s.between}><Text>{L('Balance', 'Остаток')}</Text><Text>{aed(Math.max(0, inv.totalFils - paid))} AED</Text></View>
+              {methods ? <BiLine en="Payment method" ar={AR_LABEL.paymentMethod} value={methods} color={COLOR.head} /> : null}
+              {b.settings.bankDetails ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 2 }}>{b.settings.bankDetails}</Text> : null}
             </>
-          )}
-        </View>
-        {b.settings.bankDetails ? <Text style={[s.box, { fontSize: 8 }]}>{L('Bank details', 'Реквизиты')}: {b.settings.bankDetails}</Text> : null}
-        <Text style={{ marginTop: 8, fontSize: 7.5, color: '#555' }}>
-          {(b.settings.warrantyText.en ?? '').replace('{months}', String(b.settings.warrantyLaborMonths)).replace('{km}', String(b.settings.warrantyLaborKm))}
-        </Text>
-        <Footer settings={b.settings} lang={ru ? 'ru' : 'en'} />
+          }
+        />
+        <Codes jobNo={String(b.order.number)} invoiceNo={inv.number} qrText={qrText} />
+        <GarageFooter s={head} />
       </Page>
     </Document>
   ));
@@ -355,7 +454,7 @@ export async function renderReceipt(paymentId: string): Promise<Blob> {
   return render((fam) => (
     <Document title={p.receiptNumber}>
       <Page size="A5" style={[s.page, { fontFamily: fam }]}>
-        <Header settings={b.settings} title={t('pdf.receiptTitle')} sub={`${p.receiptNumber} · ${formatDateTime(p.receivedAt)}`} />
+        <Header settings={b.settings} compact title={t('pdf.receiptTitle')} ar={AR_TITLE.receipt} sub={`${p.receiptNumber} · ${formatDateTime(p.receivedAt)}`} />
         <Parties customer={b.customer} vehicle={b.vehicle} order={b.order} lang={lang} />
         <View style={[s.box, { marginTop: 10 }]}>
           <View style={s.between}><Text>{t(`payment.kind.${p.kind}`)} · {t(`payment.method.${p.method}`)}</Text><Text style={[s.bold, { fontSize: 13 }]}>{formatAed(p.amountFils, lang)}</Text></View>
@@ -377,7 +476,7 @@ export async function renderDebt(debtId: string): Promise<Blob> {
   return render((fam) => (
     <Document title="debt">
       <Page size="A5" style={[s.page, { fontFamily: fam }]}>
-        <Header settings={b.settings} title={t('pdf.debtTitle')} sub={formatDateTime(d.signedAt)} />
+        <Header settings={b.settings} compact title={t('pdf.debtTitle')} ar={AR_TITLE.debt} sub={formatDateTime(d.signedAt)} />
         <Parties customer={b.customer} vehicle={b.vehicle} order={b.order} lang={lang} />
         <Text style={[s.box, { marginTop: 10 }]}>{t('pdf.debtText', { name: b.customer.name, amount: formatAed(d.amountFils, lang), date: formatDate(d.dueDate), number: b.order.number })}</Text>
         {sig && <Image src={sig} style={{ width: 160, height: 60, objectFit: 'contain', marginTop: 10 }} />}
@@ -401,7 +500,7 @@ export async function renderReport(r: Report, from: string, to: string, lang: La
   return render((fam) => (
     <Document title="report">
       <Page size="A4" style={[s.page, { fontFamily: fam }]}>
-        <Header settings={settings} title={t('report.title')} sub={`${formatDate(from)} – ${formatDate(to)}`} />
+        <Header settings={settings} title={t('report.title')} ar={AR_TITLE.report} sub={`${formatDate(from)} – ${formatDate(to)}`} />
         {row(t('report.received'), String(r.ordersReceived))}
         {row(t('report.delivered'), String(r.ordersDelivered))}
         {row(t('report.revenueGross'), a(r.revenueGross), true)}

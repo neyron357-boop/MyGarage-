@@ -157,7 +157,6 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
 
 export function NewOrderPage() {
   const { t } = useTranslation();
-  const lang = useLang();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { run, busy } = useAction();
@@ -168,7 +167,8 @@ export function NewOrderPage() {
   const [pickedCustomer, setPickedCustomer] = useState<Customer>();
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
-  const [docLanguage, setDocLanguage] = useState<Lang>(lang);
+  // Documents are in English by default, whatever language the app itself is in.
+  const [docLanguage, setDocLanguage] = useState<Lang>('en');
   const [complaint, setComplaint] = useState('');
   const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();

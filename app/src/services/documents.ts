@@ -57,6 +57,13 @@ export async function versionPdf(versionId: string): Promise<PdfFile> {
   return keep('version', versionId, `estimate-${order?.number ?? ''}-v${v.number}.pdf`, async () => (await pdf()).renderVersion(versionId));
 }
 
+/** Quotation of the job's current lines (quick path). Not stored: it changes with the lines. */
+export async function quotationPdf(orderId: string): Promise<PdfFile> {
+  const order = await db.orders.get(orderId);
+  if (!order) throw new AppError('err.notFound');
+  return { blob: await (await pdf()).renderQuotation(orderId), filename: `quotation-${order.number}.pdf` };
+}
+
 export async function invoicePdf(invoiceId: string): Promise<PdfFile> {
   const inv = await db.invoices.get(invoiceId);
   if (!inv) throw new AppError('err.notFound');

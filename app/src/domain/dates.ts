@@ -60,6 +60,24 @@ export function formatDate(iso?: string): string {
 }
 
 /** DD/MM/YYYY HH:mm (Dubai time). */
+const docFmt = new Intl.DateTimeFormat('en-US', {
+  timeZone: TZ,
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true,
+});
+
+/** Date on invoices and quotations, as the garage's documents show it: "8 Nov 2026, 9:30:00 AM · GST". */
+export function formatDocDate(iso?: string): string {
+  if (!iso) return '';
+  const p = Object.fromEntries(docFmt.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return `${p.day} ${p.month} ${p.year}, ${p.hour}:${p.minute}:${p.second} ${(p.dayPeriod ?? '').toUpperCase()} · GST`;
+}
+
 export function formatDateTime(iso?: string): string {
   if (!iso) return '';
   const p = parts(iso);

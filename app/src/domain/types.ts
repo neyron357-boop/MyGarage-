@@ -16,6 +16,11 @@ export interface Plate {
 export interface Settings {
   id: 'main';
   name: string;
+  /** Name and address in Arabic: the right-hand side of the document header, as on the garage's invoices. */
+  nameAr?: string;
+  addressAr?: string;
+  /** Arabic line of the document footer. */
+  docFooterAr?: string;
   address: string;
   phone: string;
   email: string;
@@ -433,6 +438,8 @@ export interface InvoiceLine {
 
 export interface PartySnapshot {
   name: string;
+  nameAr?: string;
+  addressAr?: string;
   address?: string;
   trn?: string;
   phone?: string;
