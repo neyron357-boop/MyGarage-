@@ -52,7 +52,7 @@ import { importBackup, saveBackupFile, wipeAll } from '../../services/backup';
 import { loadDemoData } from '../../services/demo';
 import { blobToDataUrl } from '../../services/media';
 import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
-import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar } from '../../ui/components';
+import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar, Tip } from '../../ui/components';
 import { formatBytes, insecureContext, requestPersistence, useBackupAge, useStorageInfo } from '../../ui/device';
 import { useAction, useLang, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
@@ -330,26 +330,20 @@ function PricesTab() {
   const [edit, setEdit] = useState<JobTemplate | null>(null);
   return (
     <Stack gap="md">
-      <Box className="surface" p="md" style={{ borderLeft: `4px solid var(--mantine-color-${s?.pricesReviewed ? 'green' : 'yellow'}-5)` }}>
-        <Group gap="sm" wrap="nowrap" align="flex-start">
-          <ThemeIcon variant="light" color={s?.pricesReviewed ? 'green' : 'yellow'} radius="xl" size={32} style={{ flexShrink: 0 }}>
-            {s?.pricesReviewed ? <IconCheck size={17} stroke={2.6} /> : <IconAlertTriangle size={16} />}
-          </ThemeIcon>
-          <Box style={{ flex: 1, minWidth: 0 }}>
-            <Text size="sm" fw={600}>
-              {s?.pricesReviewed ? t('settings.pricesDone') : t('settings.pricesHint')}
-            </Text>
-            <Text size="xs" c="dimmed" mt={2}>
-              {t('settings.pricesNet')} {s?.pricesReviewed ? '' : t('settings.pricesDoneHint')}
-            </Text>
-            {!s?.pricesReviewed && (
-              <Button mt="sm" size="compact-md" variant="light" color="green" leftSection={<IconCheck size={16} />} onClick={() => run(() => saveSettings({ pricesReviewed: true }), 'common.saved')}>
-                {t('settings.pricesDone')}
-              </Button>
-            )}
-          </Box>
-        </Group>
-      </Box>
+      <Tip
+        icon={s?.pricesReviewed ? IconCheck : IconAlertTriangle}
+        color={s?.pricesReviewed ? 'green' : 'yellow'}
+        title={s?.pricesReviewed ? t('settings.pricesDone') : t('settings.pricesHint')}
+        actions={
+          !s?.pricesReviewed && (
+            <Button variant="subtle" leftSection={<IconCheck size={18} />} onClick={() => run(() => saveSettings({ pricesReviewed: true }), 'common.saved')}>
+              {t('settings.pricesDone')}
+            </Button>
+          )
+        }
+      >
+        {t('settings.pricesNet')} {s?.pricesReviewed ? '' : t('settings.pricesDoneHint')}
+      </Tip>
       <Button w="fit-content" leftSection={<IconPlus size={18} />} onClick={() => setEdit({ id: uid(), code: `custom_${Date.now()}`, titleRu: '', titleEn: '', items: [], active: true })}>
         {t('settings.newTemplate')}
       </Button>

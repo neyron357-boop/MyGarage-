@@ -959,6 +959,9 @@ html.kb .tab-bar-wrap {
   padding: 14px 16px 0;
   margin-bottom: var(--mantine-spacing-lg);
 }
+.mantine-Stack-root > .tip {
+  margin-bottom: 0;
+}
 .tip-main {
   display: flex;
   align-items: flex-start;

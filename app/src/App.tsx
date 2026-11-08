@@ -1,8 +1,8 @@
-import { AppShell, Box, Button, Group, Kbd, MantineProvider, NavLink as MNavLink, Stack, Text, TextInput } from '@mantine/core';
+import { AppShell, Box, Button, Kbd, MantineProvider, NavLink as MNavLink, Stack, Text, TextInput } from '@mantine/core';
 import { DatesProvider } from '@mantine/dates';
 import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
-import { IconCash, IconChartBar, IconDots, IconLayoutKanban, IconPackage, IconPlus, IconSearch, IconSettings, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import { IconCash, IconChartBar, IconDots, IconInfoCircle, IconLayoutKanban, IconPackage, IconPlus, IconSearch, IconSettings, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +26,7 @@ import { SearchPage } from './features/search/SearchPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
-import { Logo, Money } from './ui/components';
+import { Logo, Money, Tip } from './ui/components';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useLang, usePhone } from './ui/hooks';
 import { PwaUpdater } from './ui/pwa';
@@ -190,34 +190,21 @@ function PreviewNotice() {
   });
   if (import.meta.env.MODE !== 'single' || hidden) return null;
   return (
-    <Box mb="md" mt="xs" p="sm" className="surface" style={{ boxShadow: 'inset 4px 0 0 var(--mantine-color-yellow-5)' }}>
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <div>
-          <Text fw={600} size="sm">
-            {t('preview.title')}
-          </Text>
-          <Text size="sm" c="dimmed">
-            {t('preview.text')}
-          </Text>
-        </div>
-        <Button
-          variant="subtle"
-          color="gray"
-          size="compact-sm"
-          aria-label={t('common.close')}
-          onClick={() => {
-            setHidden(true);
-            try {
-              localStorage.setItem('mygarage.previewNoticeHidden', '1');
-            } catch {
-              // ignore
-            }
-          }}
-        >
-          ×
-        </Button>
-      </Group>
-    </Box>
+    <Tip
+      icon={IconInfoCircle}
+      color="yellow"
+      title={t('preview.title')}
+      onClose={() => {
+        setHidden(true);
+        try {
+          localStorage.setItem('mygarage.previewNoticeHidden', '1');
+        } catch {
+          // ignore
+        }
+      }}
+    >
+      {t('preview.text')}
+    </Tip>
   );
 }
 
