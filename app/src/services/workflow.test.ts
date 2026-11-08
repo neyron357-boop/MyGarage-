@@ -11,6 +11,8 @@ import { bundleAmountDue, changeStage, checkIn, completeQc, createOrder, decline
 import { setProcurement } from './parts';
 import { ensureSeed } from './seed';
 import { versionMessage } from './messages';
+import { loadJobIndex } from './search';
+import { matchJobs } from '../domain/search';
 
 const png = () => new Blob([new Uint8Array([137, 80, 78, 71, 1, 2, 3, Math.random() * 255])], { type: 'image/png' });
 
@@ -51,6 +53,22 @@ describe('search', () => {
     expect((await search('050 123'))[0]?.customer.name).toBe('Ahmed Ali');
     expect((await search('ahmed')).length).toBeGreaterThan(0);
     await expectAppError(createVehicle((await db.customers.toArray())[0].id, { plate: v.plate, make: 'X', model: 'Y' }), 'err.plateExists');
+  });
+
+  it('finds jobs by their lines, part numbers, complaint and linked expenses', async () => {
+    const { o } = await newOrder();
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front Brake Pads', partNumber: '04465-33450', unitPriceFils: 18000 });
+    const cat = (await db.expenseCategories.toArray())[0]!;
+    await addExpense({ date: '2026-11-06', categoryId: cat.id, amountFils: 5000, vatFils: 0, method: 'cash', orderId: o.id, vendor: 'Al Masaood', note: 'Диски тормозные' });
+    const index = await loadJobIndex('ru');
+    const ids = (q: string) => matchJobs(index, q).matches.map((m) => m.doc.orderId);
+    expect(ids('колодки')).toEqual([o.id]);
+    expect(ids('0446533450')).toEqual([o.id]);
+    expect(ids('скрип')).toEqual([o.id]);
+    expect(ids('masaood')).toEqual([o.id]);
+    expect(ids('колодки camry')).toEqual([o.id]);
+    expect(ids(String(o.number))).toEqual([o.id]);
+    expect(matchJobs(index, 'диски').matches[0]?.fields.map((f) => f.kind)).toEqual(['expense']);
   });
 });
 

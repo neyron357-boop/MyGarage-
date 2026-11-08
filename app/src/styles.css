@@ -260,6 +260,14 @@ body {
   font-variant-numeric: tabular-nums;
 }
 /* Small secondary label above a value (sentence case, like iOS). */
+/* What the search found, inside a result. */
+.search-mark {
+  background: var(--mantine-color-cobalt-light);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
 .eyebrow {
   font-size: 13px;
   font-weight: 500;

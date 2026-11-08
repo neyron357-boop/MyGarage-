@@ -45,6 +45,16 @@ async function launchBrowser() {
     await page.getByText('Camry').first().waitFor();
     await shot('02-board-demo', true);
   });
+  await step('search by works and parts', async () => {
+    // A Russian word finds the jobs by their lines (the English title too), highlighted.
+    await page.goto(BASE + '#/search');
+    await page.getByPlaceholder('Номер, имя, работа, деталь…').fill('колодки');
+    await page.getByRole('heading', { name: 'Заказы' }).waitFor();
+    await page.locator('.search-mark', { hasText: 'Колодки' }).first().waitFor();
+    await page.getByPlaceholder('Номер, имя, работа, деталь…').fill('масляный фильтр camry');
+    await page.locator('.search-mark', { hasText: /фильтр/i }).first().waitFor();
+    await shot('02b-search-jobs');
+  });
   await step('new order', async () => {
     // Fast check-in: the plate first, make and model from chips, the customer is optional.
     await page.goto(BASE + '#/orders/new');
