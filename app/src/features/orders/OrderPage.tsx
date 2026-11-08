@@ -26,6 +26,7 @@ import {
   IconArrowBackUp,
   IconArrowRight,
   IconCar,
+  IconChevronRight,
   IconCircleCheck,
   IconDots,
   IconFileTypePdf,
@@ -69,7 +70,7 @@ import {
   type OrderBundle,
 } from '../../services/orders';
 import {
-  ContactButtons,
+  ContactTiles,
   EmptyState,
   Field,
   Flags,
@@ -433,6 +434,7 @@ function WorkTab({ b }: { b: OrderBundle }) {
   const prepaid = b.payments.some((p) => p.kind === 'prepayment');
   const prepayAmount = needPrepay.reduce((s, i) => s + itemAmounts(i).gross, 0);
   const done = approved.filter((i) => i.done).length;
+  const canReportProblem = ['awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check'].includes(b.order.stage);
   const row = (i: OrderItem) => (
     <ItemRow
       key={i.id}
@@ -457,16 +459,21 @@ function WorkTab({ b }: { b: OrderBundle }) {
   );
   return (
     <Stack gap="lg">
-      <Group gap="xs">
-        <Button leftSection={<IconTool size={18} />} variant="default" onClick={() => navigate(`/orders/${b.order.id}/estimate`)}>
-          {t('order.editEstimate')}
-        </Button>
-        {['awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check'].includes(b.order.stage) && (
-          <Button color="orange" variant="light" leftSection={<IconAlertTriangle size={18} />} onClick={() => navigate(`/orders/${b.order.id}/problem`)}>
-            {t('order.foundProblem')}
-          </Button>
-        )}
-      </Group>
+      {/* With nothing on the job yet, the empty state below offers the estimate: one button, not two. */}
+      {(visible.length > 0 || canReportProblem) && (
+        <Group gap="xs">
+          {visible.length > 0 && (
+            <Button leftSection={<IconTool size={18} />} variant="default" onClick={() => navigate(`/orders/${b.order.id}/estimate`)}>
+              {t('order.editEstimate')}
+            </Button>
+          )}
+          {canReportProblem && (
+            <Button color="orange" variant="light" leftSection={<IconAlertTriangle size={18} />} onClick={() => navigate(`/orders/${b.order.id}/problem`)}>
+              {t('order.foundProblem')}
+            </Button>
+          )}
+        </Group>
+      )}
       {needPrepay.length > 0 && !prepaid && (
         <Alert color="orange" title={t('prepay.title')}>
           <Text size="sm">{t('prepay.text', { amount: formatAed(prepayAmount) })}</Text>
@@ -891,29 +898,31 @@ export function OrderPage() {
               )}
             </Group>
             {b.order.imported && <ImportedNote imp={b.order.imported} />}
-            <Group justify="space-between" wrap="nowrap" mt="md" gap="sm">
+            <Box mt="md">
               {b.customer.name || b.customer.phone ? (
-                <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => navigate(`/customers/${b.customer.id}`)}>
-                  <Avatar color="cobalt" radius="xl" size={42}>
+                // The customer: a row that opens the card, the ways to reach them as tiles under it.
+                <UnstyledButton className="customer-line" onClick={() => navigate(`/customers/${b.customer.id}`)}>
+                  <Avatar color="cobalt" radius="xl" size={44}>
                     {b.customer.name ? initials(b.customer.name) : <IconUser size={20} />}
                   </Avatar>
-                  <Box style={{ minWidth: 0 }}>
-                    <Text fw={600} lineClamp={2} lh={1.25}>
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    <Text fw={600} fz={17} lineClamp={1} lh={1.3}>
                       {(b.customer.type === 'company' && b.customer.companyName ? b.customer.companyName : b.customer.name) || t('customer.noName')}
                     </Text>
-                    <Text size="xs" c="dimmed" className="tnum">
+                    <Text fz={15} c="dimmed" className="tnum" lineClamp={1}>
                       {[b.customer.phone ? formatPhone(b.customer.phone) : '', t(`lang.${b.order.docLanguage}`)].filter(Boolean).join(' · ')}
                     </Text>
                   </Box>
-                </Group>
+                  <IconChevronRight size={18} stroke={2.4} className="chevron" aria-hidden />
+                </UnstyledButton>
               ) : (
                 // Checked in with the plate only: the customer can be added any time.
                 <Button variant="light" leftSection={<IconUserPlus size={18} />} onClick={() => setCustomerOpen(true)}>
                   {t('qi.addCustomer')}
                 </Button>
               )}
-              <ContactButtons phone={b.customer.phone} whatsapp={b.customer.whatsapp} telegram={b.customer.telegram} />
-            </Group>
+              <ContactTiles phone={b.customer.phone} whatsapp={b.customer.whatsapp} telegram={b.customer.telegram} />
+            </Box>
             {(flags.waitingClientSince || flags.waitingParts || flags.debt || flags.incident || flags.warranty || flags.storageDays) && (
               <Box mt="md">
                 <Flags flags={flags} hours={waitingHours} warnHours={b.settings.boardWarnHours} alertHours={b.settings.boardAlertHours} />
@@ -936,9 +945,9 @@ export function OrderPage() {
                 </Box>
               )}
               {quickSecondary.length > 0 && (
-                <Group gap={6} mt="sm">
+                <Group gap={8} mt="sm">
                   {quickSecondary.map((s) => (
-                    <Button key={s.label} size="compact-md" variant="subtle" onClick={s.onClick}>
+                    <Button key={s.label} size="sm" variant="default" onClick={s.onClick}>
                       {s.label}
                     </Button>
                   ))}
@@ -962,9 +971,10 @@ export function OrderPage() {
               </Box>
             )}
             {step.secondary && (
-              <Group gap={6} mt="sm">
+              // Secondary ways on: small capsules on the card, not loose text.
+              <Group gap={8} mt="sm">
                 {step.secondary.map((s) => (
-                  <Button key={s.action} size="compact-md" variant="subtle" color={s.action === 'declineRepair' ? 'red' : 'gray'} onClick={() => act(s.action)}>
+                  <Button key={s.action} size="sm" variant="default" c={s.action === 'declineRepair' ? 'red' : undefined} onClick={() => act(s.action)}>
                     {t(s.label)}
                   </Button>
                 ))}

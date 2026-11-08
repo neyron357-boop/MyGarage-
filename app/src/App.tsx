@@ -296,37 +296,46 @@ const TABS: { to: string; icon: Icon; key: string }[] = [
 ];
 const MORE_PATHS = ['/more', '/customers', '/vehicles', '/parts', '/reports', '/settings'];
 
+/** The tab a screen belongs to: its own root, or the tab it was opened from (a job, a customer). */
+function tabOf(pathname: string): string | undefined {
+  if (MORE_PATHS.some((p) => pathname.startsWith(p))) return '/more';
+  return TABS.find((s) => s.to === pathname)?.to;
+}
+
 /**
- * The phone tab bar, like UITabBar: it never moves with the screens. "+" opens a new job straight
- * away (the car is the first thing to record). Tapping the tab you are on scrolls it to the top.
+ * The phone tab bar of iOS 26: a floating Liquid Glass capsule that never moves with the screens.
+ * The tab you are in sits on a lens that slides from tab to tab; a screen opened from a tab (a job
+ * from the board) keeps that tab lit, and tapping it goes back to the tab's first screen — tapping
+ * it there scrolls to the top. "+" (new job) is its own tinted glass circle at the trailing end, like
+ * the compose button of iOS apps: a tab bar is for places, not actions.
  */
 function TabBar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const active = (to: string) => (to === '/more' ? MORE_PATHS.some((p) => pathname.startsWith(p)) : pathname === to);
+  const last = useRef('/');
+  const current = tabOf(pathname) ?? last.current;
+  last.current = current;
+  const index = TABS.findIndex((s) => s.to === current);
   const go = (to: string) => {
     if (pathname === to) return scrollToTop(true);
-    hintNavigation('tab');
+    hintNavigation(current === to ? 'pop' : 'tab');
     navigate(to);
   };
-  const tab = (s: (typeof TABS)[number]) => (
-    <button key={s.to} type="button" data-href={s.to} className={active(s.to) ? 'active' : undefined} aria-current={active(s.to) ? 'page' : undefined} onClick={() => go(s.to)}>
-      <s.icon stroke={1.7} aria-hidden />
-      <span>{t(s.key)}</span>
-    </button>
-  );
   return (
     <div className="tab-bar-wrap">
-      <nav className="tab-bar" aria-label={t('nav.menu')}>
-        {TABS.slice(0, 2).map(tab)}
-        <div className="tab-plus-wrap">
-          <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} onClick={() => navigate('/orders/new')}>
-            <IconPlus size={26} stroke={2.4} />
+      <nav className="tab-bar glass" aria-label={t('nav.menu')} style={{ '--i': Math.max(0, index), '--n': TABS.length } as React.CSSProperties}>
+        <span className="tab-lens" data-hidden={index < 0} aria-hidden />
+        {TABS.map((s) => (
+          <button key={s.to} type="button" data-href={s.to} className={s.to === current ? 'active' : undefined} aria-current={s.to === current ? 'page' : undefined} onClick={() => go(s.to)}>
+            <s.icon stroke={s.to === current ? 2.1 : 1.8} aria-hidden />
+            <span>{t(s.key)}</span>
           </button>
-        </div>
-        {TABS.slice(2).map(tab)}
+        ))}
       </nav>
+      <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} onClick={() => navigate('/orders/new')}>
+        <IconPlus size={28} stroke={2.2} aria-hidden />
+      </button>
     </div>
   );
 }

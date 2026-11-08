@@ -203,9 +203,10 @@ export function Flags({ flags, hours, warnHours = 2, alertHours = 24 }: { flags:
 /* ---------------- Page structure ---------------- */
 
 /**
- * iOS back button: chevron + the name of the screen it leads to. On a phone it goes back through the
- * stack (the previous screen returns as it was); with nothing behind (a screen opened from a link) it
- * goes to `to`, or the board.
+ * iOS back button. On a phone it is the round glass button of iOS 26 with the back chevron (the screen
+ * it leads to is its accessible name); a screen presented from the bottom is closed with a round "×".
+ * It goes back through the stack (the previous screen returns as it was); with nothing behind (a
+ * screen opened from a link) it goes to `to`, or the board. On a PC: chevron + the screen's name.
  */
 export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
   const navigate = useNavigate();
@@ -218,16 +219,22 @@ export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
     if ((window.history.state?.idx ?? 0) > 0) return navigate(-1);
     navigate(to ?? '/');
   };
-  // A screen presented from the bottom is left with "Cancel", like a new message on iPhone.
+  const name = label ?? (stack?.previous ? title(stack.previous.pathname) : to ? title(to) : t('common.back'));
+  const aria = typeof name === 'string' ? name : t('common.back');
   if (screen?.modal)
     return (
-      <button type="button" className="nav-back nav-cancel" onClick={go}>
-        <span className="nav-back-label">{label ?? t('common.cancel')}</span>
+      <button type="button" className="nav-glass nav-close" onClick={go} aria-label={typeof label === 'string' ? label : t('common.cancel')}>
+        <IconX size={22} stroke={2.3} aria-hidden />
       </button>
     );
-  const name = label ?? (stack?.previous ? title(stack.previous.pathname) : to ? title(to) : t('common.back'));
+  if (screen)
+    return (
+      <button type="button" className="nav-glass nav-back" onClick={go} aria-label={aria}>
+        <IconChevronLeft size={26} stroke={2.4} style={{ marginLeft: -2 }} aria-hidden />
+      </button>
+    );
   return (
-    <button type="button" className="nav-back" onClick={go} aria-label={typeof name === 'string' ? name : t('common.back')}>
+    <button type="button" className="nav-back" onClick={go} aria-label={aria}>
       <IconChevronLeft size={28} stroke={2.4} style={{ marginLeft: -4, marginRight: -3, flexShrink: 0 }} />
       <span className="nav-back-label">{name}</span>
     </button>
@@ -253,11 +260,15 @@ export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: R
     let frame = 0;
     const update = () => {
       frame = 0;
-      const barBottom = barRef.current?.getBoundingClientRect().bottom ?? 44;
+      const bar = barRef.current;
+      const barBottom = bar?.getBoundingClientRect().bottom ?? 44;
       // How much of the large title is still below the bar: it fades over its last 28 px.
       const left = title.getBoundingClientRect().bottom - barBottom;
       head.style.setProperty('--title-o', Math.max(0, Math.min(1, left / 28)).toFixed(3));
       setCompact(left <= 8);
+      // Content under the bar: the scroll edge shows (iOS 26).
+      const y = target instanceof Window ? target.scrollY : target.scrollTop;
+      if (bar) bar.dataset.scrolled = String(y > 2);
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
@@ -521,6 +532,47 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
   );
 }
 
+/**
+ * An inline tip like iOS TipKit: a tinted symbol, a title and a message; its actions are tinted
+ * words under a hairline (the message keeps the whole width instead of sharing it with a button).
+ */
+export function Tip({
+  icon: I,
+  color = 'cobalt',
+  title,
+  children,
+  actions,
+  onClose,
+}: {
+  icon: Icon;
+  color?: string;
+  title: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+  onClose?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="tip surface rise-enter">
+      <div className="tip-main">
+        <span className="tip-icon" style={{ color: `var(--mantine-color-${color}-6)` }} aria-hidden>
+          <I size={30} stroke={1.6} />
+        </span>
+        <div className="tip-text">
+          <div className="tip-title">{title}</div>
+          {children && <div className="tip-body">{children}</div>}
+        </div>
+        {onClose && (
+          <ActionIcon variant="subtle" color="gray" size={30} className="tip-close" aria-label={t('common.close')} onClick={onClose}>
+            <IconX size={16} stroke={2.4} />
+          </ActionIcon>
+        )}
+      </div>
+      {actions && <div className="tip-actions">{actions}</div>}
+    </div>
+  );
+}
+
 /** Animated green check for "signed" / "paid" moments. */
 export function SuccessMark({ size = 64 }: { size?: number }) {
   return (
@@ -642,27 +694,26 @@ export function PageSkeleton({ variant = 'list' }: { variant?: 'list' | 'detail'
 }
 
 /** Round contact buttons: WhatsApp, Telegram, call (nothing while the customer has no phone yet). */
-export function ContactButtons({ phone, whatsapp, telegram, size = 38 }: { phone: string; whatsapp?: string; telegram?: string; size?: number }) {
+/**
+ * The action tiles of an iPhone contact card: WhatsApp, Telegram and a call, an icon over a word, in
+ * equal tiles under the name. Only what the customer can be reached by (no `tel:` without a number).
+ */
+export function ContactTiles({ phone, whatsapp, telegram }: { phone: string; whatsapp?: string; telegram?: string }) {
   const { t } = useTranslation();
-  if (!phone && !whatsapp) return null;
+  const tiles: { href: string; icon: Icon; label: string; color: string; external: boolean }[] = [];
+  if (whatsapp || phone) tiles.push({ href: whatsappUrl(whatsapp || phone, ''), icon: IconBrandWhatsapp, label: 'WhatsApp', color: 'green', external: true });
+  if (telegram || phone) tiles.push({ href: telegramChatUrl(phone, telegram), icon: IconBrandTelegram, label: 'Telegram', color: 'cobalt', external: true });
+  if (phone) tiles.push({ href: `tel:${phone}`, icon: IconPhone, label: t('customer.call'), color: 'green', external: false });
+  if (!tiles.length) return null;
   return (
-    <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
-      <Tooltip label="WhatsApp">
-        <ActionIcon component="a" href={whatsappUrl(whatsapp || phone, '')} target="_blank" rel="noopener" size={size} radius="xl" color="green" variant="light" aria-label="WhatsApp">
-          <IconBrandWhatsapp size={20} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label="Telegram">
-        <ActionIcon component="a" href={telegramChatUrl(phone, telegram)} target="_blank" rel="noopener" size={size} radius="xl" color="cobalt" variant="light" aria-label="Telegram">
-          <IconBrandTelegram size={20} />
-        </ActionIcon>
-      </Tooltip>
-      <Tooltip label={t('customer.call')}>
-        <ActionIcon component="a" href={`tel:${phone}`} size={size} radius="xl" color="gray" variant="light" aria-label={t('customer.call')}>
-          <IconPhone size={20} />
-        </ActionIcon>
-      </Tooltip>
-    </Group>
+    <div className="contact-tiles">
+      {tiles.map((x) => (
+        <a key={x.label} className="contact-tile" href={x.href} target={x.external ? '_blank' : undefined} rel={x.external ? 'noopener' : undefined}>
+          <x.icon size={24} stroke={1.8} style={{ color: `var(--mantine-color-${x.color}-6)` }} aria-hidden />
+          <span>{x.label}</span>
+        </a>
+      ))}
+    </div>
   );
 }
 

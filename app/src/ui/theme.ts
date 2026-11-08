@@ -33,11 +33,12 @@ import {
 import { DatePickerInput, DateTimePicker, MonthPickerInput } from '@mantine/dates';
 
 /*
- * MyGarage design tokens — a native iPhone app, built with the web.
- * The iOS system palette: grouped grey canvas, white inset groups with 12 px corners and no borders
- * or shadows, hairline separators, one blue tint, semantic colours for status only. Type is the
+ * MyGarage design tokens — a native iPhone app of iOS 26/27 (Liquid Glass), built with the web.
+ * The iOS system palette: grouped grey canvas, white inset groups with 24 px corners and no borders
+ * or shadows, hairline separators, one blue tint, semantic colours for status only. Controls are
+ * capsules; the bars float over the content as glass (the tab bar, round bar buttons). Type is the
  * phone's own system face (SF Pro on iPhone, Roboto on Android, Segoe UI on Windows) at the iOS
- * sizes: 34 large title, 17 body, 15 secondary, 13 footnote. Bars are translucent and blurred.
+ * sizes: 34 large title, 17 body, 15 secondary, 13 footnote.
  * The palette keeps the key "cobalt" for the tint so existing code keeps working.
  */
 
@@ -99,7 +100,9 @@ export const FONT_PLATE = 'Oswald, "Arial Narrow", sans-serif';
 /** The push and sheet curve of UIKit. */
 export const EASE_IOS = 'cubic-bezier(0.32, 0.72, 0, 1)';
 
-const inputStyles = { label: { fontWeight: 500, marginBottom: rem(6) }, description: { marginTop: 0 }, input: { borderRadius: rem(10) } };
+const inputStyles = { label: { fontWeight: 500, marginBottom: rem(6) }, description: { marginTop: 0 }, input: { borderRadius: rem(12) } };
+/** iOS 26 controls are capsules whatever their height. */
+const CAPSULE = '999px';
 const inputDefaults = { size: 'md', variant: 'filled' } as const;
 
 export const theme = createTheme({
@@ -124,8 +127,8 @@ export const theme = createTheme({
   // 16 px body on a PC; on a phone every field is 17 px (styles.css) — iPhone Safari zooms into smaller ones.
   fontSizes: { xs: rem(12), sm: rem(14), md: rem(16), lg: rem(18), xl: rem(21) },
   lineHeights: { xs: '1.35', sm: '1.4', md: '1.45', lg: '1.45', xl: '1.35' },
-  // iOS corners: 10 for fields and small cards, 12 for inset groups, 18 for sheets and big cards.
-  radius: { xs: rem(6), sm: rem(8), md: rem(10), lg: rem(12), xl: rem(18) },
+  // iOS 26 corners: 12 for fields and small cards, 24 for inset groups and cards, 32 for dialogs.
+  radius: { xs: rem(6), sm: rem(10), md: rem(12), lg: rem(24), xl: rem(32) },
   defaultRadius: 'md',
   spacing: { xs: rem(8), sm: rem(12), md: rem(16), lg: rem(20), xl: rem(28) },
   shadows: {
@@ -138,17 +141,17 @@ export const theme = createTheme({
   cursorType: 'pointer',
   focusRing: 'auto',
   components: {
-    // iOS buttons: 44 pt tall (50 for the main action), 12 pt corners, semibold label.
+    // iOS 26 buttons: capsules, 44 pt tall (52 for the main action), semibold label.
     Button: Button.extend({
       defaultProps: { size: 'md' },
       vars: (_theme, props) => {
-        if (props.size === 'lg') return { root: { '--button-height': rem(50), '--button-fz': rem(17), '--button-radius': rem(14), '--button-padding-x': rem(20) } };
-        if (props.size === 'md' || !props.size) return { root: { '--button-height': rem(44), '--button-fz': rem(16), '--button-radius': rem(12), '--button-padding-x': rem(18) } };
-        return { root: {} };
+        if (props.size === 'lg') return { root: { '--button-height': rem(52), '--button-fz': rem(17), '--button-radius': CAPSULE, '--button-padding-x': rem(22) } };
+        if (props.size === 'md' || !props.size) return { root: { '--button-height': rem(44), '--button-fz': rem(16), '--button-radius': CAPSULE, '--button-padding-x': rem(18) } };
+        return { root: { '--button-radius': CAPSULE } };
       },
       styles: { root: { fontWeight: 600 }, label: { overflow: 'visible' } },
     }),
-    ActionIcon: ActionIcon.extend({ defaultProps: { radius: 'xl' } }),
+    ActionIcon: ActionIcon.extend({ vars: () => ({ root: { '--ai-radius': CAPSULE } }) }),
     Badge: Badge.extend({
       defaultProps: { radius: 'xl', variant: 'light' },
       styles: { root: { textTransform: 'none', fontWeight: 600, letterSpacing: 0, flexShrink: 0 } },
@@ -170,7 +173,7 @@ export const theme = createTheme({
     Switch: Switch.extend({ defaultProps: { size: 'lg', color: 'green' } }),
     Chip: Chip.extend({ defaultProps: { radius: 'xl' } }),
     SegmentedControl: SegmentedControl.extend({
-      defaultProps: { radius: 9, size: 'sm' },
+      defaultProps: { radius: 999, size: 'sm' },
       styles: { root: { padding: 2 }, label: { fontWeight: 600, fontSize: rem(13) } },
     }),
     Tabs: Tabs.extend({ styles: { tab: { fontWeight: 600 } } }),
@@ -187,10 +190,10 @@ export const theme = createTheme({
     Drawer: Drawer.extend({
       defaultProps: { overlayProps: { backgroundOpacity: 0.4, blur: 0 }, transitionProps: { duration: 320, timingFunction: EASE_IOS } },
     }),
-    // Context menus: rounded, blurred, 17 pt rows, like the iOS ones.
+    // Context menus: rounded glass, 17 pt rows, like the iOS 26 ones.
     Menu: Menu.extend({
-      defaultProps: { shadow: 'lg', radius: 'lg', withinPortal: true, transitionProps: { transition: 'pop-top-right', duration: 160, timingFunction: EASE_IOS } },
-      styles: { dropdown: { padding: 4 }, item: { fontSize: rem(16), padding: `${rem(10)} ${rem(12)}`, borderRadius: rem(9) }, divider: { marginBlock: 4 } },
+      defaultProps: { shadow: 'lg', radius: 'lg', withinPortal: true, transitionProps: { transition: 'pop-top-right', duration: 180, timingFunction: EASE_IOS } },
+      styles: { dropdown: { padding: 6 }, item: { fontSize: rem(17), padding: `${rem(11)} ${rem(14)}`, borderRadius: rem(16) }, divider: { marginBlock: 4 } },
     }),
     Tooltip: Tooltip.extend({ defaultProps: { radius: 'sm', withArrow: true } }),
     Alert: Alert.extend({ defaultProps: { radius: 'lg', variant: 'light' }, styles: { title: { fontWeight: 600 } } }),
@@ -220,9 +223,13 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--font-display': FONT_DISPLAY,
     '--font-rounded': FONT_ROUNDED,
     '--font-plate': FONT_PLATE,
-    '--app-bottom-h': '50px',
-    '--app-nav-h': '44px',
-    '--radius-group': '12px',
+    // The floating tab bar (iOS 26): a 62 pt capsule 21 pt off the screen edges.
+    '--app-bottom-h': '62px',
+    '--bar-inset': '21px',
+    // Navigation bar: room for the 44 pt round glass buttons.
+    '--app-nav-h': '52px',
+    '--radius-group': '24px',
+    '--glass-blur': 'blur(18px) saturate(190%)',
   },
   light: {
     '--app-canvas': '#f2f2f7',
@@ -238,6 +245,13 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--app-bar': 'rgba(249, 249, 249, 0.84)',
     '--app-pill': '#1c1c1e',
     '--app-pill-text': '#ffffff',
+    // Liquid Glass: a bright translucent body, a light rim on top, a soft shadow under it.
+    '--glass-bg': 'rgba(255, 255, 255, 0.66)',
+    '--glass-bg-strong': 'rgba(255, 255, 255, 0.84)',
+    '--glass-rim': 'rgba(255, 255, 255, 0.95)',
+    '--glass-edge': 'rgba(0, 0, 0, 0.07)',
+    '--glass-shadow': '0 8px 28px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06)',
+    '--glass-lens': 'rgba(118, 118, 128, 0.16)',
     '--viz-1': '#007aff',
     '--viz-2': '#ff9500',
     '--viz-3': '#34c759',
@@ -256,6 +270,12 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--app-bar': 'rgba(22, 22, 24, 0.82)',
     '--app-pill': '#f2f2f7',
     '--app-pill-text': '#000000',
+    '--glass-bg': 'rgba(48, 48, 52, 0.6)',
+    '--glass-bg-strong': 'rgba(40, 40, 44, 0.86)',
+    '--glass-rim': 'rgba(255, 255, 255, 0.16)',
+    '--glass-edge': 'rgba(255, 255, 255, 0.08)',
+    '--glass-shadow': '0 8px 28px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3)',
+    '--glass-lens': 'rgba(255, 255, 255, 0.14)',
     '--viz-1': '#0a84ff',
     '--viz-2': '#ff9f0a',
     '--viz-3': '#30d158',

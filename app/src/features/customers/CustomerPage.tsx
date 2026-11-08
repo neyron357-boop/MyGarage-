@@ -9,7 +9,7 @@ import { formatDate } from '../../domain/dates';
 import { activeInvoice } from '../../domain/invoice';
 import { formatPhone } from '../../domain/phone';
 import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
-import { ContactButtons, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
+import { ContactTiles, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
 import { LinkedMoney } from '../money/MoneyEntry';
 import { initials } from './CustomersPage';
 import { CustomerModal, VehicleModal } from './forms';
@@ -51,22 +51,20 @@ export function CustomerPage() {
         }
       />
       <Box className="surface" p="md">
-        <Group justify="space-between" wrap="nowrap" align="flex-start">
-          <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-            <Avatar color={c.type === 'company' ? 'grape' : 'cobalt'} radius="xl" size={52}>
-              {initials(displayName)}
-            </Avatar>
-            <Box style={{ minWidth: 0 }}>
-              <Text fw={700} size="lg" lineClamp={2} lh={1.25}>
-                {displayName}
-              </Text>
-              <Text size="sm" c="dimmed" className="tnum">
-                {formatPhone(c.phone)}
-              </Text>
-            </Box>
-          </Group>
-          <ContactButtons phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
+        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+          <Avatar color={c.type === 'company' ? 'grape' : 'cobalt'} radius="xl" size={52}>
+            {initials(displayName)}
+          </Avatar>
+          <Box style={{ minWidth: 0 }}>
+            <Text fw={700} size="lg" lineClamp={2} lh={1.25}>
+              {displayName}
+            </Text>
+            <Text size="sm" c="dimmed" className="tnum">
+              {formatPhone(c.phone)}
+            </Text>
+          </Box>
         </Group>
+        <ContactTiles phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
         <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md" spacing="md">
           <Field label={t('customer.docLanguage')}>{t(`lang.${c.docLanguage}`)}</Field>
           <Field label={t('customer.channel')}>{c.preferredChannel === 'call' ? t('customer.call') : c.preferredChannel === 'telegram' ? 'Telegram' : 'WhatsApp'}</Field>

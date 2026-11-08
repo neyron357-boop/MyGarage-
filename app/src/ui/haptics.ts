@@ -147,6 +147,7 @@ const TAPPABLE = [
   '.scroll-tabs > button',
   '.wizard-steps > button',
   '.tab-bar button',
+  'button.tab-plus',
   'button.suggest',
   'button.search-cancel',
   'button.photo-slot',

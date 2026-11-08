@@ -48,6 +48,8 @@ async function launchBrowser() {
   await go('#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
   await settle(1500);
+  // The "demo data loaded" banner would sit over every picture (the mouse of the test pauses it).
+  await page.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
 
   const tour = async (prefix) => {
     await go('#/');

@@ -165,13 +165,18 @@ a {
   background: var(--app-fill);
   color: var(--app-label-3);
 }
-/* Segmented control: grey track, white sliding pill with a soft shadow. */
+/* Segmented control: a grey capsule track, a white capsule sliding on a spring (iOS 26). */
 .mantine-SegmentedControl-root {
   background: var(--app-fill);
 }
 .mantine-SegmentedControl-indicator {
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
-  transition-timing-function: var(--ease-ios);
+  transition-timing-function: var(--spring);
+  transition-duration: 420ms;
+}
+/* No hairlines between the segments: the capsules carry the shape. */
+.mantine-SegmentedControl-control::before {
+  display: none;
 }
 [data-mantine-color-scheme='dark'] .mantine-SegmentedControl-indicator {
   background: #636366;
@@ -215,17 +220,21 @@ a {
   background: var(--app-press);
   transition-duration: 80ms;
 }
+/* Banners and context menus are glass, like the notifications and menus of iOS 26. */
 .mantine-Notification-root {
-  border-radius: 18px;
-  box-shadow: var(--mantine-shadow-lg);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
+  border-radius: 26px;
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
+  padding-block: 12px;
 }
 .mantine-Menu-dropdown {
-  background: var(--app-bar);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
-  backdrop-filter: saturate(180%) blur(24px);
-  border: 0.5px solid var(--app-hairline);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 0;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
 }
 .mantine-Menu-item {
   transition: background-color var(--dur-1) ease;
@@ -425,19 +434,23 @@ html.vv .app-root {
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
-/* Room for the navigation bar above, the tab bar (or the home indicator) below. */
+/* Room for the navigation bar above, the floating tab bar (or the home indicator) below: the content
+   scrolls on under the glass, and the last row still comes up clear of it. */
+.screen {
+  --bar-zone: calc(var(--bar-inset) + var(--app-bottom-h));
+}
 .screen-body {
   min-height: 100%;
   padding: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h)) var(--page-pad) calc(env(safe-area-inset-bottom, 0px) + var(--page-pad));
 }
 .screen[data-tabbar='true'] .screen-body {
-  padding-bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px) + var(--page-pad) + 8px);
+  padding-bottom: calc(var(--bar-zone) + 28px);
 }
 .screen:has(> .screen-bottom > .sticky-bar) .screen-body {
-  padding-bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px) + 96px);
+  padding-bottom: calc(var(--bar-zone) + 104px);
 }
 .screen[data-tabbar='false']:has(> .screen-bottom > .sticky-bar) .screen-body {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
 }
 .screen-nav {
   position: absolute;
@@ -453,12 +466,46 @@ html.vv .app-root {
   bottom: 0;
   z-index: 4;
 }
+/* The screen's own actions float just above the tab bar. */
 .screen[data-tabbar='true'] > .screen-bottom {
-  bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--bar-zone) + 4px);
 }
 /* While typing, the action bar sits right on the keyboard. */
 html.kb .screen > .screen-bottom {
   bottom: 0;
+}
+/* The scroll edge of iOS 26: the content fades into the canvas under the floating bars at the bottom
+   (and under the navigation bar at the top, see .nav-bar), so glass and labels stay readable. */
+.screen::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  height: var(--edge-h, 0px);
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--app-canvas) 96%, transparent) 0%,
+    color-mix(in srgb, var(--app-canvas) 82%, transparent) 45%,
+    color-mix(in srgb, var(--app-canvas) 0%, transparent) 100%
+  );
+}
+.screen[data-tabbar='true'] {
+  --edge-h: calc(var(--bar-zone) + 26px);
+}
+.screen:has(> .screen-bottom > .sticky-bar) {
+  --edge-h: calc(env(safe-area-inset-bottom, 0px) + 92px);
+}
+.screen[data-tabbar='true']:has(> .screen-bottom > .sticky-bar) {
+  --edge-h: calc(var(--bar-zone) + 92px);
+}
+html.kb .screen {
+  --edge-h: 0px;
+}
+html.kb .screen:has(> .screen-bottom > .sticky-bar) {
+  --edge-h: 76px;
 }
 /* The shade over a screen that another one covers (iOS dims the screen underneath). */
 .screen-dim {
@@ -472,19 +519,23 @@ html.kb .screen > .screen-bottom {
 [data-mantine-color-scheme='dark'] .screen-dim {
   background: rgba(0, 0, 0, 0.45);
 }
-/* The tab bar stands still; it steps away for work at the car and while typing. */
+/* The tab bar floats still over every screen; it sinks away for work at the car and while typing. */
 .tab-bar-wrap {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: max(var(--bar-inset), env(safe-area-inset-left, 0px));
+  right: max(var(--bar-inset), env(safe-area-inset-right, 0px));
+  bottom: var(--bar-inset);
   z-index: 20;
-  height: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
-  transition: transform 320ms var(--ease-ios);
+  display: flex;
+  gap: 8px;
+  height: var(--app-bottom-h);
+  transition: transform 420ms var(--ease-ios), opacity 260ms ease;
 }
 .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='false']) > .tab-bar-wrap,
 html.kb .tab-bar-wrap {
-  transform: translate3d(0, 105%, 0);
+  transform: translate3d(0, calc(100% + var(--bar-inset) + 24px), 0);
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ---------- Haptics (ui/haptics.ts) ---------- */
@@ -756,7 +807,7 @@ html.kb .tab-bar-wrap {
   align-items: center;
   gap: 12px;
   padding: 0 16px;
-  min-height: 50px;
+  min-height: 52px;
   text-decoration: none;
   color: inherit;
 }
@@ -820,11 +871,125 @@ html.kb .tab-bar-wrap {
 .row-icon {
   width: 30px;
   height: 30px;
-  border-radius: 7px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   color: #fff;
   flex-shrink: 0;
+}
+
+/* ---------- Contact card: the customer line and the tiles to reach them ---------- */
+.customer-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% + 16px);
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border-radius: 16px;
+  text-align: left;
+  transition: background-color 240ms ease;
+}
+.customer-line:active {
+  background: var(--app-press);
+  transition: none;
+}
+.customer-line .chevron {
+  flex-shrink: 0;
+  color: var(--app-label-3);
+}
+.contact-tiles {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.contact-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 58px;
+  border-radius: 16px;
+  background: var(--app-fill);
+  color: var(--mantine-color-text);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  transition: transform 340ms var(--spring), background-color var(--dur-1) ease;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.contact-tile:active {
+  transform: scale(0.95);
+  background: var(--app-press);
+  transition-duration: 80ms;
+}
+.contact-tile:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+
+/* ---------- Tips (iOS TipKit) ---------- */
+.tip {
+  padding: 14px 16px 0;
+  margin-bottom: var(--mantine-spacing-lg);
+}
+.tip-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+.tip-icon {
+  flex-shrink: 0;
+  display: grid;
+  margin-top: 1px;
+}
+.tip-text {
+  flex: 1;
+  min-width: 0;
+}
+.tip-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.tip-body {
+  margin-top: 3px;
+  font-size: 15px;
+  line-height: 1.38;
+  color: var(--app-label-2);
+}
+.tip-close {
+  margin: -4px -6px 0 0;
+  color: var(--app-label-2);
+}
+/* Actions: tinted words in a row under a hairline that starts where the text starts. */
+.tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-left: 42px;
+  border-top: 0.5px solid var(--app-hairline);
+}
+.tip-actions .mantine-Button-root {
+  height: 46px;
+  padding-inline: 0;
+  font-size: 17px;
+  font-weight: 500;
+  background: none !important;
+}
+.tip-actions .mantine-Button-root:active:not([data-disabled]) {
+  opacity: 0.4;
+}
+.tip-actions .mantine-Button-inner {
+  justify-content: flex-start;
 }
 
 /* ---------- KPI ---------- */
@@ -832,7 +997,7 @@ html.kb .tab-bar-wrap {
 .kpi {
   background: var(--app-card);
   border-radius: var(--radius-group);
-  padding: 11px 14px 11px;
+  padding: 12px 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -948,11 +1113,90 @@ html.kb .tab-bar-wrap {
   padding: env(safe-area-inset-top, 0px) var(--page-pad) 0;
   margin: calc(-1 * var(--page-pad)) calc(-1 * var(--page-pad)) 0;
 }
-/* Phone: the bar sits over the screen, outside its scroll view (it never bounces with the content). */
+/* Phone: the bar sits over the screen, outside its scroll view (it never bounces with the content).
+   As in iOS 26 it has no bar of its own: round glass buttons float at its ends, and once the content
+   scrolls under it the scroll edge fades it into the canvas (status bar included), with the small
+   title in the middle. */
 .screen-nav > .nav-bar {
   position: relative;
   top: auto;
   margin: 0;
+}
+.screen-nav > .nav-bar::before {
+  bottom: -18px;
+  background: linear-gradient(
+    to bottom,
+    var(--app-canvas) 0%,
+    var(--app-canvas) calc(100% - 30px),
+    color-mix(in srgb, var(--app-canvas) 0%, transparent) 100%
+  );
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-bottom: 0;
+  pointer-events: none;
+}
+.screen-nav > .nav-bar[data-scrolled='true']::before {
+  opacity: 1;
+}
+/* Bar buttons of iOS 26: 44 pt glass circles (icons in the label colour) and glass capsules for words;
+   the confirming one is tinted. */
+.screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass) {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  color: var(--mantine-color-text);
+}
+.screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root:not([data-variant='filled'])) {
+  border: 0;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
+  transition: transform 340ms var(--spring), background-color var(--dur-1) ease;
+}
+.screen-nav .nav-bar .mantine-Button-root {
+  height: 44px;
+  min-height: 44px;
+  padding-inline: 16px;
+  font-size: 17px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+.screen-nav .nav-bar .mantine-Button-root:not([data-variant='filled']) {
+  color: var(--mantine-color-text);
+}
+.screen-nav .nav-bar .mantine-Button-root[data-variant='filled'] {
+  background: var(--mantine-color-cobalt-6);
+  color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--mantine-color-cobalt-6) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+[data-mantine-color-scheme='dark'] .screen-nav .nav-bar .mantine-Button-root[data-variant='filled'] {
+  background: var(--mantine-color-cobalt-5);
+  color: #fff;
+}
+.screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root):active:not(:disabled) {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+.screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root):active:not(:disabled) {
+  opacity: 1;
+}
+.screen-nav .nav-bar .nav-glass {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  margin: 0;
+  justify-self: start;
+  cursor: pointer;
+  font: inherit;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.nav-glass:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
 }
 /* The large title starts right under the bar there (the screen already keeps room for the bar). */
 .screen-body > :first-child > .page-head:first-child,
@@ -1101,7 +1345,7 @@ html.kb .tab-bar-wrap {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
+  min-height: 52px;
   padding: 4px 16px;
 }
 .ios-row + .ios-row::before {
@@ -1219,8 +1463,8 @@ html.kb .tab-bar-wrap {
   font: inherit;
   color: inherit;
   text-align: left;
-  padding: 10px 12px;
-  border-radius: 12px;
+  padding: 10px 14px;
+  border-radius: 18px;
   background: color-mix(in srgb, var(--mantine-color-cobalt-6) 9%, var(--app-card));
   cursor: pointer;
   transition: transform 340ms var(--spring), background-color var(--dur-1) ease;
@@ -1242,11 +1486,11 @@ html.kb .tab-bar-wrap {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  height: 40px;
-  padding: 0 8px 0 10px;
-  border-radius: 12px;
+  height: 44px;
+  padding: 0 10px 0 14px;
+  border-radius: 999px;
   background: var(--app-fill);
   color: var(--mantine-color-text);
   transition: background-color var(--dur-1) ease, box-shadow var(--dur-2) ease;
@@ -1356,83 +1600,115 @@ html.kb .tab-bar-wrap {
   border-radius: 12px;
 }
 
-/* Phone tab bar: the UIKit one — 49 pt plus the home indicator, translucent, hairline on top,
-   icon over a 10 pt label, the tint on the active tab. The "+" in the middle starts a new job. */
+/* ---------- Liquid Glass (iOS 26/27) ---------- */
+/* The material of the floating bars and bar buttons: a bright translucent body that blurs what scrolls
+   under it, a light rim on its top edge and a soft shadow that lifts it off the content. */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
+}
+
+/* Phone tab bar: the floating bar of iOS 26 — a 62 pt glass capsule 21 pt off the edges, icon over a
+   10 pt label in the label colour; the tab you are in is tinted and sits on a lens that slides from
+   tab to tab. "+" (new job) is its own tinted glass circle at the trailing end. */
 .tab-bar {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
   height: 100%;
-  align-items: flex-start;
-  padding: 5px 6px env(safe-area-inset-bottom, 0px);
-  background: var(--app-bar);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  backdrop-filter: saturate(180%) blur(20px);
-  box-shadow: 0 -0.5px 0 var(--app-hairline);
+  padding: 2px;
+  border-radius: 999px;
+}
+.tab-lens {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--n, 4));
+  border-radius: 999px;
+  background: var(--glass-lens);
+  transform: translate3d(calc(var(--i, 0) * 100%), 0, 0);
+  transition: transform 560ms var(--spring), opacity var(--dur-2) ease;
+  pointer-events: none;
+}
+.tab-lens[data-hidden='true'] {
+  opacity: 0;
 }
 .tab-bar button[data-href] {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
+  gap: 1px;
   border: 0;
+  border-radius: 999px;
   background: none;
   margin: 0;
-  padding: 2px 0 0;
+  padding: 0 0 1px;
   font: inherit;
   font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  color: var(--app-tab-idle);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--mantine-color-text);
   cursor: pointer;
-  transition: color var(--dur-1) ease;
+  transition: color var(--dur-2) ease;
   -webkit-user-select: none;
   user-select: none;
 }
+.tab-bar button[data-href] span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tab-bar button[data-href] svg {
-  width: 27px;
-  height: 27px;
-  transition: transform 360ms var(--spring), stroke-width var(--dur-1) ease;
+  width: 26px;
+  height: 26px;
+  transition: transform 380ms var(--spring);
 }
 .tab-bar button[data-href]:active svg {
-  transform: scale(0.86);
+  transform: scale(0.84);
   transition-duration: 80ms;
 }
 .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-6);
 }
-.tab-bar button[data-href].active svg {
-  stroke-width: 2.1;
-}
 [data-mantine-color-scheme='dark'] .tab-bar button[data-href].active {
-  color: var(--mantine-color-cobalt-5);
+  color: var(--mantine-color-cobalt-4);
 }
 .tab-bar button[data-href]:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
-  outline-offset: -2px;
-  border-radius: 10px;
-}
-.tab-bar .tab-plus-wrap {
-  flex: 1;
-  display: grid;
-  justify-items: center;
+  outline-offset: -3px;
 }
 .tab-plus {
-  width: 44px;
-  height: 44px;
-  margin-top: -1px;
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--app-bottom-h);
+  height: var(--app-bottom-h);
   border-radius: 50%;
   border: 0;
   padding: 0;
   display: grid;
   place-items: center;
-  background: var(--mantine-color-cobalt-6);
   color: #fff;
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 90%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--mantine-color-cobalt-6) 32%, transparent), 0 1px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 0 0 0.5px rgba(255, 255, 255, 0.22);
   cursor: pointer;
-  transition: transform 360ms var(--spring), background-color var(--dur-2) ease;
+  transition: transform 380ms var(--spring);
 }
 [data-mantine-color-scheme='dark'] .tab-plus {
-  background: var(--mantine-color-cobalt-5);
+  background: color-mix(in srgb, var(--mantine-color-cobalt-5) 92%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 0.5px rgba(255, 255, 255, 0.18);
 }
 .tab-plus:active {
   transform: scale(0.88);
@@ -1456,23 +1732,44 @@ html.kb .tab-bar-wrap {
   box-shadow: 0 -0.5px 0 var(--app-hairline);
   animation: mg-rise-in var(--dur-2) var(--ease-out) both;
 }
-/* The main action: 50 pt, like the prominent button of iOS sheets. */
+/* The main action: a 52 pt capsule, like the prominent buttons of iOS 26. */
 .sticky-bar .mantine-Button-root {
-  height: 50px;
-  min-height: 50px;
-  border-radius: 14px;
+  height: 52px;
+  min-height: 52px;
+  border-radius: 999px;
   font-size: 17px;
 }
 /* Phone: the bar belongs to its screen, pinned to the bottom edge (above the tab bar, or on the
-   keyboard), always where the thumb is — also on a short screen. */
+   keyboard), always where the thumb is — also on a short screen. Like the bottom bars of iOS 26 it
+   has no backing of its own: the buttons float as glass over the faded scroll edge. */
 .screen-bottom > .sticky-bar {
   position: relative;
   bottom: auto;
   margin: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  padding-top: 6px;
 }
 .screen[data-tabbar='true'] > .screen-bottom > .sticky-bar,
 html.kb .screen-bottom > .sticky-bar {
-  padding-bottom: 10px;
+  padding-bottom: 8px;
+}
+.screen-bottom > .sticky-bar .mantine-Button-root[data-variant='filled'] {
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--mantine-color-cobalt-6) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.screen-bottom > .sticky-bar .mantine-Button-root[data-variant='filled'][data-disabled],
+.screen-bottom > .sticky-bar .mantine-Button-root[data-variant='filled']:disabled {
+  box-shadow: none;
+}
+/* The other actions of the bar: clear glass with the tint (or the colour of the button). */
+.screen-bottom > .sticky-bar .mantine-Button-root:is([data-variant='light'], [data-variant='default'], [data-variant='outline']) {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
+  border: 0;
 }
 @media (min-width: 48em) {
   .sticky-bar {
@@ -1489,7 +1786,7 @@ html.kb .screen-bottom > .sticky-bar {
 .photo-slot {
   position: relative;
   aspect-ratio: 4 / 3;
-  border-radius: 14px;
+  border-radius: 18px;
   overflow: hidden;
   background: var(--app-fill);
   border: 0;
@@ -2259,22 +2556,24 @@ html.kb .screen-bottom > .sticky-bar {
 }
 
 /* ---------- Bottom sheets (phones) ---------- */
-/* The iOS sheet: rounded top, a grabber, it never climbs under the status bar. */
+/* The iOS 26 sheet: it floats 8 pt off the screen edges with corners that follow the phone's own,
+   a grabber on top; it never climbs under the status bar. */
 @media (max-width: 48em) {
   .mg-sheet .mantine-Modal-inner {
     align-items: flex-end !important;
-    padding: 0 !important;
+    padding: 0 8px 8px !important;
   }
   .mg-sheet .mantine-Modal-content {
     flex: 0 0 100% !important;
-    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px) !important;
-    border-radius: 16px 16px 0 0 !important;
-    box-shadow: 0 -0.5px 0 var(--app-hairline), 0 -12px 40px rgba(0, 0, 0, 0.16);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 20px) !important;
+    border-radius: 34px !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22), 0 0 0 0.5px var(--glass-edge);
     overscroll-behavior: contain;
   }
   .mg-sheet .mantine-Modal-header {
-    padding-top: 22px;
-    border-radius: 16px 16px 0 0;
+    padding-top: 24px;
+    padding-inline: 20px;
+    border-radius: 34px 34px 0 0;
     touch-action: none;
   }
   /* Grab handle: drag the header down to close. */
@@ -2290,7 +2589,8 @@ html.kb .screen-bottom > .sticky-bar {
     background: var(--app-grabber);
   }
   .mg-sheet .mantine-Modal-body {
-    padding-bottom: calc(var(--mantine-spacing-md) + env(safe-area-inset-bottom, 0px));
+    padding-inline: 20px;
+    padding-bottom: calc(var(--mantine-spacing-md) + max(0px, env(safe-area-inset-bottom, 0px) - 8px));
   }
   /* With the keyboard up the sheet rises above it (and fits the space left), as iOS sheets do. */
   html.vv .mg-sheet .mantine-Modal-inner {
@@ -2304,11 +2604,17 @@ html.kb .screen-bottom > .sticky-bar {
   html.kb .mg-sheet .mantine-Modal-body {
     padding-bottom: var(--mantine-spacing-md);
   }
+  /* The round "×" of iOS 26 sheets: 36 pt, the label colour on a grey glass. */
   .mg-sheet .mantine-Modal-close {
-    width: 30px;
-    height: 30px;
-    min-width: 30px;
-    min-height: 30px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    color: var(--mantine-color-text);
+  }
+  .mg-sheet .mantine-Modal-close svg {
+    width: 20px !important;
+    height: 20px !important;
   }
 }
 .mantine-Modal-content,

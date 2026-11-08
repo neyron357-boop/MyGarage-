@@ -184,8 +184,8 @@ const check = (name, ok, detail) => {
   const barHidden = await page.evaluate(() => getComputedStyle(document.querySelector('.tab-bar-wrap')).transform !== 'none');
   check('new job: tab bar steps away', barHidden, {});
 
-  // 7. Back from "New job": dismissed down to money.
-  await page.locator('.screen[data-role="top"] .nav-back').click();
+  // 7. The round "×" of "New job": dismissed down to money.
+  await page.locator('.screen[data-role="top"] .nav-close').click();
   await page.waitForTimeout(700);
   check('new job: dismissed back to money', (await page.evaluate(() => location.hash)).startsWith('#/money'), {});
 

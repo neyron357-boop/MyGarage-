@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Collapse, Group, Progress, SimpleGrid, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconBuildingStore, IconCheck, IconChevronDown, IconCloudDownload, IconDeviceMobile, IconListDetails, IconLockOpen, IconUsers, IconX, type Icon } from '@tabler/icons-react';
+import { IconBuildingStore, IconCheck, IconChevronDown, IconCloudDownload, IconDeviceMobile, IconListCheck, IconListDetails, IconLockOpen, IconUsers, IconX, type Icon } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,7 @@ import { db } from '../../db/db';
 import { dubaiDate } from '../../domain/dates';
 import { saveBackupFile } from '../../services/backup';
 import { PLACEHOLDER_STAFF } from '../../services/seed';
+import { Tip } from '../../ui/components';
 import { useAction, useSettings } from '../../ui/hooks';
 import { insecureContext, useBackupAge } from '../../ui/device';
 import { useInstall } from '../../ui/pwa';
@@ -44,20 +45,25 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
   const done = items.filter((i) => i.done).length;
   if (done === items.length) return null;
   return (
-    <Box className="surface rise-enter" p="md" mb="lg">
-      <Group justify="space-between" wrap="nowrap" align="flex-start" mb={open ? 'xs' : 0}>
-        <UnstyledButton onClick={() => setOpen((o) => !o)} style={{ flex: 1, minWidth: 0 }} aria-expanded={open}>
-          <Group gap={6} wrap="nowrap">
-            <Text fw={700}>{t('setup.title')}</Text>
-            <IconChevronDown size={18} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 200ms ease', flexShrink: 0 }} />
+    // Laid out like a tip (iOS TipKit): symbol, title, message with the progress; the header folds it.
+    <Box className="tip surface rise-enter" pb="md">
+      <div className="tip-main" style={{ paddingBottom: open ? 10 : 0 }}>
+        <span className="tip-icon" style={{ color: 'var(--mantine-color-cobalt-6)' }} aria-hidden>
+          <IconListCheck size={30} stroke={1.6} />
+        </span>
+        <UnstyledButton className="tip-text" style={{ textAlign: 'left' }} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <div className="tip-title">{t('setup.title')}</div>
+          <Group gap={4} wrap="nowrap" className="tip-body" align="center">
+            <span style={{ minWidth: 0 }}>{t('setup.hint', { done, total: items.length })}</span>
+            <IconChevronDown size={16} stroke={2.4} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 240ms var(--ease-ios)', flexShrink: 0 }} />
           </Group>
-          <Text size="xs" c="dimmed">
-            {t('setup.hint', { done, total: items.length })}
-          </Text>
+          <Progress value={(done / items.length) * 100} size={5} mt={10} color={done === items.length ? 'green' : 'cobalt'} />
         </UnstyledButton>
         <ActionIcon
           variant="subtle"
           color="gray"
+          size={30}
+          className="tip-close"
           aria-label={t('common.close')}
           onClick={() => {
             setDismissed(true);
@@ -68,12 +74,11 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
             }
           }}
         >
-          <IconX size={18} />
+          <IconX size={16} stroke={2.4} />
         </ActionIcon>
-      </Group>
-      <Progress value={(done / items.length) * 100} size="sm" mb={open ? 'sm' : 0} mt={open ? 0 : 'xs'} color={done === items.length ? 'green' : 'cobalt'} />
+      </div>
       <Collapse in={open}>
-      <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0} verticalSpacing={0} className="stagger">
+      <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0} verticalSpacing={0} className="stagger" ml={42}>
         {items.map((i) => (
           <Group
             key={i.key}
@@ -108,7 +113,7 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
   );
 }
 
-/** One-tap backup when the last one is older than a week. */
+/** One-tap backup when the last one is older than a week (a tip, like iOS TipKit). */
 export function BackupReminder() {
   const { t } = useTranslation();
   const { run, busy } = useAction();
@@ -116,22 +121,18 @@ export function BackupReminder() {
   const hasOrders = useLiveQuery(async () => (await db.orders.count()) > 0, []);
   if (!hasOrders || !backup.due) return null;
   return (
-    <Group className="surface rise-enter" p="sm" pl="md" mb="lg" gap="sm" wrap="nowrap">
-      <ThemeIcon variant="light" color="orange" radius="xl" size={36}>
-        <IconCloudDownload size={19} />
-      </ThemeIcon>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Text size="sm" fw={700}>
-          {backup.at ? t('backupReminder.title', { days: backup.days }) : t('backupReminder.never')}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {t('backupReminder.text')}
-        </Text>
-      </div>
-      <Button size="compact-md" variant="light" color="orange" loading={busy} onClick={() => run(() => saveBackupFile(`mygarage-backup-${dubaiDate()}.mygarage`), 'settings.backupDone')}>
-        {t('backupReminder.action')}
-      </Button>
-    </Group>
+    <Tip
+      icon={IconCloudDownload}
+      color="orange"
+      title={backup.at ? t('backupReminder.title', { days: backup.days }) : t('backupReminder.never')}
+      actions={
+        <Button variant="subtle" loading={busy} onClick={() => run(() => saveBackupFile(`mygarage-backup-${dubaiDate()}.mygarage`), 'settings.backupDone')}>
+          {t('backupReminder.action')}
+        </Button>
+      }
+    >
+      {t('backupReminder.text')}
+    </Tip>
   );
 }
 
@@ -139,19 +140,9 @@ export function InsecureWarning() {
   const { t } = useTranslation();
   if (!insecureContext()) return null;
   return (
-    <Group className="surface" p="sm" pl="md" mb="lg" gap="sm" wrap="nowrap">
-      <ThemeIcon variant="light" color="yellow" radius="xl" size={36}>
-        <IconLockOpen size={19} />
-      </ThemeIcon>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Text size="sm" fw={700}>
-          {t('insecure.title')}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {t('insecure.text')}
-        </Text>
-      </div>
-    </Group>
+    <Tip icon={IconLockOpen} color="yellow" title={t('insecure.title')}>
+      {t('insecure.text')}
+    </Tip>
   );
 }
 
