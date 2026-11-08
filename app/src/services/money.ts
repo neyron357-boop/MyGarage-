@@ -177,12 +177,14 @@ export async function addCashMovement(input: { direction: 'in' | 'out'; amountFi
 }
 
 export async function cashState() {
-  const [open, closings] = await Promise.all([
+  const [open, closings, settings] = await Promise.all([
     db.cashMovements.filter((m) => !m.closingId).sortBy('at'),
     db.cashClosings.orderBy('date').toArray(),
+    db.settings.get('main'),
   ]);
   const last = closings[closings.length - 1];
-  const opening = last?.actualFils ?? 0;
+  // Before the first closing the cash box starts from the book's opening cash ("Cash Start").
+  const opening = last?.actualFils ?? settings?.cashStartFils ?? 0;
   const t = cashTotals(open);
   return { opening, movements: open, inFils: t.inFils, outFils: t.outFils, expected: opening + t.inFils - t.outFils, lastClosing: last };
 }
@@ -225,14 +227,17 @@ export interface ExpenseInput {
   vatFils: number;
   vendor?: string;
   method: PayMethod;
+  /** What it was spent on: a job, or a car / a customer without a job. */
   orderId?: string;
+  vehicleId?: string;
+  customerId?: string;
   note?: string;
   overLimitComment?: string;
   receipt?: Blob;
 }
 
 export async function categoryMonthSpent(categoryId: string, month: string = monthKey()): Promise<number> {
-  const list = await db.expenses.where('categoryId').equals(categoryId).filter((e) => e.date.startsWith(month)).toArray();
+  const list = await db.expenses.where('categoryId').equals(categoryId).filter((e) => e.date.startsWith(month) && !e.voidedAt).toArray();
   return list.reduce((s, e) => s + e.amountFils, 0);
 }
 
@@ -245,6 +250,10 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
     throw new AppError('err.overLimitComment');
   }
   const id = uid();
+  // A job brings its car and customer; a car brings its owner.
+  const order = input.orderId ? await db.orders.get(input.orderId) : undefined;
+  const vehicleId = input.vehicleId || order?.vehicleId || undefined;
+  const customerId = input.customerId || order?.customerId || (vehicleId ? (await db.vehicles.get(vehicleId))?.customerId : undefined) || undefined;
   let receiptMediaId: string | undefined;
   if (input.receipt) receiptMediaId = (await addMedia({ ownerType: 'expense', ownerId: id, slot: 'receipt', file: input.receipt })).id;
   const e: Expense = {
@@ -256,7 +265,9 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
     vendor: input.vendor?.trim() || undefined,
     method: input.method,
     receiptMediaId,
-    orderId: input.orderId,
+    orderId: input.orderId || undefined,
+    vehicleId,
+    customerId,
     note: input.note?.trim() || undefined,
     overLimitComment: input.overLimitComment?.trim() || undefined,
     createdAt: nowIso(),

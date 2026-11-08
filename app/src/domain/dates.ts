@@ -3,9 +3,14 @@ import type { Lang } from './types';
 export const TZ = 'Asia/Dubai';
 
 let clockOffsetMs = 0;
+let lastNow = 0;
 
 export function nowIso(): string {
-  return new Date(Date.now() + clockOffsetMs).toISOString();
+  if (clockOffsetMs !== 0) return new Date(Date.now() + clockOffsetMs).toISOString();
+  // Strictly increasing: two records made within the same millisecond still keep their order
+  // (the money book sorts same-day entries by the moment they were recorded).
+  lastNow = Math.max(Date.now(), lastNow + 1);
+  return new Date(lastNow).toISOString();
 }
 
 /**
@@ -102,6 +107,13 @@ export function shortDuration(hours: number, lang: Lang): string {
 }
 
 /** Inclusive date range check on YYYY-MM-DD strings. */
+/** First and last day of a month "YYYY-MM" as "YYYY-MM-DD". */
+export function monthRange(month: string): [string, string] {
+  const [y, m] = month.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return [`${month}-01`, `${month}-${String(last).padStart(2, '0')}`];
+}
+
 export function inRange(day: string, from: string, to: string): boolean {
   return day >= from && day <= to;
 }

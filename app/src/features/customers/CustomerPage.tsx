@@ -10,6 +10,7 @@ import { activeInvoice } from '../../domain/invoice';
 import { formatPhone } from '../../domain/phone';
 import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
 import { ContactButtons, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
+import { LinkedMoney } from '../money/MoneyEntry';
 import { initials } from './CustomersPage';
 import { CustomerModal, VehicleModal } from './forms';
 
@@ -163,6 +164,9 @@ export function CustomerPage() {
           </List>
         )}
       </Section>
+      <Box mt="lg">
+        <LinkedMoney link={{ customerId: c.id }} by="customerId" />
+      </Box>
       <CustomerModal opened={edit} onClose={() => setEdit(false)} customer={c} />
       <VehicleModal opened={addCar} onClose={() => setAddCar(false)} customerId={c.id} />
     </>

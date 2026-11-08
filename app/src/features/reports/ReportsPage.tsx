@@ -102,7 +102,7 @@ export function ReportsPage() {
   const [to, setTo] = useState<string>();
   const [f, tt] = range(period, from ?? '', to ?? '');
   const data = useLiveQuery(async () => {
-    const [orders, invoices, items, expenses, payments, closings, cats] = await Promise.all([
+    const [orders, invoices, items, allExpenses, payments, closings, cats, incomes] = await Promise.all([
       db.orders.toArray(),
       db.invoices.toArray(),
       db.items.toArray(),
@@ -110,8 +110,10 @@ export function ReportsPage() {
       db.payments.toArray(),
       db.cashClosings.toArray(),
       db.expenseCategories.toArray(),
+      db.incomes.toArray(),
     ]);
-    return { report: computeReport({ from: f, to: tt, orders, invoices, items, expenses, payments, closings }), invoices, payments, expenses, cats, orders };
+    const expenses = allExpenses.filter((e) => !e.voidedAt);
+    return { report: computeReport({ from: f, to: tt, orders, invoices, items, expenses, payments, closings, incomes }), invoices, payments, expenses, cats, orders };
   }, [f, tt]);
   if (!data) return <PageSkeleton />;
   const r = data.report;
@@ -199,6 +201,7 @@ export function ReportsPage() {
             <Section title={t('report.pnl')} description={t('report.pnlHint')} mt={0}>
               <List>
                 <ListRow title={t('report.revenueNet')} right={<Money fils={r.revenueNet} size="sm" />} />
+                {r.otherIncome > 0 && <ListRow title={`+ ${t('report.otherIncome')}`} right={<Money fils={r.otherIncome} size="sm" />} />}
                 <ListRow title={`− ${t('report.partsCost')}`} right={<Money fils={r.partsCostNet} size="sm" />} />
                 <ListRow title={`− ${t('report.expensesNet')}`} right={<Money fils={r.expensesNet} size="sm" />} />
                 <ListRow title={<Text fw={800} size="sm">{t('report.grossProfit')}</Text>} right={<Money fils={r.grossProfit} size="sm" fw={800} c={r.grossProfit >= 0 ? 'green' : 'red'} />} />

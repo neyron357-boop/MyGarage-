@@ -13,21 +13,21 @@ import {
   type Icon,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, formatDateTime, monthKey } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
-import { netFromGross, vatOf } from '../../domain/vat';
 import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
-import { addCashMovement, addExpense, cashState, categoryMonthSpent, closeCashDay, paySalary } from '../../services/money';
+import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
-import { CaptureButton } from '../../ui/CaptureButton';
 import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
-import { DateField, MonthField } from '../../ui/DateFields';
+import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { initials } from '../customers/CustomersPage';
+import { LedgerTab } from './LedgerTab';
+import { EntrySheet } from './MoneyEntry';
 
 const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
 
@@ -183,87 +183,18 @@ function CashTab() {
   );
 }
 
-function ExpenseModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
-  const { t } = useTranslation();
-  const lang = useLang();
-  const { run, busy } = useAction();
-  const cats = useLiveQuery(() => db.expenseCategories.filter((c) => c.active).toArray(), []);
-  const [date, setDate] = useState(dubaiDate());
-  const [categoryId, setCategoryId] = useState<string | null>(null);
-  const [amount, setAmount] = useState<number>();
-  const [vat, setVat] = useState<number>();
-  const [vendor, setVendor] = useState('');
-  const [method, setMethod] = useState<PayMethod>('cash');
-  const [note, setNote] = useState('');
-  const [over, setOver] = useState('');
-  const [receipt, setReceipt] = useState<File>();
-  const [spent, setSpent] = useState(0);
-  const cat = cats?.find((c) => c.id === categoryId);
-  useEffect(() => {
-    if (categoryId) void categoryMonthSpent(categoryId, date.slice(0, 7)).then(setSpent);
-  }, [categoryId, date]);
-  const overLimit = !!cat && cat.monthlyLimitFils > 0 && spent + (amount ?? 0) > cat.monthlyLimitFils;
-  const reset = () => {
-    setAmount(undefined);
-    setVat(undefined);
-    setVendor('');
-    setNote('');
-    setOver('');
-    setReceipt(undefined);
-  };
-  return (
-    <Modal opened={opened} onClose={onClose} title={t('expense.add')} size="lg">
-      <Stack>
-        <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          <Select label={t('expense.category')} placeholder={t('expense.pickCategory')} value={categoryId} onChange={setCategoryId} data={(cats ?? []).map((c) => ({ value: c.id, label: lang === 'ru' ? c.nameRu : c.nameEn }))} />
-          <DateField label={t('common.date')} value={date} onChange={setDate} />
-        </SimpleGrid>
-        {cat && cat.monthlyLimitFils > 0 && (
-          <Box className="surface-soft" p="sm">
-            <Text size="xs" c={overLimit ? 'red' : 'dimmed'} fw={600} mb={4}>
-              {t('expense.limitUsage', { spent: formatAed(spent + (amount ?? 0)), limit: formatAed(cat.monthlyLimitFils) })}
-            </Text>
-            <Progress value={Math.min(100, ((spent + (amount ?? 0)) / cat.monthlyLimitFils) * 100)} color={overLimit ? 'red' : 'cobalt'} />
-          </Box>
-        )}
-        <SimpleGrid cols={2}>
-          <MoneyInput label={t('expense.amountGross')} value={amount} onChange={setAmount} />
-          <MoneyInput
-            label={t('expense.vat')}
-            value={vat}
-            onChange={setVat}
-            description={
-              amount ? (
-                <Text span size="xs" c="cobalt.6" style={{ cursor: 'pointer' }} onClick={() => setVat(vatOf(netFromGross(amount, 500), 500))}>
-                  {t('expense.vatFromGross')}
-                </Text>
-              ) : undefined
-            }
-          />
-        </SimpleGrid>
-        <TextInput label={t('expense.vendor')} value={vendor} onChange={(e) => setVendor(e.currentTarget.value)} />
-        <MethodPicker value={method} onChange={setMethod} />
-        <CaptureButton variant="light" camera={false} leftSection={<IconReceipt2 size={18} />} onFiles={(f) => setReceipt(f[0])}>
-          {receipt ? t('parts.receiptAttached') : t('parts.receiptPhoto')}
-        </CaptureButton>
-        <TextInput label={t('common.notes')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
-        {overLimit && <TextInput label={t('expense.overLimitComment')} required value={over} onChange={(e) => setOver(e.currentTarget.value)} error={t('expense.overLimit')} />}
-        <Button loading={busy} disabled={!categoryId || !amount} onClick={() => run(async () => { await addExpense({ date, categoryId: categoryId!, amountFils: amount ?? 0, vatFils: vat ?? 0, vendor, method, note, overLimitComment: over, receipt }); reset(); onClose(); }, 'common.saved')}>
-          {t('common.save')}
-        </Button>
-      </Stack>
-    </Modal>
-  );
-}
-
 function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const { t } = useTranslation();
   const lang = useLang();
   const [open, setOpen] = useState(addOpen);
   const [month, setMonth] = useState(monthKey());
   const data = useLiveQuery(async () => {
-    const [list, cats] = await Promise.all([db.expenses.filter((e) => e.date.startsWith(month)).reverse().sortBy('date'), db.expenseCategories.toArray()]);
-    return { list, cats };
+    const [list, cats, vehicles] = await Promise.all([
+      db.expenses.filter((e) => e.date.startsWith(month) && !e.voidedAt).reverse().sortBy('date'),
+      db.expenseCategories.toArray(),
+      db.vehicles.toArray(),
+    ]);
+    return { list, cats, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
   }, [month]);
   if (!data) return <PageSkeleton />;
   const byCat = (id: string) => data.list.filter((e) => e.categoryId === id).reduce((s, e) => s + e.amountFils, 0);
@@ -332,17 +263,26 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
                   )
                 }
                 title={`${c ? (lang === 'ru' ? c.nameRu : c.nameEn) : ''}${e.vendor ? ` · ${e.vendor}` : ''}`}
-                subtitle={`${formatDate(e.date)} · ${t(`payment.method.${e.method}`)}${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${e.note ? ` · ${e.note}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
+                subtitle={
+                  <Group gap={6} wrap="nowrap" mt={2}>
+                    {e.vehicleId && data.vehicles.get(e.vehicleId) && <PlateText plate={data.vehicles.get(e.vehicleId)!.plate} size="xs" />}
+                    <Text span size="xs" c="dimmed" lineClamp={2}>
+                      {`${formatDate(e.date)} · ${t(`payment.method.${e.method}`)}${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${e.note ? ` · ${e.note}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
+                    </Text>
+                  </Group>
+                }
                 right={<Money fils={e.amountFils} size="sm" />}
               />
             );
           })}
         </List>
       )}
-      <ExpenseModal opened={open} onClose={() => setOpen(false)} />
+      <EntrySheet opened={open} onClose={() => setOpen(false)} preset={OUT} />
     </Stack>
   );
 }
+
+const OUT = { kind: 'out' as const };
 
 function SalariesTab() {
   const { t } = useTranslation();
@@ -456,7 +396,7 @@ function DebtsTab() {
 export function MoneyPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') ?? 'cash';
+  const tab = params.get('tab') ?? 'book';
   return (
     <>
       <PageHeader title={t('nav.money')} />
@@ -464,6 +404,7 @@ export function MoneyPage() {
         value={tab}
         onChange={(v) => setParams({ tab: v })}
         items={[
+          { value: 'book', label: t('money.book') },
           { value: 'cash', label: t('money.cash') },
           { value: 'expenses', label: t('money.expenses') },
           { value: 'salaries', label: t('money.salaries') },
@@ -471,6 +412,7 @@ export function MoneyPage() {
         ]}
       />
       <div key={tab} className="fade-enter">
+        {tab === 'book' && <LedgerTab />}
         {tab === 'cash' && <CashTab />}
         {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}
         {tab === 'salaries' && <SalariesTab />}

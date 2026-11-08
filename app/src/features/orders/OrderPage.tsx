@@ -93,6 +93,7 @@ import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useOrderBundle } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { ImportedNote } from '../settings/EaglecartImport';
+import { LinkedMoney } from '../money/MoneyEntry';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { CustomerModal } from '../customers/forms';
 import { DecisionModal, DoneToggle, ItemRow, ResolveBModal, VersionCard } from '../estimate/components';
@@ -980,7 +981,13 @@ export function OrderPage() {
           {tab === 'approvals' && <ApprovalsTab b={b} />}
           {tab === 'photos' && <PhotosTab b={b} />}
           {tab === 'docs' && <DocsTab b={b} />}
-          {tab === 'payments' && <PaymentPanel b={b} allowDebt={b.order.stage === 'ready'} />}
+          {tab === 'payments' && (
+            <Stack gap="lg">
+              <PaymentPanel b={b} allowDebt={b.order.stage === 'ready'} />
+              {/* Parts bought for this job, other money for it — linked to the job, its car and customer. */}
+              <LinkedMoney link={{ orderId: b.order.id, vehicleId: b.vehicle.id, customerId: b.customer.id }} by="orderId" />
+            </Stack>
+          )}
           {tab === 'journal' && <JournalTab b={b} />}
         </div>
       </Box>

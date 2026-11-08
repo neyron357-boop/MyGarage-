@@ -1,6 +1,6 @@
 import { dubaiDate, inRange } from './dates';
 import { roundFils } from './money';
-import type { CashClosing, Expense, Invoice, Order, OrderItem, Payment } from './types';
+import type { CashClosing, Expense, Income, Invoice, Order, OrderItem, Payment } from './types';
 
 export interface ReportInput {
   from: string; // YYYY-MM-DD inclusive (Dubai)
@@ -11,6 +11,8 @@ export interface ReportInput {
   expenses: Expense[];
   payments: Payment[];
   closings: CashClosing[];
+  /** Money received without an invoice (items sold, small jobs). */
+  incomes?: Income[];
 }
 
 export interface Report {
@@ -26,6 +28,8 @@ export interface Report {
   expensesNet: number;
   expensesVat: number;
   expensesByCategory: { categoryId: string; gross: number; vat: number }[];
+  /** Received without an invoice (gross, as received). */
+  otherIncome: number;
   grossProfit: number;
   vatOutput: number;
   vatInput: number;
@@ -53,6 +57,7 @@ export function computeReport(input: ReportInput): Report {
     expensesNet: 0,
     expensesVat: 0,
     expensesByCategory: [],
+    otherIncome: 0,
     grossProfit: 0,
     vatOutput: 0,
     vatInput: 0,
@@ -98,7 +103,7 @@ export function computeReport(input: ReportInput): Report {
 
   const byCat = new Map<string, { gross: number; vat: number }>();
   for (const e of input.expenses) {
-    if (!inRange(e.date, from, to)) continue;
+    if (e.voidedAt || !inRange(e.date, from, to)) continue;
     r.expensesNet += e.amountFils - e.vatFils;
     r.expensesVat += e.vatFils;
     const c = byCat.get(e.categoryId) ?? { gross: 0, vat: 0 };
@@ -117,8 +122,9 @@ export function computeReport(input: ReportInput): Report {
     r.payments[p.method] += p.kind === 'refund' ? -p.amountFils : p.amountFils;
   }
   for (const c of input.closings) if (inRange(c.date, from, to)) r.cashDiffFils += c.diffFils;
+  for (const i of input.incomes ?? []) if (!i.voidedAt && inRange(i.date, from, to)) r.otherIncome += i.amountFils;
 
-  r.grossProfit = r.revenueNet - r.partsCostNet - r.expensesNet;
+  r.grossProfit = r.revenueNet + r.otherIncome - r.partsCostNet - r.expensesNet;
   r.averageTicketGross = salesCount ? Math.round(r.revenueGross / salesCount) : 0;
   return r;
 }

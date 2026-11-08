@@ -13,6 +13,7 @@ import type {
   Expense,
   ExpenseCategory,
   Incident,
+  Income,
   Inspection,
   Invoice,
   ItemDecision,
@@ -64,6 +65,7 @@ export class GarageDB extends Dexie {
   cashMovements!: Table<CashMovement, string>;
   cashClosings!: Table<CashClosing, string>;
   expenses!: Table<Expense, string>;
+  incomes!: Table<Income, string>;
   expenseCategories!: Table<ExpenseCategory, string>;
   employees!: Table<Employee, string>;
   salaryPayments!: Table<SalaryPayment, string>;
@@ -108,6 +110,11 @@ export class GarageDB extends Dexie {
       claims: 'id, orderId, vehicleId',
       incidents: 'id, orderId',
       counters: 'name',
+    });
+    // v2: money book — other income, expenses linked to a car / customer.
+    this.version(2).stores({
+      expenses: 'id, date, categoryId, orderId, vehicleId, customerId',
+      incomes: 'id, date, orderId, vehicleId, customerId',
     });
     installGuards(this);
   }
@@ -160,6 +167,11 @@ function installGuards(db: GarageDB) {
   guard(db.debts, ['status']);
   guard(db.events, []);
   guard(db.addenda, []);
+  // Money book entries: what they were for can be corrected, the money itself (amount, method, date)
+  // cannot; a wrong entry is cancelled (voidedAt), never deleted.
+  const links = ['note', 'orderId', 'vehicleId', 'customerId', 'voidedAt'];
+  guard(db.expenses, [...links, 'categoryId', 'vendor', 'overLimitComment', 'receiptMediaId']);
+  guard(db.incomes, [...links, 'category']);
 }
 
 export let db = new GarageDB();

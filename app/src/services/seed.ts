@@ -98,7 +98,7 @@ const RELATED: Omit<RelatedRule, 'id'>[] = [
 ];
 
 const CATEGORIES: Omit<ExpenseCategory, 'id' | 'active'>[] = [
-  { code: 'parts', nameRu: 'Запчасти (не по заказам)', nameEn: 'Parts (not for orders)', monthlyLimitFils: 0 },
+  { code: 'parts', nameRu: 'Запчасти', nameEn: 'Parts', monthlyLimitFils: 0 },
   { code: 'consumables', nameRu: 'Расходники', nameEn: 'Consumables', monthlyLimitFils: aed(2000) },
   { code: 'rent', nameRu: 'Аренда', nameEn: 'Rent', monthlyLimitFils: 0 },
   { code: 'utilities', nameRu: 'Коммунальные услуги', nameEn: 'Utilities', monthlyLimitFils: aed(1500) },
@@ -129,6 +129,10 @@ export async function ensureSeed(lang: 'ru' | 'en' = 'ru'): Promise<void> {
     }
     if ((await db.expenseCategories.count()) === 0) {
       await db.expenseCategories.bulkAdd(CATEGORIES.map((c) => ({ ...c, id: uid(), active: true })));
+    } else {
+      // Parts bought for a job are now expenses linked to it: the old name "(not for orders)" no longer fits.
+      const parts = await db.expenseCategories.where('code').equals('parts').first();
+      if (parts?.nameRu === 'Запчасти (не по заказам)') await db.expenseCategories.update(parts.id, { nameRu: 'Запчасти', nameEn: 'Parts' });
     }
     if ((await db.employees.count()) === 0) {
       await db.employees.bulkAdd([

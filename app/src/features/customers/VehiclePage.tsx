@@ -11,6 +11,7 @@ import { changeVehicleOwner } from '../../services/customers';
 import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
 import { VehicleModal } from './forms';
+import { LinkedMoney } from '../money/MoneyEntry';
 
 export function VehiclePage() {
   const { id } = useParams();
@@ -110,6 +111,9 @@ export function VehiclePage() {
           </List>
         )}
       </Section>
+      <Box mt="lg">
+        <LinkedMoney link={{ vehicleId: v.id, customerId: v.customerId }} by="vehicleId" />
+      </Box>
       {mileage.length > 0 && (
         <Section title={t('vehicle.mileageHistory')}>
           <Box className="surface" p="md">

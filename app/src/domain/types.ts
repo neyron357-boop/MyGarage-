@@ -48,6 +48,9 @@ export interface Settings {
   setupDone: boolean;
   /** The manager has gone through the starter price list (setup checklist). */
   pricesReviewed?: boolean;
+  /** Opening balances of the money book ("Cash Start" / "Card Start" of the garage's money sheet). */
+  cashStartFils?: number;
+  cardStartFils?: number;
 }
 
 export interface Customer {
@@ -481,6 +484,7 @@ export type CashReason =
   | 'refund'
   | 'parts_purchase'
   | 'expense'
+  | 'income'
   | 'salary'
   | 'collection'
   | 'supplier_refund'
@@ -496,8 +500,28 @@ export interface CashMovement {
   orderId?: string;
   paymentId?: string;
   expenseId?: string;
+  incomeId?: string;
   note?: string;
   closingId?: string;
+}
+
+/** Money received outside a job's invoice: a sold item ("Sales"), a small job done on the spot, other. */
+export type IncomeCategory = 'service' | 'sales' | 'other';
+
+export interface Income {
+  id: string;
+  date: string; // YYYY-MM-DD (Dubai)
+  category: IncomeCategory;
+  amountFils: number; // gross
+  method: PayMethod;
+  /** What it was for: a job, or just the car / the customer. */
+  orderId?: string;
+  vehicleId?: string;
+  customerId?: string;
+  note?: string;
+  createdAt: string;
+  /** Entered by mistake: cancelled (a cash entry is reversed in the cash book, nothing is deleted). */
+  voidedAt?: string;
 }
 
 export interface CashClosing {
@@ -533,10 +557,15 @@ export interface Expense {
   vendor?: string;
   method: PayMethod;
   receiptMediaId?: string;
+  /** What it was spent on: a job, or just a car / a customer (filled from the job when one is picked). */
   orderId?: string;
+  vehicleId?: string;
+  customerId?: string;
   note?: string;
   overLimitComment?: string;
   createdAt: string;
+  /** Entered by mistake: cancelled (a cash entry is reversed in the cash book, nothing is deleted). */
+  voidedAt?: string;
 }
 
 export interface Employee {
