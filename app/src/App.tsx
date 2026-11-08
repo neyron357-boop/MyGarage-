@@ -2,7 +2,22 @@ import { AppShell, Box, Button, Kbd, MantineProvider, NavLink as MNavLink, Stack
 import { DatesProvider } from '@mantine/dates';
 import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
-import { IconCash, IconChartBar, IconDots, IconInfoCircle, IconLayoutKanban, IconPackage, IconPlus, IconSearch, IconSettings, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import {
+  IconCash,
+  IconCashBanknoteFilled,
+  IconChartBar,
+  IconDotsFilled,
+  IconInfoCircle,
+  IconLayoutKanban,
+  IconLayoutKanbanFilled,
+  IconPackage,
+  IconPlus,
+  IconSearch,
+  IconSettings,
+  IconTruck,
+  IconUsers,
+  type Icon,
+} from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -275,11 +290,12 @@ function DesktopShell() {
 
 /* ---------------- Phone ---------------- */
 
+// Filled symbols, as Apple asks for tab bars (the magnifier of Search stays a line, as in iOS).
 const TABS: { to: string; icon: Icon; key: string }[] = [
-  { to: '/', icon: IconLayoutKanban, key: 'nav.board' },
+  { to: '/', icon: IconLayoutKanbanFilled, key: 'nav.board' },
   { to: '/search', icon: IconSearch, key: 'nav.search' },
-  { to: '/money', icon: IconCash, key: 'nav.money' },
-  { to: '/more', icon: IconDots, key: 'nav.more' },
+  { to: '/money', icon: IconCashBanknoteFilled, key: 'nav.money' },
+  { to: '/more', icon: IconDotsFilled, key: 'nav.more' },
 ];
 const MORE_PATHS = ['/more', '/customers', '/vehicles', '/parts', '/reports', '/settings'];
 
@@ -315,7 +331,7 @@ function TabBar() {
         <span className="tab-lens" data-hidden={index < 0} aria-hidden />
         {TABS.map((s) => (
           <button key={s.to} type="button" data-href={s.to} className={s.to === current ? 'active' : undefined} aria-current={s.to === current ? 'page' : undefined} onClick={() => go(s.to)}>
-            <s.icon stroke={s.to === current ? 2.1 : 1.8} aria-hidden />
+            <s.icon stroke={2.2} aria-hidden />
             <span>{t(s.key)}</span>
           </button>
         ))}
