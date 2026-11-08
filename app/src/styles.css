@@ -537,6 +537,38 @@ html.kb .tab-bar-wrap {
   pointer-events: none;
 }
 
+/* ---------- Touch targets ---------- */
+/* Small controls (compact buttons in rows, the stage chip, round icon buttons, the clear "x", filter pills)
+   keep their look but take a touch of about 44 pt, the iPhone minimum: an invisible margin of touch
+   around them (and the iPhone's haptic label covers it too). */
+@media (pointer: coarse) {
+  .mantine-Button-root[data-size^='compact'],
+  .mantine-ActionIcon-root,
+  .mantine-CloseButton-root,
+  .mantine-InputClearButton-root {
+    overflow: visible;
+  }
+  .stage-btn,
+  .search-clear,
+  .chip,
+  .scroll-tabs > button {
+    position: relative;
+  }
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear)::after {
+    content: '';
+    position: absolute;
+    inset: -9px -5px;
+  }
+  :is(.chip, .scroll-tabs > button)::after {
+    content: '';
+    position: absolute;
+    inset: -4px -2px;
+  }
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root) > .haptic-hit {
+    inset: -9px -5px;
+  }
+}
+
 /* ---------- Haptics (ui/haptics.ts) ---------- */
 /* A transparent label over each control: the finger lands on it, the control still gets the click,
    and the label gives the iPhone's own tap through a hidden switch. */
