@@ -21,7 +21,7 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleCheck, IconCircleX, IconFileDescription, IconMinus, IconRefresh, IconTrash, IconVideo } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleCheck, IconCircleX, IconFileDescription, IconId, IconMinus, IconRefresh, IconTrash, IconVideo } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTime } from '../../domain/dates';
@@ -32,8 +32,11 @@ import type { CheckState, DamageMark, DamageType, DamageView, FuelLevel, Inspect
 import { addDamageMark, addInspectionPhoto, removeDamageMark, updateDamageMark, updateInspection } from '../../services/inspections';
 import { deleteMedia, mediaUrl } from '../../services/media';
 import type { OrderBundle } from '../../services/orders';
-import { AngleHint } from '../../ui/AngleHint';
+import { AngleHint, hasAngleHint } from '../../ui/AngleHint';
+import { inAppCameraAvailable } from '../../ui/camera';
 import { CaptureButton } from '../../ui/CaptureButton';
+import { PhotoViewer, type ViewerItem } from '../../ui/PhotoViewer';
+import { WalkaroundCamera } from '../../ui/WalkaroundCamera';
 import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
 import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
 import { DateTimeField } from '../../ui/DateFields';
@@ -72,12 +75,57 @@ function Card({ children, p = 'md' }: { children: ReactNode; p?: string }) {
   );
 }
 
-/** One photo slot: camera-position hint when empty, the photo with time stamp when taken. */
-export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspection; slot: string; media: Media[]; before?: Media; required?: boolean }) {
+/** A photo of an act in the viewer: angle name, time and the start of its SHA-256 (proof it is unchanged). */
+const photoItem = (m: Media, t: (k: string) => string): ViewerItem => ({
+  id: m.id,
+  title: t(`slot.${m.slot}`),
+  caption: `${formatDateTime(m.createdAt)} · SHA-256 ${m.sha256.slice(0, 12)}`,
+});
+
+function PhotoActions({ onDelete, onRetake }: { onDelete: () => void; onRetake?: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Button radius="xl" size="md" variant="light" color="red" leftSection={<IconTrash size={18} />} onClick={onDelete}>
+        {t('common.delete')}
+      </Button>
+      {onRetake && (
+        <Button radius="xl" size="md" variant="white" color="dark" leftSection={<IconRefresh size={18} />} onClick={onRetake}>
+          {t('photos.retake')}
+        </Button>
+      )}
+    </>
+  );
+}
+
+/**
+ * One photo slot: camera-position hint when empty, the photo with time stamp when taken.
+ * On a phone the slot opens the in-app camera (`onCamera` — the walk-around of the parent step —
+ * or a camera for this one slot); elsewhere the system camera / file picker.
+ */
+export function PhotoSlot({
+  insp,
+  slot,
+  media,
+  before,
+  required,
+  onCamera,
+  onOpen,
+}: {
+  insp: Inspection;
+  slot: string;
+  media: Media[];
+  before?: Media;
+  required?: boolean;
+  onCamera?: (slot: string) => void;
+  /** Open a taken photo in the parent's gallery (to swipe through all photos of the act). */
+  onOpen?: (mediaId: string) => void;
+}) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const input = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(false);
+  const [camera, setCamera] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
   const [reason, setReason] = useState('');
   const photo = media.find((m) => m.slot === slot && m.kind === 'photo');
@@ -85,10 +133,21 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
   const url = useMediaUrl(photo?.id);
   const beforeUrl = useMediaUrl(before?.id);
   const pick = () => input.current?.click();
+  const live = inAppCameraAvailable();
+  const shoot = () => {
+    if (!live) return pick();
+    if (onCamera) onCamera(slot);
+    else setCamera(true);
+  };
+  const retake = () => {
+    setPreview(false);
+    // The system picker must open from the tap itself; the in-app camera waits until the sheet is gone.
+    if (!live) pick();
+    else window.setTimeout(shoot, 320);
+  };
   const onFiles = (files: File[]) =>
     run(async () => {
-      if (photo && !insp.locked) await deleteMedia(photo.id);
-      await addInspectionPhoto(insp.id, slot, files[0]);
+      await addInspectionPhoto(insp.id, slot, files[0], { replace: true });
       haptic(8);
       setPreview(false);
     });
@@ -110,7 +169,7 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
         type="button"
         disabled={insp.locked && !photo}
         className={`photo-slot${photo ? ' filled' : ''}${skipped && !photo ? ' skipped' : ''}`}
-        onClick={() => (photo ? setPreview(true) : !insp.locked && !skipped ? pick() : undefined)}
+        onClick={() => (photo ? (onOpen ? onOpen(photo.id) : setPreview(true)) : !insp.locked && !skipped ? shoot() : undefined)}
         aria-label={t(`slot.${slot}`)}
       >
         {photo && url ? (
@@ -149,7 +208,7 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
           </Stack>
         ) : (
           <Stack align="center" gap={2}>
-            <AngleHint slot={slot} />
+            {hasAngleHint(slot) ? <AngleHint slot={slot} /> : <IconId size={34} stroke={1.5} color="var(--mantine-color-gray-5)" style={{ margin: 10 }} />}
             <Group gap={4} c="cobalt.6">
               <IconCamera size={15} />
               <Text size="xs" fw={700} c="cobalt.6">
@@ -188,24 +247,16 @@ export function PhotoSlot({ insp, slot, media, before, required }: { insp: Inspe
             </Anchor>
           ))}
       </Group>
-      <Modal opened={preview} onClose={() => setPreview(false)} title={t(`slot.${slot}`)} size="xl" padding="sm">
-        {photo && <MediaImage id={photo.id} thumb={false} h="62vh" w="100%" />}
-        <Group justify="space-between" mt="sm">
-          <Text size="xs" c="dimmed">
-            {photo && formatDateTime(photo.createdAt)} · SHA-256 {photo?.sha256.slice(0, 12)}
-          </Text>
-          {!insp.locked && (
-            <Group gap="xs">
-              <Button variant="default" color="red" leftSection={<IconTrash size={16} />} onClick={() => photo && run(async () => { await deleteMedia(photo.id); setPreview(false); })}>
-                {t('common.delete')}
-              </Button>
-              <Button leftSection={<IconRefresh size={16} />} onClick={pick}>
-                {t('photos.retake')}
-              </Button>
-            </Group>
-          )}
-        </Group>
-      </Modal>
+      {preview && (
+        <PhotoViewer
+          items={photo ? [photoItem(photo, t)] : []}
+          index={0}
+          onIndex={() => undefined}
+          onClose={() => setPreview(false)}
+          actions={insp.locked || !photo ? undefined : () => <PhotoActions onDelete={() => run(() => deleteMedia(photo.id))} onRetake={retake} />}
+        />
+      )}
+      {camera && <WalkaroundCamera insp={insp} media={media} slots={[slot]} before={before ? [before] : undefined} onClose={() => setCamera(false)} onSystemCamera={pick} />}
       <Modal opened={skipOpen} onClose={() => setSkipOpen(false)} title={t('photos.skipReason')}>
         <Group gap={6} mb="sm">
           {['dark', 'dirty', 'noSpace', 'customerRush'].map((r) => (
@@ -279,25 +330,64 @@ export function VehicleStep({ insp, media, b }: StepProps) {
 export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
+  const live = inAppCameraAvailable() && !insp.locked;
+  // The walk-around camera: `start` = the angle to begin with (a tapped tile), undefined = first empty.
+  const [camera, setCamera] = useState<{ start?: string } | null>(null);
+  // No camera access: the phone's own camera for one slot.
+  const sysInput = useRef<HTMLInputElement>(null);
+  const sysSlot = useRef('extra');
+  const total = REQUIRED_SLOTS.length;
   const done = REQUIRED_SLOTS.filter((s) => media.some((m) => m.slot === s) || insp.skippedPhotos[s]).length;
+  const shot = REQUIRED_SLOTS.filter((s) => media.some((m) => m.slot === s && m.kind === 'photo')).length;
+  const extraSlots = [...(insp.kind === 'intake' ? ['mulkiya'] : []), ...EXTRA_SLOTS.filter((s) => s !== 'extra')];
   const extras = media.filter((m) => m.slot === 'extra' && m.kind === 'photo');
   const video = media.find((m) => m.kind === 'video');
+  const complete = done === total;
+  const openCamera = (start?: string) => setCamera({ start });
+  // All photos of the act in walk-around order, to swipe through in the viewer.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const gallery = [...REQUIRED_SLOTS, ...extraSlots]
+    .map((s) => media.find((m) => m.slot === s && m.kind === 'photo'))
+    .filter((m): m is Media => !!m)
+    .concat(extras);
+  const openPhoto = (id: string) => setViewing(Math.max(0, gallery.findIndex((m) => m.id === id)));
+  const retakeFromViewer = (slot: string) => {
+    setViewing(null);
+    if (live) window.setTimeout(() => openCamera(slot), 320);
+    else {
+      sysSlot.current = slot;
+      sysInput.current?.click();
+    }
+  };
   return (
     <Stack gap="md">
       <Card>
-        <Group justify="space-between" mb={6}>
+        <Group justify="space-between" mb={6} wrap="nowrap" align="flex-start">
           <Text size="sm" fw={600}>
-            {insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hintOptional')}
+            {live ? t(insp.kind === 'handover' ? 'camera.startHintHandover' : 'camera.startHint') : insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hintOptional')}
           </Text>
-          <Text fw={800} className="display" fz={18} c={done === REQUIRED_SLOTS.length ? 'green' : undefined}>
-            {done} / {REQUIRED_SLOTS.length}
+          <Text fw={800} className="display tnum" fz={18} c={complete ? 'green' : undefined} style={{ flexShrink: 0 }}>
+            {done} / {total}
           </Text>
         </Group>
-        <Progress value={(done / REQUIRED_SLOTS.length) * 100} color={done === REQUIRED_SLOTS.length ? 'green' : 'cobalt'} size="sm" />
+        <Progress value={(done / total) * 100} color={complete ? 'green' : 'cobalt'} size="sm" transitionDuration={280} />
+        {live && (
+          <Button
+            mt="md"
+            size="lg"
+            h={52}
+            fullWidth
+            variant={complete ? 'light' : 'filled'}
+            leftSection={<IconCamera size={22} />}
+            onClick={() => openCamera(complete ? extraSlots.find((s) => !media.some((m) => m.slot === s)) ?? 'extra' : undefined)}
+          >
+            {t(shot === 0 ? 'camera.start' : complete ? 'camera.more' : 'camera.continue')}
+          </Button>
+        )}
       </Card>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
         {REQUIRED_SLOTS.map((s) => (
-          <PhotoSlot key={s} insp={insp} slot={s} media={media} required before={intakeMedia?.find((m) => m.slot === s)} />
+          <PhotoSlot key={s} insp={insp} slot={s} media={media} required before={intakeMedia?.find((m) => m.slot === s)} onCamera={live ? openCamera : undefined} onOpen={openPhoto} />
         ))}
       </SimpleGrid>
       <Title order={5} mt="sm">
@@ -305,19 +395,26 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
       </Title>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
         {/* The registration card (Mulkiya) is one of the extra photos at check-in. */}
-        {[...(insp.kind === 'intake' ? ['mulkiya'] : []), ...EXTRA_SLOTS.filter((s) => s !== 'extra')].map((s) => (
-          <PhotoSlot key={s} insp={insp} slot={s} media={media} before={intakeMedia?.find((m) => m.slot === s)} />
+        {extraSlots.map((s) => (
+          <PhotoSlot key={s} insp={insp} slot={s} media={media} before={intakeMedia?.find((m) => m.slot === s)} onCamera={live ? openCamera : undefined} onOpen={openPhoto} />
         ))}
       </SimpleGrid>
       <Group gap="xs">
         {extras.map((m) => (
-          <Photo key={m.id} id={m.id} h={72} />
+          <button key={m.id} type="button" className="thumb-btn" onClick={() => openPhoto(m.id)} aria-label={t('slot.extra')}>
+            <MediaImage id={m.id} h={72} w={96} />
+          </button>
         ))}
-        {!insp.locked && (
-          <CaptureButton variant="default" multiple loading={busy} onFiles={(files) => run(async () => { for (const f of files) await addInspectionPhoto(insp.id, 'extra', f); })}>
-            {t('photos.addMore')}
-          </CaptureButton>
-        )}
+        {!insp.locked &&
+          (live ? (
+            <Button variant="default" leftSection={<IconCamera size={18} />} onClick={() => openCamera('extra')}>
+              {t('photos.addMore')}
+            </Button>
+          ) : (
+            <CaptureButton variant="default" multiple loading={busy} onFiles={(files) => run(async () => { for (const f of files) await addInspectionPhoto(insp.id, 'extra', f); })}>
+              {t('photos.addMore')}
+            </CaptureButton>
+          ))}
         {!insp.locked && !video && (
           <CaptureButton variant="default" accept="video/*" leftSection={<IconVideo size={18} />} loading={busy} onFiles={(files) => run(() => addInspectionPhoto(insp.id, 'video', files[0]))}>
             {t('photos.video')}
@@ -329,6 +426,52 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
           </Badge>
         )}
       </Group>
+      {/* Last in the step, so the slots' own file inputs keep their order. */}
+      <input
+        ref={sysInput}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        onChange={(e) => {
+          const file = e.currentTarget.files?.[0];
+          e.currentTarget.value = '';
+          const slot = sysSlot.current;
+          if (file) void run(() => addInspectionPhoto(insp.id, slot, file, { replace: slot !== 'extra' }));
+        }}
+      />
+      {viewing !== null && (
+        <PhotoViewer
+          items={gallery.map((m) => photoItem(m, t))}
+          index={Math.min(viewing, Math.max(0, gallery.length - 1))}
+          onIndex={setViewing}
+          onClose={() => setViewing(null)}
+          actions={
+            insp.locked
+              ? undefined
+              : (it) => {
+                  const m = gallery.find((g) => g.id === it.id);
+                  if (!m) return null;
+                  return <PhotoActions onDelete={() => void run(() => deleteMedia(m.id))} onRetake={m.slot === 'extra' ? undefined : () => retakeFromViewer(m.slot)} />;
+                }
+          }
+        />
+      )}
+      {camera && (
+        <WalkaroundCamera
+          insp={insp}
+          media={media}
+          slots={REQUIRED_SLOTS}
+          extraSlots={[...extraSlots, 'extra']}
+          start={camera.start}
+          before={intakeMedia}
+          onClose={() => setCamera(null)}
+          onSystemCamera={(slot) => {
+            sysSlot.current = slot;
+            sysInput.current?.click();
+          }}
+        />
+      )}
     </Stack>
   );
 }
@@ -341,6 +484,8 @@ export function DamageStep({ insp, media, marks }: StepProps) {
   const { run, busy } = useAction();
   const [view, setView] = useState<DamageView>('top');
   const [editing, setEditing] = useState<DamageMark | null>(null);
+  // The damage mark whose close-up the in-app camera is taking.
+  const [closeup, setCloseup] = useState<string | null>(null);
   const editPhoto = editing ? media.find((m) => m.id === editing.mediaId) : undefined;
   return (
     <Stack gap="md">
@@ -428,7 +573,12 @@ export function DamageStep({ insp, media, marks }: StepProps) {
             {editPhoto ? (
               <Photo id={editPhoto.id} h={180} w="100%" />
             ) : (
-              !insp.locked && (
+              !insp.locked &&
+              (inAppCameraAvailable() ? (
+                <Button variant="light" leftSection={<IconCamera size={18} />} onClick={() => setCloseup(editing.id)}>
+                  {t('damage.closeup')}
+                </Button>
+              ) : (
                 <CaptureButton
                   variant="light"
                   loading={busy}
@@ -442,7 +592,7 @@ export function DamageStep({ insp, media, marks }: StepProps) {
                 >
                   {t('damage.closeup')}
                 </CaptureButton>
-              )
+              ))
             )}
             <Group justify="space-between">
               {!insp.locked ? (
@@ -457,6 +607,19 @@ export function DamageStep({ insp, media, marks }: StepProps) {
           </Stack>
         )}
       </Modal>
+      {closeup && (
+        <WalkaroundCamera
+          insp={insp}
+          media={media}
+          slots={['damage']}
+          append
+          onClose={() => setCloseup(null)}
+          onSaved={async (m) => {
+            await updateDamageMark(closeup, { mediaId: m.id });
+            setEditing((e) => (e && e.id === closeup ? { ...e, mediaId: m.id } : e));
+          }}
+        />
+      )}
     </Stack>
   );
 }

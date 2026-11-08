@@ -196,6 +196,8 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
 }
 
 export function bundleAmountDue(b: OrderBundle): number {
+  // History from Eaglecart: payments were not kept there consistently, so nothing is shown as owed.
+  if (b.order.imported?.history) return 0;
   return amountDue(summarize(b.items).approvedGross, b.invoices, b.payments);
 }
 

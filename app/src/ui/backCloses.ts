@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { layers } from './historyLayer';
 
 const OVERLAY = '.mantine-Modal-content, .mantine-Drawer-content';
 
@@ -42,6 +43,8 @@ export function useBackClosesSheets(enabled: boolean) {
         ignorePops--;
         return;
       }
+      // A camera or photo viewer over the sheet handles Back itself (or just removed its own step).
+      if (layers.open > 0 || Date.now() < layers.ignorePopsUntil) return;
       const open = [...tracked.values()].filter((s) => !s.popped);
       const top = open[open.length - 1];
       if (!top) return;

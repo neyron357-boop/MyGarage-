@@ -79,8 +79,8 @@ import {
   Money,
   MoneyInput,
   PageHeader,
+  MediaImage,
   PageSkeleton,
-  Photo,
   PlateText,
   ScrollTabs,
   Section,
@@ -91,6 +91,8 @@ import {
 } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useOrderBundle } from '../../ui/hooks';
+import { PhotoViewer } from '../../ui/PhotoViewer';
+import { ImportedNote } from '../settings/EaglecartImport';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { CustomerModal } from '../customers/forms';
 import { DecisionModal, DoneToggle, ItemRow, ResolveBModal, VersionCard } from '../estimate/components';
@@ -552,6 +554,9 @@ function PhotosTab({ b }: { b: OrderBundle }) {
     { title: t('parts.receipts'), list: b.media.filter((m) => m.slot === 'receipt') },
     { title: t('handover.title'), list: b.media.filter((m) => m.ownerId === b.handover?.id && (m.kind === 'photo' || m.kind === 'video')) },
   ].filter((g) => g.list.length);
+  // Every photo of the job in one gallery: swipe from check-in through to handover.
+  const [viewing, setViewing] = useState<number | null>(null);
+  const all = groups.flatMap((g) => g.list.filter((m) => m.kind === 'photo').map((m) => ({ m, group: g.title })));
   if (!groups.length) return <EmptyState icon={IconPhoto} title={t('order.noPhotos')} />;
   return (
     <Stack gap="lg">
@@ -563,13 +568,34 @@ function PhotosTab({ b }: { b: OrderBundle }) {
                 m.kind === 'video' ? (
                   <Badge key={m.id}>{t('photos.videoSaved')}</Badge>
                 ) : (
-                  <Photo key={m.id} id={m.id} h={88} w="100%" label={<>{t(`slot.${m.slot}`, { defaultValue: m.slot })}<br />{formatDateTime(m.createdAt).slice(11)}</>} />
+                  <Stack key={m.id} gap={4} align="center">
+                    <button type="button" className="thumb-btn" style={{ width: '100%' }} onClick={() => setViewing(all.findIndex((x) => x.m.id === m.id))} aria-label={t(`slot.${m.slot}`, { defaultValue: m.slot })}>
+                      <MediaImage id={m.id} h={88} w="100%" />
+                    </button>
+                    <Text size="xs" c="dimmed" ta="center" lh={1.3}>
+                      {t(`slot.${m.slot}`, { defaultValue: m.slot })}
+                      <br />
+                      {formatDateTime(m.createdAt).slice(11)}
+                    </Text>
+                  </Stack>
                 ),
               )}
             </SimpleGrid>
           </Box>
         </Section>
       ))}
+      {viewing !== null && (
+        <PhotoViewer
+          items={all.map(({ m, group }) => ({
+            id: m.id,
+            title: t(`slot.${m.slot}`, { defaultValue: m.slot }),
+            caption: `${group} · ${formatDateTime(m.createdAt)} · SHA-256 ${m.sha256.slice(0, 12)}`,
+          }))}
+          index={viewing}
+          onIndex={setViewing}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </Stack>
   );
 }
@@ -843,12 +869,13 @@ export function OrderPage() {
               <UnstyledButton onClick={() => setStageOpen(true)} aria-label={t('order.changeStage')} className="stage-btn">
                 <StageBadge stage={b.order.stage} size="lg" chevron={!['closed', 'cancelled'].includes(b.order.stage)} />
               </UnstyledButton>
-              {b.order.outcome === 'repair_declined' && (
+              {b.order.outcome === 'repair_declined' && !b.order.imported && (
                 <Badge color="gray" size="lg" variant="outline">
                   {t('order.repairDeclined')}
                 </Badge>
               )}
             </Group>
+            {b.order.imported && <ImportedNote imp={b.order.imported} />}
             <Group justify="space-between" wrap="nowrap" mt="md" gap="sm">
               {b.customer.name || b.customer.phone ? (
                 <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => navigate(`/customers/${b.customer.id}`)}>

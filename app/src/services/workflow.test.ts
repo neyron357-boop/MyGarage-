@@ -55,6 +55,32 @@ describe('search', () => {
 });
 
 describe('intake act', () => {
+  it('a retake replaces the photo in its slot; extra photos add up; a camera thumbnail is kept', async () => {
+    const { o } = await newOrder();
+    const insp = await getOrCreateInspection(o.id, 'intake');
+    const first = await addInspectionPhoto(insp.id, 'front', png());
+    const thumb = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
+    const second = await addInspectionPhoto(insp.id, 'front', png(), { thumb, replace: true });
+    const front = await db.media.where('ownerId').equals(insp.id).filter((m) => m.slot === 'front').toArray();
+    expect(front.map((m) => m.id)).toEqual([second.id]);
+    expect(await db.mediaBlobs.get(first.id)).toBeUndefined();
+    expect((await db.mediaBlobs.get(second.id))?.thumb?.size).toBe(3);
+    await addInspectionPhoto(insp.id, 'extra', png());
+    await addInspectionPhoto(insp.id, 'extra', png());
+    expect(await db.media.where('ownerId').equals(insp.id).filter((m) => m.slot === 'extra').count()).toBe(2);
+  });
+
+  it('a failed retake keeps the old photo', async () => {
+    const { o } = await newOrder();
+    const insp = await getOrCreateInspection(o.id, 'intake');
+    const first = await addInspectionPhoto(insp.id, 'rear', png());
+    await completeInspection(insp.id);
+    await signInspection(insp.id, 'Ahmed Ali', png()).catch(() => undefined); // incomplete: not signed
+    await db.inspections.update(insp.id, { locked: true });
+    await expectAppError(addInspectionPhoto(insp.id, 'rear', png(), { replace: true }), 'err.signedLocked');
+    expect((await db.media.where('ownerId').equals(insp.id).filter((m) => m.slot === 'rear').toArray()).map((m) => m.id)).toEqual([first.id]);
+  });
+
   it('can be saved empty without a signature, and is frozen once signed', async () => {
     const { o } = await newOrder();
     const insp = await getOrCreateInspection(o.id, 'intake');

@@ -58,6 +58,7 @@ import { useAction, useLang, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
 import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
 import { initials } from '../customers/CustomersPage';
+import { EaglecartImportCard } from './EaglecartImport';
 
 function Card({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
   return (
@@ -535,6 +536,7 @@ function DataTab() {
           {t('settings.importWarning')}
         </Text>
       </Card>
+      <EaglecartImportCard />
       <DeviceCard />
       {counts?.orders === 0 && (
         <Card title={t('settings.demo')} description={t('settings.demoHint')}>

@@ -103,6 +103,29 @@ export type Stage =
 
 export type Outcome = 'in_progress' | 'completed' | 'repair_declined' | 'no_show' | 'cancelled';
 
+/**
+ * A job carried over from the previous system (Eaglecart) with what was known there. History jobs
+ * get no invoice or payment in MyGarage (money was not kept consistently there), so they are never
+ * counted as owed and do not enter revenue or VAT reports.
+ */
+export interface ImportedFrom {
+  system: 'eaglecart';
+  jobId: string;
+  /** Job number shown in Eaglecart. */
+  jobNo: string;
+  /** Status there: Pending, In Progress, Delivered, Quotation… */
+  status: string;
+  /** Eaglecart order the job was converted to (#1024), with the payment recorded there. */
+  orderNo?: string;
+  paidFils?: number;
+  payMethod?: string;
+  /** Job total there, gross. */
+  totalFils: number;
+  /** Closed history (true) or a job carried over to continue in MyGarage (false). */
+  history: boolean;
+  importedAt: string;
+}
+
 export interface Order {
   id: string;
   number: number;
@@ -126,6 +149,8 @@ export interface Order {
   testDriveStartKm?: number;
   testDriveEndKm?: number;
   storageWaived?: boolean;
+  /** Carried over from Eaglecart. */
+  imported?: ImportedFrom;
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;

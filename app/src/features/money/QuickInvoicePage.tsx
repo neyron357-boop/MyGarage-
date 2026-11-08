@@ -25,20 +25,37 @@ import { CustomerModal } from '../customers/forms';
 import { PaymentModal } from './PaymentPanel';
 
 type Kind = 'labor' | 'part';
-type Suggestion = { titleRu: string; titleEn: string; price: number };
+type Suggestion = { titleRu: string; titleEn: string; price: number; uses: number };
+type Suggestions = { list: Map<string, Suggestion>; top: string[] };
 
-/** Titles typed before and from the price list, for one-tap entry. */
+/**
+ * Titles typed before and from the price list, for one-tap entry: the latest price of each title,
+ * and the most used ones first (they become the quick chips).
+ */
 function useSuggestions(lang: Lang) {
   return useLiveQuery(async () => {
     const [templates, items] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray()]);
-    const out: Record<Kind, Map<string, Suggestion>> = { labor: new Map(), part: new Map() };
-    const put = (kind: Kind, s: Suggestion) => {
+    const maps: Record<Kind, Map<string, Suggestion>> = { labor: new Map(), part: new Map() };
+    const put = (kind: Kind, s: Omit<Suggestion, 'uses'>, used: boolean) => {
       const title = (lang === 'ru' ? s.titleRu || s.titleEn : s.titleEn || s.titleRu).trim();
-      if (title && !out[kind].has(title)) out[kind].set(title, s);
+      if (!title) return;
+      const had = maps[kind].get(title);
+      if (had) had.uses += used ? 1 : 0;
+      else maps[kind].set(title, { ...s, uses: used ? 1 : 0 });
     };
-    for (const it of [...items].reverse()) if (it.kind === 'labor' || it.kind === 'part') put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils });
-    for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils });
-    return out;
+    // Newest first, so a title keeps its latest price.
+    const sorted = [...items].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+    for (const it of sorted) if (it.kind === 'labor' || it.kind === 'part') put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils }, true);
+    for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, false);
+    const pack = (m: Map<string, Suggestion>): Suggestions => ({
+      list: m,
+      top: [...m.entries()]
+        .filter(([, s]) => s.price > 0)
+        .sort((a, b) => b[1].uses - a[1].uses)
+        .slice(0, 8)
+        .map(([k]) => k),
+    });
+    return { labor: pack(maps.labor), part: pack(maps.part) };
   }, [lang]);
 }
 
@@ -58,7 +75,7 @@ function LineSheet({
   opened: boolean;
   onClose: () => void;
   onDelete?: () => void;
-  suggestions?: Map<string, Suggestion>;
+  suggestions?: Suggestions;
 }) {
   const { t } = useTranslation();
   const lang = useLang();
@@ -76,7 +93,15 @@ function LineSheet({
     setPrice(item?.unitPriceFils);
     setCost(item?.costPriceFils);
   }, [opened, item, lang]);
-  const names = useMemo(() => [...(suggestions?.keys() ?? [])], [suggestions]);
+  const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
+  /** One tap on a frequent line: its name and its last price. */
+  const pick = (name: string) => {
+    const s = suggestions?.list.get(name);
+    setTitle(name);
+    setPicked(s);
+    if (s?.price) setPrice(s.price);
+    haptic(6);
+  };
   const save = () =>
     run(async () => {
       const typed = title.trim();
@@ -91,6 +116,16 @@ function LineSheet({
   return (
     <Modal opened={opened} onClose={onClose} title={item ? t('item.edit') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')}>
       <Stack gap="md">
+        {!item && (suggestions?.top.length ?? 0) > 0 && (
+          <div className="chip-row" aria-label={t('qi.frequent')}>
+            {suggestions!.top.map((name) => (
+              <button key={name} type="button" className="chip" data-active={title === name} onClick={() => pick(name)}>
+                {name}
+                <span className="chip-note">{formatAed(suggestions!.list.get(name)!.price, lang, false)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <Autocomplete
           label={kind === 'labor' ? t('qi.workName') : t('qi.partName')}
           placeholder={kind === 'labor' ? t('qi.workPlaceholder') : t('qi.partPlaceholder')}
@@ -98,16 +133,32 @@ function LineSheet({
           filter={typedOnly}
           limit={8}
           value={title}
+          renderOption={({ option }) => {
+            const p = suggestions?.list.get(option.value)?.price;
+            return (
+              <Group justify="space-between" wrap="nowrap" w="100%" gap="sm">
+                <Text size="sm" lineClamp={2}>
+                  {option.value}
+                </Text>
+                {!!p && (
+                  <Text size="sm" c="dimmed" className="tnum" style={{ flexShrink: 0 }}>
+                    {formatAed(p)}
+                  </Text>
+                )}
+              </Group>
+            );
+          }}
           onChange={(v) => {
             setTitle(v);
-            const s = suggestions?.get(v);
+            const s = suggestions?.list.get(v);
             if (s) {
               setPicked(s);
               if (price === undefined || price === 0) setPrice(s.price || undefined);
             }
           }}
           autoComplete="off"
-          data-autofocus
+          // With quick chips on screen the keyboard waits for a tap: it would cover them.
+          data-autofocus={item || !suggestions?.top.length ? true : undefined}
         />
         <SimpleGrid cols={kind === 'part' ? 2 : 1}>
           {kind === 'part' && <NumberInput label={t('qi.qty')} min={0.1} step={1} decimalScale={2} value={qty} onChange={(v) => setQty(Number(v) || 1)} inputMode="decimal" />}

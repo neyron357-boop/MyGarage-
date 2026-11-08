@@ -44,15 +44,17 @@ export interface AddMediaInput {
   name?: string;
   compress?: boolean;
   locked?: boolean;
+  /** A photo already sized for storage (in-app camera) comes with its thumbnail and is stored as is. */
+  thumb?: Blob;
 }
 
 export async function addMedia(input: AddMediaInput): Promise<Media> {
   const kind: Media['kind'] =
     input.kind ?? (input.file.type.startsWith('video/') ? 'video' : input.file.type === 'application/pdf' ? 'pdf' : 'photo');
   let blob = input.file;
-  let thumb: Blob | undefined;
+  let thumb: Blob | undefined = input.thumb;
   if (kind === 'video' && blob.size > MAX_VIDEO_BYTES) throw new Error('video_too_large');
-  if (kind === 'photo' && input.compress !== false && typeof document !== 'undefined') {
+  if (kind === 'photo' && !thumb && input.compress !== false && typeof document !== 'undefined') {
     try {
       const c = await compressImage(blob);
       blob = c.blob;

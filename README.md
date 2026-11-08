@@ -50,7 +50,7 @@ npm run preview    # открыть http://localhost:4173
 ```bash
 cd app
 npm run typecheck
-npm test           # 47 тестов: деньги, VAT, этапы, быстрый путь и полный путь заказа, защита документов, резервная копия, SHA-256, ссылки WhatsApp/Telegram
+npm test           # 56 тестов: деньги, VAT, этапы, быстрый путь и полный путь заказа, фото и пересъёмка, перенос из Eaglecart, защита документов, резервная копия, SHA-256, ссылки WhatsApp/Telegram
 npm run e2e        # сценарий в браузере на размере телефона (нужен запущенный npm run dev -- --port 5173)
 ```
 

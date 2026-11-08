@@ -700,6 +700,12 @@ body {
   background: var(--mantine-color-cobalt-6);
   color: #fff;
 }
+/* Secondary text inside a chip (a price). */
+.chip-note {
+  margin-left: 6px;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
 .chip:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 1px;
@@ -855,6 +861,22 @@ body {
     bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
     padding-bottom: 10px;
   }
+  /* The action bar always sits at the very bottom, where the thumb is — also on a short screen
+     (no button floating mid-screen with empty space under it); the page keeps room for it. */
+  body > .sticky-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+  }
+  body:has(.with-bottom-nav) > .sticky-bar {
+    bottom: calc(var(--app-bottom-h) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: 10px;
+  }
+  body:has(> .sticky-bar) .mantine-AppShell-main {
+    padding-bottom: calc(var(--app-shell-footer-offset, 0rem) + 88px + env(safe-area-inset-bottom, 0px));
+  }
 }
 @media (min-width: 48em) {
   .sticky-bar {
@@ -976,6 +998,552 @@ body {
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--app-card) 70%, transparent);
+}
+
+/* ---------- In-app camera (walk-around) ---------- */
+/* Always dark, like the phone's own camera; the viewfinder is exactly the photo that will be saved. */
+.cam {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'top' 'finder' 'strip' 'controls';
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: #000;
+  color: #fff;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.cam button {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.cam-top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 60px;
+  padding: 8px 12px;
+}
+.cam-icon {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: transform var(--dur-1) var(--ease-out), background-color var(--dur-2) ease, color var(--dur-2) ease;
+}
+.cam-icon:active {
+  transform: scale(0.9);
+}
+.cam-icon[data-on='true'] {
+  background: #ffd60a;
+  color: #000;
+}
+.cam-icon-spacer {
+  flex: 0 0 42px;
+}
+.cam-title {
+  min-width: 0;
+  text-align: center;
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.cam-title-main {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cam-title-sub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.62);
+  font-variant-numeric: tabular-nums;
+}
+.cam-finder {
+  grid-area: finder;
+  position: relative;
+  overflow: hidden;
+  background: #111;
+}
+.cam-video,
+.cam-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* The check-in photo shows through, to stand where it was taken. */
+@keyframes cam-ghost-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.4;
+  }
+}
+.cam-ghost {
+  opacity: 0.4;
+  pointer-events: none;
+  animation: cam-ghost-in var(--dur-3) ease both;
+}
+/* Rule-of-thirds lines: keep the car level and centred. */
+.cam-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cam-grid::before,
+.cam-grid::after {
+  content: '';
+  position: absolute;
+  border: 0 solid rgba(255, 255, 255, 0.24);
+}
+.cam-grid::before {
+  top: 0;
+  bottom: 0;
+  left: 33.333%;
+  right: 33.333%;
+  border-left-width: 1px;
+  border-right-width: 1px;
+}
+.cam-grid::after {
+  left: 0;
+  right: 0;
+  top: 33.333%;
+  bottom: 33.333%;
+  border-top-width: 1px;
+  border-bottom-width: 1px;
+}
+@keyframes cam-flash {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.cam-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  pointer-events: none;
+  animation: cam-flash 240ms ease-out both;
+}
+.cam-map {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 4px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.walk-map-cam {
+  transition: transform 420ms var(--ease-out);
+}
+@keyframes cam-pulse {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.walk-map-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cam-pulse 1.6s ease-out infinite;
+}
+.cam-pill {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.cam-ghost-toggle {
+  right: 10px;
+  top: 10px;
+  cursor: pointer;
+  transition: background-color var(--dur-2) ease, color var(--dur-2) ease, transform var(--dur-1) var(--ease-out);
+}
+.cam-ghost-toggle:active {
+  transform: scale(0.95);
+}
+.cam-ghost-toggle[data-on='true'] {
+  background: rgba(255, 255, 255, 0.92);
+  color: #000;
+}
+.cam-rotate {
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  text-align: center;
+  animation: mg-fade-in var(--dur-3) ease 400ms both;
+}
+.cam-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+}
+.cam-dim {
+  background: rgba(0, 0, 0, 0.45);
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.cam-card {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 18px 14px;
+  border-radius: 22px;
+  color: #fff;
+  background: rgba(30, 30, 32, 0.92);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+.cam-card-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.cam-card-text {
+  font-size: 14px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.68);
+}
+.cam-strip {
+  grid-area: strip;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px 14px 6px;
+  scrollbar-width: none;
+}
+.cam-strip::-webkit-scrollbar {
+  display: none;
+}
+.cam-strip-item {
+  position: relative;
+  flex: 0 0 auto;
+  width: 50px;
+  height: 50px;
+  border: 0;
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) ease, opacity var(--dur-2) ease;
+}
+.cam-strip-item[data-done='false'] {
+  opacity: 0.75;
+}
+.cam-strip-item[data-active='true'] {
+  opacity: 1;
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px #000, 0 0 0 4px #fff;
+}
+.cam-strip-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: mg-pop 320ms var(--ease-out) both;
+}
+.cam-controls {
+  grid-area: controls;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 12px 20px 20px;
+}
+.cam-side {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.cam-side-end {
+  justify-content: flex-end;
+}
+.cam-shutter {
+  width: 78px;
+  height: 78px;
+  padding: 5px;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  background: transparent;
+  cursor: pointer;
+  transition: opacity var(--dur-2) ease;
+}
+.cam-shutter span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.cam-shutter:active span {
+  transform: scale(0.86);
+}
+.cam-shutter:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cam-last {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 0 2px #fff;
+  animation: mg-pop 360ms var(--ease-out) both;
+}
+.cam-last img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cam-count,
+.cam-saving {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+.cam-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 2px 10px 8px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--dur-1) ease;
+}
+.cam-text:active {
+  opacity: 0.6;
+}
+/* Phone turned sideways: the picture takes the whole screen, the controls move to a column. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .cam {
+    grid-template-columns: minmax(0, 1fr) 116px;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: 'finder controls';
+  }
+  .cam-top {
+    position: absolute;
+    z-index: 3;
+    top: env(safe-area-inset-top);
+    left: env(safe-area-inset-left);
+    right: calc(116px + env(safe-area-inset-right));
+    background: linear-gradient(rgba(0, 0, 0, 0.5), transparent);
+  }
+  .cam-map,
+  .cam-ghost-toggle {
+    top: 66px;
+  }
+  .cam-strip {
+    position: absolute;
+    z-index: 3;
+    left: env(safe-area-inset-left);
+    right: calc(116px + env(safe-area-inset-right));
+    bottom: env(safe-area-inset-bottom);
+    padding-bottom: 12px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.5));
+  }
+  .cam-controls {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto 1fr;
+    justify-items: center;
+    padding: 14px 8px;
+  }
+  .cam-controls > .cam-side:first-child {
+    order: 1;
+    align-self: end;
+  }
+  .cam-side-end {
+    order: -1;
+    align-self: start;
+    justify-content: center;
+  }
+  .cam-rotate {
+    display: none;
+  }
+}
+
+/* A thumbnail that opens the viewer. */
+.thumb-btn {
+  border: 0;
+  padding: 0;
+  background: none;
+  border-radius: var(--mantine-radius-md);
+  overflow: hidden;
+  cursor: zoom-in;
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.thumb-btn:active {
+  transform: scale(0.96);
+}
+.thumb-btn:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+
+/* ---------- Photo viewer ---------- */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 410;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  color: #fff;
+  -webkit-user-select: none;
+  user-select: none;
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.viewer button {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.viewer-top {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 60px;
+  padding: 8px 12px;
+}
+.viewer-top,
+.viewer-bottom {
+  transition: opacity var(--dur-2) ease;
+}
+.viewer[data-chrome='false'] .viewer-top,
+.viewer[data-chrome='false'] .viewer-bottom,
+.viewer[data-chrome='false'] .viewer-nav {
+  opacity: 0;
+  pointer-events: none;
+}
+.viewer-stage {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+}
+.viewer-slide {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  will-change: transform;
+}
+.viewer-slide[data-animate='true'] {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.viewer-img[data-animate='true'] {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.viewer-nav {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: opacity var(--dur-2) ease, background-color var(--dur-1) ease;
+}
+.viewer-nav:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.viewer-nav.prev {
+  left: 12px;
+}
+.viewer-nav.next {
+  right: 12px;
+}
+/* On a phone the photos are swiped; the arrows are for a mouse. */
+@media (pointer: coarse) {
+  .viewer-nav {
+    display: none;
+  }
+}
+.viewer-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 18px;
+}
+.viewer-caption {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.68);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
 }
 
 /* ---------- Wizard ---------- */

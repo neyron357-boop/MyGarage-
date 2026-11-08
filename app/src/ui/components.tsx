@@ -33,7 +33,9 @@ import type { Emirate, Plate, Stage } from '../domain/types';
 import { mediaUrl } from '../services/media';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { haptic } from './clipboard';
-import { useLang } from './hooks';
+import { useLang, usePhone } from './hooks';
+import { createPortal } from 'react-dom';
+import { PhotoViewer } from './PhotoViewer';
 
 /* ---------------- Toasts ---------------- */
 
@@ -401,9 +403,15 @@ export function SuccessMark({ size = 64 }: { size?: number }) {
   );
 }
 
-/** Primary actions pinned to the bottom of the screen (above the phone tab bar). */
+/**
+ * Primary actions pinned to the bottom of the screen (above the phone tab bar). On a phone the bar
+ * lives outside the page (the page's entrance animation must not carry it), so it is at the very
+ * bottom from the first frame, also on a short screen; on a PC it closes the content.
+ */
 export function StickyBar({ children }: { children: ReactNode }) {
-  return <div className="sticky-bar no-print">{children}</div>;
+  const phone = usePhone();
+  const bar = <div className="sticky-bar no-print">{children}</div>;
+  return phone ? createPortal(bar, document.body) : bar;
 }
 
 export interface TabItem {
@@ -605,9 +613,7 @@ export function Photo({ id, h = 90, w, label }: { id: string; h?: number; w?: nu
           </Text>
         )}
       </Stack>
-      <Modal opened={open} onClose={() => setOpen(false)} size="xl" withCloseButton padding="xs">
-        {open && <MediaImage id={id} thumb={false} h="75vh" w="100%" radius="md" />}
-      </Modal>
+      {open && <PhotoViewer items={[{ id, title: typeof label === 'string' ? label : undefined }]} index={0} onIndex={() => undefined} onClose={() => setOpen(false)} />}
     </>
   );
 }

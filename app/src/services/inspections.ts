@@ -3,7 +3,7 @@ import { nowIso } from '../domain/dates';
 import { FUNCTION_CHECKS, validateInspection } from '../domain/inspection';
 import type { DamageMark, Inspection } from '../domain/types';
 import { AppError } from './errors';
-import { addMedia, lockMediaOf } from './media';
+import { addMedia, deleteMedia, lockMediaOf } from './media';
 import { bundleAmountDue, loadOrderBundle, logEvent, tryStage } from './orders';
 
 
@@ -52,9 +52,15 @@ export async function updateInspection(id: string, patch: Partial<Inspection>): 
   await db.inspections.update(id, patch);
 }
 
-export async function addInspectionPhoto(inspectionId: string, slot: string, file: Blob) {
+/**
+ * Add a photo to an open act. `replace`: a retake — the photos already in this slot are deleted only
+ * after the new one is stored, so a failed save never leaves the slot empty.
+ */
+export async function addInspectionPhoto(inspectionId: string, slot: string, file: Blob, opts: { thumb?: Blob; replace?: boolean } = {}) {
   await getUnlocked(inspectionId);
-  const media = await addMedia({ ownerType: 'inspection', ownerId: inspectionId, slot, file });
+  const old = opts.replace ? await db.media.where('ownerId').equals(inspectionId).filter((m) => m.slot === slot && m.kind === 'photo').toArray() : [];
+  const media = await addMedia({ ownerType: 'inspection', ownerId: inspectionId, slot, file, thumb: opts.thumb });
+  for (const m of old) await deleteMedia(m.id);
   const insp = await db.inspections.get(inspectionId);
   if (insp?.skippedPhotos[slot]) {
     const skipped = { ...insp.skippedPhotos };

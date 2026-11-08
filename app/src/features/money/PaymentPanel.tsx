@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { addDays, dubaiDate, formatDate, formatDateTime, nowIso } from '../../domain/dates';
 import { activeInvoice, chooseInvoiceType, paidNet } from '../../domain/invoice';
 import { summarize } from '../../domain/items';
+import { formatAed } from '../../domain/money';
 import type { InvoiceType, PayMethod, Payment } from '../../domain/types';
 import { debtPdf, invoicePdf, openPdf, receiptPdf } from '../../services/documents';
 import { simpleMessage } from '../../services/messages';
@@ -68,7 +69,8 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
             );
           })}
         </SimpleGrid>
-        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus required />
+        {/* The amount due is already filled in: no keyboard over the button unless there is nothing to suggest. */}
+        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus={!amount} required />
         {due > 0 && kind !== 'refund' && (
           <Group gap={6} mt={-8}>
             <Button size="compact-sm" variant="light" onClick={() => setAmount(due)}>
@@ -79,8 +81,9 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
           </Group>
         )}
         {method !== 'cash' && <TextInput label={t('payment.reference')} value={reference} onChange={(e) => setReference(e.currentTarget.value)} />}
-        <Button onClick={save} loading={busy} disabled={!amount} color={kind === 'refund' ? 'red' : undefined}>
+        <Button size="lg" onClick={save} loading={busy} disabled={!amount} color={kind === 'refund' ? 'red' : undefined}>
           {t('payment.save')}
+          {!!amount && ` · ${formatAed(amount)}`}
         </Button>
       </Stack>
     </Modal>
