@@ -296,6 +296,43 @@ function Screen({ entry, role, children }: { entry: Entry; role: 'top' | 'below'
 /** Where the back swipe starts: a strip along the left edge, like the iPhone's. */
 const EDGE = 24;
 
+/**
+ * Safari in a tab (not the installed app) has its own interactive back and forward swipe from the
+ * screen edges, with a picture of the page it goes to: the app then neither starts its own swipe nor
+ * plays a second animation once Safari's has brought the page.
+ */
+const browserSwipes = () => {
+  const c = document.documentElement.classList;
+  return c.contains('ios') && !c.contains('standalone');
+};
+let edgeSwipeAt = -Infinity;
+function watchBrowserSwipes(): () => void {
+  let edgeStart = -Infinity;
+  let x0 = 0;
+  const start = (e: TouchEvent) => {
+    const t = e.touches[0];
+    edgeStart = t && (t.clientX < 30 || t.clientX > window.innerWidth - 30) ? performance.now() : -Infinity;
+    x0 = t?.clientX ?? 0;
+  };
+  // Safari's gesture takes the touch away (touchcancel), or it is a clear sideways drag from the edge.
+  const cancel = () => {
+    if (performance.now() - edgeStart < 1500) edgeSwipeAt = performance.now();
+  };
+  const move = (e: TouchEvent) => {
+    const t = e.touches[0];
+    if (t && performance.now() - edgeStart < 1500 && Math.abs(t.clientX - x0) > 24) edgeSwipeAt = performance.now();
+  };
+  const opts = { passive: true, capture: true } as const;
+  document.addEventListener('touchstart', start, opts);
+  document.addEventListener('touchmove', move, opts);
+  document.addEventListener('touchcancel', cancel, opts);
+  return () => {
+    document.removeEventListener('touchstart', start, opts);
+    document.removeEventListener('touchmove', move, opts);
+    document.removeEventListener('touchcancel', cancel, opts);
+  };
+}
+
 export function PhoneStack({ render, onTop }: { render: (location: Location, entryId: string) => ReactNode; onTop?: (location: Location) => void }) {
   const location = useLocation();
   const action = useNavigationType();
@@ -312,9 +349,16 @@ export function PhoneStack({ render, onTop }: { render: (location: Location, ent
     hint = null;
     const from = gestureFrom.current;
     gestureFrom.current = null;
-    setModel((m) => next(m, location, action, historyIdx(), h, from));
+    // Safari's own edge swipe already showed the way there: the screens just settle.
+    const safariSwiped = action === 'POP' && browserSwipes() && performance.now() - edgeSwipeAt < 3000;
+    setModel((m) => {
+      const n = next(m, location, action, historyIdx(), h, from);
+      return safariSwiped && n.anim ? { ...n, anim: { ...n.anim, done: true } } : n;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key, location.pathname, location.search, location.hash]);
+
+  useEffect(() => (browserSwipes() ? watchBrowserSwipes() : undefined), []);
 
   const { entries, out, anim } = model;
   const top = entries[entries.length - 1];
@@ -454,7 +498,8 @@ export function PhoneStack({ render, onTop }: { render: (location: Location, ent
     };
 
     const start = (e: TouchEvent) => {
-      if (id !== -1 || e.touches.length !== 1) return;
+      // In a Safari tab the edge belongs to Safari's own back swipe.
+      if (id !== -1 || e.touches.length !== 1 || browserSwipes()) return;
       const m = modelRef.current;
       const t = e.touches[0];
       if (t.clientX > EDGE || m.anim || m.entries.length < 2) return;

@@ -218,6 +218,50 @@ const check = (name, ok, detail) => {
   }
   check('no horizontal overflow', wide.length === 0, wide);
 
+  // 11. Safari in a tab (not installed): the edge swipe is Safari's own, and going back after it
+  //     does not play a second animation.
+  const iphone = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+    locale: 'ru-RU',
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1',
+  });
+  const sp = await iphone.newPage();
+  sp.on('pageerror', (e) => errors.push('pageerror (iphone): ' + e.message));
+  await sp.goto(BASE + '#/settings?tab=data');
+  await sp.getByRole('button', { name: 'Загрузить демо-данные' }).click();
+  await sp.waitForTimeout(1500);
+  await sp.goto(BASE + '#/');
+  await sp.waitForTimeout(1000);
+  await sp.locator('.screen[data-role="top"] .surface.tap').first().click();
+  await sp.waitForTimeout(800);
+  const safari = await sp.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const ios = document.documentElement.classList.contains('ios') && !document.documentElement.classList.contains('standalone');
+        const root = document.querySelector('.stack');
+        const touch = (type, x, y) => {
+          const t = new Touch({ identifier: 9, target: root, clientX: x, clientY: y, pageX: x, pageY: y });
+          root.dispatchEvent(new TouchEvent(type, { touches: type === 'touchmove' || type === 'touchstart' ? [t] : [], changedTouches: [t], bubbles: true, cancelable: true }));
+        };
+        touch('touchstart', 6, 420);
+        touch('touchmove', 60, 421);
+        touch('touchmove', 120, 422);
+        const top = document.querySelector('.stack > .screen[data-role="top"]');
+        const moved = Math.round(top.getBoundingClientRect().left);
+        // Safari's gesture takes the touch and goes back itself.
+        touch('touchcancel', 120, 422);
+        history.back();
+        setTimeout(() => {
+          const leaving = document.querySelector('.stack > .screen[data-role="out"]');
+          resolve({ ios, moved, hash: location.hash, animating: !!leaving && leaving.getAnimations().length > 0 });
+        }, 120);
+      }),
+  );
+  check('safari tab: edge swipe left to Safari, no second animation', safari.ios && safari.moved === 0 && safari.hash === '#/' && !safari.animating, safari);
+  await iphone.close();
+
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
   await browser.close();
   if (fails.length || errors.length) process.exit(1);
