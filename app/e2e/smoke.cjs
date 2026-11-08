@@ -33,7 +33,12 @@ async function launchBrowser() {
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 300)); });
-  const shot = (n, full = false) => page.screenshot({ path: `${SP}/shots/${n}.png`, fullPage: full });
+  // Screens slide in (View Transitions): wait for that and any other animation before the picture.
+  const settled = () => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
+  const shot = async (n, full = false) => {
+    await settled();
+    await page.screenshot({ path: `${SP}/shots/${n}.png`, fullPage: full });
+  };
   const step = async (name, fn) => { try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n')[0]); await shot('fail-' + name.replace(/\W+/g, '_')); throw e; } };
 
   await step('board empty', async () => { await page.goto(BASE); await page.getByText('Мастерская', { exact: true }).first().waitFor(); await shot('01-board-empty'); });

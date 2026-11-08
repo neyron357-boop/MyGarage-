@@ -44,6 +44,8 @@ export function useSwipeBack(ref: RefObject<HTMLElement>, enabled: boolean) {
       if (id !== -1 || e.touches.length !== 1) return;
       const t = e.touches[0];
       if (t.clientX > EDGE || !canGoBack()) return;
+      // A signature, a slider or a drawing area owns its own horizontal strokes.
+      if ((t.target as Element | null)?.closest?.('canvas, .sig-pad, input[type="range"], .mantine-Slider-root, [data-no-swipe]')) return;
       id = t.identifier;
       x0 = t.clientX;
       y0 = t.clientY;

@@ -226,6 +226,9 @@ export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
  * one has scrolled under it) above a large title that fades as it goes.
  */
 export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode }) {
+  const { t } = useTranslation();
+  // iOS names the screen "Back" leads to: the board, the job.
+  const backLabel = typeof back === 'string' ? (back === '/' ? t('nav.board') : /^\/orders\/[^/]+$/.test(back) ? t('order.title') : undefined) : undefined;
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -258,7 +261,7 @@ export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: R
   return (
     <>
       <div className="nav-bar" data-compact={compact} ref={barRef}>
-        <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} />}</div>
+        <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} label={backLabel} />}</div>
         <div className="nav-title" aria-hidden>
           {title}
         </div>
@@ -531,20 +534,48 @@ export interface TabItem {
   count?: number;
 }
 
-/** Horizontal pill tabs that scroll instead of wrapping; the active one is always scrolled into view. */
+/**
+ * Horizontal pill tabs that scroll instead of wrapping. The dark pill slides from the old tab to the
+ * new one (like the thumb of a segmented control); the active tab is always scrolled into view.
+ */
 export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: string; onChange: (v: string) => void; items: TabItem[]; mb?: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const pill = useRef<HTMLSpanElement>(null);
+  const ready = useRef(false);
   useEffect(() => {
     const root = ref.current;
     const el = root?.querySelector<HTMLElement>('[data-active="true"]');
-    if (!root || !el) return;
+    const p = pill.current;
+    if (!root || !p) return;
+    const place = () => {
+      const active = root.querySelector<HTMLElement>('[data-active="true"]');
+      if (!active) {
+        p.style.opacity = '0';
+        return;
+      }
+      p.style.opacity = '1';
+      p.style.transform = `translateX(${active.offsetLeft}px)`;
+      p.style.width = `${active.offsetWidth}px`;
+      p.style.height = `${active.offsetHeight}px`;
+    };
+    place();
+    // The first placement happens before paint and must not slide in from nowhere.
+    if (!ready.current) {
+      ready.current = true;
+      requestAnimationFrame(() => root.setAttribute('data-ready', 'true'));
+    }
+    const ro = new ResizeObserver(place);
+    ro.observe(root);
+    if (!el) return () => ro.disconnect();
     const left = el.offsetLeft - root.offsetLeft;
     if (left < root.scrollLeft + 8 || left + el.offsetWidth > root.scrollLeft + root.clientWidth - 8) {
       root.scrollTo({ left: Math.max(0, left - 24), behavior: 'smooth' });
     }
-  }, [value]);
+    return () => ro.disconnect();
+  }, [value, items.length]);
   return (
     <Box mb={mb} className="scroll-tabs" role="tablist" ref={ref}>
+      <span className="scroll-tabs-pill" ref={pill} aria-hidden />
       {items.map((it) => (
         <button
           key={it.value}

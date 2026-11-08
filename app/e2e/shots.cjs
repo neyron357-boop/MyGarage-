@@ -34,6 +34,8 @@ async function launchBrowser() {
       await page.evaluate((y) => window.scrollTo(0, y), opts.scroll);
       await settle(350);
     }
+    // Screens slide in (View Transitions): wait for that and any other animation before the picture.
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
     await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: !!opts.full });
     console.log('shot', name);
   };
@@ -55,6 +57,17 @@ async function launchBrowser() {
     const order = await page.evaluate(() => location.hash);
     await shot(`${prefix}-02-order`);
     await shot(`${prefix}-02b-order-scrolled`, { scroll: 380 });
+    // The "…" menu and the stage sheet of the job.
+    await page.locator('.nav-bar .mantine-ActionIcon-root').first().click();
+    await settle(500);
+    await shot(`${prefix}-02c-order-menu`);
+    await page.keyboard.press('Escape');
+    await settle(300);
+    await page.locator('.stage-btn').first().click();
+    await settle(700);
+    await shot(`${prefix}-02d-stage-sheet`);
+    await page.keyboard.press('Escape');
+    await settle(400);
     await go(order + '?tab=work');
     await shot(`${prefix}-03-order-work`);
     await go('#/orders/new');

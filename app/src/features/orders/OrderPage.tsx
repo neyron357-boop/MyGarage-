@@ -73,6 +73,7 @@ import {
   EmptyState,
   Field,
   Flags,
+  FormRow,
   Kpi,
   List,
   ListRow,
@@ -82,6 +83,7 @@ import {
   MediaImage,
   PageSkeleton,
   PlateText,
+  RowGroup,
   ScrollTabs,
   Section,
   STAGE_META,
@@ -339,36 +341,48 @@ function Overview({ b }: { b: OrderBundle }) {
           <Kpi label={t('payment.due')} value={<Money fils={due} display />} color={due && ['ready', 'delivered'].includes(b.order.stage) ? 'red' : !due && b.payments.length > 0 ? 'green' : undefined} />
         </SimpleGrid>
       )}
-      <Box className="surface" p="md">
-        <Stack gap="md">
-          <Textarea
-            label={t('order.complaint')}
-            value={complaint}
-            onChange={(e) => setComplaint(e.currentTarget.value)}
-            onBlur={() => complaint !== b.order.complaint && run(() => updateOrder(b.order.id, { complaint }), 'common.saved')}
-            readOnly={finished}
-            autosize
-            minRows={2}
-          />
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
+      {/* iOS grouped form: the complaint as a text row, the mechanic and the promised time as label–value rows. */}
+      <Box>
+        <RowGroup title={t('order.complaint')} mt={0}>
+          <div className="ios-row left">
+            <Textarea
+              aria-label={t('order.complaint')}
+              placeholder={t('order.complaintHint')}
+              value={complaint}
+              onChange={(e) => setComplaint(e.currentTarget.value)}
+              onBlur={() => complaint !== b.order.complaint && run(() => updateOrder(b.order.id, { complaint }), 'common.saved')}
+              readOnly={finished}
+              autosize
+              minRows={1}
+              w="100%"
+            />
+          </div>
+        </RowGroup>
+        <RowGroup mt="md">
+          <FormRow label={t('order.mechanic')}>
             <Select
-              label={t('order.mechanic')}
+              aria-label={t('order.mechanic')}
               placeholder={t('order.mechanicPick')}
               clearable={!finished}
               disabled={finished}
               value={b.order.mechanicId ?? null}
               onChange={(v) => run(() => assignMechanic(b.order.id, v ?? undefined))}
               data={(employees ?? []).map((e) => ({ value: e.id, label: `${e.name} · ${t(`role.${e.role}`)}` }))}
+              w="100%"
             />
-            <DateTimeField
-              label={t('cond.promised')}
-              placeholder={t('common.notSet')}
-              disabled={finished}
-              value={b.order.promisedReadyAt ?? i?.conditions?.promisedReadyAt}
-              onChange={(v) => run(() => updateOrder(b.order.id, { promisedReadyAt: v }))}
-            />
-          </SimpleGrid>
-        </Stack>
+          </FormRow>
+          <FormRow label={t('cond.promised')}>
+            <Box w="100%">
+              <DateTimeField
+                label={undefined}
+                placeholder={t('common.notSet')}
+                disabled={finished}
+                value={b.order.promisedReadyAt ?? i?.conditions?.promisedReadyAt}
+                onChange={(v) => run(() => updateOrder(b.order.id, { promisedReadyAt: v }))}
+              />
+            </Box>
+          </FormRow>
+        </RowGroup>
       </Box>
       {(i?.locked || i?.completedAt) && (
         <Section

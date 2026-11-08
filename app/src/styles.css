@@ -604,7 +604,7 @@ html[data-nav='tab']::view-transition-new(page) {
   color: var(--mantine-color-dimmed);
 }
 .money.display {
-  font-family: var(--font-display);
+  font-family: var(--font-rounded);
   font-weight: 700;
   letter-spacing: -0.015em;
 }
@@ -808,6 +808,7 @@ html[data-nav='tab']::view-transition-new(page) {
 
 /* ---------- Scrollable filter pills ---------- */
 .scroll-tabs {
+  position: relative;
   display: flex;
   gap: 6px;
   overflow-x: auto;
@@ -818,7 +819,24 @@ html[data-nav='tab']::view-transition-new(page) {
 .scroll-tabs::-webkit-scrollbar {
   display: none;
 }
+/* The dark pill under the active tab; it slides between tabs (ScrollTabs positions it). */
+.scroll-tabs-pill {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  width: 0;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--app-pill);
+  pointer-events: none;
+  opacity: 0;
+}
+.scroll-tabs[data-ready='true'] .scroll-tabs-pill {
+  transition: transform 320ms var(--ease-ios), width 320ms var(--ease-ios), opacity var(--dur-2) ease;
+}
 .scroll-tabs button {
+  position: relative;
+  z-index: 1;
   flex-shrink: 0;
   border: 0;
   background: var(--app-card);
@@ -847,8 +865,12 @@ html[data-nav='tab']::view-transition-new(page) {
   outline-offset: 1px;
 }
 .scroll-tabs button[data-active='true'] {
-  background: var(--app-pill);
+  background: transparent;
   color: var(--app-pill-text);
+}
+/* Without the script (first paint) the active tab paints its own pill. */
+.scroll-tabs:not([data-ready='true']) button[data-active='true'] {
+  background: var(--app-pill);
 }
 .scroll-tabs .count {
   font-size: 12px;
@@ -1035,7 +1057,8 @@ html[data-nav='tab']::view-transition-new(page) {
   flex: 1;
   min-width: 0;
 }
-/* Fields inside a row are borderless and transparent: the row is the field. */
+/* Fields inside a row are borderless and transparent: the row is the field. The label says what the
+   field is, so a leading icon is dropped; a trailing chevron or clear button keeps its room. */
 .ios-row .mantine-Input-wrapper {
   --input-bg: transparent !important;
   --input-bd: transparent !important;
@@ -1045,6 +1068,12 @@ html[data-nav='tab']::view-transition-new(page) {
   padding-left: 0;
   padding-right: 0;
   text-align: right;
+}
+.ios-row .mantine-Input-wrapper[data-with-right-section] .mantine-Input-input {
+  padding-right: var(--input-right-section-width, 2.25rem);
+}
+.ios-row .mantine-Input-section[data-position='left'] {
+  display: none;
 }
 .ios-row.left .mantine-Input-input {
   text-align: left;
@@ -2128,8 +2157,8 @@ html[data-nav='tab']::view-transition-new(page) {
 }
 .choice-card {
   border: 0;
-  box-shadow: inset 0 0 0 1.5px var(--app-hairline);
-  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px var(--app-hairline);
+  border-radius: var(--radius-group);
   padding: 12px;
   background: var(--app-card);
   cursor: pointer;
@@ -2137,12 +2166,13 @@ html[data-nav='tab']::view-transition-new(page) {
   font: inherit;
   color: inherit;
   width: 100%;
-  transition: box-shadow var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out), background-color var(--dur-2) ease;
+  transition: box-shadow var(--dur-2) var(--ease-out), transform 340ms var(--spring), background-color var(--dur-2) ease;
   -webkit-user-select: none;
   user-select: none;
 }
 .choice-card:active:not(:disabled) {
   transform: scale(0.98);
+  transition-duration: 80ms;
 }
 .choice-card:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
