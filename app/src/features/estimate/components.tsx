@@ -38,7 +38,7 @@ import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
 import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, itemRangeGross, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
-import { enteredFromNet, netFromEntered, rateFor, switchVatMode, vatModeOf, type Amounts, type VatMode } from '../../domain/vat';
+import { enteredFromNet, enteredPrice, netFromEntered, priceFromEntered, rateFor, switchVatMode, vatModeOf, type Amounts, type VatMode } from '../../domain/vat';
 import type { Block, DecisionKind, DecisionVia, EstimateVersion, ItemKind, OrderItem, Urgency } from '../../domain/types';
 import { addItem, recordDecisions, removeItem, resolveB, restoreItem, setDone, updateItem, withdrawItems, type NewItem } from '../../services/estimate';
 import { verbalConfirmation } from '../../services/messages';
@@ -135,32 +135,39 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
   const { run, busy } = useAction();
   const s = b.settings;
   const [v, setV] = useState<NewItem>(blank(block ?? 'A'));
-  // How the typed prices are counted: VAT on top, inside, or none (the line's rate becomes 0).
+  // The unit price as typed; `mode` says how typed prices are counted: VAT on top, inside, or none.
+  const [unit, setUnit] = useState<number | undefined>(0);
   const [mode, setMode] = useState<VatMode>('add');
   const taxRate = item?.vatRateBp ? item.vatRateBp : s.vatRateBp;
   useEffect(() => {
     if (opened) {
-      setV(item ? { ...item } : { ...blank(block ?? 'A'), ...extra, block: block ?? extra?.block ?? 'A' });
-      setMode(vatModeOf(item ? item.vatRateBp : extra?.vatRateBp, s.pricesIncludeVat));
+      const base: NewItem = item ? { ...item } : { ...blank(block ?? 'A'), ...extra, block: block ?? extra?.block ?? 'A' };
+      const m = vatModeOf(item ?? extra, s.pricesIncludeVat);
+      setV(base);
+      setMode(m);
+      setUnit(enteredPrice({ unitPriceFils: base.unitPriceFils ?? 0, unitGrossFils: base.unitGrossFils }, taxRate, m));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, block]);
   const set = (p: Partial<NewItem>) => setV((x) => ({ ...x, ...p }));
-  /** Another way of counting VAT keeps the typed amounts and counts them anew. */
+  /** Another way of counting VAT keeps the typed amounts and counts them anew (the unit price is kept as typed). */
   const changeMode = (m: VatMode) => {
     const conv = (n: number) => switchVatMode(n, taxRate, mode, m);
     setV((x) => {
-      const next = { ...x, unitPriceFils: conv(x.unitPriceFils ?? 0) };
+      const next = { ...x };
       if (x.priceMinFils !== undefined) next.priceMinFils = conv(x.priceMinFils);
       if (x.priceMaxFils !== undefined) next.priceMaxFils = conv(x.priceMaxFils);
       return next;
     });
     setMode(m);
   };
+  /** A net price shown the way prices are typed now. */
+  const typedOf = (net: number | undefined) => (net === undefined ? undefined : enteredPrice({ unitPriceFils: net }, taxRate, mode));
   const markup = (cost: number | undefined) => (cost === undefined ? undefined : roundFils(cost * (1 + s.defaultMarkupBp / 10000)));
+  const priced = { ...priceFromEntered(unit ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
   const save = () =>
     run(async () => {
-      const patch = { ...v, unitPriceFils: v.unitPriceFils ?? 0, vatRateBp: rateFor(mode, taxRate) };
+      const patch = { ...v, ...priced };
       if (item) await updateItem(item.id, patch);
       else await addItem(b.order.id, patch);
       onClose();
@@ -212,17 +219,21 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
                   label={t('item.costPrice')}
                   description={t('item.costPriceHint', { pct: s.defaultMarkupBp / 100 })}
                   value={v.costPriceFils}
-                  onChange={(c) => set({ costPriceFils: c, unitPriceFils: !v.unitPriceFils || v.unitPriceFils === markup(v.costPriceFils) ? markup(c) ?? 0 : v.unitPriceFils })}
+                  onChange={(c) => {
+                    // The price follows the cost with the markup until it is typed by hand.
+                    if (!unit || unit === typedOf(markup(v.costPriceFils))) setUnit(typedOf(markup(c)) ?? 0);
+                    set({ costPriceFils: c });
+                  }}
                 />
               )}
             </Stack>
           </Box>
         )}
         {!v.customerSupplied && (
-          <PriceInput label={v.kind === 'labor' && v.unit === 'h' ? t('item.pricePerHour') : t('item.unitPrice')} net={v.unitPriceFils} onChange={(n) => set({ unitPriceFils: n ?? 0 })} rateBp={taxRate} mode={mode} />
+          <MoneyInput label={v.kind === 'labor' && v.unit === 'h' ? t('item.pricePerHour') : t('item.unitPrice')} value={unit} onChange={setUnit} />
         )}
         {v.kind === 'labor' && v.unit === 'h' && (
-          <Button variant="subtle" size="compact-sm" w="fit-content" onClick={() => set({ unitPriceFils: s.laborRateFils })}>
+          <Button variant="subtle" size="compact-sm" w="fit-content" onClick={() => setUnit(typedOf(s.laborRateFils))}>
             {t('item.useLaborRate', { rate: (s.laborRateFils / 100).toFixed(2) })}
           </Button>
         )}
@@ -250,7 +261,7 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
               {mode === 'none' ? t('item.lineTotalNoVat') : t('item.lineTotal')}
             </Text>
             <Text size="lg" fw={700}>
-              <Money fils={itemAmounts({ ...(v as OrderItem), vatRateBp: rateFor(mode, taxRate) }).gross} />
+              <Money fils={itemAmounts({ ...(v as OrderItem), ...priced }).gross} />
             </Text>
           </div>
           <Button onClick={save} loading={busy} leftSection={<IconCheck size={18} />}>
@@ -555,7 +566,7 @@ export function ResolveBModal({ b, item, onClose }: { b: OrderBundle; item: Orde
           {t('bresolve.question')}
         </Text>
         <Alert color={item.bChoice === 'do_if_needed' ? 'green' : 'cobalt'}>{item.bChoice === 'do_if_needed' ? t('bresolve.preapproved') : t('bresolve.callMe')}</Alert>
-        <PriceInput label={t('bresolve.actualPrice')} net={net} onChange={setNet} rateBp={item.vatRateBp || b.settings.vatRateBp} mode={vatModeOf(item.vatRateBp, b.settings.pricesIncludeVat)} hint />
+        <PriceInput label={t('bresolve.actualPrice')} net={net} onChange={setNet} rateBp={item.vatRateBp || b.settings.vatRateBp} mode={vatModeOf(item, b.settings.pricesIncludeVat)} hint />
         <Group grow>
           <Button variant="default" loading={busy} onClick={() => run(async () => { await resolveB(item.id, false, 0); onClose(); }, 'common.saved')}>
             {t('bresolve.notNeeded')}

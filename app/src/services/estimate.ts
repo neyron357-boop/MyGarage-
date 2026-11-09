@@ -22,13 +22,14 @@ import type {
   SnapshotItem,
   VersionKind,
 } from '../domain/types';
+import { syncDiscount } from './discount';
 import { AppError } from './errors';
 import { logEvent, tryStage } from './orders';
 import { getSettings } from './settings';
 
 export type NewItem = Partial<OrderItem> & Pick<OrderItem, 'kind' | 'block'>;
 
-const LOCKED_FIELDS: (keyof OrderItem)[] = ['kind', 'block', 'qty', 'unitPriceFils', 'priceMinFils', 'priceMaxFils', 'titleRu', 'titleEn', 'customerSupplied', 'vatRateBp'];
+const LOCKED_FIELDS: (keyof OrderItem)[] = ['kind', 'block', 'qty', 'unitPriceFils', 'unitGrossFils', 'priceMinFils', 'priceMaxFils', 'titleRu', 'titleEn', 'customerSupplied', 'vatRateBp'];
 
 export async function addItem(orderId: string, input: NewItem): Promise<OrderItem> {
   const settings = await getSettings();
@@ -155,6 +156,8 @@ async function buildVersion(orderId: string, opts: SendOptions): Promise<{ versi
  * customer. Called when the estimate really goes out (the message is sent, or the customer is there).
  */
 export async function sendVersion(orderId: string, opts: SendOptions): Promise<EstimateVersion> {
+  // A percentage discount is counted on the lines as they are now.
+  await syncDiscount(orderId);
   const { version, drafts, order } = await buildVersion(orderId, opts);
   await db.transaction('rw', db.versions, db.items, db.events, async () => {
     await db.versions.add(version);
@@ -198,6 +201,7 @@ export async function withdrawItems(itemIds: string[], opts: { cancel?: boolean 
 
 /** The version that "send" would freeze now, without freezing it (to show the message before it goes). */
 export async function previewVersion(orderId: string, opts: SendOptions): Promise<EstimateVersion> {
+  await syncDiscount(orderId);
   return (await buildVersion(orderId, opts)).version;
 }
 

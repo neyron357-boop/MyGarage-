@@ -222,6 +222,8 @@ erDiagram
 | `title_ru`, `title_en` | |
 | `qty`, `unit` | количество и единица (шт, ч, л) |
 | `unit_price_fils` | цена клиенту без VAT (для B — ожидаемая) |
+| `unit_gross_fils` | цена с VAT, если её набрали «VAT в цене»: брутто строки ровно qty × она, VAT выделяется из неё (тогда `unit_price_fils` — её нетто) |
+| `discount_pct_bp` | у строки скидки (`kind = discount`), данной процентом: 1000 = 10 %; пока черновик — пересчитывается от строк |
 | `price_min_fils`, `price_max_fils` | вилка для блока B |
 | `vat_rate_bp` | обычно 500; `0` — строка без VAT (выбор «Без VAT» под ценой, как позиция без Tax в Eaglecart) |
 | `urgency` | `red` · `yellow` · `green` (для C и доп. согласований) |

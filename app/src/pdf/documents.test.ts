@@ -49,7 +49,8 @@ describe('documents', () => {
     const { createCustomer, createVehicle } = await import('../services/customers');
     const { createOrder } = await import('../services/orders');
     const { addItem } = await import('../services/estimate');
-    const { quickInvoice, addPayment } = await import('../services/money');
+    const { quickInvoice, addPayment, discountIssuedInvoice } = await import('../services/money');
+    const { setDiscount } = await import('../services/discount');
     const { getOrCreateInspection } = await import('../services/inspections');
     const docs = await import('./documents');
     dbm.db.close();
@@ -64,8 +65,15 @@ describe('documents', () => {
       expect(b.size).toBeGreaterThan(20_000);
       expect(new TextDecoder().decode((await b.arrayBuffer()).slice(0, 5))).toBe('%PDF-');
     };
+    // Lines with a discount (a minus line) on the quotation, the invoice and its credit note.
+    await setDiscount(o.id, { pctBp: 1000 });
     await pdfOk(await docs.renderQuotation(o.id));
-    const inv = await quickInvoice(o.id);
+    const first = await quickInvoice(o.id);
+    const { credit, invoice: inv } = await discountIssuedInvoice(o.id, { grossFils: 10000 });
+    // 600.00 + 2 × 346.50 = 1 293.00 AED: −10 % → 1 163.70, then 100 AED off instead → 1 193.00.
+    expect(first.totalFils).toBe(116370);
+    expect(inv.totalFils).toBe(119300);
+    await pdfOk(await docs.renderInvoice(credit.id));
     await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: inv.totalFils, reference: '' });
     await pdfOk(await docs.renderInvoice(inv.id));
     await pdfOk(await docs.renderReceipt((await dbm.db.payments.toArray())[0].id));

@@ -1,17 +1,19 @@
 import { Autocomplete, Box, Button, Group, Modal, NumberInput, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconCheck, IconFileTypePdf, IconPackage, IconPlus, IconSend, IconTool, IconUserPlus } from '@tabler/icons-react';
+import { IconCheck, IconDiscount, IconFileTypePdf, IconPackage, IconPlus, IconSend, IconTool, IconUserPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
+import { discountBase } from '../../domain/discount';
 import { activeInvoice } from '../../domain/invoice';
 import { itemAmounts, itemTitle } from '../../domain/items';
-import { formatAed } from '../../domain/money';
+import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
-import { fromNet, lineAmounts, rateFor, sumAmounts, switchVatMode, vatModeOf, type VatMode } from '../../domain/vat';
+import { enteredPrice, priceFromEntered, rateFor, sumAmounts, vatModeOf, type VatMode } from '../../domain/vat';
 import type { Lang, OrderItem } from '../../domain/types';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
+import { syncDiscount } from '../../services/discount';
 import { addItem, removeItem, restoreItem, updateItem, withdrawItems } from '../../services/estimate';
 import { simpleMessage } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
@@ -21,13 +23,14 @@ import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader,
 import { typedOnly, useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { scrollToTop } from '../../ui/stack';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
-import { PriceInput, VatModeField } from '../estimate/components';
+import { VatModeField } from '../estimate/components';
 import { CustomerModal } from '../customers/forms';
+import { DiscountSheet } from './DiscountSheet';
 import { PaymentModal } from './PaymentPanel';
 
 type Kind = 'labor' | 'part';
-/** A line typed before: its latest net price and VAT rate (0 — it went without VAT). */
-type Suggestion = { titleRu: string; titleEn: string; price: number; rate?: number; uses: number };
+/** A line typed before: its latest net price, VAT-inclusive price if typed with VAT, and VAT rate (0 — no VAT). */
+type Suggestion = { titleRu: string; titleEn: string; price: number; gross?: number; rate?: number; uses: number };
 type Suggestions = { list: Map<string, Suggestion>; top: string[] };
 
 /**
@@ -47,7 +50,7 @@ function useSuggestions(lang: Lang) {
     };
     // Newest first, so a title keeps its latest price.
     const sorted = [...items].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-    for (const it of sorted) if (it.kind === 'labor' || it.kind === 'part') put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, rate: it.vatRateBp }, true);
+    for (const it of sorted) if (it.kind === 'labor' || it.kind === 'part') put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, gross: it.unitGrossFils, rate: it.vatRateBp }, true);
     for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, false);
     const pack = (m: Map<string, Suggestion>): Suggestions => ({
       list: m,
@@ -86,9 +89,9 @@ function LineSheet({
   const [title, setTitle] = useState('');
   const [picked, setPicked] = useState<Suggestion>();
   const [qty, setQty] = useState<number>(1);
+  // The price as typed; `mode` says how it is counted: VAT on top, VAT inside, or no VAT on this line.
   const [price, setPrice] = useState<number | undefined>();
   const [cost, setCost] = useState<number | undefined>();
-  // How the typed price is counted: VAT on top, inside, or no VAT on this line.
   const [mode, setMode] = useState<VatMode>('add');
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
@@ -97,33 +100,40 @@ function LineSheet({
     setTitle(item ? itemTitle(item, lang) : '');
     setPicked(undefined);
     setQty(item?.qty ?? 1);
-    setPrice(item?.unitPriceFils);
+    const m = vatModeOf(item, incl);
+    setMode(m);
+    setPrice(item ? enteredPrice(item, taxRate, m) : undefined);
     setCost(item?.costPriceFils);
-    setMode(vatModeOf(item?.vatRateBp, incl));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, lang, incl]);
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
+  /** A suggestion's price as it is typed: with VAT if it was typed with VAT last time. */
+  const suggested = (s: Suggestion) => {
+    const m = vatModeOf({ vatRateBp: s.rate, unitGrossFils: s.gross }, incl);
+    return { mode: m, price: enteredPrice({ unitPriceFils: s.price, unitGrossFils: s.gross }, s.rate || b.settings.vatRateBp, m) };
+  };
+  const takeSuggestion = (s: Suggestion) => {
+    const x = suggested(s);
+    setMode(x.mode);
+    setPrice(x.price);
+  };
   /** One tap on a frequent line: its name, its last price and VAT as last time. */
   const pick = (name: string) => {
     const s = suggestions?.list.get(name);
     setTitle(name);
     setPicked(s);
-    if (s?.price) {
-      setPrice(s.price);
-      setMode(vatModeOf(s.rate, incl));
-    }
+    if (s?.price) takeSuggestion(s);
     haptic('selection');
   };
-  /** Another way of counting VAT keeps the typed amount and counts it anew. */
-  const changeMode = (m: VatMode) => {
-    if (price !== undefined) setPrice(switchVatMode(price, taxRate, mode, m));
-    setMode(m);
-  };
+  // Another way of counting VAT keeps the typed amount and counts it anew.
+  const priced = { ...priceFromEntered(price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
+  const lineTotal = price ? itemAmounts({ kind, qty: kind === 'part' ? qty || 1 : 1, ...priced } as OrderItem) : undefined;
   const save = () =>
     run(async () => {
       const typed = title.trim();
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
       const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
-      const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, unitPriceFils: price ?? 0, vatRateBp: rateFor(mode, taxRate) };
+      const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, ...priced };
       if (kind === 'part') patch.costPriceFils = cost;
       if (item) await updateItem(item.id, patch);
       else await addItem(b.order.id, { kind, block: 'A', ...patch });
@@ -138,7 +148,7 @@ function LineSheet({
             {suggestions!.top.map((name) => (
               <button key={name} type="button" className="chip" data-active={title === name} onClick={() => pick(name)}>
                 {name}
-                <span className="chip-note">{formatAed(suggestions!.list.get(name)!.price, lang, false)}</span>
+                <span className="chip-note">{formatAed(suggested(suggestions!.list.get(name)!).price, lang, false)}</span>
               </button>
             ))}
           </div>
@@ -151,7 +161,8 @@ function LineSheet({
           limit={8}
           value={title}
           renderOption={({ option }) => {
-            const p = suggestions?.list.get(option.value)?.price;
+            const s = suggestions?.list.get(option.value);
+            const p = s?.price ? suggested(s).price : undefined;
             return (
               <Group justify="space-between" wrap="nowrap" w="100%" gap="sm">
                 <Text size="sm" lineClamp={2}>
@@ -170,10 +181,7 @@ function LineSheet({
             const s = suggestions?.list.get(v);
             if (s) {
               setPicked(s);
-              if ((price === undefined || price === 0) && s.price) {
-                setPrice(s.price);
-                setMode(vatModeOf(s.rate, incl));
-              }
+              if ((price === undefined || price === 0) && s.price) takeSuggestion(s);
             }
           }}
           autoComplete="off"
@@ -182,9 +190,9 @@ function LineSheet({
         />
         <SimpleGrid cols={kind === 'part' ? 2 : 1}>
           {kind === 'part' && <NumberInput label={t('qi.qty')} min={0.1} step={1} decimalScale={2} value={qty} onChange={(v) => setQty(Number(v) || 1)} inputMode="decimal" />}
-          <PriceInput label={kind === 'part' ? t('qi.unitPrice') : t('qi.price')} net={price} onChange={setPrice} rateBp={taxRate} mode={mode} />
+          <MoneyInput label={kind === 'part' ? t('qi.unitPrice') : t('qi.price')} value={price} onChange={setPrice} />
         </SimpleGrid>
-        <VatModeField mode={mode} onChange={changeMode} rateBp={taxRate} total={price ? lineAmounts(kind === 'part' ? qty || 1 : 1, price, rateFor(mode, taxRate)) : undefined} />
+        <VatModeField mode={mode} onChange={setMode} rateBp={taxRate} total={lineTotal} />
         {kind === 'part' && <MoneyInput label={t('qi.cost')} description={t('qi.costHint')} value={cost} onChange={setCost} />}
         <Button size="lg" loading={busy} disabled={!title.trim() || !price} onClick={save}>
           {t('common.save')}
@@ -206,10 +214,14 @@ function IssuedView({ b }: { b: OrderBundle }) {
   const { run, busy } = useAction();
   const [pay, setPay] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
+  const [discount, setDiscountOpen] = useState(false);
   const inv = activeInvoice(b.invoices)!;
   const due = Math.max(0, bundleAmountDue(b));
   const paid = inv.totalFils - due;
   const closed = b.order.stage === 'closed' || b.order.stage === 'delivered';
+  // A discount while something is still to pay: given with a credit note and a new invoice.
+  const canDiscount = !closed && due > 0 && !b.debts.some((d) => d.status === 'open');
+  const hasDiscount = inv.lines.some((l) => l.kind === 'discount');
   const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
   const offerSend = () =>
     setSend({
@@ -239,10 +251,21 @@ function IssuedView({ b }: { b: OrderBundle }) {
           <ListRow
             key={i}
             title={l.description}
-            subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(fromNet(l.unitPriceFils, l.vatRateBp).gross)}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
-            right={<Money fils={l.gross} />}
+            subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
+            right={<Money fils={l.gross} c={l.kind === 'discount' ? 'green.7' : undefined} />}
           />
         ))}
+        {canDiscount && (
+          <ListRow
+            left={<IconDiscount size={20} color="var(--mantine-color-cobalt-6)" />}
+            title={
+              <Text span c="cobalt.6" fw={500} inherit>
+                {hasDiscount ? t('discount.change') : t('discount.add')}
+              </Text>
+            }
+            onClick={() => setDiscountOpen(true)}
+          />
+        )}
       </List>
       <List>
         <ListRow title={<Text span fw={700} inherit>{t('qi.total')}</Text>} right={<Text fz={22} lh={1.1}><Money fils={inv.totalFils} display /></Text>} />
@@ -291,6 +314,7 @@ function IssuedView({ b }: { b: OrderBundle }) {
       )}
       {pay && <PaymentModal b={b} opened onClose={() => setPay(false)} />}
       <SendDialog customer={b.customer} request={send} onClose={() => setSend(null)} />
+      <DiscountSheet b={b} opened={discount} onClose={() => setDiscountOpen(false)} />
     </Stack>
   );
 }
@@ -315,14 +339,23 @@ export function QuickInvoicePage() {
   const [confirm, setConfirm] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
+  const [discountOpen, setDiscountOpen] = useState(false);
+  // A percentage discount follows the lines: recounted whenever they change.
+  const baseKey = b ? discountBase(b.items).map((i) => `${i.id}:${itemAmounts(i).gross}`).join('|') : '';
+  const pctDiscount = !!b?.items.some((i) => i.kind === 'discount' && i.approvalState === 'draft' && i.discountPctBp);
+  const orderId = b?.order.id;
+  useEffect(() => {
+    if (orderId && pctDiscount) syncDiscount(orderId).catch((e) => console.error(e));
+  }, [orderId, baseKey, pctDiscount]);
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b) return <EmptyState title={t('err.notFound')} />;
 
   const inv = activeInvoice(b.invoices);
   const lines = b.items.filter((i) => ['draft', 'approved'].includes(i.approvalState));
   const waiting = b.items.filter((i) => i.approvalState === 'pending');
-  const work = lines.filter((i) => i.kind !== 'part');
+  const work = lines.filter((i) => i.kind !== 'part' && i.kind !== 'discount');
   const parts = lines.filter((i) => i.kind === 'part');
+  const discounts = lines.filter((i) => i.kind === 'discount');
   const sum = sumAmounts(lines.map(itemAmounts));
   const rate = b.settings.vatRateBp / 100;
   const c = b.customer;
@@ -414,6 +447,38 @@ export function QuickInvoicePage() {
             {parts.map(row)}
             {addRow('part')}
           </List>
+          {work.length + parts.length > 0 && (
+            <>
+              <div className="group-title" style={{ marginTop: 22 }}>
+                <Group gap={6}>
+                  <IconDiscount size={15} />
+                  {t('discount.title')}
+                </Group>
+              </div>
+              <List>
+                {discounts.map((i) => (
+                  <ListRow
+                    key={i.id}
+                    title={itemTitle(i, b.order.docLanguage) || t('discount.title')}
+                    subtitle={i.vatRateBp === 0 ? t('item.noVat') : undefined}
+                    right={<Money fils={itemAmounts(i).gross} c="green.7" />}
+                    onClick={() => setDiscountOpen(true)}
+                  />
+                ))}
+                {discounts.length === 0 && (
+                  <ListRow
+                    left={<IconPlus size={20} color="var(--mantine-color-cobalt-6)" />}
+                    title={
+                      <Text span c="cobalt.6" fw={500} inherit>
+                        {t('discount.add')}
+                      </Text>
+                    }
+                    onClick={() => setDiscountOpen(true)}
+                  />
+                )}
+              </List>
+            </>
+          )}
           {waiting.length > 0 && (
             // Sent for approval by mistake (or the customer agreed in person): back onto this invoice.
             <div className="group-note">
@@ -492,6 +557,7 @@ export function QuickInvoicePage() {
       </ConfirmModal>
       <CustomerModal opened={customerOpen} onClose={() => setCustomerOpen(false)} customer={c} />
       <SendDialog customer={b.customer} request={send} onClose={() => setSend(null)} />
+      {!inv && <DiscountSheet b={b} opened={discountOpen} onClose={() => setDiscountOpen(false)} />}
     </>
   );
 }

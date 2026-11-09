@@ -315,10 +315,22 @@ async function launchBrowser() {
     await shot('31a-line-no-vat');
     await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('320,50').first().waitFor(); // 220.50 + 100 without VAT
+    // A discount before the invoice: one tap rounds the total down.
+    await page.getByText('Добавить скидку').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'К оплате 320,00 AED' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Выписать инвойс · 320,00 AED' }).waitFor();
     await shot('31-quick-invoice', true);
     await page.getByRole('button', { name: /^Выписать инвойс/ }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByText(/Инвойс INV-/).waitFor();
+    // A discount after the invoice: credit note and a new invoice (10 % of 320.50 = 32.05).
+    await page.getByText('Изменить скидку').click();
+    await page.getByRole('dialog').getByText('%', { exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: '10 %' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Оформить скидку' }).click();
+    await page.getByRole('dialog').last().getByRole('button', { name: 'Оформить скидку' }).click();
+    await page.getByRole('button', { name: 'Принять оплату · 288,45 AED' }).waitFor();
     await shot('32-quick-issued', true);
     await page.getByRole('button', { name: /^Принять оплату/ }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Провести' }).click();

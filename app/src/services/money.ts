@@ -1,8 +1,11 @@
 import { db, nextNumber, uid } from '../db/db';
 import { cashTotals, nonCashTotals } from '../domain/cash';
 import { dubaiDate, monthKey, nowIso } from '../domain/dates';
-import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from '../domain/invoice';
+import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
+import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, paidNet } from '../domain/invoice';
+import { formatAed } from '../domain/money';
 import type { CashClosing, CashMovement, CashReason, Debt, Expense, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
+import { setDiscount } from './discount';
 import { AppError } from './errors';
 import { recordDecisions, sendVersion, setDone } from './estimate';
 import { addMedia } from './media';
@@ -149,6 +152,44 @@ export async function issueCreditNote(invoiceId: string, reason: string): Promis
     await db.invoices.update(orig.id, { status: 'credited' });
     await logEvent(orig.orderId, 'credit_note', { number: cn.number, original: orig.number, reason });
     return cn;
+  });
+}
+
+/**
+ * A discount once the invoice is out. An issued invoice never changes, so it is cancelled with a credit
+ * note and a new invoice with the discount is issued at once (same type); payments already made count
+ * towards it. The total cannot drop below what was paid — that would be a refund.
+ */
+export async function discountIssuedInvoice(orderId: string, spec: DiscountSpec | null): Promise<{ credit: Invoice; invoice: Invoice }> {
+  return db.transaction('rw', db.tables, async () => {
+    const [invoices, items, payments, debts] = await Promise.all([
+      db.invoices.where('orderId').equals(orderId).toArray(),
+      db.items.where('orderId').equals(orderId).toArray(),
+      db.payments.where('orderId').equals(orderId).toArray(),
+      db.debts.where('orderId').equals(orderId).toArray(),
+    ]);
+    const inv = activeInvoice(invoices);
+    if (!inv || inv.type === 'credit_note') throw new AppError('err.notFound');
+    if (debts.some((d) => d.status === 'open')) throw new AppError('err.discountDebt');
+    // Only the invoiced lines are issued again: lines added since would slip onto the new invoice unasked.
+    if (items.some((i) => i.approvalState === 'draft' && i.kind !== 'discount')) throw new AppError('err.discountDrafts');
+    const before = grossOf(discountBase(items));
+    const off = spec ? discountGross(spec, before) : 0;
+    if (spec && !(off > 0)) throw new AppError('err.amountRequired');
+    if (off > before) throw new AppError('err.discountTooBig');
+    if (before - off < paidNet(payments)) throw new AppError('err.discountOverPaid');
+    if (before - off === inv.totalFils) throw new AppError('err.discountSame');
+    const credit = await issueCreditNote(inv.id, off ? `Discount ${formatAed(off, 'en')}` : 'Discount withdrawn');
+    const ids = await setDiscount(orderId, spec, { quiet: true });
+    if (ids.length) {
+      // The garage gives it in person: recorded like the quick invoice's lines — agreed and done.
+      const v = await sendVersion(orderId, { via: 'in_person', kind: 'price_change', reason: 'Discount' });
+      await recordDecisions(v.id, ids.map((itemId) => ({ itemId, decision: 'approve' as const })), 'in_person');
+      for (const id of ids) await setDone(id, true);
+    }
+    const invoice = await issueInvoice(orderId, inv.type);
+    await logEvent(orderId, 'discount', { amount: off, pct: spec && 'pctBp' in spec ? spec.pctBp : undefined, credit: credit.number, invoice: invoice.number });
+    return { credit, invoice };
   });
 }
 

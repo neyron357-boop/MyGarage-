@@ -305,6 +305,13 @@ export interface OrderItem {
   qty: number;
   unit: 'pcs' | 'h' | 'l' | 'set';
   unitPriceFils: number; // net, per unit
+  /**
+   * The VAT-inclusive unit price when the price was typed with VAT ("VAT in the price"): the line's
+   * gross is exactly qty × this and its VAT is taken out of it; `unitPriceFils` holds the net equivalent.
+   */
+  unitGrossFils?: number;
+  /** A discount line given as a percentage (basis points, 1000 = 10 %): it follows the lines while a draft. */
+  discountPctBp?: number;
   priceMinFils?: number; // block B: net line total
   priceMaxFils?: number; // block B: net line total
   vatRateBp: number;

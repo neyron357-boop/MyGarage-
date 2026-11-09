@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatAed, parseAed, roundFils } from './money';
-import { enteredFromNet, fromNet, lineAmounts, netFromEntered, netFromGross, rateFor, switchVatMode, vatModeOf, vatOf } from './vat';
+import { enteredFromNet, enteredPrice, fromGross, fromNet, lineAmounts, netFromEntered, netFromGross, priceFromEntered, rateFor, switchVatMode, vatModeOf, vatOf } from './vat';
 import { formatPlate, plateMatches, plateSearchKey } from './plates';
 import { formatPhone, normalizePhone, phoneDigits } from './phone';
 import { dubaiDate, formatDate, formatDateTime } from './dates';
@@ -9,6 +9,7 @@ import {
   decisionPatch,
   isAwaitingClient,
   isAwaitingDisassembly,
+  itemAmounts,
   noCallLimitRemaining,
   resolveBlockB,
   summarize,
@@ -89,10 +90,11 @@ describe('vat', () => {
     expect(netFromGross(100, 500)).toBe(95);
   });
   it('counts a typed price with VAT on top, inside, or without VAT', () => {
-    expect(vatModeOf(500, false)).toBe('add');
-    expect(vatModeOf(500, true)).toBe('incl');
+    expect(vatModeOf({ vatRateBp: 500 }, false)).toBe('add');
+    expect(vatModeOf({ vatRateBp: 500 }, true)).toBe('incl');
     expect(vatModeOf(undefined, true)).toBe('incl');
-    expect(vatModeOf(0, false)).toBe('none');
+    expect(vatModeOf({ vatRateBp: 0 }, false)).toBe('none');
+    expect(vatModeOf({ vatRateBp: 500, unitGrossFils: 25000 }, false)).toBe('incl');
     expect(rateFor('none', 500)).toBe(0);
     expect(rateFor('incl', 500)).toBe(500);
     // 100 AED typed: +VAT → net 100 (pays 105); VAT inside → net 95.24 (pays 100); no VAT → net 100 (pays 100).
@@ -105,6 +107,22 @@ describe('vat', () => {
     expect(switchVatMode(10000, 500, 'add', 'incl')).toBe(9524);
     expect(switchVatMode(9524, 500, 'incl', 'none')).toBe(10000);
     expect(switchVatMode(10000, 500, 'none', 'add')).toBe(10000);
+  });
+  it('a price typed with VAT keeps its total to the fils', () => {
+    // 250.00 with VAT inside: 238.10 + 11.90, not 238.10 + 11.91 = 250.01.
+    expect(fromGross(25000, 500)).toEqual({ net: 23810, vat: 1190, gross: 25000 });
+    expect(fromNet(netFromGross(25000, 500), 500).gross).toBe(25001); // why the gross is kept
+    const p = priceFromEntered(25000, 500, 'incl');
+    expect(p).toEqual({ unitPriceFils: 23810, unitGrossFils: 25000 });
+    expect(itemAmounts(item({ ...p }))).toEqual({ net: 23810, vat: 1190, gross: 25000 });
+    expect(itemAmounts(item({ ...p, qty: 2 }))).toEqual({ net: 47619, vat: 2381, gross: 50000 });
+    expect(enteredPrice({ ...p }, 500, 'incl')).toBe(25000);
+    expect(priceFromEntered(25000, 500, 'add')).toEqual({ unitPriceFils: 25000, unitGrossFils: undefined });
+    expect(priceFromEntered(25000, 0, 'incl')).toEqual({ unitPriceFils: 25000, unitGrossFils: undefined });
+    // A discount line with VAT inside is negative to the fils too.
+    expect(itemAmounts(item({ kind: 'discount', unitPriceFils: 2858, unitGrossFils: 3001 }))).toEqual({ net: -2858, vat: -143, gross: -3001 });
+    // The invoice line carries the exact amounts.
+    expect(invoiceLines([item({ ...p, approvalState: 'approved' })], 'en')[0]).toMatchObject({ unitPriceFils: 23810, net: 23810, vat: 1190, gross: 25000 });
   });
   it('an untaxed line goes onto the invoice with no VAT', () => {
     const lines = invoiceLines([item({ approvalState: 'approved' }), item({ approvalState: 'approved', vatRateBp: 0, unitPriceFils: 5000 })], 'en');

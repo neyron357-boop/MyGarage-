@@ -1,20 +1,28 @@
 import { roundFils } from './money';
-import { fromNet, type Amounts } from './vat';
+import { fromGross, fromNet, type Amounts } from './vat';
 import type { DecisionKind, ItemDecision, Lang, OrderItem } from './types';
 
 export function itemTitle(item: Pick<OrderItem, 'titleRu' | 'titleEn'>, lang: Lang): string {
   return (lang === 'ru' ? item.titleRu || item.titleEn : item.titleEn || item.titleRu) || '';
 }
 
-/** Net line amount. Customer-supplied parts cost the customer nothing; discounts are negative. */
-export function itemNet(item: OrderItem): number {
-  if (item.customerSupplied) return 0;
-  const net = roundFils(item.qty * item.unitPriceFils);
-  return item.kind === 'discount' ? -Math.abs(net) : net;
+/**
+ * Line amounts. Customer-supplied parts cost the customer nothing; discounts are negative. A price
+ * typed with VAT ("VAT in the price") keeps its gross to the fils and its VAT is taken out of it;
+ * otherwise VAT is added to the net.
+ */
+export function itemAmounts(item: OrderItem): Amounts {
+  if (item.customerSupplied) return fromNet(0, item.vatRateBp);
+  const signed = (x: number) => (item.kind === 'discount' ? -Math.abs(x) : x);
+  if (item.unitGrossFils !== undefined && item.vatRateBp > 0) {
+    return fromGross(signed(roundFils(item.qty * item.unitGrossFils)), item.vatRateBp);
+  }
+  return fromNet(signed(roundFils(item.qty * item.unitPriceFils)), item.vatRateBp);
 }
 
-export function itemAmounts(item: OrderItem): Amounts {
-  return fromNet(itemNet(item), item.vatRateBp);
+/** Net line amount. */
+export function itemNet(item: OrderItem): number {
+  return itemAmounts(item).net;
 }
 
 /** Price range (gross) for block B items; for others min = max = actual. */
@@ -134,8 +142,9 @@ export function resolveBlockB(item: OrderItem, needed: boolean, actualNetFils: n
   const qty = item.qty > 0 ? item.qty : 1;
   const unitPriceFils = roundFils(actualNetFils / qty);
   const max = item.priceMaxFils ?? Number.POSITIVE_INFINITY;
+  // The actual price is a net one: a VAT-inclusive price typed earlier no longer applies.
   if (item.bChoice === 'do_if_needed' && actualNetFils <= max) {
-    return { kind: 'auto_approved', patch: { bNeeded: true, unitPriceFils, approvalState: 'approved' } };
+    return { kind: 'auto_approved', patch: { bNeeded: true, unitPriceFils, unitGrossFils: undefined, approvalState: 'approved' } };
   }
-  return { kind: 'needs_approval', patch: { bNeeded: true, unitPriceFils, bChoice: undefined, approvalState: 'draft' } };
+  return { kind: 'needs_approval', patch: { bNeeded: true, unitPriceFils, unitGrossFils: undefined, bChoice: undefined, approvalState: 'draft' } };
 }
