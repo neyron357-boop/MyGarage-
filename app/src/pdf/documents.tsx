@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { db } from '../db/db';
 import { addDays, formatDate, formatDateTime, formatDocDate, nowIso } from '../domain/dates';
 import { REQUIRED_SLOTS } from '../domain/inspection';
+import { checkLabel, lightLabel } from '../domain/quickLists';
 import { itemAmounts, itemTitle } from '../domain/items';
 import { formatAed } from '../domain/money';
 import { formatPhone } from '../domain/phone';
@@ -136,8 +137,10 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
   const sig = insp.signatureMediaId ? await mediaDataUrl(insp.signatureMediaId, false) : undefined;
   const intake = insp.kind === 'intake';
   const c = insp.conditions;
-  const fails = Object.entries(insp.functionChecks).filter(([, v]) => v === 'fail').map(([k]) => t(`check.${k}`));
-  const oks = Object.entries(insp.functionChecks).filter(([, v]) => v === 'ok').map(([k]) => t(`check.${k}`));
+  // Checks and lights are the words of the garage's lists (older reports: built-in codes, translated).
+  const tl = (k: string, o?: { defaultValue?: string }) => String(t(k, o));
+  const fails = Object.entries(insp.functionChecks).filter(([, v]) => v === 'fail').map(([k]) => checkLabel(tl, k));
+  const oks = Object.entries(insp.functionChecks).filter(([, v]) => v === 'ok').map(([k]) => checkLabel(tl, k));
   const approved = b.items.filter((i) => i.approvalState === 'approved');
   const declined = b.items.filter((i) => i.approvalState === 'declined');
   const declinedAt = (id: string) => b.decisions.filter((d) => d.itemId === id && d.decision === 'decline').pop()?.decidedAt;
@@ -149,7 +152,7 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
         <Parties customer={b.customer} vehicle={b.vehicle} order={b.order} lang={lang} />
         <View style={s.box}>
           <Text>{t('intake.mileage')}: <Text style={s.bold}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US').replace(/\u00a0/g, ' ')} ${t('unit.km')}` : '—'}</Text> · {t('intake.fuel')}: <Text style={s.bold}>{insp.fuelLevel !== undefined ? t(`fuel.${insp.fuelLevel}`) : '—'}</Text></Text>
-          <Text>{t('intake.lights')}: {insp.warningLights.length ? insp.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Text>
+          <Text>{t('intake.lights')}: {insp.warningLights.length ? insp.warningLights.map((l) => lightLabel(tl, l)).join(', ') : t('pdf.none')}</Text>
           {intake && <Text>OBD: {insp.obdNoCodes ? t('intake.obdNone') : insp.obdCodes.join(', ') || `${t('pdf.skipped')}: ${insp.obdSkipReason ?? ''}`}</Text>}
           {intake && <Text>{t('pdf.working')}: {oks.join(', ') || '—'}</Text>}
           {intake && <Text>{t('pdf.notWorking')}: {fails.join(', ') || t('pdf.none')}</Text>}

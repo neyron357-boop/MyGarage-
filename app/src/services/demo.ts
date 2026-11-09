@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 import { addDays, dubaiDate, nowIso, runAt } from '../domain/dates';
-import { FUNCTION_CHECKS, QC_CHECKS, REQUIRED_SLOTS } from '../domain/inspection';
+import { QC_CHECKS, REQUIRED_SLOTS } from '../domain/inspection';
+import { DEFAULT_QUICK_LISTS } from '../domain/quickLists';
 import type { CheckState, Lang, Order } from '../domain/types';
 import { createCustomer, createVehicle } from './customers';
 import { demoPhoto, demoSignature } from './demoPhotos';
@@ -13,7 +14,8 @@ import { saveSupplier, setProcurement } from './parts';
 const hoursAgo = (h: number) => addDays(nowIso(), -h / 24);
 const at = <T,>(hAgo: number, fn: () => Promise<T>) => runAt(hoursAgo(hAgo), fn);
 
-const ALL_OK = Object.fromEntries(FUNCTION_CHECKS.map((c) => [c, 'ok' as CheckState]));
+// The standard (English) list of Settings → Lists, as a report opened today would have it.
+const ALL_OK = Object.fromEntries(DEFAULT_QUICK_LISTS.functionChecks.map((c) => [c, 'ok' as CheckState]));
 const QC_ALL = Object.fromEntries(QC_CHECKS.map((c) => [c, true]));
 
 /** Sign an intake act with a full set of (drawn) photos. */

@@ -538,9 +538,10 @@ html.kb .tab-bar-wrap {
 }
 
 /* ---------- Touch targets ---------- */
-/* Small controls (compact buttons in rows, the stage chip, round icon buttons, the clear "x", filter pills)
-   keep their look but take a touch of about 44 pt, the iPhone minimum: an invisible margin of touch
-   around them (and the iPhone's haptic label covers it too). */
+/* Small controls (compact buttons in rows, the stage chip, round icon buttons, the clear "x") keep their
+   look but take a touch of about 44 pt, the iPhone minimum: an invisible margin of touch around them
+   (and the iPhone's haptic label covers it too). Not inside the sideways rows of pills and chips: there
+   the margin would stick out of the row and let it scroll up and down under the finger. */
 @media (pointer: coarse) {
   .mantine-Button-root[data-size^='compact'],
   .mantine-ActionIcon-root,
@@ -549,9 +550,7 @@ html.kb .tab-bar-wrap {
     overflow: visible;
   }
   .stage-btn,
-  .search-clear,
-  .chip,
-  .scroll-tabs > button {
+  .search-clear {
     position: relative;
   }
   :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear)::after {
@@ -559,13 +558,12 @@ html.kb .tab-bar-wrap {
     position: absolute;
     inset: -9px -5px;
   }
-  :is(.chip, .scroll-tabs > button)::after {
-    content: '';
-    position: absolute;
-    inset: -4px -2px;
-  }
   :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root) > .haptic-hit {
     inset: -9px -5px;
+  }
+  :is(.scroll-tabs, .chip-row:not(.wrap)) :is(.mantine-Button-root, .mantine-ActionIcon-root)::after,
+  :is(.scroll-tabs, .chip-row:not(.wrap)) :is(.mantine-Button-root, .mantine-ActionIcon-root) > .haptic-hit {
+    inset: 0;
   }
 }
 
@@ -965,6 +963,33 @@ html.kb .tab-bar-wrap {
   outline-offset: 2px;
 }
 
+/* ---------- Editable list lines (Settings → Lists) ---------- */
+.quick-row {
+  gap: 4px;
+  padding-right: 8px;
+}
+.quick-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  color: inherit;
+  padding: 0;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.quick-input::placeholder {
+  color: var(--app-label-3);
+}
+.quick-add-icon {
+  flex-shrink: 0;
+  color: var(--mantine-color-cobalt-6);
+}
+
 /* ---------- Label — amount rows inside a card ---------- */
 .kv-rows {
   margin-top: 10px;
@@ -1098,10 +1123,18 @@ html.kb .tab-bar-wrap {
   position: relative;
   display: flex;
   gap: 6px;
+  /* Sideways only: the row never moves up and down under the finger. */
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
   padding: 2px;
   margin: 0 -2px;
+}
+/* What a row of tabs shows is at least a screen tall on a phone: switching to a shorter tab never pulls
+   the page (and the row with it) down — the row stays where the finger left it. */
+.screen-body .tab-panel {
+  min-height: calc(100dvh - var(--app-nav-h) - env(safe-area-inset-top, 0px) - 56px);
 }
 .scroll-tabs::-webkit-scrollbar {
   display: none;
@@ -1481,6 +1514,8 @@ html.kb .tab-bar-wrap {
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
   padding: 2px 0;
 }
@@ -2229,29 +2264,54 @@ html.kb .screen-bottom > .sticky-bar {
 .cam-strip::-webkit-scrollbar {
   display: none;
 }
+/* Each side: its photo (or where to stand) with its name under it — tap to shoot that side. */
 .cam-strip-item {
   position: relative;
   flex: 0 0 auto;
-  width: 50px;
-  height: 50px;
+  width: 64px;
   border: 0;
   padding: 0;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  color: #fff;
+  background: none;
+  cursor: pointer;
+}
+.cam-strip-thumb {
+  width: 50px;
+  height: 50px;
   border-radius: 12px;
   overflow: hidden;
   display: grid;
   place-items: center;
-  color: #fff;
   background: rgba(255, 255, 255, 0.12);
-  cursor: pointer;
   transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) ease, opacity var(--dur-2) ease;
 }
-.cam-strip-item[data-done='false'] {
+.cam-strip-item[data-done='false'] .cam-strip-thumb {
   opacity: 0.75;
 }
-.cam-strip-item[data-active='true'] {
+.cam-strip-item[data-active='true'] .cam-strip-thumb {
   opacity: 1;
   transform: scale(1.08);
   box-shadow: 0 0 0 2px #000, 0 0 0 4px #fff;
+}
+.cam-strip-label {
+  max-width: 64px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.72);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cam-strip-item[data-active='true'] .cam-strip-label {
+  color: #fff;
 }
 .cam-strip-item img {
   width: 100%;

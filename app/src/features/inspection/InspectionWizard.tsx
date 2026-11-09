@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
 import { REQUIRED_SLOTS, validateInspection, type MissingKey } from '../../domain/inspection';
+import { checkLabel, lightLabel } from '../../domain/quickLists';
 import { formatAed } from '../../domain/money';
 import type { Inspection } from '../../domain/types';
 import { inspectionPdf, openPdf } from '../../services/documents';
@@ -198,7 +199,7 @@ function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: I
   const c = insp.conditions;
   const fails = Object.entries(insp.functionChecks)
     .filter(([, v]) => v === 'fail')
-    .map(([k]) => tc(`check.${k}`));
+    .map(([k]) => checkLabel(tc, k));
   return (
     <Stack gap="md">
       {missing.length > 0 && (
@@ -241,7 +242,7 @@ function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: I
           <Field label={tc('pdf.photos')}>{media.filter((m) => m.kind === 'photo').length}</Field>
           <Field label={tc('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} ${tc('unit.km')}` : '—'}</Field>
           <Field label={tc('intake.fuel')}>{insp.fuelLevel !== undefined ? tc(`fuel.${insp.fuelLevel}`) : '—'}</Field>
-          <Field label={tc('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => tc(`light.${l}`)).join(', ') : tc('pdf.none')}</Field>
+          <Field label={tc('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => lightLabel(tc, l)).join(', ') : tc('pdf.none')}</Field>
           {insp.kind === 'intake' && (
             <>
               <Field label={tc('pdf.damage')}>{insp.noDamage ? tc('damage.none') : marks.map((m, i) => `${i + 1}. ${tc(`damage.type.${m.type}`)}`).join(', ') || '—'}</Field>

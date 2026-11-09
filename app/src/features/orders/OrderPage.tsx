@@ -47,6 +47,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate, formatDateTime } from '../../domain/dates';
 import { QC_CHECKS } from '../../domain/inspection';
+import { lightLabel } from '../../domain/quickLists';
 import { activeInvoice } from '../../domain/invoice';
 import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, summarize } from '../../domain/items';
 import { formatAed } from '../../domain/money';
@@ -395,7 +396,7 @@ function Overview({ b }: { b: OrderBundle }) {
             <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md" verticalSpacing="md">
               <Field label={t('intake.mileage')}>{i.mileageKm !== undefined ? `${i.mileageKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'}</Field>
               <Field label={t('intake.fuel')}>{i.fuelLevel !== undefined ? t(`fuel.${i.fuelLevel}`) : '—'}</Field>
-              <Field label={t('intake.lights')}>{i.warningLights.length ? i.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Field>
+              <Field label={t('intake.lights')}>{i.warningLights.length ? i.warningLights.map((l) => lightLabel(t, l)).join(', ') : t('pdf.none')}</Field>
               <Field label={t('step.obd')}>{i.obdNoCodes ? t('intake.obdNone') : i.obdCodes.join(', ') || i.obdSkipReason || '—'}</Field>
               <Field label={t('cond.testDrive')}>{i.conditions?.testDriveAllowed ? t('common.yes') : t('common.no')}</Field>
               {/* Terms that only acts signed before the fast check-in have. */}
@@ -1001,7 +1002,7 @@ export function OrderPage() {
             { value: 'journal', label: t('order.tab.journal') },
           ]}
         />
-        <div key={tab} className="fade-enter">
+        <div key={tab} className="fade-enter tab-panel">
           {tab === 'overview' && <Overview b={b} />}
           {tab === 'work' && <WorkTab b={b} />}
           {tab === 'approvals' && <ApprovalsTab b={b} />}

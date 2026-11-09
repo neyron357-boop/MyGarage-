@@ -8,14 +8,14 @@ import { db } from '../../db/db';
 import { CAR_MAKES, canonicalMake, canonicalModel, modelsFor, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone } from '../../domain/phone';
 import { EMIRATES } from '../../domain/plates';
+import { quickList } from '../../domain/quickLists';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
 import { findVehicleForCheckIn, popularMakes, popularModels, suggestCustomers } from '../../services/customers';
 import { checkIn } from '../../services/orders';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
-import { typedOnly, useAction, useLang } from '../../ui/hooks';
+import { typedOnly, useAction, useLang, useSettings } from '../../ui/hooks';
 
-const QUICK = ['service', 'brakes', 'ac', 'checkEngine', 'suspension', 'electrics', 'noise', 'battery'];
 const LAST_EMIRATE = 'mygarage.lastEmirate';
 
 function lastEmirate(): Emirate {
@@ -160,6 +160,7 @@ export function NewOrderPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { run, busy } = useAction();
+  const settings = useSettings();
   const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
@@ -189,9 +190,10 @@ export function NewOrderPage() {
   const suggestions = useLiveQuery(() => (picked || pickedCustomer ? [] : suggestCustomers(phone, name)), [picked, pickedCustomer, phone, name]) ?? [];
   const owner = picked?.owner ?? pickedCustomer;
 
-  const addQuick = (k: string) => {
-    const phrase = t(`newOrder.quick.${k}`);
-    setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase.toLowerCase()}` : phrase));
+  // Complaint chips: the garage's list (Settings → Lists) — English by default, as it goes on the documents.
+  const complaints = quickList(settings, 'complaints');
+  const addQuick = (phrase: string) => {
+    setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase}` : phrase));
   };
 
   const submit = (target: 'intake' | 'invoice' | 'book') =>
@@ -343,9 +345,9 @@ export function NewOrderPage() {
         </div>
         <Box className="surface" p="md">
           <div className="chip-row wrap">
-            {QUICK.map((k) => (
-              <button key={k} type="button" className="chip" data-active={complaint.includes(t(`newOrder.quick.${k}`))} onClick={() => addQuick(k)}>
-                {t(`newOrder.quick.${k}`)}
+            {complaints.map((p) => (
+              <button key={p} type="button" className="chip" data-active={complaint.includes(p)} onClick={() => addQuick(p)}>
+                {p}
               </button>
             ))}
           </div>

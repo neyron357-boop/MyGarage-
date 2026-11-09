@@ -247,6 +247,20 @@ async function launchBrowser() {
     await page.getByText('Закрыт').first().waitFor();
     await shot('22-order-closed', true);
   });
+  await step('quick lists', async () => {
+    // Settings → Lists: a line added to the complaints is a chip in "New job" (English by default).
+    await page.goto(BASE + '#/settings?tab=lists');
+    // The lines are editable fields: the standard complaints are their values.
+    await page.locator('input.quick-input[value="Scheduled service"]').first().waitFor();
+    const add = page.getByPlaceholder('Новая строка (на английском)').first();
+    await add.fill('Wheel balancing');
+    await add.press('Enter');
+    await page.waitForTimeout(400);
+    await shot('34-settings-lists', true);
+    await page.goto(BASE + '#/orders/new');
+    await page.getByRole('button', { name: 'Wheel balancing' }).waitFor();
+    await page.getByRole('button', { name: 'Brake noise' }).waitFor();
+  });
   await step('quick invoice path', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('31415');

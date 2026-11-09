@@ -27,6 +27,11 @@ export interface WalkaroundCameraProps {
   extraSlots?: readonly string[];
   /** Slot to start from (a tapped tile); by default the first one without a photo. */
   start?: string;
+  /**
+   * Only this side (a tapped tile): after the shot the camera closes and the photo is in its tile — it
+   * does not walk on to another side by itself. The walk-around is "Shoot around" without `once`.
+   */
+  once?: boolean;
   /** Handover: the check-in photos, shown see-through to repeat the angle. */
   before?: Media[];
   onClose: () => void;
@@ -51,12 +56,18 @@ function useThumbUrl(id?: string, thumb = true) {
   return url;
 }
 
+/** One side in the strip under the finder: its photo or position, and its name — tap it to shoot that side. */
 function StripItem({ slot, active, mediaId, localUrl, onClick, label }: { slot: string; active: boolean; mediaId?: string; localUrl?: string; onClick: () => void; label: string }) {
   const dbUrl = useThumbUrl(localUrl ? undefined : mediaId);
   const url = localUrl ?? dbUrl;
   return (
     <button type="button" className="cam-strip-item" data-active={active} data-done={!!url} onClick={onClick} aria-label={label} aria-current={active}>
-      {url ? <img src={url} alt="" key={url} /> : slot === FREE ? <IconPlus size={18} /> : hasAngleHint(slot) ? <AngleHint slot={slot} size={34} /> : <IconId size={20} />}
+      <span className="cam-strip-thumb">
+        {url ? <img src={url} alt="" key={url} /> : slot === FREE ? <IconPlus size={18} /> : hasAngleHint(slot) ? <AngleHint slot={slot} size={34} /> : <IconId size={20} />}
+      </span>
+      <span className="cam-strip-label" aria-hidden>
+        {label}
+      </span>
     </button>
   );
 }
@@ -65,7 +76,7 @@ function StripItem({ slot, active, mediaId, localUrl, onClick, label }: { slot: 
  * Full-screen camera for the photos of an act. One tap per angle: the photo is saved in the
  * background and the camera moves on to the next angle by itself, the map shows where to stand.
  */
-export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, before, onClose, onSystemCamera, append, onSaved }: WalkaroundCameraProps) {
+export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, once, before, onClose, onSystemCamera, append, onSaved }: WalkaroundCameraProps) {
   const { t } = useTranslation();
   const errorText = useErrorText();
   const all = useMemo(() => [...slots, ...extraSlots], [slots, extraSlots]);
@@ -225,7 +236,8 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, b
         })
         .finally(() => setPending((n) => n - 1));
 
-      if (single) {
+      // One side asked for (or the only one): back to the tiles with its photo.
+      if (single || (once && slot !== FREE)) {
         void finish();
         return;
       }
@@ -408,7 +420,7 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, b
             <span className="cam-saving">
               <Loader color="white" size={14} /> {t('camera.saving')}
             </span>
-          ) : single ? null : mainDone === slots.length || current === FREE ? (
+          ) : single || once ? null : mainDone === slots.length || current === FREE ? (
             <button type="button" className="cam-text" onClick={() => void finish()}>
               {t('camera.finish')}
             </button>

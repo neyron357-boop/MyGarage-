@@ -53,7 +53,7 @@ function useSuggestions(lang: Lang) {
       top: [...m.entries()]
         .filter(([, s]) => s.price > 0)
         .sort((a, b) => b[1].uses - a[1].uses)
-        .slice(0, 8)
+        .slice(0, 12)
         .map(([k]) => k),
     });
     return { labor: pack(maps.labor), part: pack(maps.part) };
@@ -79,7 +79,8 @@ function LineSheet({
   suggestions?: Suggestions;
 }) {
   const { t } = useTranslation();
-  const lang = useLang();
+  // The lines go on the customer's invoice: names in the job's document language (English by default).
+  const lang = b.order.docLanguage;
   const { run, busy } = useAction();
   const [title, setTitle] = useState('');
   const [picked, setPicked] = useState<Suggestion>();
@@ -106,7 +107,8 @@ function LineSheet({
   const save = () =>
     run(async () => {
       const typed = title.trim();
-      const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : lang === 'ru' ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
+      // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
+      const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
       const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, unitPriceFils: price ?? 0 };
       if (kind === 'part') patch.costPriceFils = cost;
       if (item) await updateItem(item.id, patch);
@@ -285,7 +287,8 @@ export function QuickInvoicePage() {
   const lang = useLang();
   const { run, busy } = useAction();
   const b = useOrderBundle(id);
-  const suggestions = useSuggestions(lang);
+  // Quick lines in the language of this job's documents (English by default), as they will be printed.
+  const suggestions = useSuggestions(b?.order.docLanguage ?? 'en');
   const [sheet, setSheet] = useState<{ kind: Kind; item?: OrderItem } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -305,7 +308,7 @@ export function QuickInvoicePage() {
   const row = (i: OrderItem) => (
     <ListRow
       key={i.id}
-      title={itemTitle(i, lang) || '—'}
+      title={itemTitle(i, b.order.docLanguage) || '—'}
       subtitle={i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : undefined}
       right={<Money fils={itemAmounts(i).gross} />}
       onClick={i.approvalState === 'draft' ? () => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i }) : undefined}

@@ -1,16 +1,14 @@
-import { ActionIcon, Box, Button, Collapse, Group, Progress, SimpleGrid, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconBuildingStore, IconCheck, IconChevronDown, IconCloudDownload, IconDeviceMobile, IconListCheck, IconListDetails, IconLockOpen, IconUsers, IconX, type Icon } from '@tabler/icons-react';
+import { ActionIcon, Box, Collapse, Group, Progress, SimpleGrid, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { IconBuildingStore, IconCheck, IconChevronDown, IconDeviceMobile, IconListCheck, IconListDetails, IconLockOpen, IconUsers, IconX, type Icon } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dubaiDate } from '../../domain/dates';
-import { saveBackupFile } from '../../services/backup';
 import { PLACEHOLDER_STAFF } from '../../services/seed';
 import { Tip } from '../../ui/components';
-import { useAction, useSettings } from '../../ui/hooks';
-import { insecureContext, useBackupAge } from '../../ui/device';
+import { useSettings } from '../../ui/hooks';
+import { insecureContext } from '../../ui/device';
 import { useInstall } from '../../ui/pwa';
 
 const DISMISS_KEY = 'mygarage.setupDismissed';
@@ -110,29 +108,6 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
       </SimpleGrid>
       </Collapse>
     </Box>
-  );
-}
-
-/** One-tap backup when the last one is older than a week (a tip, like iOS TipKit). */
-export function BackupReminder() {
-  const { t } = useTranslation();
-  const { run, busy } = useAction();
-  const backup = useBackupAge();
-  const hasOrders = useLiveQuery(async () => (await db.orders.count()) > 0, []);
-  if (!hasOrders || !backup.due) return null;
-  return (
-    <Tip
-      icon={IconCloudDownload}
-      color="orange"
-      title={backup.at ? t('backupReminder.title', { days: backup.days }) : t('backupReminder.never')}
-      actions={
-        <Button variant="subtle" loading={busy} onClick={() => run(() => saveBackupFile(`mygarage-backup-${dubaiDate()}.mygarage`), 'settings.backupDone')}>
-          {t('backupReminder.action')}
-        </Button>
-      }
-    >
-      {t('backupReminder.text')}
-    </Tip>
   );
 }
 

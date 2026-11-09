@@ -257,6 +257,7 @@ export function PartsPage() {
           { value: 'suppliers', label: t('nav.suppliers'), count: suppliers.filter((s) => !s.archivedAt).length },
         ]}
       />
+      <div className="tab-panel">
       {tab === 'needed' && (needed.length ? <List>{needed.map(row)}</List> : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
       {tab === 'ordered' && (ordered.length ? <List>{ordered.map(row)}</List> : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
       {tab === 'pickup' && (
@@ -365,6 +366,7 @@ export function PartsPage() {
           )}
         </Stack>
       )}
+      </div>
       <ProcurementModal item={proc} onClose={() => setProc(null)} />
       <SupplierModal supplier={supplierEdit} onClose={() => setSupplierEdit(null)} />
     </>

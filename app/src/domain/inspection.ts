@@ -2,19 +2,12 @@ import type { DamageMark, Inspection } from './types';
 
 export const REQUIRED_SLOTS = ['front', 'front_right', 'right', 'rear_right', 'rear', 'rear_left', 'left', 'front_left'] as const;
 export const EXTRA_SLOTS = ['wheels', 'roof', 'windshield', 'interior', 'extra'] as const;
-export const WARNING_LIGHTS = ['check_engine', 'abs', 'airbag', 'oil', 'battery', 'coolant', 'brake', 'tpms', 'other'] as const;
-export const FUNCTION_CHECKS = [
-  'ac',
-  'windows',
-  'central_lock',
-  'radio',
-  'headlights',
-  'indicators',
-  'brake_lights',
-  'wipers',
-  'alarm',
-  'rear_camera',
-] as const;
+/*
+ * Warning lights and function checks are the words of the garage's lists (domain/quickLists.ts,
+ * Settings → Lists). Reports made before the lists keep built-in codes — check_engine, abs, airbag,
+ * oil, battery, coolant, brake, tpms, other; ac, windows, central_lock, radio, headlights, indicators,
+ * brake_lights, wipers, alarm, rear_camera — still said in words by the `light.*` / `check.*` texts.
+ */
 export const QC_CHECKS = [
   'no_leaks',
   'wheels_torqued',

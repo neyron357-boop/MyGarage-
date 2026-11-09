@@ -25,7 +25,8 @@ import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleChec
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTime } from '../../domain/dates';
-import { EXTRA_SLOTS, FUEL_LEVELS, FUNCTION_CHECKS, REQUIRED_SLOTS, WARNING_LIGHTS } from '../../domain/inspection';
+import { EXTRA_SLOTS, FUEL_LEVELS, REQUIRED_SLOTS } from '../../domain/inspection';
+import { checkLabel, lightLabel, quickList } from '../../domain/quickLists';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatPhone } from '../../domain/phone';
 import type { CheckState, DamageMark, DamageType, DamageView, FuelLevel, Inspection, Media } from '../../domain/types';
@@ -41,7 +42,7 @@ import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectC
 import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
 import { DateTimeField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useSettings } from '../../ui/hooks';
 import { LazyTextarea, LazyTextInput } from '../../ui/LazyText';
 
 export interface StepProps {
@@ -123,6 +124,7 @@ export function PhotoSlot({
 }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
+  const settings = useSettings();
   const input = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(false);
   const [camera, setCamera] = useState(false);
@@ -258,10 +260,11 @@ export function PhotoSlot({
       )}
       {camera && <WalkaroundCamera insp={insp} media={media} slots={[slot]} before={before ? [before] : undefined} onClose={() => setCamera(false)} onSystemCamera={pick} />}
       <Modal opened={skipOpen} onClose={() => setSkipOpen(false)} title={t('photos.skipReason')}>
+        {/* The reason is printed on the handover report: the garage's list, English by default. */}
         <Group gap={6} mb="sm">
-          {['dark', 'dirty', 'noSpace', 'customerRush'].map((r) => (
-            <Chip key={r} checked={reason === t(`photos.reasons.${r}`)} onChange={() => setReason(t(`photos.reasons.${r}`))}>
-              {t(`photos.reasons.${r}`)}
+          {quickList(settings, 'skipReasons').map((r) => (
+            <Chip key={r} checked={reason === r} onChange={() => setReason(r)}>
+              {r}
             </Chip>
           ))}
         </Group>
@@ -331,8 +334,9 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const live = inAppCameraAvailable() && !insp.locked;
-  // The walk-around camera: `start` = the angle to begin with (a tapped tile), undefined = first empty.
-  const [camera, setCamera] = useState<{ start?: string } | null>(null);
+  // The walk-around camera: `start` = the angle to begin with, undefined = first empty; `once` = a tapped
+  // tile: only that side is shot, then the tiles come back (you choose the sides yourself).
+  const [camera, setCamera] = useState<{ start?: string; once?: boolean } | null>(null);
   // No camera access: the phone's own camera for one slot.
   const sysInput = useRef<HTMLInputElement>(null);
   const sysSlot = useRef('extra');
@@ -344,6 +348,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
   const video = media.find((m) => m.kind === 'video');
   const complete = done === total;
   const openCamera = (start?: string) => setCamera({ start });
+  const shootSide = (slot: string) => setCamera({ start: slot, once: slot !== 'extra' });
   // All photos of the act in walk-around order, to swipe through in the viewer.
   const [viewing, setViewing] = useState<number | null>(null);
   const gallery = [...REQUIRED_SLOTS, ...extraSlots]
@@ -353,7 +358,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
   const openPhoto = (id: string) => setViewing(Math.max(0, gallery.findIndex((m) => m.id === id)));
   const retakeFromViewer = (slot: string) => {
     setViewing(null);
-    if (live) window.setTimeout(() => openCamera(slot), 320);
+    if (live) window.setTimeout(() => shootSide(slot), 320);
     else {
       sysSlot.current = slot;
       sysInput.current?.click();
@@ -387,7 +392,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
       </Card>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
         {REQUIRED_SLOTS.map((s) => (
-          <PhotoSlot key={s} insp={insp} slot={s} media={media} required before={intakeMedia?.find((m) => m.slot === s)} onCamera={live ? openCamera : undefined} onOpen={openPhoto} />
+          <PhotoSlot key={s} insp={insp} slot={s} media={media} required before={intakeMedia?.find((m) => m.slot === s)} onCamera={live ? shootSide : undefined} onOpen={openPhoto} />
         ))}
       </SimpleGrid>
       <Title order={5} mt="sm">
@@ -396,7 +401,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" verticalSpacing="md">
         {/* The registration card (Mulkiya) is one of the extra photos at check-in. */}
         {extraSlots.map((s) => (
-          <PhotoSlot key={s} insp={insp} slot={s} media={media} before={intakeMedia?.find((m) => m.slot === s)} onCamera={live ? openCamera : undefined} onOpen={openPhoto} />
+          <PhotoSlot key={s} insp={insp} slot={s} media={media} before={intakeMedia?.find((m) => m.slot === s)} onCamera={live ? shootSide : undefined} onOpen={openPhoto} />
         ))}
       </SimpleGrid>
       <Group gap="xs">
@@ -464,6 +469,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
           slots={REQUIRED_SLOTS}
           extraSlots={[...extraSlots, 'extra']}
           start={camera.start}
+          once={camera.once}
           before={intakeMedia}
           onClose={() => setCamera(null)}
           onSystemCamera={(slot) => {
@@ -626,6 +632,7 @@ export function DamageStep({ insp, media, marks }: StepProps) {
 
 export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
   const { t } = useTranslation();
+  const lights = quickList(b.settings, 'warningLights');
   const intake = insp.kind === 'handover' ? b.intake : undefined;
   const testKm = (b.order.testDriveEndKm ?? 0) - (b.order.testDriveStartKm ?? 0);
   const delta = intake?.mileageKm !== undefined && insp.mileageKm !== undefined ? insp.mileageKm - intake.mileageKm : undefined;
@@ -682,18 +689,20 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
         <Text size="sm" fw={600} mb={8}>
           {t('intake.lights')}
         </Text>
+        {/* The garage's list (Settings → Lists, English by default — it is printed on the report), plus
+            whatever this report already has (older reports keep their built-in codes). */}
         <Chip.Group multiple value={insp.warningLights} onChange={(v) => void save(insp, { warningLights: v })}>
           <Group gap={6}>
-            {WARNING_LIGHTS.map((l) => (
+            {[...lights, ...insp.warningLights.filter((l) => !lights.includes(l))].map((l) => (
               <Chip key={l} value={l} color="red" variant="light" disabled={insp.locked}>
-                {t(`light.${l}`)}
+                {lightLabel(t, l)}
               </Chip>
             ))}
           </Group>
         </Chip.Group>
         <Text size="xs" c="dimmed" mt="sm">
           {insp.warningLights.length === 0 ? t('intake.noLights') : t('intake.lightsCount', { n: insp.warningLights.length })}
-          {intake && intake.warningLights.length > 0 && ` · ${t('handover.atIntake')}: ${intake.warningLights.map((l) => t(`light.${l}`)).join(', ')}`}
+          {intake && intake.warningLights.length > 0 && ` · ${t('handover.atIntake')}: ${intake.warningLights.map((l) => lightLabel(t, l)).join(', ')}`}
         </Text>
       </Card>
     </Stack>
@@ -743,6 +752,9 @@ const CHECK_ICON = { ok: IconCircleCheck, fail: IconCircleX, unchecked: IconMinu
 
 export function ChecksStep({ insp }: StepProps) {
   const { t } = useTranslation();
+  const settings = useSettings();
+  // The report's own list (made from Settings → Lists when the report was opened).
+  const checks = Object.keys(insp.functionChecks).length ? Object.keys(insp.functionChecks) : quickList(settings, 'functionChecks');
   const set = (c: string, v: CheckState) => void save(insp, { functionChecks: { ...insp.functionChecks, [c]: v } });
   return (
     <Stack gap="md">
@@ -751,18 +763,18 @@ export function ChecksStep({ insp }: StepProps) {
           {t('intake.checksHint')}
         </Text>
         {!insp.locked && (
-          <Button size="compact-sm" variant="light" color="green" onClick={() => void save(insp, { functionChecks: Object.fromEntries(FUNCTION_CHECKS.map((c) => [c, insp.functionChecks[c] === 'fail' ? 'fail' : 'ok'])) })}>
+          <Button size="compact-sm" variant="light" color="green" onClick={() => void save(insp, { functionChecks: Object.fromEntries(checks.map((c) => [c, insp.functionChecks[c] === 'fail' ? 'fail' : 'ok'])) })}>
             {t('intake.allWork')}
           </Button>
         )}
       </Group>
       <List>
-        {FUNCTION_CHECKS.map((c) => {
+        {checks.map((c) => {
           const v = insp.functionChecks[c] ?? 'unchecked';
           return (
             <ListRow
               key={c}
-              title={t(`check.${c}`)}
+              title={checkLabel(t, c)}
               right={
                 <Group gap={4} wrap="nowrap">
                   {(['ok', 'fail', 'unchecked'] as const).map((s) => {

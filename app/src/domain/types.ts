@@ -51,6 +51,8 @@ export interface Settings {
   /** Opening balances of the money book ("Cash Start" / "Card Start" of the garage's money sheet). */
   cashStartFils?: number;
   cardStartFils?: number;
+  /** The garage's own quick-pick lists (domain/quickLists.ts); missing → the standard English ones. */
+  quickLists?: Partial<Record<'complaints' | 'warningLights' | 'functionChecks' | 'skipReasons', string[]>>;
 }
 
 export interface Customer {

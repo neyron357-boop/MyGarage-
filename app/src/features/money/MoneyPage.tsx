@@ -422,7 +422,7 @@ export function MoneyPage() {
           { value: 'debts', label: t('money.debts') },
         ]}
       />
-      <div key={tab} className="fade-enter">
+      <div key={tab} className="fade-enter tab-panel">
         {tab === 'book' && <LedgerTab />}
         {tab === 'cash' && <CashTab />}
         {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}

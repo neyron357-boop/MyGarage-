@@ -27,7 +27,7 @@ import { useLang, usePhone } from '../../ui/hooks';
 import { orderFlags } from '../orders/flags';
 import { JobCard } from '../orders/JobCard';
 import { attentionItems, type AttentionItem, type AttentionKind } from './attention';
-import { BackupReminder, InsecureWarning, SetupChecklist } from './BoardNotices';
+import { InsecureWarning, SetupChecklist } from './BoardNotices';
 
 async function loadBoard() {
   const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
@@ -244,8 +244,8 @@ export function BoardPage() {
         {header}
         <InsecureWarning />
         {kpis}
+        {/* The backup reminder lives in More and Settings → Data, not on the board. */}
         <Box mt="lg">
-          <BackupReminder />
           <SetupChecklist compact />
         </Box>
         {attentionBlock}
@@ -263,7 +263,7 @@ export function BoardPage() {
               { value: 'delivered', label: t('board.tabDebts'), count: lists.delivered.length },
             ]}
           />
-          <Stack gap="sm" key={filter} className="stagger">
+          <Stack gap="sm" key={filter} className="stagger tab-panel">
             {list.length === 0 && <EmptyState>{t('board.nothing')}</EmptyState>}
             {list.map((b) => (
               <JobCard key={b.order.id} b={b} />
@@ -280,7 +280,6 @@ export function BoardPage() {
       <InsecureWarning />
       {kpis}
       <Box mt="lg">
-        <BackupReminder />
         <SetupChecklist compact />
       </Box>
       {attentionBlock}

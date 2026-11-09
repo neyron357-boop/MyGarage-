@@ -1,6 +1,7 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
-import { FUNCTION_CHECKS, validateInspection } from '../domain/inspection';
+import { validateInspection } from '../domain/inspection';
+import { quickList } from '../domain/quickLists';
 import type { DamageMark, Inspection } from '../domain/types';
 import { AppError } from './errors';
 import { addMedia, deleteMedia, lockMediaOf } from './media';
@@ -14,6 +15,8 @@ export async function getOrCreateInspection(orderId: string, kind: Inspection['k
   const order = await db.orders.get(orderId);
   if (!order) throw new AppError('err.notFound');
   const intake = kind === 'handover' ? await db.inspections.where('orderId').equals(orderId).filter((i) => i.kind === 'intake').first() : undefined;
+  // What gets checked: the garage's list from Settings → Lists (the handover repeats the check-in's list).
+  const checks = intake && Object.keys(intake.functionChecks).length ? Object.keys(intake.functionChecks) : quickList(await db.settings.get('main'), 'functionChecks');
   const draft: Inspection = {
     id: uid(),
     orderId,
@@ -21,7 +24,7 @@ export async function getOrCreateInspection(orderId: string, kind: Inspection['k
     step: 0,
     warningLights: [],
     obdCodes: [],
-    functionChecks: Object.fromEntries(FUNCTION_CHECKS.map((c) => [c, 'unchecked'])),
+    functionChecks: Object.fromEntries(checks.map((c) => [c, 'unchecked'])),
     skippedPhotos: {},
     complaint: kind === 'intake' ? order.complaint : undefined,
     keysCount: intake?.keysCount,

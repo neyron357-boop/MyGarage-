@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatDateTime } from '../../domain/dates';
 import { REQUIRED_SLOTS } from '../../domain/inspection';
+import { lightLabel } from '../../domain/quickLists';
 import type { DamageView } from '../../domain/types';
 import { closeClaim, createWarrantyOrder, openClaim } from '../../services/claims';
 import { inspectionPdf, openPdf } from '../../services/documents';
@@ -121,7 +122,7 @@ export function ClaimPage() {
                   <SimpleGrid cols={2} spacing="sm">
                     <Field label={t('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'}</Field>
                     <Field label={t('intake.fuel')}>{insp.fuelLevel !== undefined ? t(`fuel.${insp.fuelLevel}`) : '—'}</Field>
-                    <Field label={t('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => t(`light.${l}`)).join(', ') : t('pdf.none')}</Field>
+                    <Field label={t('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => lightLabel(t, l)).join(', ') : t('pdf.none')}</Field>
                     {idx === 0 && <Field label={t('step.obd')}>{insp.obdNoCodes ? t('intake.obdNone') : insp.obdCodes.join(', ') || insp.obdSkipReason || '—'}</Field>}
                   </SimpleGrid>
                   <Field label={t('sign.signedBy')}>

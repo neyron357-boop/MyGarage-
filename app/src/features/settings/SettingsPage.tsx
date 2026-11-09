@@ -32,6 +32,7 @@ import {
   IconDownload,
   IconFileText,
   IconList,
+  IconListCheck,
   IconPlus,
   IconSettings,
   IconTemplate,
@@ -58,6 +59,7 @@ import { useAction, useLang, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
 import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
 import { initials } from '../customers/CustomersPage';
+import { ListsTab } from './ListsTab';
 import { EaglecartImportCard } from './EaglecartImport';
 
 function Card({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
@@ -595,6 +597,7 @@ const TABS: { key: string; icon: Icon }[] = [
   { key: 'texts', icon: IconFileText },
   { key: 'staff', icon: IconUsers },
   { key: 'prices', icon: IconList },
+  { key: 'lists', icon: IconListCheck },
   { key: 'categories', icon: IconCategory },
   { key: 'data', icon: IconDatabase },
 ];
@@ -606,7 +609,7 @@ export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   // An old or mistyped link opens the first tab, not an empty screen.
   const asked = params.get('tab') ?? 'business';
-  const tab = ['business', 'rules', 'texts', 'staff', 'prices', 'categories', 'data'].includes(asked) ? asked : 'business';
+  const tab = TABS.some((x) => x.key === asked) ? asked : 'business';
   const [pendingTab, setPendingTab] = useState<string | null>(null);
   const openTab = (v: string) => {
     if (v === tab) return;
@@ -616,12 +619,13 @@ export function SettingsPage() {
   };
   if (!s) return <PageSkeleton />;
   const content = (
-    <div key={tab} className="fade-enter">
+    <div key={tab} className="fade-enter tab-panel">
       {tab === 'business' && <BusinessTab s={s} />}
       {tab === 'rules' && <RulesTab s={s} />}
       {tab === 'texts' && <TextsTab s={s} />}
       {tab === 'staff' && <StaffTab />}
       {tab === 'prices' && <PricesTab />}
+      {tab === 'lists' && <ListsTab s={s} onOpenPrices={() => openTab('prices')} />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'data' && <DataTab />}
       <ConfirmModal
