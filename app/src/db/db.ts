@@ -155,6 +155,20 @@ function sameValue(a: unknown, b: unknown): boolean {
   }
 }
 
+/**
+ * Journal entries that may go: only those of a job being deleted whole, a job with no documents and no
+ * money (domain/deletion.ts, services/orders deleteJob), and only while that deletion runs.
+ */
+const purgeable = new Set<string>();
+export async function purgeJournal(ids: string[]): Promise<void> {
+  ids.forEach((id) => purgeable.add(id));
+  try {
+    await db.events.bulkDelete(ids);
+  } finally {
+    ids.forEach((id) => purgeable.delete(id));
+  }
+}
+
 function installGuards(db: GarageDB) {
   guard(db.inspections, ['pdfMediaId', 'pdfSha256'], (o) => o.locked);
   guard(db.media, [], (m) => m.locked);
@@ -165,7 +179,7 @@ function installGuards(db: GarageDB) {
   guard(db.cashMovements, ['closingId']);
   guard(db.cashClosings, []);
   guard(db.debts, ['status']);
-  guard(db.events, []);
+  guard(db.events, [], (e) => !purgeable.has(e.id));
   guard(db.addenda, []);
   // Money book entries: what they were for can be corrected, the money itself (amount, method, date)
   // cannot; a wrong entry is cancelled (voidedAt), never deleted.

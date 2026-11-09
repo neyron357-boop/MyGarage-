@@ -35,6 +35,7 @@ import {
   IconSend,
   IconStatusChange,
   IconTool,
+  IconTrash,
   IconUser,
   IconUserPlus,
   IconUserX,
@@ -105,6 +106,8 @@ import { PaymentModal, PaymentPanel } from '../money/PaymentPanel';
 import { ProcurementModal } from '../parts/PartsPage';
 import { orderFlags } from './flags';
 import { nextStep, type StepAction } from './nextStep';
+import { DeleteJobModal } from './DeleteJob';
+import { useStack } from '../../ui/stack';
 
 const ctxOf = (b: OrderBundle) => ({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name });
 
@@ -733,6 +736,8 @@ export function OrderPage() {
   const [qc, setQc] = useState(false);
   const [decline, setDecline] = useState(false);
   const [noShow, setNoShow] = useState(false);
+  const [remove, setRemove] = useState(false);
+  const stack = useStack();
   const [decide, setDecide] = useState<EstimateVersion | null>(null);
   const [pay, setPay] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
@@ -875,6 +880,10 @@ export function OrderPage() {
                   {t('order.declineRepair')}
                 </Menu.Item>
               )}
+              <Menu.Divider />
+              <Menu.Item color="red" leftSection={<IconTrash size={18} />} onClick={() => setRemove(true)}>
+                {t('order.delete')}
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         }
@@ -1042,6 +1051,17 @@ export function OrderPage() {
       <QcModal b={b} opened={qc} onClose={() => setQc(false)} />
       <IncidentModal b={b} opened={incident} onClose={() => setIncident(false)} />
       <ReasonModal title={t('next.noShow')} opened={noShow} onClose={() => setNoShow(false)} onSubmit={(r) => run(() => markNoShow(b.order.id, r))} />
+      <DeleteJobModal
+        order={b.order}
+        opened={remove}
+        onClose={() => setRemove(false)}
+        // The job's screen goes back first (it must not show an empty page), then the job is deleted.
+        beforeDelete={async () => {
+          if (stack) stack.back('/');
+          else navigate('/');
+          await new Promise((r) => setTimeout(r, 520));
+        }}
+      />
       <Modal opened={decline} onClose={() => setDecline(false)} title={t('order.declineRepair')}>
         <Text size="sm" mb="md">
           {b.intake?.conditions?.diagnosticsFeeFils

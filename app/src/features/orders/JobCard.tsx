@@ -1,27 +1,42 @@
-import { Box, Group, Stack, Text } from '@mantine/core';
+import { Box, Group, Modal, Stack, Text } from '@mantine/core';
+import { IconExternalLink, IconTrash } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatDateTime, hoursBetween, shortDuration } from '../../domain/dates';
 import { summarize } from '../../domain/items';
 import type { OrderBundle } from '../../services/orders';
-import { Flags, Money, PlateText, STAGE_META, StageTrack } from '../../ui/components';
+import { Flags, List, ListRow, Money, PlateText, STAGE_META, StageTrack } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
+import { useLongPress } from '../../ui/longPress';
+import { DeleteJobModal } from './DeleteJob';
 import { orderFlags } from './flags';
 
-/** Compact job card used on the board and in lists. */
+/**
+ * Compact job card used on the board and in lists. A tap opens the job; a long press (right click on a
+ * PC) brings its actions, as on iPhone: open, delete.
+ */
 export function JobCard({ b, showStage = true }: { b: OrderBundle; showStage?: boolean }) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
+  const [menu, setMenu] = useState(false);
+  const [remove, setRemove] = useState(false);
+  const press = useLongPress(() => setMenu(true));
   const { flags, waitingHours } = orderFlags(b);
   const sum = summarize(b.items);
   const meta = STAGE_META[b.order.stage];
   const amount = sum.approvedGross || sum.fixedGross;
+  const open = () => navigate(`/orders/${b.order.id}`);
   return (
+    <>
     <Box
       className="surface tap"
       p="md"
-      onClick={() => navigate(`/orders/${b.order.id}`)}
+      {...press.handlers}
+      onClick={() => {
+        if (!press.consumeClick()) open();
+      }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -75,5 +90,33 @@ export function JobCard({ b, showStage = true }: { b: OrderBundle; showStage?: b
         <Flags flags={flags} hours={waitingHours} warnHours={b.settings.boardWarnHours} alertHours={b.settings.boardAlertHours} />
       </Stack>
     </Box>
+    {/* The card's actions (long press), a sheet like the iPhone's context menu. */}
+    <Modal opened={menu} onClose={() => setMenu(false)} title={`№${b.order.number} · ${b.vehicle.make} ${b.vehicle.model}`.trim()}>
+      <List>
+        <ListRow
+          title={t('common.open')}
+          left={<IconExternalLink size={20} stroke={1.8} />}
+          chevron
+          onClick={() => {
+            setMenu(false);
+            open();
+          }}
+        />
+        <ListRow
+          title={
+            <Text span inherit c="red">
+              {t('order.delete')}
+            </Text>
+          }
+          left={<IconTrash size={20} stroke={1.8} color="var(--mantine-color-red-6)" />}
+          onClick={() => {
+            setMenu(false);
+            setRemove(true);
+          }}
+        />
+      </List>
+    </Modal>
+    <DeleteJobModal order={b.order} opened={remove} onClose={() => setRemove(false)} />
+    </>
   );
 }

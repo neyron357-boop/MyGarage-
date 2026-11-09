@@ -261,6 +261,32 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Wheel balancing' }).waitFor();
     await page.getByRole('button', { name: 'Brake noise' }).waitFor();
   });
+  await step('delete job', async () => {
+    // A job opened by mistake: "…" → "Delete job" takes it off the board; "Undo" brings it back.
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('27182');
+    await page.getByRole('button', { name: 'Начать приёмку' }).click();
+    await page.waitForURL(/\/intake$/);
+    const orderHash = (await page.evaluate(() => location.hash)).replace(/\/intake$/, '');
+    await page.goto(BASE + orderHash);
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').first().click();
+    await page.getByRole('menuitem', { name: 'Удалить заказ' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Удалить заказ' }).click();
+    await page.getByText(/удалён/).first().waitFor();
+    await page.waitForTimeout(400);
+    const gone = await page.evaluate((id) => new Promise((resolve) => {
+      const open = indexedDB.open('mygarage');
+      open.onsuccess = () => {
+        const req = open.result.transaction('orders').objectStore('orders').get(id);
+        req.onsuccess = () => { resolve(!req.result); open.result.close(); };
+      };
+    }), orderHash.split('/').pop());
+    if (!gone) throw new Error('the job is still there');
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await page.waitForTimeout(600);
+    await page.goto(BASE + orderHash);
+    await page.getByText('27182').first().waitFor();
+  });
   await step('quick invoice path', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('31415');

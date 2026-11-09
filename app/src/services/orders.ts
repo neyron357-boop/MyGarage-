@@ -1,5 +1,6 @@
-import { db, nextNumber, uid } from '../db/db';
+import { db, nextNumber, purgeJournal, uid } from '../db/db';
 import { hoursBetween, nowIso } from '../domain/dates';
+import { whyJobStays, type DeleteBlock } from '../domain/deletion';
 import { amountDue } from '../domain/invoice';
 import { summarize } from '../domain/items';
 import { checkTransition, isBackward, type StageContext } from '../domain/stages';
@@ -288,6 +289,118 @@ export async function assignMechanic(orderId: string, employeeId: string | undef
   await db.transaction('rw', db.orders, db.events, async () => {
     await db.orders.update(orderId, { mechanicId: employeeId, updatedAt: nowIso() });
     await logEvent(orderId, 'mechanic', { employeeId });
+  });
+}
+
+/** Everything a deleted job took with it, to bring it back ("Undo"). */
+export interface DeletedJob {
+  order: Order;
+  events: OrderEvent[];
+  items: OrderItem[];
+  inspections: Inspection[];
+  marks: DamageMark[];
+  media: Media[];
+  blobs: { id: string; blob: Blob; thumb?: Blob }[];
+  messages: MessageLog[];
+  incidents: Incident[];
+  /** Money-book entries that were for this job: they stay in the book, only unlinked from it. */
+  expenseIds: string[];
+  incomeIds: string[];
+}
+
+const JOB_TABLES = () => [
+  db.orders,
+  db.events,
+  db.items,
+  db.inspections,
+  db.damageMarks,
+  db.media,
+  db.mediaBlobs,
+  db.messages,
+  db.incidents,
+  db.claims,
+  db.invoices,
+  db.payments,
+  db.debts,
+  db.versions,
+  db.decisions,
+  db.supplierReturns,
+  db.expenses,
+  db.incomes,
+];
+
+/** Why this job cannot be deleted (domain/deletion.ts), or undefined when it can. */
+export async function jobDeleteBlock(orderId: string): Promise<DeleteBlock | undefined> {
+  const [invoices, payments, debts, versions, decisions, inspections, claims, supplierReturns] = await Promise.all([
+    db.invoices.where('orderId').equals(orderId).toArray(),
+    db.payments.where('orderId').equals(orderId).toArray(),
+    db.debts.where('orderId').equals(orderId).toArray(),
+    db.versions.where('orderId').equals(orderId).toArray(),
+    db.decisions.where('orderId').equals(orderId).toArray(),
+    db.inspections.where('orderId').equals(orderId).toArray(),
+    db.claims.where('orderId').equals(orderId).toArray(),
+    db.supplierReturns.where('orderId').equals(orderId).toArray(),
+  ]);
+  const items = await db.items.where('orderId').equals(orderId).primaryKeys();
+  const owners = [orderId, ...inspections.map((i) => i.id), ...items];
+  const lockedMedia = (await db.media.where('ownerId').anyOf(owners).toArray()).some((m) => m.locked);
+  return whyJobStays({ invoices, payments, debts, versions, decisions, inspections, claims, supplierReturns, lockedMedia });
+}
+
+/**
+ * Delete a job opened by mistake, with everything in it (works, photos, unsigned reports, messages, its
+ * journal). Only a job without documents and money (see jobDeleteBlock); its car and customer stay,
+ * money-book entries for it stay in the book unlinked. Returns what is needed to undo it.
+ */
+export async function deleteJob(orderId: string): Promise<DeletedJob> {
+  return db.transaction('rw', JOB_TABLES(), async () => {
+    const order = await db.orders.get(orderId);
+    if (!order) throw new AppError('err.notFound');
+    const block = await jobDeleteBlock(orderId);
+    if (block) throw new AppError(`order.deleteBlock.${block}`);
+    const [events, items, inspections, messages, incidents, expenses, incomes] = await Promise.all([
+      db.events.where('orderId').equals(orderId).toArray(),
+      db.items.where('orderId').equals(orderId).toArray(),
+      db.inspections.where('orderId').equals(orderId).toArray(),
+      db.messages.where('orderId').equals(orderId).toArray(),
+      db.incidents.where('orderId').equals(orderId).toArray(),
+      db.expenses.where('orderId').equals(orderId).toArray(),
+      db.incomes.where('orderId').equals(orderId).toArray(),
+    ]);
+    const inspIds = inspections.map((i) => i.id);
+    const owners = [orderId, ...inspIds, ...items.map((i) => i.id), ...incidents.map((i) => i.id)];
+    const media = await db.media.where('ownerId').anyOf(owners).toArray();
+    const blobs = (await db.mediaBlobs.bulkGet(media.map((m) => m.id))).filter((b): b is NonNullable<typeof b> => !!b);
+    const marks = inspIds.length ? await db.damageMarks.where('inspectionId').anyOf(inspIds).toArray() : [];
+    for (const e of expenses) await db.expenses.update(e.id, { orderId: undefined });
+    for (const i of incomes) await db.incomes.update(i.id, { orderId: undefined });
+    await db.damageMarks.bulkDelete(marks.map((m) => m.id));
+    await db.mediaBlobs.bulkDelete(media.map((m) => m.id));
+    await db.media.bulkDelete(media.map((m) => m.id));
+    await db.inspections.bulkDelete(inspIds);
+    await db.items.bulkDelete(items.map((i) => i.id));
+    await db.messages.bulkDelete(messages.map((m) => m.id));
+    await db.incidents.bulkDelete(incidents.map((i) => i.id));
+    await purgeJournal(events.map((e) => e.id));
+    await db.orders.delete(orderId);
+    return { order, events, items, inspections, marks, media, blobs, messages, incidents, expenseIds: expenses.map((e) => e.id), incomeIds: incomes.map((i) => i.id) };
+  });
+}
+
+/** "Undo" right after deleting a job: everything comes back as it was. */
+export async function restoreJob(d: DeletedJob): Promise<void> {
+  await db.transaction('rw', JOB_TABLES(), async () => {
+    await db.orders.put(d.order);
+    await db.events.bulkPut(d.events);
+    await db.items.bulkPut(d.items);
+    await db.inspections.bulkPut(d.inspections);
+    await db.damageMarks.bulkPut(d.marks);
+    await db.media.bulkPut(d.media);
+    await db.mediaBlobs.bulkPut(d.blobs);
+    await db.messages.bulkPut(d.messages);
+    await db.incidents.bulkPut(d.incidents);
+    for (const id of d.expenseIds) await db.expenses.update(id, { orderId: d.order.id });
+    for (const id of d.incomeIds) await db.incomes.update(id, { orderId: d.order.id });
   });
 }
 

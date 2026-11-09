@@ -15,7 +15,7 @@ import { addAddendum, completeInspection, getOrCreateInspection, inspectionState
 import { simpleMessage } from '../../services/messages';
 import { bundleAmountDue, updateOrder } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
-import { Field, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
+import { EmptyState, Field, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useErrorText, useOrderBundle } from '../../ui/hooks';
 import { scrollToTop } from '../../ui/stack';
@@ -312,7 +312,8 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
       (e) => setError(errorText(e)),
     );
   }, [id, kind, errorText]);
-  const st = useLiveQuery(() => (inspId ? inspectionState(inspId) : undefined), [inspId]);
+  // null: the report is gone (its job was deleted while this screen waited in the stack).
+  const st = useLiveQuery(() => (inspId ? inspectionState(inspId).catch(() => null) : undefined), [inspId]);
   const addenda = useLiveQuery(() => (inspId ? db.addenda.where('inspectionId').equals(inspId).toArray() : []), [inspId]);
   const intakeMedia = useLiveQuery(async () => (kind === 'handover' && b?.intake ? db.media.where('ownerId').equals(b.intake.id).toArray() : undefined), [kind, b?.intake?.id]);
   const steps = kind === 'intake' ? INTAKE_STEPS : HANDOVER_STEPS;
@@ -332,6 +333,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
   }, [step]);
 
   if (error) return <Alert color="red">{error}</Alert>;
+  if (b === null || st === null) return <EmptyState title={t('err.notFound')} />;
   if (!b || !st || step === null) return <PageSkeleton variant="detail" />;
   const { insp, media, marks } = st;
   const props: StepProps = { insp, media, marks, b, intakeMedia };

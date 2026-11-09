@@ -664,6 +664,8 @@ html.kb .tab-bar-wrap {
   transition: transform 360ms var(--spring), background-color var(--dur-1) ease, opacity var(--dur-1) ease;
   -webkit-user-select: none;
   user-select: none;
+  /* A long press opens the card's actions (JobCard), not the iPhone's callout. */
+  -webkit-touch-callout: none;
 }
 @media (hover: hover) {
   .tap:hover {
