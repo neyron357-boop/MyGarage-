@@ -38,13 +38,13 @@ import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
 import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, itemRangeGross, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
-import { fromNet, netFromGross } from '../../domain/vat';
-import type { Block, DecisionKind, DecisionVia, EstimateVersion, ItemKind, OrderItem, Settings, Urgency } from '../../domain/types';
-import { addItem, recordDecisions, removeItem, resolveB, restoreItem, setDone, updateItem, type NewItem } from '../../services/estimate';
+import { enteredFromNet, netFromEntered, rateFor, switchVatMode, vatModeOf, type Amounts, type VatMode } from '../../domain/vat';
+import type { Block, DecisionKind, DecisionVia, EstimateVersion, ItemKind, OrderItem, Urgency } from '../../domain/types';
+import { addItem, recordDecisions, removeItem, resolveB, restoreItem, setDone, updateItem, withdrawItems, type NewItem } from '../../services/estimate';
 import { verbalConfirmation } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
-import { Money, MoneyInput, SelectCard, undoToast } from '../../ui/components';
+import { ConfirmModal, Money, MoneyInput, SelectCard, undoToast } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
 import type { SendRequest } from '../../ui/SendDialog';
 
@@ -52,18 +52,47 @@ export const BLOCK_COLOR: Record<Block, string> = { A: 'cobalt', B: 'orange', C:
 export const KIND_ICON: Record<ItemKind, Icon> = { labor: IconTool, part: IconPackage, fee: IconReceipt2, discount: IconPercentage };
 const URGENCY_COLOR: Record<Urgency, string> = { red: 'red', yellow: 'yellow', green: 'green' };
 
-/** Price entry that respects the "prices include VAT" setting; always returns net fils. */
-export function PriceInput({ label, net, onChange, settings, vatRateBp }: { label: string; net: number | undefined; onChange: (net: number | undefined) => void; settings: Settings; vatRateBp?: number }) {
+/**
+ * Price entry: the typed amount is counted as `mode` says (VAT on top, VAT inside, or no VAT);
+ * always returns the net price in fils. `rateBp` is the rate of a taxed line.
+ */
+export function PriceInput({ label, net, onChange, rateBp, mode, hint }: { label: string; net: number | undefined; onChange: (net: number | undefined) => void; rateBp: number; mode: VatMode; hint?: boolean }) {
   const { t } = useTranslation();
-  const rate = vatRateBp ?? settings.vatRateBp;
-  const shown = net === undefined ? undefined : settings.pricesIncludeVat ? fromNet(net, rate).gross : net;
   return (
     <MoneyInput
       label={label}
-      description={settings.pricesIncludeVat ? t('common.withVat') : t('common.withoutVat')}
-      value={shown}
-      onChange={(v) => onChange(v === undefined ? undefined : settings.pricesIncludeVat ? netFromGross(v, rate) : v)}
+      description={hint ? t(`item.vatHint.${mode}`, { rate: rateBp / 100 }) : undefined}
+      value={net === undefined ? undefined : enteredFromNet(net, rateBp, mode)}
+      onChange={(v) => onChange(v === undefined ? undefined : netFromEntered(v, rateBp, mode))}
     />
+  );
+}
+
+/**
+ * How this line's price is counted — VAT added on top, VAT already inside, or no VAT on the line —
+ * and what the line comes to for the customer.
+ */
+export function VatModeField({ mode, onChange, rateBp, total }: { mode: VatMode; onChange: (mode: VatMode) => void; rateBp: number; total?: Amounts }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const rate = rateBp / 100;
+  return (
+    <div>
+      <SegmentedControl
+        fullWidth
+        value={mode}
+        onChange={(m) => onChange(m as VatMode)}
+        aria-label={t('item.vatMode.label')}
+        data={(['add', 'incl', 'none'] as const).map((m) => ({ value: m, label: t(`item.vatMode.${m}`, { rate }) }))}
+      />
+      <Text size="xs" c="dimmed" mt={6} className="tnum">
+        {total && total.gross !== 0
+          ? mode === 'none'
+            ? t('item.vatTotalNone', { total: formatAed(total.gross, lang) })
+            : t('item.vatTotal', { total: formatAed(total.gross, lang), vat: formatAed(total.vat, lang, false) })
+          : t(`item.vatHint.${mode}`, { rate })}
+      </Text>
+    </div>
   );
 }
 
@@ -106,15 +135,32 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
   const { run, busy } = useAction();
   const s = b.settings;
   const [v, setV] = useState<NewItem>(blank(block ?? 'A'));
+  // How the typed prices are counted: VAT on top, inside, or none (the line's rate becomes 0).
+  const [mode, setMode] = useState<VatMode>('add');
+  const taxRate = item?.vatRateBp ? item.vatRateBp : s.vatRateBp;
   useEffect(() => {
-    if (opened) setV(item ? { ...item } : { ...blank(block ?? 'A'), ...extra, block: block ?? extra?.block ?? 'A' });
+    if (opened) {
+      setV(item ? { ...item } : { ...blank(block ?? 'A'), ...extra, block: block ?? extra?.block ?? 'A' });
+      setMode(vatModeOf(item ? item.vatRateBp : extra?.vatRateBp, s.pricesIncludeVat));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, block]);
   const set = (p: Partial<NewItem>) => setV((x) => ({ ...x, ...p }));
+  /** Another way of counting VAT keeps the typed amounts and counts them anew. */
+  const changeMode = (m: VatMode) => {
+    const conv = (n: number) => switchVatMode(n, taxRate, mode, m);
+    setV((x) => {
+      const next = { ...x, unitPriceFils: conv(x.unitPriceFils ?? 0) };
+      if (x.priceMinFils !== undefined) next.priceMinFils = conv(x.priceMinFils);
+      if (x.priceMaxFils !== undefined) next.priceMaxFils = conv(x.priceMaxFils);
+      return next;
+    });
+    setMode(m);
+  };
   const markup = (cost: number | undefined) => (cost === undefined ? undefined : roundFils(cost * (1 + s.defaultMarkupBp / 10000)));
   const save = () =>
     run(async () => {
-      const patch = { ...v, unitPriceFils: v.unitPriceFils ?? 0 };
+      const patch = { ...v, unitPriceFils: v.unitPriceFils ?? 0, vatRateBp: rateFor(mode, taxRate) };
       if (item) await updateItem(item.id, patch);
       else await addItem(b.order.id, patch);
       onClose();
@@ -134,12 +180,13 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
         <SimpleGrid cols={3} spacing="xs">
           {(['A', 'B', 'C'] as const).map((x) => (
             <SelectCard key={x} active={v.block === x} onClick={() => set({ block: x })}>
-              <Group gap={6} wrap="nowrap">
+              {/* Letter above the name: three cards side by side on a phone keep the whole word. */}
+              <Stack gap={4} align="center">
                 <BlockChip block={x} />
-                <Text size="sm" fw={700} lineClamp={1}>
+                <Text size="sm" fw={700} ta="center" lh={1.2}>
                   {t(`block.${x}.name`)}
                 </Text>
-              </Group>
+              </Stack>
             </SelectCard>
           ))}
         </SimpleGrid>
@@ -172,7 +219,7 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
           </Box>
         )}
         {!v.customerSupplied && (
-          <PriceInput label={v.kind === 'labor' && v.unit === 'h' ? t('item.pricePerHour') : t('item.unitPrice')} net={v.unitPriceFils} onChange={(n) => set({ unitPriceFils: n ?? 0 })} settings={s} />
+          <PriceInput label={v.kind === 'labor' && v.unit === 'h' ? t('item.pricePerHour') : t('item.unitPrice')} net={v.unitPriceFils} onChange={(n) => set({ unitPriceFils: n ?? 0 })} rateBp={taxRate} mode={mode} />
         )}
         {v.kind === 'labor' && v.unit === 'h' && (
           <Button variant="subtle" size="compact-sm" w="fit-content" onClick={() => set({ unitPriceFils: s.laborRateFils })}>
@@ -181,10 +228,11 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
         )}
         {v.block === 'B' && (
           <SimpleGrid cols={2}>
-            <PriceInput label={t('item.priceMin')} net={v.priceMinFils} onChange={(n) => set({ priceMinFils: n })} settings={s} />
-            <PriceInput label={t('item.priceMax')} net={v.priceMaxFils} onChange={(n) => set({ priceMaxFils: n })} settings={s} />
+            <PriceInput label={t('item.priceMin')} net={v.priceMinFils} onChange={(n) => set({ priceMinFils: n })} rateBp={taxRate} mode={mode} />
+            <PriceInput label={t('item.priceMax')} net={v.priceMaxFils} onChange={(n) => set({ priceMaxFils: n })} rateBp={taxRate} mode={mode} />
           </SimpleGrid>
         )}
+        {!v.customerSupplied && <VatModeField mode={mode} onChange={changeMode} rateBp={taxRate} />}
         {(v.block === 'C' || extra?.urgency) && (
           <div>
             <Text size="sm" fw={500} mb={6}>
@@ -199,10 +247,10 @@ export function ItemModal({ b, item, block, opened, onClose, extra }: { b: Order
         <Group justify="space-between" mt="xs" wrap="nowrap">
           <div>
             <Text size="xs" c="dimmed">
-              {t('item.lineTotal')}
+              {mode === 'none' ? t('item.lineTotalNoVat') : t('item.lineTotal')}
             </Text>
             <Text size="lg" fw={700}>
-              <Money fils={itemAmounts({ ...(v as OrderItem) }).gross} />
+              <Money fils={itemAmounts({ ...(v as OrderItem), vatRateBp: rateFor(mode, taxRate) }).gross} />
             </Text>
           </div>
           <Button onClick={save} loading={busy} leftSection={<IconCheck size={18} />}>
@@ -236,6 +284,8 @@ export function ItemRow({ item, editable, onEdit, right }: { item: OrderItem; b?
   const { t } = useTranslation();
   const lang = useLang();
   const { run } = useAction();
+  // An item waiting for the customer's answer can still be changed or removed (it goes back to draft).
+  const [ask, setAsk] = useState<'edit' | 'delete' | null>(null);
   const a = itemAmounts(item);
   const r = itemRangeGross(item);
   const KI = KIND_ICON[item.kind];
@@ -267,6 +317,7 @@ export function ItemRow({ item, editable, onEdit, right }: { item: OrderItem; b?
             {t(`item.kind.${item.kind}`)} · {item.qty} {t(`unit.${item.unit}`)}
             {item.partNumber ? ` · ${item.partNumber}` : ''}
             {item.customerSupplied ? ` · ${t('item.customerSupplied')}` : ''}
+            {item.vatRateBp === 0 && !item.customerSupplied ? ` · ${t('item.noVat')}` : ''}
             {item.kind === 'part' && item.procurementStatus && !item.customerSupplied ? ` · ${t(`proc.${item.procurementStatus}`)}` : ''}
             {margin !== undefined ? ` · ${t('item.margin')} ${formatAed(margin, lang, false)}` : ''}
           </Text>
@@ -300,10 +351,35 @@ export function ItemRow({ item, editable, onEdit, right }: { item: OrderItem; b?
                   </Tooltip>
                 </>
               )}
+              {editable && isAwaitingClient(item) && (
+                <>
+                  <ActionIcon variant="subtle" color="gray" onClick={() => setAsk('edit')} aria-label={t('common.edit')}>
+                    <IconPencil size={18} />
+                  </ActionIcon>
+                  <ActionIcon variant="subtle" color="red" onClick={() => setAsk('delete')} aria-label={t('common.delete')}>
+                    <IconTrash size={18} />
+                  </ActionIcon>
+                </>
+              )}
             </Group>
           </Group>
         </Box>
       </Group>
+      <ConfirmModal
+        opened={!!ask}
+        onClose={() => setAsk(null)}
+        title={ask === 'delete' ? t('item.withdrawDeleteTitle') : t('item.withdrawEditTitle')}
+        confirmLabel={ask === 'delete' ? t('common.delete') : t('common.edit')}
+        color={ask === 'delete' ? 'red' : undefined}
+        onConfirm={async () => {
+          const what = ask;
+          const n = await run(() => withdrawItems([item.id], { cancel: what === 'delete' }));
+          if (n && what === 'edit') onEdit?.();
+          return true;
+        }}
+      >
+        <Text size="sm">{t('item.withdrawText')}</Text>
+      </ConfirmModal>
     </Box>
   );
 }
@@ -479,7 +555,7 @@ export function ResolveBModal({ b, item, onClose }: { b: OrderBundle; item: Orde
           {t('bresolve.question')}
         </Text>
         <Alert color={item.bChoice === 'do_if_needed' ? 'green' : 'cobalt'}>{item.bChoice === 'do_if_needed' ? t('bresolve.preapproved') : t('bresolve.callMe')}</Alert>
-        <PriceInput label={t('bresolve.actualPrice')} net={net} onChange={setNet} settings={b.settings} vatRateBp={item.vatRateBp} />
+        <PriceInput label={t('bresolve.actualPrice')} net={net} onChange={setNet} rateBp={item.vatRateBp || b.settings.vatRateBp} mode={vatModeOf(item.vatRateBp, b.settings.pricesIncludeVat)} hint />
         <Group grow>
           <Button variant="default" loading={busy} onClick={() => run(async () => { await resolveB(item.id, false, 0); onClose(); }, 'common.saved')}>
             {t('bresolve.notNeeded')}
@@ -514,7 +590,7 @@ export function VersionCard({ v, b, actions }: { v: EstimateVersion; b: OrderBun
             </Text>
           </div>
         </Group>
-        <Badge color={v.status === 'answered' ? 'green' : 'yellow'}>{t(`versionStatus.${v.status}`)}</Badge>
+        <Badge color={v.status === 'answered' ? 'green' : v.status === 'withdrawn' ? 'gray' : 'yellow'}>{t(`versionStatus.${v.status}`)}</Badge>
       </Group>
       {v.reason && (
         <Text size="sm" mt="sm" fw={500}>

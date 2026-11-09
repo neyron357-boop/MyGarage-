@@ -305,6 +305,16 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByLabel('Цена за шт.').fill('30');
     await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
+    // A line without VAT (a fee paid on the customer's behalf): 100 AED stays 100 AED.
+    await page.getByText('Добавить работу').click();
+    await page.getByRole('dialog').getByLabel('Что сделали').fill('RTA test fee');
+    await page.getByRole('dialog').getByLabel('Цена', { exact: true }).fill('100');
+    await page.getByRole('dialog').getByText('Итого 105,00 AED, в т. ч. VAT 5,00').waitFor();
+    await page.getByRole('dialog').getByText('Без VAT', { exact: true }).click();
+    await page.getByRole('dialog').getByText('Итого 100,00 AED, без VAT').waitFor();
+    await shot('31a-line-no-vat');
+    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByText('320,50').first().waitFor(); // 220.50 + 100 without VAT
     await shot('31-quick-invoice', true);
     await page.getByRole('button', { name: /^Выписать инвойс/ }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Выписать инвойс' }).click();

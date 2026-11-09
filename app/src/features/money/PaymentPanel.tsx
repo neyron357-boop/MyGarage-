@@ -154,25 +154,25 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
     <Stack gap="lg">
       <Box className="surface" p="md">
         <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{t('payment.approvedTotal')}</div>
             <Text fz={20} mt={2}>
               <Money fils={sum.approvedGross} display />
             </Text>
           </div>
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{inv ? inv.number : t('payment.invoiceTotal')}</div>
             <Text fz={20} mt={2} c={inv ? undefined : 'dimmed'}>
               {inv ? <Money fils={inv.totalFils} display /> : '—'}
             </Text>
           </div>
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{t('payment.paid')}</div>
             <Text fz={20} mt={2}>
               <Money fils={paid} display />
             </Text>
           </div>
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{due >= 0 ? t('payment.due') : t('payment.overpaid')}</div>
             <Text fz={26} mt={0} c={due > 0 ? 'red' : 'green'}>
               <Money fils={Math.abs(due)} display />

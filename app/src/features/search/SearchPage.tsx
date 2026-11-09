@@ -1,5 +1,5 @@
 import { Avatar, Box, Button, Group, Stack, Text } from '@mantine/core';
-import { IconPlus, IconUserSearch } from '@tabler/icons-react';
+import { IconHistory, IconPlus, IconUserSearch } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,19 +8,29 @@ import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { matchJobs, splitWords, wordMatches, type JobMatch, type Term } from '../../domain/search';
-import type { Customer, Stage } from '../../domain/types';
+import type { Customer, Order, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
 import { loadJobIndex, type JobHitData } from '../../services/search';
 import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, StageBadge } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
 
-export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage } };
+export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage }; history?: Order[]; historyCount?: number };
 
+/**
+ * Cars and customers for the query, each car with its job in the workshop (if any) and its last visits
+ * — so the history stays in sight also once a new job for the car is open.
+ */
 export function useSearch(q: string) {
   return useLiveQuery(async () => {
     const hits = await search(q);
-    const active = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
-    return hits.map((h) => ({ ...h, activeOrder: h.vehicle ? active.find((o) => o.vehicleId === h.vehicle!.id) : undefined })) as Hit[];
+    const ids = hits.map((h) => h.vehicle?.id).filter((x): x is string => !!x);
+    const orders = ids.length ? await db.orders.where('vehicleId').anyOf(ids).toArray() : [];
+    return hits.map((h) => {
+      const mine = h.vehicle ? orders.filter((o) => o.vehicleId === h.vehicle!.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
+      const activeOrder = mine.find((o) => o.stage !== 'closed' && o.stage !== 'cancelled');
+      const past = mine.filter((o) => o.id !== activeOrder?.id);
+      return { ...h, activeOrder, history: past.slice(0, 3), historyCount: past.length };
+    }) as Hit[];
   }, [q]);
 }
 
@@ -173,26 +183,50 @@ export function SearchPage() {
         <Section title={t('search.cars')} mt={0}>
           <List key="hits">
             {hits.map((h) => (
-              <HitRow
-                key={(h.vehicle?.id ?? '') + h.customer.id}
-                hit={h}
-                onClick={() => (h.activeOrder ? navigate(`/orders/${h.activeOrder.id}`) : h.vehicle ? navigate(`/vehicles/${h.vehicle.id}`) : navigate(`/customers/${h.customer.id}`))}
-                right={
-                  h.vehicle && !h.activeOrder ? (
-                    <Button
-                      size="compact-sm"
-                      variant="light"
-                      style={{ flexShrink: 0 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/orders/new?vehicleId=${h.vehicle!.id}`);
-                      }}
-                    >
-                      {t('search.newJob')}
-                    </Button>
-                  ) : undefined
-                }
-              />
+              <Fragment key={(h.vehicle?.id ?? '') + h.customer.id}>
+                <HitRow
+                  hit={h}
+                  onClick={() => (h.activeOrder ? navigate(`/orders/${h.activeOrder.id}`) : h.vehicle ? navigate(`/vehicles/${h.vehicle.id}`) : navigate(`/customers/${h.customer.id}`))}
+                  right={
+                    h.vehicle && !h.activeOrder ? (
+                      <Button
+                        size="compact-sm"
+                        variant="light"
+                        style={{ flexShrink: 0 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/orders/new?vehicleId=${h.vehicle!.id}`);
+                        }}
+                      >
+                        {t('search.newJob')}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+                {/* The car's last visits stay here, also once a new job for it is open. */}
+                {h.history?.map((o) => (
+                  <ListRow
+                    key={o.id}
+                    onClick={() => navigate(`/orders/${o.id}`)}
+                    chevron
+                    left={<IconHistory size={18} stroke={1.8} className="history-icon" aria-hidden />}
+                    title={<Text span fz={15}>{[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}</Text>}
+                    subtitle={
+                      <Group gap={6} wrap="nowrap">
+                        {o.complaint && (
+                          <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
+                            {o.complaint}
+                          </Text>
+                        )}
+                        <StageBadge stage={o.stage} size="sm" />
+                      </Group>
+                    }
+                  />
+                ))}
+                {h.vehicle && (h.historyCount ?? 0) > (h.history?.length ?? 0) && (
+                  <ListRow onClick={() => navigate(`/vehicles/${h.vehicle!.id}`)} chevron left={<span className="history-icon-space" />} title={<Text span fz={15} c="cobalt.6">{t('search.allVisits', { n: h.historyCount })}</Text>} />
+                )}
+              </Fragment>
             ))}
           </List>
         </Section>

@@ -183,7 +183,7 @@ export function FoundProblemPage() {
           }
         />
       )}
-      <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} reason={reason} kind="supplement" onSent={sv.afterSend} />
+      <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} reason={reason} kind="supplement" onSent={sv.afterSend} onPrepare={sv.prepare} />
       {sv.decide && <DecisionModal b={b} version={sv.decide} opened onClose={() => { sv.setDecide(null); navigate(`/orders/${b.order.id}`); }} onVerbal={sv.setSend} />}
       <SendDialog customer={b.customer} request={sv.send} onClose={() => { sv.setSend(null); navigate(`/orders/${b.order.id}`); }} />
     </>

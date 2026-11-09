@@ -368,7 +368,8 @@ export interface EstimateVersion {
   maxGross: number;
   recommendedGross: number;
   mediaIds: string[];
-  status: 'sent' | 'answered' | 'expired';
+  /** withdrawn: every item was taken back before the customer answered (it did not go out, or was changed). */
+  status: 'sent' | 'answered' | 'expired' | 'withdrawn';
   validUntil: string;
   sentAt: string;
   sentVia: SendVia;

@@ -71,8 +71,9 @@ export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => v
 export function Money({ fils, size, fw, c, display }: { fils: number; size?: string; fw?: number; c?: string; display?: boolean }) {
   const lang = useLang();
   const s = formatAed(fils, lang, false);
+  // How long the figure is: in a tile or a figure cell it is sized to fit (styles.css, "fit to cell").
   return (
-    <Text span size={size} fz={size ? undefined : 'inherit'} fw={fw ?? (display ? undefined : 600)} c={c} className={display ? 'money display' : 'money'}>
+    <Text span size={size} fz={size ? undefined : 'inherit'} fw={fw ?? (display ? undefined : 600)} c={c} className={display ? 'money display' : 'money'} style={{ '--chars': s.length } as React.CSSProperties}>
       {s}
       <span className="cur">AED</span>
     </Text>

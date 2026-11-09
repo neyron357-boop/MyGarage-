@@ -831,6 +831,9 @@ html.kb .tab-bar-wrap {
   background: var(--app-card);
   border-radius: var(--radius-group);
   overflow: hidden;
+  /* Not a scroll box: the hairlines run on past the edge, and focus or scrollIntoView would
+     otherwise slide the rows sideways ("ена масла" with the start of the line cut off). */
+  overflow: clip;
 }
 .list-row {
   position: relative;
@@ -963,6 +966,15 @@ html.kb .tab-bar-wrap {
 .contact-tile:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 2px;
+}
+
+/* ---------- A car's past visits under it (search) ---------- */
+.history-icon,
+.history-icon-space {
+  flex-shrink: 0;
+  width: 18px;
+  margin-left: 4px;
+  color: var(--app-label-2);
 }
 
 /* ---------- Editable list lines (Settings → Lists) ---------- */
@@ -1099,19 +1111,25 @@ html.kb .tab-bar-wrap {
 .kpi .value .money .cur {
   font-family: var(--mantine-font-family);
 }
-/* Three tiles in a row on a phone: an amount shrinks to the tile and its currency goes under it
-   (a count keeps its size), so "1 102,50 AED" is never cut at the tile's edge. */
-.kpi {
+/* ---------- Fit to cell: amounts never run over their neighbours ---------- */
+/* Tiles (.kpi) and figure cells (.amount-cell, three or two across on a phone) are size containers.
+   An amount in them keeps its size while it fits, and gets just small enough when it does not: the
+   Money component tells how many characters the figure has (--chars), the cell's width does the rest. */
+.kpi,
+.amount-cell {
   container-type: inline-size;
+  min-width: 0;
 }
+:is(.kpi, .amount-cell) .money {
+  font-size: min(1em, calc(100cqi / (var(--chars, 6) * 0.6 + 1.7)));
+}
+/* Very narrow (three tiles in a row): the currency goes under the figure, so the figure can be bigger. */
 @container (max-width: 130px) {
-  .kpi .value:has(> .money) {
-    font-size: clamp(15px, 21cqi, 22px);
-  }
-  .kpi .value .money {
+  :is(.kpi, .amount-cell) .money {
     white-space: normal;
+    font-size: min(1em, calc(100cqi / (var(--chars, 6) * 0.6 + 0.3)));
   }
-  .kpi .value .money.display .cur {
+  :is(.kpi, .amount-cell) .money .cur {
     display: block;
     margin: 2px 0 0;
     vertical-align: 0;
@@ -2362,12 +2380,21 @@ html.kb .screen-bottom > .sticky-bar {
   cursor: default;
 }
 .cam-last {
+  position: relative;
   width: 48px;
   height: 48px;
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 0 0 2px #fff;
   animation: mg-pop 360ms var(--ease-out) both;
+}
+/* The photo is still being saved: a small spinner over its thumbnail. */
+.cam-last-busy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.38);
 }
 .cam-last img {
   width: 100%;

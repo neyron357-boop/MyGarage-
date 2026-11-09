@@ -1,7 +1,7 @@
 import { Autocomplete, Box, Button, Group, Modal, NumberInput, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconCheck, IconFileTypePdf, IconPackage, IconPlus, IconSend, IconTool, IconUserPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -9,10 +9,10 @@ import { activeInvoice } from '../../domain/invoice';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
-import { fromNet, sumAmounts } from '../../domain/vat';
+import { fromNet, lineAmounts, rateFor, sumAmounts, switchVatMode, vatModeOf, type VatMode } from '../../domain/vat';
 import type { Lang, OrderItem } from '../../domain/types';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
-import { addItem, removeItem, restoreItem, updateItem } from '../../services/estimate';
+import { addItem, removeItem, restoreItem, updateItem, withdrawItems } from '../../services/estimate';
 import { simpleMessage } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
 import { bundleAmountDue, changeStage, type OrderBundle } from '../../services/orders';
@@ -21,12 +21,13 @@ import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader,
 import { typedOnly, useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { scrollToTop } from '../../ui/stack';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
-import { PriceInput } from '../estimate/components';
+import { PriceInput, VatModeField } from '../estimate/components';
 import { CustomerModal } from '../customers/forms';
 import { PaymentModal } from './PaymentPanel';
 
 type Kind = 'labor' | 'part';
-type Suggestion = { titleRu: string; titleEn: string; price: number; uses: number };
+/** A line typed before: its latest net price and VAT rate (0 — it went without VAT). */
+type Suggestion = { titleRu: string; titleEn: string; price: number; rate?: number; uses: number };
 type Suggestions = { list: Map<string, Suggestion>; top: string[] };
 
 /**
@@ -46,7 +47,7 @@ function useSuggestions(lang: Lang) {
     };
     // Newest first, so a title keeps its latest price.
     const sorted = [...items].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-    for (const it of sorted) if (it.kind === 'labor' || it.kind === 'part') put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils }, true);
+    for (const it of sorted) if (it.kind === 'labor' || it.kind === 'part') put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, rate: it.vatRateBp }, true);
     for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, false);
     const pack = (m: Map<string, Suggestion>): Suggestions => ({
       list: m,
@@ -87,6 +88,10 @@ function LineSheet({
   const [qty, setQty] = useState<number>(1);
   const [price, setPrice] = useState<number | undefined>();
   const [cost, setCost] = useState<number | undefined>();
+  // How the typed price is counted: VAT on top, inside, or no VAT on this line.
+  const [mode, setMode] = useState<VatMode>('add');
+  const incl = b.settings.pricesIncludeVat;
+  const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
   useEffect(() => {
     if (!opened) return;
     setTitle(item ? itemTitle(item, lang) : '');
@@ -94,22 +99,31 @@ function LineSheet({
     setQty(item?.qty ?? 1);
     setPrice(item?.unitPriceFils);
     setCost(item?.costPriceFils);
-  }, [opened, item, lang]);
+    setMode(vatModeOf(item?.vatRateBp, incl));
+  }, [opened, item, lang, incl]);
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
-  /** One tap on a frequent line: its name and its last price. */
+  /** One tap on a frequent line: its name, its last price and VAT as last time. */
   const pick = (name: string) => {
     const s = suggestions?.list.get(name);
     setTitle(name);
     setPicked(s);
-    if (s?.price) setPrice(s.price);
+    if (s?.price) {
+      setPrice(s.price);
+      setMode(vatModeOf(s.rate, incl));
+    }
     haptic('selection');
+  };
+  /** Another way of counting VAT keeps the typed amount and counts it anew. */
+  const changeMode = (m: VatMode) => {
+    if (price !== undefined) setPrice(switchVatMode(price, taxRate, mode, m));
+    setMode(m);
   };
   const save = () =>
     run(async () => {
       const typed = title.trim();
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
       const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
-      const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, unitPriceFils: price ?? 0 };
+      const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, unitPriceFils: price ?? 0, vatRateBp: rateFor(mode, taxRate) };
       if (kind === 'part') patch.costPriceFils = cost;
       if (item) await updateItem(item.id, patch);
       else await addItem(b.order.id, { kind, block: 'A', ...patch });
@@ -156,7 +170,10 @@ function LineSheet({
             const s = suggestions?.list.get(v);
             if (s) {
               setPicked(s);
-              if (price === undefined || price === 0) setPrice(s.price || undefined);
+              if ((price === undefined || price === 0) && s.price) {
+                setPrice(s.price);
+                setMode(vatModeOf(s.rate, incl));
+              }
             }
           }}
           autoComplete="off"
@@ -165,8 +182,9 @@ function LineSheet({
         />
         <SimpleGrid cols={kind === 'part' ? 2 : 1}>
           {kind === 'part' && <NumberInput label={t('qi.qty')} min={0.1} step={1} decimalScale={2} value={qty} onChange={(v) => setQty(Number(v) || 1)} inputMode="decimal" />}
-          <PriceInput label={kind === 'part' ? t('qi.unitPrice') : t('qi.price')} net={price} onChange={setPrice} settings={b.settings} />
+          <PriceInput label={kind === 'part' ? t('qi.unitPrice') : t('qi.price')} net={price} onChange={setPrice} rateBp={taxRate} mode={mode} />
         </SimpleGrid>
+        <VatModeField mode={mode} onChange={changeMode} rateBp={taxRate} total={price ? lineAmounts(kind === 'part' ? qty || 1 : 1, price, rateFor(mode, taxRate)) : undefined} />
         {kind === 'part' && <MoneyInput label={t('qi.cost')} description={t('qi.costHint')} value={cost} onChange={setCost} />}
         <Button size="lg" loading={busy} disabled={!title.trim() || !price} onClick={save}>
           {t('common.save')}
@@ -221,7 +239,7 @@ function IssuedView({ b }: { b: OrderBundle }) {
           <ListRow
             key={i}
             title={l.description}
-            subtitle={l.qty !== 1 ? `${l.qty} × ${formatAed(fromNet(l.unitPriceFils, l.vatRateBp).gross)}` : undefined}
+            subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(fromNet(l.unitPriceFils, l.vatRateBp).gross)}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
             right={<Money fils={l.gross} />}
           />
         ))}
@@ -290,6 +308,10 @@ export function QuickInvoicePage() {
   // Quick lines in the language of this job's documents (English by default), as they will be printed.
   const suggestions = useSuggestions(b?.order.docLanguage ?? 'en');
   const [sheet, setSheet] = useState<{ kind: Kind; item?: OrderItem } | null>(null);
+  // While the sheet slides away it keeps showing what it showed (not "Add labour" for a part).
+  const lastSheet = useRef(sheet);
+  if (sheet) lastSheet.current = sheet;
+  const shownSheet = sheet ?? lastSheet.current;
   const [confirm, setConfirm] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
@@ -309,7 +331,7 @@ export function QuickInvoicePage() {
     <ListRow
       key={i.id}
       title={itemTitle(i, b.order.docLanguage) || '—'}
-      subtitle={i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : undefined}
+      subtitle={[i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '', i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
       right={<Money fils={itemAmounts(i).gross} />}
       onClick={i.approvalState === 'draft' ? () => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i }) : undefined}
     />
@@ -392,7 +414,15 @@ export function QuickInvoicePage() {
             {parts.map(row)}
             {addRow('part')}
           </List>
-          {waiting.length > 0 && <div className="group-note">{t('qi.pendingNote', { n: waiting.length })}</div>}
+          {waiting.length > 0 && (
+            // Sent for approval by mistake (or the customer agreed in person): back onto this invoice.
+            <div className="group-note">
+              {t('qi.pendingNote', { n: waiting.length })}{' '}
+              <Button variant="subtle" size="compact-sm" px={4} onClick={() => run(() => withdrawItems(waiting.map((i) => i.id)), 'qi.pendingBackDone')}>
+                {t('qi.pendingBack')}
+              </Button>
+            </div>
+          )}
           <Box mt="lg">
             <List>
               <ListRow title={<Text span c="dimmed" inherit>{t('qi.subtotal')}</Text>} right={<Money fils={sum.net} />} />
@@ -434,12 +464,12 @@ export function QuickInvoicePage() {
 
       <LineSheet
         b={b}
-        kind={sheet?.kind ?? 'labor'}
-        item={sheet?.item}
+        kind={shownSheet?.kind ?? 'labor'}
+        item={shownSheet?.item}
         opened={!!sheet}
         onClose={() => setSheet(null)}
         onDelete={sheet?.item ? () => removeLine(sheet.item!) : undefined}
-        suggestions={sheet ? suggestions?.[sheet.kind] : undefined}
+        suggestions={shownSheet ? suggestions?.[shownSheet.kind] : undefined}
       />
       <ConfirmModal
         opened={confirm}

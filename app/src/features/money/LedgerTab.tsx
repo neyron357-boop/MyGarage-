@@ -44,7 +44,7 @@ function OpeningSheet({ opened, onClose, cash, card, cashLocked }: { opened: boo
         </Text>
         <SimpleGrid cols={2}>
           {cashLocked ? (
-            <Box>
+            <Box className="amount-cell">
               <Text size="sm" fw={500}>
                 {t('ledger.cashStart')}
               </Text>
@@ -220,7 +220,7 @@ export function LedgerTab() {
     <Stack gap="lg">
       <SimpleGrid cols={2} spacing="sm">
         {(['cash', 'card'] as const).map((p) => (
-          <UnstyledButton key={p} className="surface tap" p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
+          <UnstyledButton key={p} className="surface tap amount-cell" p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
             <div className="eyebrow">{t(p === 'cash' ? 'ledger.cashBalance' : 'ledger.cardBalance')}</div>
             <Text fz={26} lh={1.15} mt={4}>
               <Money fils={p === 'cash' ? book.cash : book.card} display />

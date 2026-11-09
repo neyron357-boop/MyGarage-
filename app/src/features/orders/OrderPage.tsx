@@ -50,7 +50,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import { QC_CHECKS } from '../../domain/inspection';
 import { lightLabel } from '../../domain/quickLists';
 import { activeInvoice } from '../../domain/invoice';
-import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, summarize } from '../../domain/items';
+import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, itemTitle, summarize } from '../../domain/items';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { checkTransition, isBackward, STAGES } from '../../domain/stages';
@@ -95,7 +95,7 @@ import {
   StickyBar,
 } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
-import { useAction, useOrderBundle } from '../../ui/hooks';
+import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { ImportedNote } from '../settings/EaglecartImport';
 import { LinkedMoney } from '../money/MoneyEntry';
@@ -418,7 +418,49 @@ function Overview({ b }: { b: OrderBundle }) {
         </Section>
       )}
       {b.order.warrantyOfOrderId && <Alert color="grape">{t('order.warrantyOf')}</Alert>}
+      <CarHistory b={b} />
     </Stack>
+  );
+}
+
+/** What was done to this car before: its earlier jobs, newest first, with what they were about. */
+function CarHistory({ b }: { b: OrderBundle }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const navigate = useNavigate();
+  const past = useLiveQuery(async () => {
+    const orders = (await db.orders.where('vehicleId').equals(b.vehicle.id).toArray()).filter((o) => o.id !== b.order.id).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+    const items = orders.length ? await db.items.where('orderId').anyOf(orders.map((o) => o.id)).toArray() : [];
+    return orders.map((o) => {
+      const mine = items.filter((i) => i.orderId === o.id && i.approvalState !== 'cancelled' && i.approvalState !== 'declined');
+      return { o, works: mine.map((i) => itemTitle(i, lang)).filter(Boolean), total: summarize(mine).approvedGross };
+    });
+  }, [b.vehicle.id, b.order.id, lang]);
+  if (!past?.length) return null;
+  return (
+    <Section title={t('order.carHistory')} description={t('order.carHistoryHint', { n: past.length })} mt={0}>
+      <List>
+        {past.slice(0, 6).map(({ o, works, total }) => (
+          <ListRow
+            key={o.id}
+            onClick={() => navigate(`/orders/${o.id}`)}
+            chevron
+            title={[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}
+            subtitle={
+              <Stack gap={4} align="flex-start">
+                {(works.length > 0 || o.complaint) && (
+                  <Text span inherit lineClamp={2}>
+                    {works.length ? works.join(' · ') : o.complaint}
+                  </Text>
+                )}
+                <StageBadge stage={o.stage} size="sm" />
+              </Stack>
+            }
+            right={total > 0 ? <Money fils={total} size="sm" /> : undefined}
+          />
+        ))}
+      </List>
+    </Section>
   );
 }
 

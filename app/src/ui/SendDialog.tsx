@@ -10,6 +10,7 @@ import { copyText } from './clipboard';
 import { haptic } from './haptics';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
 import { SelectCard } from './components';
+import { useErrorText } from './hooks';
 
 export interface SendRequest {
   text: string;
@@ -18,10 +19,13 @@ export interface SendRequest {
   orderId?: string;
   /** Optional PDF that can be shared as a file (phone share sheet). */
   pdf?: () => Promise<{ blob: Blob; filename: string }>;
+  /** Done once the message really went ("Yes, sent"): an estimate is frozen only then. */
+  onConfirm?: () => Promise<unknown>;
 }
 
 export function SendDialog({ customer, request, onClose, onSent }: { customer: Customer; request: SendRequest | null; onClose: () => void; onSent?: () => void }) {
   const { t } = useTranslation();
+  const errorText = useErrorText();
   const [text, setText] = useState('');
   const [channel, setChannel] = useState<Channel>(customer.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp');
   const [opened, setOpened] = useState(false);
@@ -41,6 +45,12 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
   const url = channel === 'whatsapp' ? whatsappUrl(phone, text) : telegramUrl(text);
 
   const confirm = async () => {
+    try {
+      await request.onConfirm?.();
+    } catch (e) {
+      notifications.show({ color: 'red', message: errorText(e) });
+      return;
+    }
     await logMessage({ orderId: request.orderId, customerId: customer.id, channel, template: request.template, language: request.lang, text });
     haptic('light');
     notifications.show({ color: 'green', message: t('send.logged') });

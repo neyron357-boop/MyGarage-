@@ -1,6 +1,6 @@
 import { Button, Loader } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBolt, IconBoltOff, IconCameraOff, IconChevronRight, IconDeviceMobileRotated, IconId, IconPhotoScan, IconPlus, IconX } from '@tabler/icons-react';
+import { IconBolt, IconBoltOff, IconCameraOff, IconDeviceMobileRotated, IconId, IconPhotoScan, IconPlus, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -100,6 +100,8 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
   const firstEmpty = all.find((s) => s !== FREE && !has(s));
 
   const [current, setCurrent] = useState<string>(() => start ?? firstEmpty ?? slots[0] ?? all[0]);
+  // Once a side is picked in the strip, the camera stops walking on by itself: you choose each side.
+  const [manual, setManual] = useState(false);
   const [phase, setPhase] = useState<'starting' | 'live' | 'error' | 'done'>('starting');
   const [error, setError] = useState<CameraError>('busy');
   const [torch, setTorchOn] = useState(false);
@@ -165,7 +167,10 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
     return () => mq.removeEventListener('change', on);
   }, []);
 
-  /** Close once every photo is stored. `popped`: Back already removed our history entry. */
+  /**
+   * Close at once — with or without photos. Photos still being saved finish in the background and
+   * appear in their tiles. `popped`: Back already removed our history entry.
+   */
   const finishRef = useRef<(popped?: boolean) => Promise<void>>(async () => undefined);
   // The page underneath must not scroll; the phone's Back button closes the camera.
   useLockScroll();
@@ -175,7 +180,6 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
       if (closing.current) return;
       closing.current = true;
       stop();
-      await queue.current.catch(() => undefined);
       if (!popped) release();
       onClose();
     },
@@ -202,6 +206,11 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
   const goTo = (slot: string) => {
     setCurrent(slot);
     if (phase === 'done') setPhase(stream.current ? 'live' : 'starting');
+  };
+  /** A side tapped in the strip (or on the map): from now on you choose each side yourself. */
+  const pick = (slot: string) => {
+    setManual(true);
+    goTo(slot);
   };
 
   const shoot = async () => {
@@ -243,6 +252,14 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
       }
       if (slot === FREE) return;
       const taken = new Set(all.filter((s) => s === slot || has(s)));
+      // Sides chosen by hand: stay on this one (its photo is in the strip); the next is your choice.
+      if (manual) {
+        if (slots.every((s) => taken.has(s)) && slots.includes(slot)) {
+          haptic('success');
+          setPhase('done');
+        }
+        return;
+      }
       const next = nextAfter(slot, taken);
       if (next) setCurrent(next);
       else if (slots.includes(slot)) {
@@ -255,13 +272,6 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
     } finally {
       setShooting(false);
     }
-  };
-
-  const skip = () => {
-    const taken = new Set(all.filter((s) => s === current || has(s)));
-    const next = nextAfter(current, taken);
-    if (next) setCurrent(next);
-    else if (slots.includes(current)) setPhase('done');
   };
 
   const toggleTorch = async () => {
@@ -396,7 +406,7 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
               mediaId={stored.get(s)?.id}
               localUrl={local[s]}
               label={t(`slot.${s}`)}
-              onClick={() => goTo(s)}
+              onClick={() => pick(s)}
             />
           ))}
         </div>
@@ -407,6 +417,11 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
           {lastUrl ? (
             <span className="cam-last" key={lastUrl}>
               <img src={lastUrl} alt="" />
+              {pending > 0 && (
+                <span className="cam-last-busy" aria-label={t('camera.saving')}>
+                  <Loader color="white" size={14} />
+                </span>
+              )}
             </span>
           ) : (
             !single && <span className="cam-count">{t('camera.progress', { n: mainDone, total: slots.length })}</span>
@@ -415,18 +430,11 @@ export function WalkaroundCamera({ insp, media, slots, extraSlots = [], start, o
         <button type="button" className="cam-shutter" onClick={() => void shoot()} disabled={phase !== 'live' || shooting} aria-label={t('camera.shutter')}>
           <span />
         </button>
+        {/* "Done" is always here: leave with any number of photos, or none (saving goes on by itself). */}
         <div className="cam-side cam-side-end">
-          {pending > 0 ? (
-            <span className="cam-saving">
-              <Loader color="white" size={14} /> {t('camera.saving')}
-            </span>
-          ) : single || once ? null : mainDone === slots.length || current === FREE ? (
+          {!single && (
             <button type="button" className="cam-text" onClick={() => void finish()}>
               {t('camera.finish')}
-            </button>
-          ) : (
-            <button type="button" className="cam-text" onClick={skip}>
-              {t('camera.skip')} <IconChevronRight size={16} />
             </button>
           )}
         </div>

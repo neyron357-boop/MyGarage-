@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatAed, parseAed, roundFils } from './money';
-import { fromNet, lineAmounts, netFromGross, vatOf } from './vat';
+import { enteredFromNet, fromNet, lineAmounts, netFromEntered, netFromGross, rateFor, switchVatMode, vatModeOf, vatOf } from './vat';
 import { formatPlate, plateMatches, plateSearchKey } from './plates';
 import { formatPhone, normalizePhone, phoneDigits } from './phone';
 import { dubaiDate, formatDate, formatDateTime } from './dates';
@@ -87,6 +87,29 @@ describe('vat', () => {
   it('extracts net from a VAT-inclusive amount', () => {
     expect(netFromGross(10500, 500)).toBe(10000);
     expect(netFromGross(100, 500)).toBe(95);
+  });
+  it('counts a typed price with VAT on top, inside, or without VAT', () => {
+    expect(vatModeOf(500, false)).toBe('add');
+    expect(vatModeOf(500, true)).toBe('incl');
+    expect(vatModeOf(undefined, true)).toBe('incl');
+    expect(vatModeOf(0, false)).toBe('none');
+    expect(rateFor('none', 500)).toBe(0);
+    expect(rateFor('incl', 500)).toBe(500);
+    // 100 AED typed: +VAT → net 100 (pays 105); VAT inside → net 95.24 (pays 100); no VAT → net 100 (pays 100).
+    expect(netFromEntered(10000, 500, 'add')).toBe(10000);
+    expect(netFromEntered(10000, 500, 'incl')).toBe(9524);
+    expect(netFromEntered(10000, 500, 'none')).toBe(10000);
+    expect(enteredFromNet(9524, 500, 'incl')).toBe(10000);
+    expect(lineAmounts(1, netFromEntered(10000, 500, 'none'), rateFor('none', 500))).toEqual({ net: 10000, vat: 0, gross: 10000 });
+    // Another mode keeps the typed amount.
+    expect(switchVatMode(10000, 500, 'add', 'incl')).toBe(9524);
+    expect(switchVatMode(9524, 500, 'incl', 'none')).toBe(10000);
+    expect(switchVatMode(10000, 500, 'none', 'add')).toBe(10000);
+  });
+  it('an untaxed line goes onto the invoice with no VAT', () => {
+    const lines = invoiceLines([item({ approvalState: 'approved' }), item({ approvalState: 'approved', vatRateBp: 0, unitPriceFils: 5000 })], 'en');
+    expect(lines[1]).toMatchObject({ net: 5000, vatRateBp: 0, vat: 0, gross: 5000 });
+    expect(invoiceTotals(lines)).toEqual({ subtotalFils: 15000, vatFils: 500, totalFils: 15500 });
   });
 });
 

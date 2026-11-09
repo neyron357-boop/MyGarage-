@@ -223,7 +223,7 @@ erDiagram
 | `qty`, `unit` | количество и единица (шт, ч, л) |
 | `unit_price_fils` | цена клиенту без VAT (для B — ожидаемая) |
 | `price_min_fils`, `price_max_fils` | вилка для блока B |
-| `vat_rate_bp` | обычно 500 |
+| `vat_rate_bp` | обычно 500; `0` — строка без VAT (выбор «Без VAT» под ценой, как позиция без Tax в Eaglecart) |
 | `urgency` | `red` · `yellow` · `green` (для C и доп. согласований) |
 | `if_not_done_ru`, `if_not_done_en` | последствия отказа |
 | `approval_state` | `draft` · `pending` · `approved` · `declined` · `cancelled` (см. 4.2) |
@@ -252,7 +252,7 @@ erDiagram
 | `snapshot` | JSON: позиции, цены, итоги, фото — **ровно то, что видел клиент** |
 | `fixed_total_fils`, `max_total_fils`, `recommended_total_fils`, `delta_fils` | итоги |
 | `valid_until` | срок действия |
-| `status` | `draft` · `sent` · `answered` · `expired` · `superseded` |
+| `status` | `draft` · `sent` · `answered` · `expired` · `superseded` · `withdrawn` (все ждавшие ответа позиции отозваны в черновик или убраны; снимок остаётся как был) |
 | `sent_at`, `sent_via` | |
 | `first_opened_at` | клиент открыл ссылку |
 | `answered_at`, `answer_ip`, `answer_user_agent` | когда и с какого устройства ответил |

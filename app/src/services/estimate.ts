@@ -16,6 +16,7 @@ import type {
   DecisionKind,
   DecisionVia,
   EstimateVersion,
+  Order,
   OrderItem,
   SendVia,
   SnapshotItem,
@@ -115,8 +116,11 @@ export interface SendOptions {
   kind?: VersionKind;
 }
 
-/** Freeze all draft items into a new estimate version (v1, v2...) and mark them as waiting for the customer. */
-export async function sendVersion(orderId: string, opts: SendOptions): Promise<EstimateVersion> {
+/**
+ * The next estimate version from the draft items (not saved). Numbers run on through withdrawn versions
+ * too: the customer may have seen one, so the next is never "v1" again.
+ */
+async function buildVersion(orderId: string, opts: SendOptions): Promise<{ version: EstimateVersion; drafts: OrderItem[]; order: Order }> {
   const [order, settings] = await Promise.all([db.orders.get(orderId), getSettings()]);
   if (!order) throw new AppError('err.notFound');
   const all = await db.items.where('orderId').equals(orderId).toArray();
@@ -143,6 +147,15 @@ export async function sendVersion(orderId: string, opts: SendOptions): Promise<E
     sentAt: now,
     sentVia: opts.via,
   };
+  return { version, drafts, order };
+}
+
+/**
+ * Freeze all draft items into a new estimate version (v1, v2...) and mark them as waiting for the
+ * customer. Called when the estimate really goes out (the message is sent, or the customer is there).
+ */
+export async function sendVersion(orderId: string, opts: SendOptions): Promise<EstimateVersion> {
+  const { version, drafts, order } = await buildVersion(orderId, opts);
   await db.transaction('rw', db.versions, db.items, db.events, async () => {
     await db.versions.add(version);
     for (const i of drafts) {
@@ -156,6 +169,36 @@ export async function sendVersion(orderId: string, opts: SendOptions): Promise<E
   });
   if (order.stage === 'diagnostics') await tryStage(orderId, 'awaiting_approval');
   return version;
+}
+
+/**
+ * Take back items that wait for the customer's answer — sent by mistake, or to change them: they are
+ * drafts again (or, with `cancel`, leave the estimate). The version stays as it was sent (history); when
+ * nothing in it waits any more it is "answered" (the customer answered some) or "withdrawn".
+ */
+export async function withdrawItems(itemIds: string[], opts: { cancel?: boolean } = {}): Promise<number> {
+  return db.transaction('rw', db.items, db.versions, db.decisions, db.events, async () => {
+    const items = (await db.items.bulkGet(itemIds)).filter((i): i is OrderItem => !!i && i.approvalState === 'pending');
+    if (!items.length) return 0;
+    const versionIds = new Set(items.map((i) => i.lastVersionId).filter((v): v is string => !!v));
+    // A fresh draft: a block B choice made earlier ("do if needed") is asked again with the next version.
+    for (const i of items) await db.items.update(i.id, { approvalState: opts.cancel ? 'cancelled' : 'draft', lastVersionId: undefined, bChoice: undefined });
+    for (const vid of versionIds) {
+      const v = await db.versions.get(vid);
+      if (!v || v.status !== 'sent') continue;
+      const still = (await db.items.bulkGet(v.items.map((s) => s.itemId))).some((i) => i?.approvalState === 'pending');
+      if (still) continue;
+      const answered = (await db.decisions.where('versionId').equals(vid).count()) > 0;
+      await db.versions.update(vid, answered ? { status: 'answered', answeredAt: nowIso() } : { status: 'withdrawn' });
+    }
+    await logEvent(items[0].orderId, opts.cancel ? 'items_removed' : 'items_withdrawn', { count: items.length, titles: items.map((i) => i.titleRu || i.titleEn).join(', ') });
+    return items.length;
+  });
+}
+
+/** The version that "send" would freeze now, without freezing it (to show the message before it goes). */
+export async function previewVersion(orderId: string, opts: SendOptions): Promise<EstimateVersion> {
+  return (await buildVersion(orderId, opts)).version;
 }
 
 export interface DecisionInput {

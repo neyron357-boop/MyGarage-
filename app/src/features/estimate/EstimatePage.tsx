@@ -20,7 +20,7 @@ import { db } from '../../db/db';
 import { itemAmounts, summarize } from '../../domain/items';
 import type { Block, EstimateVersion, OrderItem, SendVia } from '../../domain/types';
 import { versionPdf } from '../../services/documents';
-import { addTemplate, approveByLimit, limitRemaining, sendVersion } from '../../services/estimate';
+import { addTemplate, approveByLimit, limitRemaining, previewVersion, sendVersion, type SendOptions } from '../../services/estimate';
 import { limitMessage, versionMessage } from '../../services/messages';
 import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, SelectCard, StickyBar } from '../../ui/components';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
@@ -92,7 +92,27 @@ export function useSendVersion(b: ReturnType<typeof useOrderBundle>) {
     else if (via === 'limit') setSend({ text: limitMessage(ctx, v), template: 'doneByLimit', lang: v.language, orderId: v.orderId, pdf: () => versionPdf(v.id) });
     else setSend({ text: versionMessage(ctx, v), template: v.number === 1 ? 'estimate' : 'supplement', lang: v.language, orderId: v.orderId, pdf: () => versionPdf(v.id) });
   };
-  return { send, setSend, decide, setDecide, afterSend };
+  /**
+   * WhatsApp / Telegram: the message is shown first; the estimate is frozen (items wait for the answer)
+   * only once it really goes — "Yes, sent" or the PDF shared. Closing the message keeps the drafts.
+   */
+  const prepare = async (orderId: string, opts: SendOptions) => {
+    if (!ctx) return;
+    const preview = await previewVersion(orderId, opts);
+    let frozen: Promise<EstimateVersion> | undefined;
+    const freeze = () => (frozen ??= sendVersion(orderId, opts));
+    setSend({
+      text: versionMessage(ctx, preview),
+      template: preview.number === 1 ? 'estimate' : 'supplement',
+      lang: preview.language,
+      orderId,
+      pdf: async () => versionPdf((await freeze()).id),
+      onConfirm: async () => {
+        await freeze();
+      },
+    });
+  };
+  return { send, setSend, decide, setDecide, afterSend, prepare };
 }
 
 const VIA_OPTIONS: { value: SendVia; icon: Icon; color: string }[] = [
@@ -102,10 +122,40 @@ const VIA_OPTIONS: { value: SendVia; icon: Icon; color: string }[] = [
   { value: 'phone', icon: IconPhone, color: 'gray' },
 ];
 
-export function SendVersionModal({ opened, onClose, orderId, reason, onSent, kind }: { opened: boolean; onClose: () => void; orderId: string; reason?: string; kind?: EstimateVersion['kind']; onSent: (v: EstimateVersion, via: SendVia) => void }) {
+export function SendVersionModal({
+  opened,
+  onClose,
+  orderId,
+  reason,
+  onSent,
+  onPrepare,
+  kind,
+}: {
+  opened: boolean;
+  onClose: () => void;
+  orderId: string;
+  reason?: string;
+  kind?: EstimateVersion['kind'];
+  onSent: (v: EstimateVersion, via: SendVia) => void;
+  /** A message to send (WhatsApp / Telegram): shown first, frozen only when it goes (useSendVersion.prepare). */
+  onPrepare?: (orderId: string, opts: SendOptions) => Promise<void>;
+}) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [via, setVia] = useState<SendVia>('whatsapp');
+  const go = () =>
+    run(async () => {
+      const opts = { via, reason, kind };
+      if (onPrepare && (via === 'whatsapp' || via === 'telegram')) {
+        await onPrepare(orderId, opts);
+        onClose();
+        return;
+      }
+      // In person or on the phone: the customer has it now — frozen at once, the answer is recorded next.
+      const v = await sendVersion(orderId, opts);
+      onClose();
+      onSent(v, via);
+    });
   return (
     <Modal opened={opened} onClose={onClose} title={t('estimate.sendTitle')}>
       <Stack gap="sm">
@@ -129,8 +179,8 @@ export function SendVersionModal({ opened, onClose, orderId, reason, onSent, kin
             </SelectCard>
           ))}
         </SimpleGrid>
-        <Button mt="xs" leftSection={<IconSend size={18} />} loading={busy} onClick={() => run(async () => { const v = await sendVersion(orderId, { via, reason, kind }); onClose(); onSent(v, via); })}>
-          {t('estimate.freezeAndSend')}
+        <Button mt="xs" leftSection={<IconSend size={18} />} loading={busy} onClick={() => void go()}>
+          {via === 'whatsapp' || via === 'telegram' ? t('estimate.prepareMessage') : t('estimate.freezeAndSend')}
         </Button>
       </Stack>
     </Modal>
@@ -143,19 +193,19 @@ export function LimitConfirm({ opened, onClose, total, remaining, onConfirm }: {
   return (
     <ConfirmModal opened={opened} onClose={onClose} title={t('estimate.limitConfirmTitle')} confirmLabel={t('estimate.approveByLimit')} color="teal" icon={<IconShieldCheck size={18} />} onConfirm={onConfirm}>
       <SimpleGrid cols={3} spacing="xs">
-        <Box className="surface-soft" p="sm">
+        <Box className="surface-soft amount-cell" p="sm">
           <div className="eyebrow">{t('common.total')}</div>
           <Text fw={700} mt={2}>
             <Money fils={total} />
           </Text>
         </Box>
-        <Box className="surface-soft" p="sm">
+        <Box className="surface-soft amount-cell" p="sm">
           <div className="eyebrow">{t('estimate.limitLeft')}</div>
           <Text fw={700} mt={2}>
             <Money fils={remaining} />
           </Text>
         </Box>
-        <Box className="surface-soft" p="sm">
+        <Box className="surface-soft amount-cell" p="sm">
           <div className="eyebrow">{t('estimate.limitAfter')}</div>
           <Text fw={700} mt={2} c="teal">
             <Money fils={Math.max(0, remaining - total)} />
@@ -212,19 +262,19 @@ export function EstimatePage() {
 
       <Box className="surface" p="md" mb="lg" style={{ position: 'sticky', top: 'calc(var(--app-nav-h) + env(safe-area-inset-top, 0px) + 8px)', zIndex: 20 }}>
         <SimpleGrid cols={3} spacing="sm">
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{t('estimate.fixed')}</div>
             <Text fz={22} mt={2}>
               <Money fils={sum.fixedGross} display />
             </Text>
           </div>
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{t('estimate.upTo')}</div>
             <Text fz={22} mt={2} c={sum.maxGross > sum.fixedGross ? 'orange' : undefined}>
               <Money fils={sum.maxGross} display />
             </Text>
           </div>
-          <div>
+          <div className="amount-cell">
             <div className="eyebrow">{t('estimate.recommended')}</div>
             <Text fz={22} mt={2} c="dimmed">
               <Money fils={sum.recommendedGross} display />
@@ -342,7 +392,7 @@ export function EstimatePage() {
       )}
       <ItemModal b={b} opened={!!edit} item={edit?.item} block={edit?.block} onClose={() => setEdit(null)} />
       <TemplateModal orderId={b.order.id} opened={tplOpen} onClose={() => setTplOpen(false)} />
-      <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} onSent={sv.afterSend} />
+      <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} onSent={sv.afterSend} onPrepare={sv.prepare} />
       {limit && (
         <LimitConfirm
           opened={limitOpen}
