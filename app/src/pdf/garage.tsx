@@ -168,19 +168,32 @@ export interface DocRow {
   description: string;
   /** Unit price excl. VAT; undefined → shown empty (a price range). */
   price?: number;
+  /** The line's part of the discount, excl. VAT (positive). */
   discount?: number;
+  /** VAT of the line (after its discount). */
   vat?: number;
   qty: number;
+  /** The line's total after its discount. */
   total: number;
   /** Shown instead of the total (a price range "AED 300.00 – 500.00"). */
   totalText?: string;
 }
 
-const COLS = [21, 119.3, 80.2, 98.2, 73.6, 66.7, 84.7];
+/** Table text size and the cells' side padding. */
+const FS = 9.8;
+const PAD = 3.7;
+/** Width (pt) the headings need: "#", "Price  السعر", "Discount  الخصم", "VAT", "Qty  الكمية", "Total  الإجمالي". */
+const HEAD = { no: 10, price: 50, discount: 69, vat: 19, qty: 45, total: 59 };
+type Col = keyof typeof HEAD;
+/** Advance widths of Tinos (Times) for what amounts are made of, in em; anything else about 0.6 em. */
+const EM: Record<string, number> = { ' ': 0.25, ' ': 0.25, '.': 0.25, ',': 0.25, '-': 0.333, '–': 0.5, A: 0.722, E: 0.611, D: 0.722 };
+const textWidth = (text: string) => [...text].reduce((w, ch) => w + (ch >= '0' && ch <= '9' ? 0.5 : (EM[ch] ?? 0.6)), 0) * FS;
+/** Fixed-width cell, or the description (the rest of the line) when no width is given. */
+const box = (w?: number) => (w ? { width: w, flexGrow: 0, flexShrink: 0 } : { flexGrow: 1, flexShrink: 1, flexBasis: 0 });
 
-function HeadCell({ en, ar, flex, align = 'left' }: { en: string; ar?: string; flex: number; align?: 'left' | 'center' | 'right' }) {
+function HeadCell({ en, ar, w, align = 'left' }: { en: string; ar?: string; w?: number; align?: 'left' | 'center' | 'right' }) {
   return (
-    <View style={{ flex, flexDirection: 'row', alignItems: 'baseline', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start', paddingHorizontal: 3.7 }}>
+    <View style={{ ...box(w), flexDirection: 'row', alignItems: 'baseline', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start', paddingHorizontal: PAD }}>
       <Text style={{ fontSize: 9.8, fontWeight: 'bold' }}>{en}</Text>
       {ar ? (
         <>
@@ -204,30 +217,43 @@ function HeadCell({ en, ar, flex, align = 'left' }: { en: string; ar?: string; f
   );
 }
 
-const cell = (flex: number, align: 'left' | 'center' | 'right' = 'left') => ({ flex, fontSize: 9.8, paddingHorizontal: 3.7, textAlign: align });
+const cell = (w: number | undefined, align: 'left' | 'center' | 'right' = 'left') => ({ ...box(w), fontSize: FS, paddingHorizontal: PAD, textAlign: align });
 
-/** The ruled table of lines: # · Description · Price · Discount · VAT · Qty · Total. */
+/**
+ * The ruled table of lines: # · Description · Price · Discount · VAT · Qty · Total. Like a web table, each
+ * amount column is as wide as its heading or its longest amount and the description takes the rest; a
+ * description breaks after its commas too ("GAS,VACUUM,OIL"), so it never runs into the prices.
+ */
 export function ItemsTable({ rows }: { rows: DocRow[] }) {
+  const texts = rows.map((r, i): Record<Col, string> => ({
+    no: `${i + 1}.`,
+    price: r.price !== undefined ? aed(r.price) : '',
+    discount: r.discount ? aed(r.discount) : '',
+    vat: r.vat !== undefined ? aed(r.vat) : '',
+    qty: String(r.qty),
+    total: r.totalText ?? aed(r.total),
+  }));
+  const w = Object.fromEntries((Object.keys(HEAD) as Col[]).map((k) => [k, Math.ceil(Math.max(HEAD[k], ...texts.map((t) => textWidth(t[k])))) + 2 * PAD + 1])) as Record<Col, number>;
   return (
     <View style={{ marginTop: 14 }}>
       <View style={{ flexDirection: 'row', borderTopWidth: 0.7, borderBottomWidth: 0.7, borderColor: COLOR.rule, paddingVertical: 5 }} fixed>
-        <HeadCell en="#" flex={COLS[0]} />
-        <HeadCell en="Description" ar={AR_LABEL.description} flex={COLS[1]} />
-        <HeadCell en="Price" ar={AR_LABEL.price} flex={COLS[2]} />
-        <HeadCell en="Discount" ar={AR_LABEL.discount} flex={COLS[3]} />
-        <HeadCell en="VAT" flex={COLS[4]} />
-        <HeadCell en="Qty" ar={AR_LABEL.qty} flex={COLS[5]} align="center" />
-        <HeadCell en="Total" ar={AR_LABEL.total} flex={COLS[6]} align="right" />
+        <HeadCell en="#" w={w.no} />
+        <HeadCell en="Description" ar={AR_LABEL.description} />
+        <HeadCell en="Price" ar={AR_LABEL.price} w={w.price} />
+        <HeadCell en="Discount" ar={AR_LABEL.discount} w={w.discount} />
+        <HeadCell en="VAT" w={w.vat} />
+        <HeadCell en="Qty" ar={AR_LABEL.qty} w={w.qty} align="center" />
+        <HeadCell en="Total" ar={AR_LABEL.total} w={w.total} align="right" />
       </View>
       {rows.map((r, i) => (
         <View key={i} wrap={false} style={{ flexDirection: 'row', paddingVertical: 5, borderBottomWidth: i < rows.length - 1 ? 0.7 : 0, borderColor: COLOR.rowRule }}>
-          <Text style={cell(COLS[0])}>{i + 1}.</Text>
-          <Text style={cell(COLS[1])}>{r.description}</Text>
-          <Text style={cell(COLS[2])}>{r.price !== undefined ? aed(r.price) : ''}</Text>
-          <Text style={cell(COLS[3])}>{r.discount ? aed(r.discount) : ''}</Text>
-          <Text style={cell(COLS[4])}>{r.vat !== undefined ? aed(r.vat) : ''}</Text>
-          <Text style={cell(COLS[5], 'center')}>{String(r.qty)}</Text>
-          <Text style={cell(COLS[6], 'right')}>{r.totalText ?? aed(r.total)}</Text>
+          <Text style={cell(w.no)}>{texts[i].no}</Text>
+          <Text style={cell(undefined)}>{r.description.replace(/,(?=\S)/g, ', ')}</Text>
+          <Text style={cell(w.price)}>{texts[i].price}</Text>
+          <Text style={cell(w.discount)}>{texts[i].discount}</Text>
+          <Text style={cell(w.vat)}>{texts[i].vat}</Text>
+          <Text style={cell(w.qty, 'center')}>{texts[i].qty}</Text>
+          <Text style={cell(w.total, 'right')}>{texts[i].total}</Text>
         </View>
       ))}
       <View style={{ borderTopWidth: 0.7, borderColor: COLOR.rule, marginTop: 13 }} />
@@ -235,8 +261,11 @@ export function ItemsTable({ rows }: { rows: DocRow[] }) {
   );
 }
 
-/** Left: total quantity and other notes; right: the rounded totals box. */
-export function Totals({ qty, notes, subtotal, vat, total, totalText }: { qty: number; notes?: ReactNode; subtotal: number; vat: number; total: number; totalText?: string }) {
+/**
+ * Left: total quantity and other notes; right: the rounded totals box. With a discount, as on the
+ * garage's own invoices: Subtotal (before it) − Discount = Total, VAT included.
+ */
+export function Totals({ qty, notes, subtotal, discount, discountLabel, vat, total, totalText }: { qty: number; notes?: ReactNode; subtotal: number; discount?: number; discountLabel?: string; vat: number; total: number; totalText?: string }) {
   const row = (en: string, ar: string, value: string, big?: boolean, after?: string) => (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: big ? 0 : 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -258,6 +287,7 @@ export function Totals({ qty, notes, subtotal, vat, total, totalText }: { qty: n
       </View>
       <View style={{ width: 256, borderWidth: 0.75, borderColor: COLOR.boxBorder, borderRadius: 10, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 13 }}>
         {row('Subtotal', AR_LABEL.subtotal, aed(subtotal))}
+        {discount ? row(discountLabel ? `Discount ${discountLabel}` : 'Discount', AR_LABEL.discount, aed(discount)) : null}
         {row('VAT (Incl.', AR_LABEL.vatIncl, aed(vat), false, ')')}
         <View style={{ borderTopWidth: 0.7, borderColor: COLOR.boxRule, marginTop: 4, marginBottom: 10 }} />
         {row('Total', AR_LABEL.total, totalText ?? aed(total), true)}

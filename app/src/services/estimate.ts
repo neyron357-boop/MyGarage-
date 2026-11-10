@@ -103,6 +103,7 @@ function snapshotItem(i: OrderItem, lang: 'ru' | 'en'): SnapshotItem {
     net: a.net,
     vat: a.vat,
     gross: a.gross,
+    vatRateBp: i.vatRateBp,
     minGross: i.block === 'B' && !i.bNeeded ? r.min : undefined,
     maxGross: i.block === 'B' && !i.bNeeded ? r.max : undefined,
     urgency: i.urgency,
@@ -124,7 +125,8 @@ export interface SendOptions {
 async function buildVersion(orderId: string, opts: SendOptions): Promise<{ version: EstimateVersion; drafts: OrderItem[]; order: Order }> {
   const [order, settings] = await Promise.all([db.orders.get(orderId), getSettings()]);
   if (!order) throw new AppError('err.notFound');
-  const all = await db.items.where('orderId').equals(orderId).toArray();
+  // In the order they were added: the quotation and the message list them as the job screen does.
+  const all = await db.items.where('orderId').equals(orderId).sortBy('createdAt');
   const drafts = all.filter((i) => i.approvalState === 'draft');
   if (drafts.length === 0) throw new AppError('err.nothingToSend');
   const prev = await db.versions.where('orderId').equals(orderId).count();

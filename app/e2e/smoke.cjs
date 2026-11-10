@@ -345,6 +345,8 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'К оплате 320,00 AED' }).click();
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByRole('button', { name: 'Клиенту · 320,00 AED' }).waitFor();
+    // Split over the lines with VAT and without, the discount still shows once.
+    if ((await page.locator('.list-row').filter({ hasText: /^Discount/ }).count()) !== 1) throw new Error('the discount must show as one line');
     await shot('31-job-price', true);
     // To the customer: the message is ready; closed without sending, the lines stay as they are.
     await page.getByRole('button', { name: 'Клиенту · 320,00 AED' }).click();

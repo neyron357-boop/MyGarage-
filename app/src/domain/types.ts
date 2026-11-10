@@ -356,6 +356,8 @@ export interface SnapshotItem {
   net: number;
   vat: number;
   gross: number;
+  /** VAT rate of the line (not kept on quotations sent before v0.5.1). */
+  vatRateBp?: number;
   minGross?: number;
   maxGross?: number;
   urgency?: Urgency;

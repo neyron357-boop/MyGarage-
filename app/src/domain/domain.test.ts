@@ -17,6 +17,7 @@ import {
 import { checkTransition, isBackward, type StageContext } from './stages';
 import { flowStage, jobPhase, nothingToBill, stepToward, type FlowFacts } from './flow';
 import { activeInvoice, amountDue, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from './invoice';
+import { apportion, discountPctLabel, discountPrice, splitDiscount, spreadDiscount } from './discount';
 import { expectedCash, nonCashTotals } from './cash';
 import { computeReport } from './reports';
 import type { CashMovement, Invoice, ItemDecision, Order, OrderItem, Payment } from './types';
@@ -382,6 +383,68 @@ describe('invoices', () => {
     expect(activeInvoice([credited, inv({ id: 'new' })])?.id).toBe('new');
     expect(activeInvoice([credited])).toBeUndefined();
     expect(formatDocNumber('INV', 2026, 7)).toBe('INV-2026-00007');
+  });
+});
+
+describe('the discount on documents', () => {
+  // The garage's own example: 130 + 150 + 200 + 2 × 10 + 350 AED (+ 5 % VAT = 892.50 AED), 92 AED off → 800.50 AED.
+  const job = () => [
+    item({ kind: 'part', titleEn: 'CONDENSER FAN (AFTER MARKET)', unitPriceFils: 13000, approvalState: 'approved' }),
+    item({ kind: 'part', titleEn: 'FRONT AC FREON GAS', unitPriceFils: 15000, approvalState: 'approved' }),
+    item({ kind: 'part', titleEn: 'AC CHILLER GAS', unitPriceFils: 20000, approvalState: 'approved' }),
+    item({ kind: 'part', titleEn: 'AC PIPE O RING', qty: 2, unitPriceFils: 1000, approvalState: 'approved' }),
+    item({ kind: 'labor', titleEn: 'LABOUR CHARGE', unitPriceFils: 35000, approvalState: 'approved' }),
+  ];
+  const withDiscount = (items: OrderItem[], grossOff: number, titleEn = 'Discount') => [
+    ...items,
+    ...splitDiscount(items, grossOff).map((p) => item({ kind: 'discount', titleEn, approvalState: 'approved', ...discountPrice(p) })),
+  ];
+
+  it('shares the discount over the lines, exact to the fils', () => {
+    const lines = invoiceLines(withDiscount(job(), 9200), 'en');
+    const s = spreadDiscount(lines);
+    expect(s.rest).toEqual([]);
+    expect(s.lines.map((l) => l.line.description)).toEqual(['CONDENSER FAN (AFTER MARKET)', 'FRONT AC FREON GAS', 'AC CHILLER GAS', 'AC PIPE O RING', 'LABOUR CHARGE']);
+    // Totals of the lines as on the garage's own invoice: 122.43, 141.26, 188.35, 18.84, 329.62.
+    expect(s.lines.map((l) => l.gross)).toEqual([12243, 14126, 18835, 1884, 32962]);
+    expect(s.lines.map((l) => l.vat)).toEqual([583, 673, 897, 90, 1569]);
+    // The discount excl. VAT, like the price: price × qty − discount + VAT = total on every line.
+    expect(s.lines.map((l) => l.discount)).toEqual([1340, 1547, 2062, 206, 3607]);
+    for (const l of s.lines) expect(l.line.net - l.discount + l.vat).toBe(l.gross);
+    // Totals: 892.50 − 92.00 = 800.50, VAT 38.12 — the lines add up to the invoice.
+    const tot = invoiceTotals(lines);
+    expect([s.subtotal, s.discount, tot.totalFils, tot.vatFils]).toEqual([89250, -9200, 80050, 3812]);
+    expect(s.lines.reduce((a, l) => a + l.gross, 0)).toBe(tot.totalFils);
+    expect(s.lines.reduce((a, l) => a + l.vat, 0)).toBe(tot.vatFils);
+    expect(s.lines.reduce((a, l) => a + l.discount, 0)).toBe(-lines.filter((l) => l.kind === 'discount').reduce((a, l) => a + l.net, 0));
+  });
+
+  it('a percentage takes exactly that share of every line, with and without VAT', () => {
+    const items = [...job(), item({ kind: 'fee', titleEn: 'RECOVERY', unitPriceFils: 5000, vatRateBp: 0, approvalState: 'approved' })];
+    const lines = invoiceLines(withDiscount(items, 9425, 'Discount 10%'), 'en');
+    const s = spreadDiscount(lines);
+    expect(s.lines.map((l) => l.discount)).toEqual([1300, 1500, 2000, 200, 3500, 500]);
+    expect(s.lines.map((l) => l.gross)).toEqual([12285, 14175, 18900, 1890, 33075, 4500]);
+    expect(s.lines.map((l) => l.vat)).toEqual([585, 675, 900, 90, 1575, 0]);
+    expect([s.subtotal, s.discount]).toEqual([94250, -9425]);
+    expect(discountPctLabel(lines.filter((l) => l.kind === 'discount').map((l) => l.description))).toBe('10%');
+    expect(discountPctLabel(['Скидка 7,5 %'])).toBe('7.5%');
+    expect(discountPctLabel(['Discount'])).toBeUndefined();
+  });
+
+  it('a discount with no line to sit on stays a line of its own', () => {
+    const lines = invoiceLines([item({ unitPriceFils: 10000, vatRateBp: 0, approvalState: 'approved' }), item({ kind: 'discount', unitPriceFils: 952, unitGrossFils: 1000, approvalState: 'approved' })], 'en');
+    const s = spreadDiscount(lines);
+    expect(s.rest).toHaveLength(1);
+    expect(s.lines[0]).toMatchObject({ discount: 0, gross: 10000 });
+    // Older quotations keep no VAT rate: lines with VAT and without are told apart by their VAT.
+    const old = spreadDiscount([
+      { kind: 'labor' as const, net: 10000, vat: 500, gross: 10500 },
+      { kind: 'part' as const, net: 5000, vat: 0, gross: 5000 },
+      { kind: 'discount' as const, net: -1000, vat: -50, gross: -1050 },
+    ]);
+    expect(old.lines.map((l) => [l.discount, l.vat, l.gross])).toEqual([[1000, 450, 9450], [0, 0, 5000]]);
+    expect(apportion(100, [1, 1, 1])).toEqual([34, 33, 33]);
   });
 });
 

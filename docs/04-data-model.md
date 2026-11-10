@@ -251,7 +251,7 @@ erDiagram
 | `order_id`, `number` | 1, 2, 3… |
 | `kind` | `initial` · `supplement` · `price_change` |
 | `reason_ru`, `reason_en` | что случилось («найден порванный пыльник») |
-| `snapshot` | JSON: позиции, цены, итоги, фото — **ровно то, что видел клиент** |
+| `snapshot` | JSON: позиции (с `vat_rate_bp` — с v0.5.1), цены, итоги, фото — **ровно то, что видел клиент** |
 | `fixed_total_fils`, `max_total_fils`, `recommended_total_fils`, `delta_fils` | итоги |
 | `valid_until` | срок действия |
 | `status` | `draft` · `sent` · `answered` · `expired` · `superseded` · `withdrawn` (все ждавшие ответа позиции отозваны в черновик или убраны; снимок остаётся как был) |

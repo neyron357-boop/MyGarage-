@@ -419,6 +419,12 @@ export function JobPage() {
     />
   );
 
+  // The discount once, as on the documents — however many VAT rates it is split over underneath.
+  const discountRow = (state: OrderItem | undefined, title: string, gross: number, onClick?: () => void) => (
+    <ListRow key="discount" left={state ? <LineMark item={state} /> : undefined} title={title} right={<Money fils={gross} c="green.7" />} onClick={onClick} />
+  );
+  const invOff = inv ? inv.lines.filter((l) => l.kind === 'discount') : [];
+
   const tiles: Tile[] = [];
   if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
@@ -593,14 +599,17 @@ export function JobPage() {
                 </Group>
               }
             />
-            {inv.lines.map((l, k) => (
-              <ListRow
-                key={k}
-                title={l.description}
-                subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
-                right={<Money fils={l.gross} c={l.kind === 'discount' ? 'green.7' : undefined} />}
-              />
-            ))}
+            {inv.lines
+              .filter((l) => l.kind !== 'discount')
+              .map((l, k) => (
+                <ListRow
+                  key={k}
+                  title={l.description}
+                  subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
+                  right={<Money fils={l.gross} />}
+                />
+              ))}
+            {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0))}
           </List>
           <Box mt="lg">
             <List>
@@ -615,7 +624,7 @@ export function JobPage() {
           {(lines.length > 0 || refusedLines.length > 0) && (
             <List>
               {lines.map(row)}
-              {discounts.map(row)}
+              {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
               {refusedLines.map(row)}
               {sentAt && (
                 <ListRow

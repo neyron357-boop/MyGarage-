@@ -2,6 +2,7 @@ import { Document, Font, Image, Page, pdf, StyleSheet, Text, View } from '@react
 import type { ReactNode } from 'react';
 import { db } from '../db/db';
 import { addDays, formatDate, formatDateTime, formatDocDate, nowIso } from '../domain/dates';
+import { discountPctLabel, spreadDiscount } from '../domain/discount';
 import { REQUIRED_SLOTS } from '../domain/inspection';
 import { checkLabel, lightLabel } from '../domain/quickLists';
 import { itemAmounts, itemTitle } from '../domain/items';
@@ -288,7 +289,8 @@ function QuotationDocument({ fam, settings, customer, vehicle, number, date, val
   date: string;
   validUntil?: string;
   rows: DocRow[];
-  totals: { gross: number; vat: number; text?: string };
+  /** gross: the total; subtotal and discount: before the discount and the discount (negative), if any. */
+  totals: { gross: number; vat: number; text?: string; subtotal?: number; discount?: number; discountLabel?: string };
   note?: string;
 }) {
   const party = partyOf(customer);
@@ -312,7 +314,9 @@ function QuotationDocument({ fam, settings, customer, vehicle, number, date, val
       <ItemsTable rows={rows} />
       <Totals
         qty={rows.reduce((a, r) => a + (r.total < 0 ? 0 : r.qty), 0)}
-        subtotal={totals.gross}
+        subtotal={totals.subtotal ?? totals.gross}
+        discount={totals.discount}
+        discountLabel={totals.discountLabel}
         vat={totals.vat}
         total={totals.gross}
         totalText={totals.text}
@@ -331,12 +335,18 @@ export async function renderVersion(versionId: string): Promise<Blob> {
   const b = (await loadOrderBundle(v.orderId))!;
   const t = tFor(v.language);
   const ranged = (i: (typeof v.items)[number]) => i.minGross !== undefined && i.maxGross !== undefined && i.minGross !== i.maxGross;
-  const rows: DocRow[] = v.items.map((i) =>
-    ranged(i)
-      ? { description: i.title, qty: i.qty, total: i.maxGross!, totalText: `${aed(i.minGross!)} – ${formatAed(i.maxGross!, 'en', false)}` }
-      : { description: i.title + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round(i.net / (i.qty || 1)), vat: i.vat, qty: i.qty, total: i.gross },
-  );
-  const vat = v.items.filter((i) => !ranged(i)).reduce((a, i) => a + i.vat, 0);
+  // The discount sits on the lines (Discount column) and once in the totals, as on the garage's invoices.
+  const spread = spreadDiscount(v.items, (i) => !ranged(i));
+  const rows: DocRow[] = [
+    ...spread.lines.map(({ line: i, discount, vat, gross }) =>
+      ranged(i)
+        ? { description: i.title, qty: i.qty, total: i.maxGross!, totalText: `${aed(i.minGross!)} – ${formatAed(i.maxGross!, 'en', false)}` }
+        : { description: i.title + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round(i.net / (i.qty || 1)), discount, vat, qty: i.qty, total: gross },
+    ),
+    ...spread.rest.map((i) => ({ description: i.title, price: Math.round(i.net / (i.qty || 1)), vat: i.vat, qty: i.qty, total: i.gross })),
+  ];
+  const vat = rows.reduce((a, r) => a + (r.vat ?? 0), 0);
+  const discountLabel = discountPctLabel(v.items.filter((i) => i.kind === 'discount').map((i) => i.title));
   const upTo = v.maxGross !== v.fixedGross;
   const note = [v.reason, v.items.some((i) => i.block === 'B') ? t('msg.bExplain') : ''].filter(Boolean).join(' ');
   return render((fam) => (
@@ -350,7 +360,7 @@ export async function renderVersion(versionId: string): Promise<Blob> {
         date={v.sentAt}
         validUntil={v.validUntil}
         rows={rows}
-        totals={{ gross: v.fixedGross, vat, text: upTo ? `${aed(v.fixedGross)} – ${formatAed(v.maxGross, 'en', false)}` : undefined }}
+        totals={{ gross: v.fixedGross, vat, subtotal: v.fixedGross - spread.discount, discount: spread.discount, discountLabel, text: upTo ? `${aed(v.fixedGross)} – ${formatAed(v.maxGross, 'en', false)}` : undefined }}
         note={note || undefined}
       />
     </Document>
@@ -361,12 +371,14 @@ export async function renderVersion(versionId: string): Promise<Blob> {
 export async function renderQuotation(orderId: string): Promise<Blob> {
   const b = (await loadOrderBundle(orderId))!;
   const items = b.items.filter((i) => ['draft', 'pending', 'approved'].includes(i.approvalState));
-  const rows: DocRow[] = items.map((i) => {
-    const a = itemAmounts(i);
-    return { description: itemTitle(i, 'en') + (i.customerSupplied ? ' (customer supplied part)' : ''), price: i.kind === 'discount' ? -Math.abs(i.unitPriceFils) : i.unitPriceFils, vat: a.vat, qty: i.qty, total: a.gross };
-  });
+  const spread = spreadDiscount(items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i })));
+  const rows: DocRow[] = [
+    ...spread.lines.map(({ line: { item: i }, discount, vat, gross }) => ({ description: itemTitle(i, 'en') + (i.customerSupplied ? ' (customer supplied part)' : ''), price: i.customerSupplied ? 0 : i.unitPriceFils, discount, vat, qty: i.qty, total: gross })),
+    ...spread.rest.map(({ item: i, vat, gross }) => ({ description: itemTitle(i, 'en'), price: -Math.abs(i.unitPriceFils), vat, qty: i.qty, total: gross })),
+  ];
   const gross = rows.reduce((x, r) => x + r.total, 0);
   const vat = rows.reduce((x, r) => x + (r.vat ?? 0), 0);
+  const discountLabel = discountPctLabel(items.filter((i) => i.kind === 'discount').map((i) => itemTitle(i, 'en')));
   const now = nowIso();
   return render((fam) => (
     <Document title={`Quotation ${b.order.number}`}>
@@ -379,7 +391,7 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
         date={now}
         validUntil={addDays(now, b.settings.estimateValidityDays)}
         rows={rows}
-        totals={{ gross, vat }}
+        totals={{ gross, vat, subtotal: spread.subtotal, discount: spread.discount, discountLabel }}
       />
     </Document>
   ));
@@ -387,8 +399,9 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
 
 /**
  * Tax invoice (and credit note) as the garage's own: seller with TRN, invoice and job numbers,
- * the customer with the car, lines with price excl. VAT and VAT, totals incl. VAT, barcodes and a QR
- * code with the invoice summary. Always in English with Arabic labels (UAE tax invoice).
+ * the customer with the car, lines with price excl. VAT, their part of the discount and VAT, totals incl.
+ * VAT (Subtotal − Discount = Total), barcodes and a QR code with the invoice summary. Always in English
+ * with Arabic labels (UAE tax invoice).
  */
 export async function renderInvoice(invoiceId: string): Promise<Blob> {
   const inv = await db.invoices.get(invoiceId);
@@ -399,13 +412,19 @@ export async function renderInvoice(invoiceId: string): Promise<Blob> {
   // The seller as it was when the invoice was issued; Arabic name/address from settings for older invoices.
   const seller = { ...inv.seller, nameAr: inv.seller.nameAr ?? b.settings.nameAr, addressAr: inv.seller.addressAr ?? b.settings.addressAr };
   const head: Settings = { ...b.settings, name: seller.name, address: seller.address ?? '', phone: seller.phone ?? '', nameAr: seller.nameAr, addressAr: seller.addressAr };
-  const rows: DocRow[] = inv.lines.map((l) => ({
-    description: l.description + (l.customerSupplied ? ' (customer supplied part)' : ''),
-    price: l.unitPriceFils,
-    vat: l.vat,
-    qty: l.qty,
-    total: l.gross,
-  }));
+  const spread = spreadDiscount(inv.lines);
+  const rows: DocRow[] = [
+    ...spread.lines.map(({ line: l, discount, vat, gross }) => ({
+      description: l.description + (l.customerSupplied ? ' (customer supplied part)' : ''),
+      price: l.unitPriceFils,
+      discount,
+      vat,
+      qty: l.qty,
+      total: gross,
+    })),
+    ...spread.rest.map((l) => ({ description: l.description, price: l.unitPriceFils, vat: l.vat, qty: l.qty, total: l.gross })),
+  ];
+  const discountLabel = discountPctLabel(inv.lines.filter((l) => l.kind === 'discount').map((l) => l.description));
   const qty = inv.lines.filter((l) => l.kind !== 'discount').reduce((a, l) => a + l.qty, 0);
   const methods = [...new Set(b.payments.filter((p) => p.kind !== 'refund').map((p) => METHOD_EN[p.method]))].join(', ');
   const qrText = [seller.name, `TRN ${seller.trn || '-'}`, `${credit ? 'Tax Credit Note' : 'Tax Invoice'} ${inv.number}`, formatDocDate(inv.issuedAt), `Total ${aed(inv.totalFils)}`, `VAT ${aed(inv.vatFils)}`].join('\n');
@@ -431,7 +450,9 @@ export async function renderInvoice(invoiceId: string): Promise<Blob> {
         <ItemsTable rows={rows} />
         <Totals
           qty={qty}
-          subtotal={inv.totalFils}
+          subtotal={spread.subtotal}
+          discount={spread.discount}
+          discountLabel={discountLabel}
           vat={inv.vatFils}
           total={inv.totalFils}
           notes={

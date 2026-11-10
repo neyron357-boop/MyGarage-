@@ -66,7 +66,7 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   if (v.number === 1) lines.push(t('msg.estimateHeader', { ...b, version: v.number }));
   else lines.push(t('msg.supplementHeader', { ...b, version: v.number, reason: v.reason ?? '' }));
   for (const block of ['A', 'B', 'C'] as const) {
-    const list = v.items.filter((i) => i.block === block);
+    const list = v.items.filter((i) => i.block === block && i.kind !== 'discount');
     if (!list.length) continue;
     lines.push('', t(`msg.block${block}`));
     for (const i of list) {
@@ -82,6 +82,9 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
     }
   }
   lines.push('');
+  // The discount once, right before the total — not among the lines.
+  const off = v.items.filter((i) => i.kind === 'discount');
+  if (off.length) lines.push(`${off[0].title}: ${money(off.reduce((a, i) => a + i.gross, 0))}`);
   if (v.maxGross !== v.fixedGross) lines.push(t('msg.totalRange', { fixed: money(v.fixedGross), max: money(v.maxGross) }));
   else lines.push(t('msg.total', { fixed: money(v.fixedGross) }));
   if (v.recommendedGross > 0) lines.push(t('msg.recommendedTotal', { sum: money(v.recommendedGross) }));
