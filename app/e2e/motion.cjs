@@ -34,6 +34,11 @@ const check = (name, ok, detail) => {
   await page.goto(BASE + '#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
   await page.waitForTimeout(2000);
+  // The board is one compact row per car: a few more cars make it longer than the screen.
+  await page.evaluate(async () => {
+    const { checkIn } = await import('/src/services/orders.ts');
+    for (let k = 0; k < 9; k++) await checkIn({ plate: { emirate: 'DXB', code: 'M', number: String(40000 + k) }, make: 'Toyota', model: 'Yaris', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+  });
   await page.goto(BASE + '#/');
   await page.waitForTimeout(1200);
 
@@ -53,7 +58,7 @@ const check = (name, ok, detail) => {
   await page.evaluate(() => document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTo(0, 420));
   await page.waitForTimeout(200);
   const barBefore = await tabBarY();
-  await page.locator('.screen[data-role="top"] .surface.tap').last().click();
+  await page.locator('.screen[data-role="top"] .job-row').last().click();
   const mid = await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -89,7 +94,7 @@ const check = (name, ok, detail) => {
   check('back: board again, scroll position kept', back.hash === '#/' && back.title === 'Мастерская' && back.leaving === 0 && boardScroll > 50 && Math.abs(back.scroll - boardScroll) < 40, { ...back, boardScroll });
 
   // 3. Edge swipe: the previous screen is visible under the finger and becomes the screen.
-  await page.locator('.screen[data-role="top"] .surface.tap').first().click();
+  await page.locator('.screen[data-role="top"] .job-row').first().click();
   await page.waitForTimeout(800);
   const swipe = await page.evaluate(
     () =>
@@ -133,7 +138,7 @@ const check = (name, ok, detail) => {
   check('swipe: lands on the board', swipe.hash === '#/' && swipe.title === 'Мастерская' && swipe.leaving === 0, swipe);
 
   // 4. A short swipe springs back.
-  await page.locator('.screen[data-role="top"] .surface.tap').first().click();
+  await page.locator('.screen[data-role="top"] .job-row').first().click();
   await page.waitForTimeout(800);
   const orderHash = await page.evaluate(() => location.hash);
   const short = await page.evaluate(
@@ -234,7 +239,7 @@ const check = (name, ok, detail) => {
   await sp.waitForTimeout(1500);
   await sp.goto(BASE + '#/');
   await sp.waitForTimeout(1000);
-  await sp.locator('.screen[data-role="top"] .surface.tap').first().click();
+  await sp.locator('.screen[data-role="top"] .job-row').first().click();
   await sp.waitForTimeout(800);
   const safari = await sp.evaluate(
     () =>

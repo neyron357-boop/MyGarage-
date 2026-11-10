@@ -95,7 +95,14 @@ async function launchBrowser() {
     await page.getByLabel('Имя').fill('Сергей Иванов');
     await page.getByPlaceholder('Словами клиента: что беспокоит').fill('Стук спереди справа на неровностях, не холодит кондиционер');
     await shot('03-new-order', true);
-    await page.getByRole('button', { name: 'Начать приёмку' }).click();
+    // One button: the car is accepted and its job opens — findings, prices and answers happen there.
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByText('Смотрим').first().waitFor();
+    await shot('03b-job-accepted');
+    // The intake act with photos is optional: "…" → "Фото".
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Фото' }).click();
     await page.getByText('Шаг 1 из 6').waitFor();
   });
   await step('intake photos', async () => {
@@ -147,8 +154,14 @@ async function launchBrowser() {
     await page.getByText('Открыть чат').waitFor();
     await shot('09-send-dialog');
     await page.locator('.mantine-Modal-close').first().click();
-    await page.getByRole('link', { name: 'Открыть заказ' }).or(page.getByRole('button', { name: 'Открыть заказ' })).first().click(); await page.getByText('Диагностика / оценка').first().waitFor();
-    await shot('10-order-after-intake', true);
+    await page.getByRole('link', { name: 'Открыть заказ' }).or(page.getByRole('button', { name: 'Открыть заказ' })).first().click();
+    await page.getByText('Смотрим').first().waitFor();
+    await shot('10-job-after-intake', true);
+    // Everything about the job (stages by hand, photos, documents, journal) stays under "…" → "Подробно".
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Подробно' }).click();
+    await page.getByText('Диагностика / оценка').first().waitFor();
+    await shot('10b-order-details', true);
   });
   await step('estimate', async () => {
     await page.getByRole('button', { name: 'Подробная оценка' }).first().click();
@@ -169,7 +182,7 @@ async function launchBrowser() {
     await page.locator('.mantine-Modal-close').first().click();
   });
   await step('order work tab', async () => {
-    const url = page.url().replace('/estimate', '') ;
+    const url = page.url().replace('/estimate', '/details');
     await page.goto(url.split('?')[0] + '?tab=work');
     await page.getByText('Ждём запчасть').first().waitFor();
     await shot('14-order-work', true);
@@ -195,7 +208,7 @@ async function launchBrowser() {
   let patrol;
   await step('work done, QC, ready', async () => {
     patrol = await page.evaluate(async () => { const { db } = await import('/src/db/db.ts'); const v = (await db.vehicles.toArray()).find((x) => x.model === 'Patrol'); return (await db.orders.where('vehicleId').equals(v.id).first()).id; });
-    await page.goto(BASE + `#/orders/${patrol}?tab=work`);
+    await page.goto(BASE + `#/orders/${patrol}/details?tab=work`);
     await page.getByText('Согласовано').first().waitFor();
     const todo = page.getByRole('button', { name: 'Готово', exact: true });
     while (await todo.count()) { await todo.first().click(); await page.waitForTimeout(400); }
@@ -265,12 +278,11 @@ async function launchBrowser() {
     // A job opened by mistake: "…" → "Delete job" takes it off the board; "Undo" brings it back.
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('27182');
-    await page.getByRole('button', { name: 'Начать приёмку' }).click();
-    await page.waitForURL(/\/intake$/);
-    const orderHash = (await page.evaluate(() => location.hash)).replace(/\/intake$/, '');
-    await page.goto(BASE + orderHash);
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').first().click();
-    await page.getByRole('menuitem', { name: 'Удалить заказ' }).click();
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    const orderHash = await page.evaluate(() => location.hash);
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Удалить' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Удалить заказ' }).click();
     await page.getByText(/удалён/).first().waitFor();
     await page.waitForTimeout(400);
@@ -287,56 +299,102 @@ async function launchBrowser() {
     await page.goto(BASE + orderHash);
     await page.getByText('27182').first().waitFor();
   });
-  await step('quick invoice path', async () => {
+  await step('job: findings, price, agreed, done, paid, gone', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('31415');
     await page.getByRole('button', { name: 'Nissan', exact: true }).click();
     await page.getByRole('button', { name: 'Sunny', exact: true }).click();
-    await shot('30-quick-new-order');
-    await page.getByRole('button', { name: 'Сразу к инвойсу' }).click();
-    await page.getByText('Добавить работу').waitFor();
-    await page.getByText('Добавить работу').click();
-    await page.getByRole('dialog').getByLabel('Что сделали').fill('Замена масла');
-    await page.getByRole('dialog').getByLabel('Цена', { exact: true }).fill('150');
-    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByText('Добавить запчасть').click();
-    await page.getByRole('dialog').getByLabel('Запчасть').fill('Фильтр салона');
-    await page.getByRole('dialog').getByLabel('Кол-во').fill('2');
-    await page.getByRole('dialog').getByLabel('Цена за шт.').fill('30');
-    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Brake noise', exact: true }).click();
+    await shot('30-check-in');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    const dlg = page.getByRole('dialog');
+    // What the mechanic found: a job and a part (the part first without a price: still to find).
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Замена масла');
+    await dlg.getByLabel('Цена', { exact: true }).fill('150');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
+    await dlg.getByLabel('Запчасть').fill('Фильтр салона');
+    await dlg.getByLabel('Кол-во').fill('2');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: /Спросить запчасти/ }).waitFor();
+    // No price yet: the quote cannot go, the suppliers can be asked.
+    if (!(await page.getByRole('button', { name: /^Клиенту/ }).isDisabled())) throw new Error('a line without a price must hold the quote');
+    await page.getByRole('button', { name: /Спросить запчасти/ }).click();
+    await dlg.getByText('Price and availability').waitFor();
+    await shot('30b-ask-supplier');
+    await page.locator('.mantine-Modal-close').first().click();
+    await page.getByText('Фильтр салона').first().click();
+    await dlg.getByLabel('Закупка за шт.').fill('20');
+    await dlg.getByLabel('Цена за шт.').fill('30');
+    await dlg.getByRole('button', { name: 'Заказано' }).click();
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
-    // A line without VAT (a fee paid on the customer's behalf): 100 AED stays 100 AED.
-    await page.getByText('Добавить работу').click();
-    await page.getByRole('dialog').getByLabel('Что сделали').fill('RTA test fee');
-    await page.getByRole('dialog').getByLabel('Цена', { exact: true }).fill('100');
-    await page.getByRole('dialog').getByText('Итого 105,00 AED, в т. ч. VAT 5,00').waitFor();
-    await page.getByRole('dialog').getByText('Без VAT', { exact: true }).click();
-    await page.getByRole('dialog').getByText('Итого 100,00 AED, без VAT').waitFor();
+    // A line without VAT (a fee paid for the customer): 100 AED stays 100 AED.
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('RTA test fee');
+    await dlg.getByLabel('Цена', { exact: true }).fill('100');
+    await dlg.getByText('Итого 105,00 AED, в т. ч. VAT 5,00').waitFor();
+    await dlg.getByText('Без VAT', { exact: true }).click();
+    await dlg.getByText('Итого 100,00 AED, без VAT').waitFor();
     await shot('31a-line-no-vat');
-    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('320,50').first().waitFor(); // 220.50 + 100 without VAT
     // A discount before the invoice: one tap rounds the total down.
-    await page.getByText('Добавить скидку').click();
-    await page.getByRole('dialog').getByRole('button', { name: 'К оплате 320,00 AED' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByRole('button', { name: 'Выписать инвойс · 320,00 AED' }).waitFor();
-    await shot('31-quick-invoice', true);
-    await page.getByRole('button', { name: /^Выписать инвойс/ }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Выписать инвойс' }).click();
-    await page.getByText(/Инвойс INV-/).waitFor();
+    await page.getByRole('button', { name: 'Скидка' }).click();
+    await dlg.getByRole('button', { name: 'К оплате 320,00 AED' }).click();
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Клиенту · 320,00 AED' }).waitFor();
+    await shot('31-job-price', true);
+    // To the customer: the message is ready; closed without sending, the lines stay as they are.
+    await page.getByRole('button', { name: 'Клиенту · 320,00 AED' }).click();
+    await page.getByText('Открыть чат').waitFor();
+    await page.locator('.mantine-Modal-close').first().click();
+    // The customer agrees in person: the work starts, the part is marked as here.
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByText('В работе').first().waitFor();
+    await page.getByText('Фильтр салона').first().click();
+    await dlg.getByRole('button', { name: 'Есть' }).click();
+    await shot('31b-line-actions');
+    await page.locator('.mantine-Modal-close').first().click();
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByText(/INV-/).first().waitFor();
     // A discount after the invoice: credit note and a new invoice (10 % of 320.50 = 32.05).
-    await page.getByText('Изменить скидку').click();
-    await page.getByRole('dialog').getByText('%', { exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: '10 %' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Оформить скидку' }).click();
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await shot('32a-more');
+    await dlg.getByRole('button', { name: 'Скидка' }).click();
+    await dlg.getByText('%', { exact: true }).click();
+    await dlg.getByRole('button', { name: '10 %' }).click();
+    await dlg.getByRole('button', { name: 'Оформить скидку' }).click();
     await page.getByRole('dialog').last().getByRole('button', { name: 'Оформить скидку' }).click();
-    await page.getByRole('button', { name: 'Принять оплату · 288,45 AED' }).waitFor();
-    await shot('32-quick-issued', true);
-    await page.getByRole('button', { name: /^Принять оплату/ }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Провести' }).click();
-    await page.getByRole('button', { name: 'Выдать машину и закрыть заказ' }).click();
-    await page.getByText('Заказ закрыт').first().waitFor();
-    await shot('33-quick-closed', true);
+    await page.getByRole('button', { name: 'Оплата · 288,45 AED' }).waitFor();
+    await shot('32-job-invoiced', true);
+    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await dlg.getByRole('button', { name: 'Провести' }).click();
+    await page.getByRole('button', { name: 'Выдать' }).click();
+    await page.getByText('Закрыт').first().waitFor();
+    await shot('33-job-closed', true);
+    // The board shows the cars by step; the closed one is gone from it.
+    await page.goto(BASE + '#/');
+    await page.locator('.job-row').first().waitFor();
+    if (await page.getByText('31415').count()) throw new Error('a closed job is still on the board');
+  });
+  await step('refused: the job closes without an invoice', async () => {
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('16180');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    const dlg = page.getByRole('dialog');
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Engine overhaul');
+    await dlg.getByLabel('Цена', { exact: true }).fill('5000');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: /^Клиенту/ }).waitFor();
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'Отказ' }).click();
+    await page.getByRole('dialog', { name: 'Клиент отказался?' }).getByRole('button', { name: 'Отказ' }).click();
+    await page.getByText('Закрыт').first().waitFor();
+    await shot('33b-job-refused');
   });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);

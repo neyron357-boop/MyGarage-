@@ -1,0 +1,132 @@
+import { db } from '../db/db';
+import { nowIso } from '../domain/dates';
+import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
+import { activeInvoice } from '../domain/invoice';
+import { isAwaitingClient, itemTitle } from '../domain/items';
+import { partsReady } from '../domain/stages';
+import type { DecisionVia, OrderItem, SendVia, Stage, Vehicle } from '../domain/types';
+import { syncDiscount } from './discount';
+import { AppError } from './errors';
+import { recordDecisions, sendVersion } from './estimate';
+import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, type OrderBundle } from './orders';
+
+/**
+ * The lazy flow: one-tap actions on a job ("agreed", "refused", "drop this line") that also keep its
+ * stage in step — the manager never moves a job by hand.
+ */
+
+/** Where the job stands now: the one thing to do with it. */
+export function phaseOf(b: OrderBundle): Phase {
+  return jobPhase({ order: b.order, items: b.items, invoices: b.invoices, dueFils: bundleAmountDue(b) });
+}
+
+async function hop(orderId: string, to: Stage): Promise<boolean> {
+  try {
+    await changeStage(orderId, to);
+    return true;
+  } catch (e) {
+    if (e instanceof AppError) return false;
+    throw e;
+  }
+}
+
+/** Put the job on the stage its lines, answers and parts call for (in several hops if needed). */
+export async function syncStage(orderId: string): Promise<void> {
+  for (let n = 0; n < 5; n++) {
+    const b = await loadOrderBundle(orderId);
+    if (!b) return;
+    const want = flowStage(b.order.stage, phaseOf(b), partsReady(b.items));
+    if (!want) return;
+    if (await hop(orderId, want)) continue;
+    const via = stepToward(b.order.stage, want);
+    if (!via || !(await hop(orderId, via))) return;
+  }
+}
+
+const viaOf = (sent: SendVia): DecisionVia => (sent === 'in_person' ? 'in_person' : sent === 'phone' ? 'phone' : 'messenger');
+
+async function answer(items: OrderItem[], decision: 'approve' | 'decline'): Promise<void> {
+  const byVersion = new Map<string, OrderItem[]>();
+  for (const i of items) if (i.lastVersionId) byVersion.set(i.lastVersionId, [...(byVersion.get(i.lastVersionId) ?? []), i]);
+  for (const [versionId, list] of byVersion) {
+    const v = await db.versions.get(versionId);
+    await recordDecisions(versionId, list.map((i) => ({ itemId: i.id, decision })), v ? viaOf(v.sentVia) : 'in_person');
+  }
+}
+
+/** The customer's answer on lines that wait for it. */
+export async function answerLines(itemIds: string[], decision: 'approve' | 'decline'): Promise<void> {
+  const items = (await db.items.bulkGet(itemIds)).filter((i): i is OrderItem => !!i && isAwaitingClient(i));
+  if (!items.length) return;
+  await answer(items, decision);
+  await syncStage(items[0].orderId);
+}
+
+/**
+ * "The customer agrees": every line not agreed yet becomes agreed — those waiting for an answer, and
+ * those never sent (told in person, recorded as a version like the quick invoice does).
+ */
+export async function approveAll(orderId: string): Promise<void> {
+  const items = await db.items.where('orderId').equals(orderId).toArray();
+  await answer(items.filter(isAwaitingClient), 'approve');
+  if (items.some((i) => i.approvalState === 'draft')) {
+    const v = await sendVersion(orderId, { via: 'in_person' });
+    await recordDecisions(v.id, v.items.map((s) => ({ itemId: s.itemId, decision: 'approve' as const })), 'in_person');
+  }
+  await syncStage(orderId);
+}
+
+/**
+ * "The customer refused": lines that wait are declined, lines never sent are dropped. With nothing
+ * left to charge for the job is closed at once — the car just leaves; otherwise what was agreed
+ * before is invoiced as usual.
+ */
+export async function refuseAll(orderId: string): Promise<'closed' | 'open'> {
+  const items = await db.items.where('orderId').equals(orderId).toArray();
+  if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
+  await answer(items.filter(isAwaitingClient), 'decline');
+  for (const i of items) if (i.approvalState === 'draft') await db.items.delete(i.id);
+  const left = await db.items.where('orderId').equals(orderId).toArray();
+  if (!nothingToBill(left)) {
+    await syncDiscount(orderId);
+    await syncStage(orderId);
+    return 'open';
+  }
+  await db.transaction('rw', db.orders, db.events, async () => {
+    await db.orders.update(orderId, { outcome: 'repair_declined', updatedAt: nowIso() });
+    await logEvent(orderId, 'repair_declined', {});
+  });
+  await changeStage(orderId, 'closed');
+  return 'closed';
+}
+
+/** An agreed line that will not be done after all (the customer changed their mind, no part): off the job. */
+export async function dropLine(itemId: string): Promise<void> {
+  const item = await db.items.get(itemId);
+  if (!item) throw new AppError('err.notFound');
+  if (item.approvalState !== 'approved') throw new AppError('err.itemSent');
+  if (activeInvoice(await db.invoices.where('orderId').equals(item.orderId).toArray())) throw new AppError('err.invoiceExists');
+  await db.transaction('rw', db.items, db.events, async () => {
+    await db.items.update(itemId, { approvalState: 'cancelled', done: false, doneAt: undefined });
+    await logEvent(item.orderId, 'items_removed', { count: 1, titles: item.titleRu || item.titleEn });
+  });
+  await syncDiscount(item.orderId);
+  await syncStage(item.orderId);
+}
+
+/** Parts of the job that are not bought yet. */
+export function partsToFind(items: OrderItem[]): OrderItem[] {
+  return items.filter((i) => i.kind === 'part' && !i.customerSupplied && ['draft', 'pending', 'approved'].includes(i.approvalState) && (i.procurementStatus ?? 'needed') === 'needed');
+}
+
+/**
+ * A message to a parts supplier (always in English): the parts of the job that still have to be
+ * found, with the car they are for.
+ */
+export function partsRequest(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin'>, parts: OrderItem[]): string {
+  const car = [vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ');
+  const lines = parts.map((p) => '• ' + itemTitle(p, 'en') + (p.partNumber ? ' (' + p.partNumber + ')' : '') + (p.qty !== 1 ? ' × ' + p.qty : ''));
+  const out = ['Hi! Price and availability, please:', ...lines, '', car];
+  if (vehicle.vin) out.push('VIN: ' + vehicle.vin);
+  return out.join('\n');
+}

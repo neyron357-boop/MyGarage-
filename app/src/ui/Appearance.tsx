@@ -46,7 +46,8 @@ export function AppearanceRows() {
   const [haptics, setHaptics] = useHaptics();
   const ios = iosVersion();
   // An iPhone older than iOS 18 has no haptics for web apps at all: say so instead of a dead switch.
-  const note = hapticsAvailable() ? t('app.hapticsHint') : isApple() && ios !== undefined && ios < 18 ? t('app.hapticsNeedsIos', { version: Math.floor(ios) }) : undefined;
+  // No explaining what a switch does; only why it is missing on an old iPhone.
+  const note = !hapticsAvailable() && isApple() && ios !== undefined && ios < 18 ? t('app.hapticsNeedsIos', { version: Math.floor(ios) }) : undefined;
   return (
     <RowGroup title={t('app.appearance')} note={note}>
       <FormRow label={t('app.language')}>

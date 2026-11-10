@@ -15,6 +15,7 @@ import {
   summarize,
 } from './items';
 import { checkTransition, isBackward, type StageContext } from './stages';
+import { flowStage, jobPhase, nothingToBill, stepToward, type FlowFacts } from './flow';
 import { activeInvoice, amountDue, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from './invoice';
 import { expectedCash, nonCashTotals } from './cash';
 import { computeReport } from './reports';
@@ -222,6 +223,45 @@ describe('items and approvals', () => {
   });
 });
 
+describe('lazy flow: what to do with a job now', () => {
+  const facts = (items: OrderItem[], p: Partial<FlowFacts> = {}): FlowFacts => ({ order: { stage: 'diagnostics', outcome: 'in_progress' }, items, invoices: [], dueFils: 0, ...p });
+  const inv = { type: 'simplified_tax_invoice', status: 'issued', issuedAt: '2026-11-10T08:00:00.000Z' } as Invoice;
+  it('reads the phase from the lines, the answers and the money', () => {
+    expect(jobPhase(facts([]))).toBe('look');
+    expect(jobPhase(facts([item({})]))).toBe('price');
+    expect(jobPhase(facts([item({ approvalState: 'pending' }), item({})]))).toBe('wait');
+    expect(jobPhase(facts([item({ approvalState: 'approved' })]))).toBe('work');
+    // Something new found during the work: the customer has to hear it first.
+    expect(jobPhase(facts([item({ approvalState: 'approved' }), item({})]))).toBe('price');
+    expect(jobPhase(facts([item({ approvalState: 'approved', done: true })], { invoices: [inv], dueFils: 10500 }))).toBe('pay');
+    expect(jobPhase(facts([item({ approvalState: 'approved', done: true })], { invoices: [inv], dueFils: 0 }))).toBe('out');
+    expect(jobPhase(facts([item({ approvalState: 'declined' })], { order: { stage: 'ready', outcome: 'repair_declined' } }))).toBe('out');
+    expect(jobPhase(facts([], { order: { stage: 'delivered', outcome: 'completed' }, dueFils: 500 }))).toBe('debt');
+    expect(jobPhase(facts([], { order: { stage: 'booked', outcome: 'in_progress' } }))).toBe('booked');
+    // A discount alone is not something to tell the customer or to work on.
+    expect(jobPhase(facts([item({ kind: 'discount' })]))).toBe('look');
+  });
+  it('moves the stage forward by itself', () => {
+    expect(flowStage('intake', 'look', true)).toBe('diagnostics');
+    expect(flowStage('diagnostics', 'price', true)).toBeNull();
+    expect(flowStage('intake', 'wait', true)).toBe('awaiting_approval');
+    expect(flowStage('in_progress', 'wait', true)).toBeNull(); // a supplement during the work
+    expect(flowStage('awaiting_approval', 'work', false)).toBe('awaiting_parts');
+    expect(flowStage('awaiting_parts', 'work', true)).toBe('in_progress');
+    expect(flowStage('in_progress', 'work', false)).toBeNull();
+    expect(flowStage('ready', 'pay', true)).toBeNull();
+    expect(stepToward('intake', 'in_progress')).toBe('diagnostics');
+    expect(stepToward('awaiting_approval', 'in_progress')).toBe('awaiting_parts');
+    expect(stepToward('awaiting_parts', 'in_progress')).toBeNull();
+  });
+  it('knows when there is nothing to charge for', () => {
+    expect(nothingToBill([])).toBe(true);
+    expect(nothingToBill([item({ approvalState: 'declined' }), item({ approvalState: 'cancelled' })])).toBe(true);
+    expect(nothingToBill([item({ customerSupplied: true, kind: 'part' })])).toBe(true);
+    expect(nothingToBill([item({})])).toBe(false);
+  });
+});
+
 describe('stage transitions', () => {
   const base = (p: Partial<StageContext> = {}): StageContext => ({
     order: order(),
@@ -236,9 +276,14 @@ describe('stage transitions', () => {
     ...p,
   });
 
-  it('requires a finished intake act', () => {
-    expect(checkTransition('intake', 'diagnostics', base()).ok).toBe(false);
-    expect(checkTransition('intake', 'diagnostics', base({ intakeDone: true })).ok).toBe(true);
+  it('the mechanic may look at the car right after check-in (the intake act is optional)', () => {
+    expect(checkTransition('intake', 'diagnostics', base()).ok).toBe(true);
+  });
+  it('a job with nothing to charge for can be closed without an invoice', () => {
+    expect(checkTransition('diagnostics', 'closed', base()).ok).toBe(true);
+    expect(checkTransition('awaiting_approval', 'closed', base({ items: [item({ approvalState: 'declined' })] })).ok).toBe(true);
+    expect(checkTransition('diagnostics', 'closed', base({ items: [item({ approvalState: 'draft' })] }))).toEqual({ ok: false, reason: 'stageErr.noInvoice' });
+    expect(checkTransition('in_progress', 'closed', base({ items: [item({ approvalState: 'approved' })] })).ok).toBe(false);
   });
   it('cannot skip stages', () => {
     expect(checkTransition('intake', 'ready', base({ intakeDone: true })).ok).toBe(false);
@@ -269,7 +314,7 @@ describe('stage transitions', () => {
     expect(checkTransition('delivered', 'closed', base({ amountDueFils: 100 })).ok).toBe(false);
   });
   it('closes from any working stage once the invoice is paid (quick path)', () => {
-    expect(checkTransition('intake', 'closed', base()).ok).toBe(false);
+    expect(checkTransition('intake', 'closed', base({ items: [item({ approvalState: 'approved' })] })).ok).toBe(false);
     expect(checkTransition('intake', 'closed', base({ invoiced: true, amountDueFils: 100 })).ok).toBe(false);
     expect(checkTransition('intake', 'closed', base({ invoiced: true, amountDueFils: 0 })).ok).toBe(true);
     expect(checkTransition('in_progress', 'closed', base({ invoiced: true, amountDueFils: 100, debtSigned: true })).ok).toBe(true);

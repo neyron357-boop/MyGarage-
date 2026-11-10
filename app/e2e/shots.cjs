@@ -47,7 +47,7 @@ async function launchBrowser() {
 
   await go('#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-  await settle(1500);
+  await settle(6000);
   // The "demo data loaded" banner would sit over every picture (the mouse of the test pauses it).
   await page.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
 
@@ -55,24 +55,37 @@ async function launchBrowser() {
     await go('#/');
     await shot(`${prefix}-01-board`);
     await shot(`${prefix}-01b-board-scrolled`, { scroll: 520 });
-    await page.locator('.screen[data-role="top"] .surface.tap').first().click();
+    await page.locator('.screen[data-role="top"] .job-row').first().click();
     await settle(900);
     const order = await page.evaluate(() => location.hash);
-    await shot(`${prefix}-02-order`);
-    await shot(`${prefix}-02b-order-scrolled`, { scroll: 380 });
-    // The "…" menu and the stage sheet of the job.
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').first().click();
-    await settle(500);
-    await shot(`${prefix}-02c-order-menu`);
-    await page.keyboard.press('Escape');
-    await settle(300);
-    await page.locator('.screen[data-role="top"] .stage-btn').first().click();
+    await shot(`${prefix}-02-job`);
+    await shot(`${prefix}-02b-job-scrolled`, { scroll: 380 });
+    // The job's "…" sheet, a line of it, and adding a part.
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await settle(600);
+    await shot(`${prefix}-02c-job-more`);
+    const closeSheet = async () => {
+      await page.locator('.mantine-Modal-close').first().click();
+      await settle(500);
+    };
+    await closeSheet();
+    await page.locator('.screen[data-role="top"] .list-row.clickable').first().click();
     await settle(700);
-    await shot(`${prefix}-02d-stage-sheet`);
-    await page.keyboard.press('Escape');
-    await settle(400);
-    await go(order + '?tab=work');
-    await shot(`${prefix}-03-order-work`);
+    await shot(`${prefix}-02d-job-line`);
+    await closeSheet();
+    await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Запчасть', exact: true }).click();
+    await settle(700);
+    await shot(`${prefix}-02e-job-part`);
+    await closeSheet();
+    // Jobs on the other steps: waiting for the customer, in work.
+    for (const k of [1, 2]) {
+      await go('#/');
+      await page.locator('.screen[data-role="top"] .job-row').nth(k).click();
+      await settle(900);
+      await shot(`${prefix}-02f-job-${k}`);
+    }
+    await go(order + '/details?tab=work');
+    await shot(`${prefix}-03-order-details`);
     await go('#/orders/new');
     await shot(`${prefix}-04-new-order`);
     await go('#/search?q=' + encodeURIComponent('масло'));
@@ -90,8 +103,7 @@ async function launchBrowser() {
     await go(order.replace('#', '#') + '/intake');
     await settle(600);
     await shot(`${prefix}-10-intake`);
-    await go(order + '/invoice');
-    await shot(`${prefix}-11-invoice`);
+
     await go('#/money?tab=expenses&add=1', 1200);
     await shot(`${prefix}-12-sheet`);
   };

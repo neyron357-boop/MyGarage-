@@ -1,5 +1,5 @@
-import { Autocomplete, Box, Button, Group, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconCar, IconChevronRight, IconUser, IconX } from '@tabler/icons-react';
+import { Autocomplete, Box, Button, Group, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
+import { IconCar, IconCheck, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -169,7 +169,7 @@ export function NewOrderPage() {
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   // Documents are in English by default, whatever language the app itself is in.
-  const [docLanguage, setDocLanguage] = useState<Lang>('en');
+  const docLanguage: Lang = 'en';
   const [complaint, setComplaint] = useState('');
   const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();
@@ -196,7 +196,7 @@ export function NewOrderPage() {
     setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase}` : phrase));
   };
 
-  const submit = (target: 'intake' | 'invoice' | 'book') =>
+  const submit = (target: 'job' | 'book') =>
     run(async () => {
       const o = await checkIn({
         vehicleId: picked?.vehicle.id,
@@ -212,7 +212,8 @@ export function NewOrderPage() {
         bookedFor: target === 'book' ? bookedFor : undefined,
       });
       if (!picked) rememberEmirate(plate.emirate);
-      navigate(target === 'intake' ? `/orders/${o.id}/intake` : target === 'invoice' ? `/orders/${o.id}/invoice` : `/orders/${o.id}`, { replace: true });
+      // Straight to the job: findings, prices and the customer's answer all happen there.
+      navigate(`/orders/${o.id}`, { replace: true });
     });
 
   const noName = t('customer.noName');
@@ -282,7 +283,21 @@ export function NewOrderPage() {
         )}
 
         <div className="group-title" style={{ marginTop: 22 }}>
-          {t('newOrder.customerOptional')}
+          {t('job.complaint')}
+        </div>
+        <Box className="surface" p="md">
+          <div className="chip-row wrap">
+            {complaints.map((p) => (
+              <button key={p} type="button" className="chip" data-active={complaint.includes(p)} onClick={() => addQuick(p)}>
+                {p}
+              </button>
+            ))}
+          </div>
+          <Textarea mt="sm" aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
+        </Box>
+
+        <div className="group-title" style={{ marginTop: 22 }}>
+          {t('job.client')}
         </div>
         {owner && (owner.name || owner.phone) ? (
           <Box className="surface rise-enter" p="md">
@@ -309,17 +324,6 @@ export function NewOrderPage() {
               <FormRow label={t('customer.name')}>
                 <TextInput aria-label={t('customer.name')} placeholder={t('newOrder.namePlaceholder')} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="off" w="100%" />
               </FormRow>
-              <FormRow label={t('newOrder.docs')}>
-                <SegmentedControl
-                  size="xs"
-                  value={docLanguage}
-                  onChange={(v) => setDocLanguage(v === 'en' ? 'en' : 'ru')}
-                  data={[
-                    { value: 'ru', label: 'RU' },
-                    { value: 'en', label: 'EN' },
-                  ]}
-                />
-              </FormRow>
             </RowGroup>
             {suggestions.length > 0 && (
               <Stack gap={8} mt={10}>
@@ -336,23 +340,10 @@ export function NewOrderPage() {
                 ))}
               </Stack>
             )}
-            <div className="group-note">{t('newOrder.customerLater')}</div>
+
           </>
         )}
 
-        <div className="group-title" style={{ marginTop: 22 }}>
-          {t('newOrder.complaintOptional')}
-        </div>
-        <Box className="surface" p="md">
-          <div className="chip-row wrap">
-            {complaints.map((p) => (
-              <button key={p} type="button" className="chip" data-active={complaint.includes(p)} onClick={() => addQuick(p)}>
-                {p}
-              </button>
-            ))}
-          </div>
-          <Textarea mt="sm" aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
-        </Box>
 
         <RowGroup>
           <FormRow label={t('newOrder.bookLater')}>
@@ -372,14 +363,9 @@ export function NewOrderPage() {
             {t('newOrder.book')}
           </Button>
         ) : (
-          <Group grow gap={10} wrap="nowrap">
-            <Button variant="light" onClick={() => submit('invoice')} loading={busy} style={{ fontSize: 16 }}>
-              {t('newOrder.toInvoice')}
-            </Button>
-            <Button onClick={() => submit('intake')} loading={busy} rightSection={<IconChevronRight size={18} />} style={{ fontSize: 16 }}>
-              {t('newOrder.startIntake')}
-            </Button>
-          </Group>
+          <Button fullWidth onClick={() => submit('job')} loading={busy} leftSection={<IconCheck size={20} />}>
+            {t('job.accept')}
+          </Button>
         )}
       </StickyBar>
     </>

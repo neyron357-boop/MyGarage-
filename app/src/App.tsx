@@ -31,7 +31,7 @@ import { EstimatePage } from './features/estimate/EstimatePage';
 import { FoundProblemPage } from './features/estimate/FoundProblemPage';
 import { InspectionWizard } from './features/inspection/InspectionWizard';
 import { MoneyPage } from './features/money/MoneyPage';
-import { QuickInvoicePage } from './features/money/QuickInvoicePage';
+import { JobPage } from './features/job/JobPage';
 import { MorePage } from './features/more/MorePage';
 import { NewOrderPage } from './features/orders/NewOrderPage';
 import { OrderPage } from './features/orders/OrderPage';
@@ -58,10 +58,11 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/" element={<BoardPage />} />
       <Route path="/search" element={<SearchPage />} />
       <Route path="/orders/new" element={<NewOrderPage />} />
-      <Route path="/orders/:id" element={<OrderPage />} />
+      <Route path="/orders/:id" element={<JobPage />} />
+      <Route path="/orders/:id/details" element={<OrderPage />} />
       <Route path="/orders/:id/intake" element={<InspectionWizard kind="intake" />} />
       <Route path="/orders/:id/handover" element={<InspectionWizard kind="handover" />} />
-      <Route path="/orders/:id/invoice" element={<QuickInvoicePage />} />
+      <Route path="/orders/:id/invoice" element={<JobPage />} />
       <Route path="/orders/:id/estimate" element={<EstimatePage />} />
       <Route path="/orders/:id/problem" element={<FoundProblemPage />} />
       <Route path="/orders/:id/claim" element={<ClaimPage />} />

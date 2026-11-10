@@ -968,6 +968,70 @@ html.kb .tab-bar-wrap {
   outline-offset: 2px;
 }
 
+/* ---------- Job screen: "more" tiles, tappable header lines ---------- */
+/* A grid of actions, one symbol and one word each (the job's "…" sheet, suppliers to ask). */
+.action-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.action-tile {
+  /* The transparent haptic label of the tile is laid over it: it must stay inside the tile. */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 74px;
+  padding: 10px 6px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--app-soft);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 240ms var(--spring), background-color 240ms ease;
+}
+.action-tile > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.action-tile:active {
+  transform: scale(0.95);
+  background: var(--app-press);
+  transition-duration: 80ms;
+}
+.action-tile:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+/* The customer and the complaint in the job's head: plain lines that open their sheet. */
+.job-line {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  border-radius: 10px;
+  -webkit-tap-highlight-color: transparent;
+}
+.job-line:active {
+  opacity: 0.6;
+}
+.job-complaint {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  color: var(--app-label-2);
+}
+
 /* ---------- A car's past visits under it (search) ---------- */
 .history-icon,
 .history-icon-space {

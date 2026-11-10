@@ -6,6 +6,7 @@ import { formatDate, formatDateTime } from '../../domain/dates';
 import { AppearanceRows } from '../../ui/Appearance';
 import { List, ListRow, PageHeader } from '../../ui/components';
 import { useBackupAge } from '../../ui/device';
+import { SetupChecklist } from '../board/BoardNotices';
 
 /** iOS Settings colours for the row icons. */
 const LINKS: { to: string; icon: Icon; label: string; hint: string; bg: string }[] = [
@@ -24,6 +25,7 @@ export function MorePage() {
   return (
     <>
       <PageHeader title={t('nav.more')} />
+      <SetupChecklist compact />
       <List>
         {LINKS.map((l) => (
           <ListRow
@@ -34,7 +36,6 @@ export function MorePage() {
               </span>
             }
             title={t(l.label)}
-            subtitle={t(l.hint)}
             onClick={() => navigate(l.to)}
             chevron
           />

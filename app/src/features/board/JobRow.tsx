@@ -1,0 +1,113 @@
+import { Group, Modal, Text, ThemeIcon } from '@mantine/core';
+import { IconCash, IconExternalLink, IconPackage, IconRepeat, IconTrash } from '@tabler/icons-react';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { hoursBetween, shortDuration } from '../../domain/dates';
+import type { Phase } from '../../domain/flow';
+import { liveLines } from '../../domain/flow';
+import { activeInvoice } from '../../domain/invoice';
+import { itemAmounts } from '../../domain/items';
+import { partsToFind } from '../../services/flow';
+import { bundleAmountDue, type OrderBundle } from '../../services/orders';
+import { List, ListRow, Money, PlateText } from '../../ui/components';
+import { useLang } from '../../ui/hooks';
+import { useLongPress } from '../../ui/longPress';
+import { PHASE_META } from '../job/phase';
+import { DeleteJobModal } from '../orders/DeleteJob';
+import { orderFlags } from '../orders/flags';
+
+/** What the job is worth now: the amount due on its invoice, or the total of its lines. */
+export function jobAmount(b: OrderBundle): number {
+  if (activeInvoice(b.invoices) || b.order.stage === 'delivered') return Math.max(0, bundleAmountDue(b));
+  return liveLines(b.items).reduce((s, i) => s + itemAmounts(i).gross, 0);
+}
+
+/**
+ * A job on the board, in one row: the step it is on (colour and symbol), the plate, the car, how long
+ * it has been there, and its money. A tap opens it; a long press (right click) offers to delete it.
+ */
+export function JobRow({ b, phase }: { b: OrderBundle; phase: Phase }) {
+  const navigate = useNavigate();
+  const lang = useLang();
+  const { t } = useTranslation();
+  const [menu, setMenu] = useState(false);
+  const [remove, setRemove] = useState(false);
+  const press = useLongPress(() => setMenu(true));
+  const m = PHASE_META[phase];
+  const { flags, waitingHours } = orderFlags(b);
+  const hours = phase === 'wait' && waitingHours !== undefined ? waitingHours : hoursBetween(b.order.stageChangedAt);
+  const late = phase === 'wait' && hours >= (b.settings.boardWarnHours ?? 2);
+  const amount = jobAmount(b);
+  const car = [b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ');
+  const find = phase === 'price' || phase === 'work' || phase === 'wait' ? partsToFind(b.items).length : 0;
+  const open = () => navigate(`/orders/${b.order.id}`);
+  return (
+    <>
+      <div
+        className="list-row clickable job-row"
+        {...press.handlers}
+        onClick={() => {
+          if (!press.consumeClick()) open();
+        }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            open();
+          }
+        }}
+        aria-label={`№${b.order.number} ${car}`}
+      >
+        <ThemeIcon variant="light" color={m.color} size={40} radius="xl" style={{ flexShrink: 0 }}>
+          <m.icon size={21} stroke={1.8} />
+        </ThemeIcon>
+        <div className="body">
+          <Group gap={8} wrap="nowrap" justify="space-between">
+            <PlateText plate={b.vehicle.plate} size="sm" />
+            {amount > 0 && <Money fils={amount} c={phase === 'debt' ? 'red.7' : undefined} />}
+          </Group>
+          <Group gap={6} wrap="nowrap" mt={3} style={{ minWidth: 0 }}>
+            <Text size="sm" lineClamp={1} style={{ minWidth: 0 }}>
+              {car || `№${b.order.number}`}
+            </Text>
+            <Text size="sm" c={late ? 'red.7' : 'dimmed'} fw={late ? 600 : undefined} style={{ flexShrink: 0 }} className="tnum">
+              · {t(`job.phase.${phase}`)} {shortDuration(hours, lang)}
+            </Text>
+            {find > 0 && <IconPackage size={15} stroke={2} color="var(--mantine-color-orange-6)" style={{ flexShrink: 0 }} aria-label={t('flags.waitingParts')} />}
+            {flags.debt && phase !== 'debt' && <IconCash size={15} stroke={2} color="var(--mantine-color-red-6)" style={{ flexShrink: 0 }} aria-label={t('flags.debt')} />}
+            {flags.warranty && <IconRepeat size={15} stroke={2} color="var(--mantine-color-grape-6)" style={{ flexShrink: 0 }} aria-label={t('flags.warranty')} />}
+          </Group>
+        </div>
+      </div>
+      {/* The row's actions (long press), a sheet like the iPhone's context menu. */}
+      <Modal opened={menu} onClose={() => setMenu(false)} title={`№${b.order.number} · ${car}`.trim()}>
+        <List>
+          <ListRow
+            title={t('common.open')}
+            left={<IconExternalLink size={20} stroke={1.8} />}
+            chevron
+            onClick={() => {
+              setMenu(false);
+              open();
+            }}
+          />
+          <ListRow
+            title={
+              <Text span inherit c="red">
+                {t('order.delete')}
+              </Text>
+            }
+            left={<IconTrash size={20} stroke={1.8} color="var(--mantine-color-red-6)" />}
+            onClick={() => {
+              setMenu(false);
+              setRemove(true);
+            }}
+          />
+        </List>
+      </Modal>
+      <DeleteJobModal order={b.order} opened={remove} onClose={() => setRemove(false)} />
+    </>
+  );
+}

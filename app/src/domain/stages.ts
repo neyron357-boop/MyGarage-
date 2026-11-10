@@ -1,4 +1,5 @@
 import type { Order, OrderItem, Stage } from './types';
+import { nothingToBill } from './flow';
 import { isAwaitingClient } from './items';
 
 export const STAGES: Stage[] = [
@@ -99,7 +100,8 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
     case 'intake':
       return { ok: true };
     case 'diagnostics':
-      return ctx.intakeDone ? { ok: true } : { ok: false, reason: 'stageErr.intakeNotSigned' };
+      // The intake act is optional: the mechanic may look at the car right after check-in.
+      return { ok: true };
     case 'awaiting_approval':
       return ctx.sentVersions > 0 ? { ok: true } : { ok: false, reason: 'stageErr.noVersionSent' };
     case 'awaiting_parts':
@@ -123,7 +125,8 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
     case 'closed':
       if (from === 'delivered') return ctx.amountDueFils <= 0 ? { ok: true } : { ok: false, reason: 'stageErr.unpaid' };
       // Quick path: the car leaves with an issued invoice that is paid, or with a signed debt.
-      if (!ctx.invoiced) return { ok: false, reason: 'stageErr.noInvoice' };
+      // Nothing to charge for (the customer refused the repair, a free look): the car just leaves.
+      if (!ctx.invoiced) return nothingToBill(ctx.items) ? { ok: true } : { ok: false, reason: 'stageErr.noInvoice' };
       return ctx.amountDueFils <= 0 || ctx.debtSigned ? { ok: true } : { ok: false, reason: 'stageErr.unpaid' };
     default:
       return { ok: false, reason: 'stageErr.notAllowed' };

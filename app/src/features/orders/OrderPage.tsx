@@ -803,7 +803,7 @@ export function OrderPage() {
   let quickPrimary: { label: string; color?: string; onClick: () => void } | undefined;
   const quickSecondary: { label: string; onClick: () => void }[] = [];
   if (quick && inv) {
-    quickSecondary.push({ label: t('order.openInvoice'), onClick: () => navigate(`/orders/${b.order.id}/invoice`) });
+    quickSecondary.push({ label: t('order.openInvoice'), onClick: () => navigate(`/orders/${b.order.id}`) });
     if (stage === 'closed' || (stage === 'delivered' && due <= 0)) quickHint = t('order.quickClosed');
     else if (due > 0) {
       quickHint = t('order.quickPay', { number: inv.number });
@@ -814,7 +814,7 @@ export function OrderPage() {
     }
   } else if (quick) {
     quickHint = drafts ? t('order.quickDrafts', { n: drafts }) : t('order.quickInvoice');
-    quickPrimary = { label: drafts ? t('order.continueInvoice') : t('order.createInvoice'), onClick: () => navigate(`/orders/${b.order.id}/invoice`) };
+    quickPrimary = { label: drafts ? t('order.continueInvoice') : t('order.createInvoice'), onClick: () => navigate(`/orders/${b.order.id}`) };
     if (!b.intake?.locked && !b.intake?.completedAt) quickSecondary.push({ label: b.intake ? t('order.continueIntake') : t('order.startIntake'), onClick: () => navigate(`/orders/${b.order.id}/intake`) });
     quickSecondary.push({ label: t('order.detailedEstimate'), onClick: () => navigate(`/orders/${b.order.id}/estimate`) });
   }
@@ -880,7 +880,7 @@ export function OrderPage() {
   return (
     <>
       <PageHeader
-        back="/"
+        back={`/orders/${b.order.id}`}
         eyebrow={`${t('order.title')} №${b.order.number} · ${formatDate(b.order.createdAt)}`}
         title={
           <>
