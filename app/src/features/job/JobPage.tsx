@@ -375,7 +375,11 @@ export function JobPage() {
     });
 
   // The usual jobs (those that went with a similar complaint first) for one-tap adding.
-  const quick = (suggestions?.labor.top ?? []).slice(0, 8).map((name) => [name, suggestions!.labor.list.get(name)!] as const);
+  const onJob = new Set(live.map((i) => itemTitle(i, docLang)));
+  const quick = (suggestions?.labor.top ?? [])
+    .filter((name) => !onJob.has(name))
+    .slice(0, 8)
+    .map((name) => [name, suggestions!.labor.list.get(name)!] as const);
   const quickAdd = (s: Suggestion) =>
     run(async () => {
       await addItem(oid, { kind: 'labor', block: 'A', titleRu: s.titleRu || undefined, titleEn: s.titleEn || undefined, qty: 1, unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) });
@@ -561,8 +565,8 @@ export function JobPage() {
         )}
       </Box>
 
-      {phase === 'look' && quick.length > 0 && (
-        // Nothing found yet: the usual jobs for such a complaint, one tap each (name, last price).
+      {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
+        // Building the quote: the usual jobs for such a complaint, one tap each (name, last price).
         <div className="chip-row" style={{ marginBottom: 12 }} aria-label={t('qi.frequent')}>
           {quick.map(([name, s]) => (
             <button key={name} type="button" className="chip" onClick={() => quickAdd(s)}>
