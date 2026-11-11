@@ -110,6 +110,8 @@ async function launchBrowser() {
       await front('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
       await page.getByText(`${i + 1} / 8`).waitFor({ timeout: 10000 });
     }
+    // The Mulkiya has two sides: both are shot.
+    await front('button[aria-label="Mulkiya, оборот"]').first().waitFor();
     await shot('04-intake-photos', true);
   });
   await step('intake damage', async () => {
@@ -331,8 +333,17 @@ async function launchBrowser() {
     await dlg.getByLabel('Закупка за шт.').fill('20');
     await dlg.getByLabel('Цена за шт.').fill('30');
     await dlg.getByRole('button', { name: 'Заказано' }).click();
+    // A photo on the line (the part): picked in the sheet, saved with it; any photo can be shared or saved.
+    await dlg.locator('input[data-photo-input="line"]').setInputFiles({ name: 'part.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+    await dlg.locator('.strip-tile img').first().waitFor();
+    await shot('31-line-photo');
+    await dlg.locator('.strip-tile img').first().click();
+    await page.locator('.viewer').getByRole('button', { name: /Поделиться|Сохранить/ }).waitFor();
+    await page.locator('.viewer button').first().click();
+    await page.locator('.viewer').waitFor({ state: 'detached' });
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
+    await page.locator('.list-row').filter({ hasText: 'Фильтр салона' }).locator('svg[aria-label="Фото"]').waitFor();
     // A line without VAT (a fee paid for the customer): 100 AED stays 100 AED.
     await page.getByRole('button', { name: 'Работа', exact: true }).click();
     await dlg.getByLabel('Что сделали').fill('RTA test fee');
@@ -385,6 +396,17 @@ async function launchBrowser() {
     await page.locator('.job-row').first().waitFor();
     if (await page.getByText('31415').count()) throw new Error('a closed job is still on the board');
   });
+  await step('a known car: its photo and owner come by themselves', async () => {
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('31415');
+    await page.getByLabel('Эта машина уже в базе').waitFor();
+    await page.getByLabel('Эта машина уже в базе').locator('img').waitFor();
+    if (await page.getByRole('button', { name: 'Nissan', exact: true }).count()) throw new Error('a known car needs no make');
+    await shot('30c-known-car');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
+    await page.getByText('Nissan Sunny').first().waitFor();
+  });
   await step('refused: the job closes without an invoice', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('16180');
@@ -429,7 +451,7 @@ async function launchBrowser() {
     });
     await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().click();
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить пруф' }).waitFor();
-    await page.locator('input[data-proof-input]').setInputFiles([1, 2].map((n) => ({ name: `proof-${n}.png`, mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') })));
+    await page.locator('input[data-photo-input="proof"]').setInputFiles([1, 2].map((n) => ({ name: `proof-${n}.png`, mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') })));
     await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).nth(1).waitFor();
     await shot('25b-expense-proofs');
     await closeModal();

@@ -24,6 +24,7 @@ import type {
 } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
+import { addMedia, deleteMedia } from './media';
 import { logEvent, tryStage } from './orders';
 import { getSettings } from './settings';
 
@@ -72,6 +73,25 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
     throw new AppError('err.itemSent');
   }
   await db.items.update(id, patch);
+}
+
+/**
+ * A line's photos (the part, the worn one, the damage): the ones kept in this order, then new ones.
+ * A photo taken off is deleted unless a quote already sent holds it (what the customer saw stays).
+ */
+export async function setLinePhotos(itemId: string, keep: string[], files: Blob[]): Promise<void> {
+  const item = await db.items.get(itemId);
+  if (!item) throw new AppError('err.notFound');
+  const before = item.mediaIds ?? [];
+  const added: string[] = [];
+  for (const file of files) added.push((await addMedia({ ownerType: 'item', ownerId: itemId, slot: 'photo', file })).id);
+  const next = [...keep.filter((id) => before.includes(id)), ...added];
+  await db.items.update(itemId, { mediaIds: next.length ? next : undefined });
+  for (const id of before.filter((x) => !next.includes(x))) {
+    const m = await db.media.get(id);
+    const sent = await db.versions.filter((v) => v.mediaIds.includes(id)).count();
+    if (m && m.slot === 'photo' && !m.locked && !sent) await deleteMedia(id);
+  }
 }
 
 /** Delete a draft item; returns it so the screen can offer "Undo". */

@@ -13,6 +13,7 @@ import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domai
 import { findVehicleForCheckIn, popularMakes, popularModels, suggestCustomers } from '../../services/customers';
 import { checkIn } from '../../services/orders';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
+import { CarThumb } from '../job/CarCover';
 import { DateTimeField } from '../../ui/DateFields';
 import { typedOnly, useAction, useLang, useSettings } from '../../ui/hooks';
 
@@ -188,7 +189,10 @@ export function NewOrderPage() {
   // The plate is already in the base: offer that car (and its open job, if any).
   const match = useLiveQuery(() => (picked ? undefined : findVehicleForCheckIn(plate)), [picked, plate.emirate, plate.code, plate.number]);
   const suggestions = useLiveQuery(() => (picked || pickedCustomer ? [] : suggestCustomers(phone, name)), [picked, pickedCustomer, phone, name]) ?? [];
-  const owner = picked?.owner ?? pickedCustomer;
+  // A plate already in the base (no job open on it) is that car: taken by itself, with its photo and owner.
+  const auto = !picked && match && !match.activeOrder ? match : undefined;
+  const known = picked ?? auto;
+  const owner = known?.owner ?? pickedCustomer;
 
   // Complaint chips: the garage's list (Settings → Lists) — English by default, as it goes on the documents.
   const complaints = quickList(settings, 'complaints');
@@ -199,7 +203,7 @@ export function NewOrderPage() {
   const submit = (target: 'job' | 'book') =>
     run(async () => {
       const o = await checkIn({
-        vehicleId: picked?.vehicle.id,
+        vehicleId: known?.vehicle.id,
         plate,
         make: canonicalMake(make),
         model: canonicalModel(make, model),
@@ -226,7 +230,8 @@ export function NewOrderPage() {
           <Box className="surface rise-enter" p="md">
             <Group justify="space-between" wrap="nowrap" gap="sm">
               <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                <PlateText plate={picked.vehicle.plate} size="lg" />
+                <CarThumb vehicleId={picked.vehicle.id} />
+                <PlateText plate={picked.vehicle.plate} size="md" />
                 <Box style={{ minWidth: 0 }}>
                   <Text fw={600} lineClamp={1}>
                     {[picked.vehicle.make, picked.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
@@ -254,31 +259,50 @@ export function NewOrderPage() {
         ) : (
           <>
             <PlateBlock plate={plate} onChange={setPlate} />
-            {match && (
+            {auto && (
+              <Box className="surface rise-enter" p="sm" mt={10} aria-label={t('newOrder.inBase')}>
+                <Group gap="sm" wrap="nowrap">
+                  <CarThumb vehicleId={auto.vehicle.id} />
+                  <Box style={{ minWidth: 0, flex: 1 }}>
+                    <Text fw={600} lineClamp={1}>
+                      {[auto.vehicle.make, auto.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
+                    </Text>
+                    <Text size="sm" c="dimmed" lineClamp={1}>
+                      {t('newOrder.inBase')}
+                    </Text>
+                  </Box>
+                </Group>
+              </Box>
+            )}
+            {match?.activeOrder && (
               <button
                 type="button"
                 className="suggest rise-enter"
                 style={{ marginTop: 10 }}
-                onClick={() => (match.activeOrder ? navigate(`/orders/${match.activeOrder.id}`) : setPicked(match))}
+                onClick={() => navigate(`/orders/${match.activeOrder!.id}`)}
               >
                 <IconCar size={22} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
                 <Box style={{ flex: 1, minWidth: 0 }}>
                   <Text size="sm" fw={600} lh={1.3}>
-                    {match.activeOrder ? t('newOrder.inWork', { n: match.activeOrder.number }) : t('newOrder.inBase')}
+                    {t('newOrder.inWork', { n: match.activeOrder.number })}
                   </Text>
                   <Text size="xs" c="dimmed" lineClamp={1}>
                     {[[match.vehicle.make, match.vehicle.model].filter(Boolean).join(' '), who(match.owner, noName)].filter(Boolean).join(' · ')}
                   </Text>
                 </Box>
                 <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
-                  {match.activeOrder ? t('newOrder.openOrder') : t('newOrder.useThis')}
+                  {t('newOrder.openOrder')}
                 </Text>
               </button>
             )}
-            <div className="group-title" style={{ marginTop: 22 }}>
-              {t('newOrder.makeModel')}
-            </div>
-            <MakeModelBlock make={make} model={model} onMake={setMake} onModel={setModel} />
+            {!auto && (
+              <>
+                <div className="group-title" style={{ marginTop: 22 }}>
+                  {t('newOrder.makeModel')}
+                </div>
+                <MakeModelBlock make={make} model={model} onMake={setMake} onModel={setModel} />
+              </>
+            )}
           </>
         )}
 
@@ -308,7 +332,7 @@ export function NewOrderPage() {
                   {who(owner, noName)}
                 </Text>
               </Group>
-              {!picked && (
+              {!known && (
                 <Button variant="subtle" color="gray" size="compact-md" aria-label={t('common.change')} onClick={() => setPickedCustomer(undefined)}>
                   <IconX size={18} />
                 </Button>

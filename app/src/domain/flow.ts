@@ -80,3 +80,24 @@ export function stepToward(stage: Stage, want: Stage): Stage | null {
   const to = WALK.indexOf(want);
   return at >= 0 && to > at + 1 ? WALK[at + 1] : null;
 }
+
+/** When anything last happened on a job (its stage, a line, a payment, a photo, the journal): the board puts the freshest first. */
+export function lastChange(j: {
+  order: { createdAt: string; updatedAt?: string; stageChangedAt?: string };
+  events?: { at: string }[];
+  items?: { createdAt: string; doneAt?: string; orderedAt?: string; receivedAt?: string }[];
+  payments?: { receivedAt: string }[];
+  media?: { createdAt: string }[];
+}): string {
+  let last = j.order.createdAt;
+  const see = (at?: string) => {
+    if (at && at > last) last = at;
+  };
+  see(j.order.updatedAt);
+  see(j.order.stageChangedAt);
+  j.events?.forEach((e) => see(e.at));
+  j.items?.forEach((i) => [i.createdAt, i.doneAt, i.orderedAt, i.receivedAt].forEach(see));
+  j.payments?.forEach((p) => see(p.receivedAt));
+  j.media?.forEach((m) => see(m.createdAt));
+  return last;
+}

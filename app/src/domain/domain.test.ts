@@ -540,3 +540,13 @@ describe('reports', () => {
     expect(r.averageTicketGross).toBe(31500);
   });
 });
+
+describe('the board order', () => {
+  it('takes the latest of everything that happened on a job', async () => {
+    const { lastChange } = await import('./flow');
+    const order = { createdAt: '2026-11-10T08:00:00Z', updatedAt: '2026-11-10T09:00:00Z', stageChangedAt: '2026-11-10T08:30:00Z' };
+    expect(lastChange({ order })).toBe('2026-11-10T09:00:00Z');
+    expect(lastChange({ order, events: [{ at: '2026-11-11T07:00:00Z' }], payments: [{ receivedAt: '2026-11-10T10:00:00Z' }] })).toBe('2026-11-11T07:00:00Z');
+    expect(lastChange({ order, items: [{ createdAt: '2026-11-10T08:10:00Z', doneAt: '2026-11-11T12:00:00Z' }], media: [{ createdAt: '2026-11-11T11:00:00Z' }] })).toBe('2026-11-11T12:00:00Z');
+  });
+});

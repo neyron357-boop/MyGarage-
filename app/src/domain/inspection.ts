@@ -1,6 +1,8 @@
 import type { DamageMark, Inspection } from './types';
 
 export const REQUIRED_SLOTS = ['front', 'front_right', 'right', 'rear_right', 'rear', 'rear_left', 'left', 'front_left'] as const;
+/** The registration card has two sides: both are shot at check-in. */
+export const MULKIYA_SLOTS = ['mulkiya', 'mulkiya_back'];
 export const EXTRA_SLOTS = ['wheels', 'roof', 'windshield', 'interior', 'extra'] as const;
 /*
  * Warning lights and function checks are the words of the garage's lists (domain/quickLists.ts,

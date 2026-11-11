@@ -17,6 +17,7 @@ import {
   IconMessage2,
   IconPackage,
   IconPhone,
+  IconPhoto,
   IconScale,
   IconSend,
   IconSignature,
@@ -349,6 +350,7 @@ export function JobPage() {
       title={
         <Text span inherit td={i.approvalState === 'declined' ? 'line-through' : undefined} c={i.approvalState === 'declined' ? 'dimmed' : undefined}>
           {itemTitle(i, docLang) || '—'}
+          {!!i.mediaIds?.length && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
         </Text>
       }
       subtitle={[i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '', partNote(i), i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}

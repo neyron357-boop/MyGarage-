@@ -1,5 +1,5 @@
 import { Button } from '@mantine/core';
-import { IconCamera, IconCameraPlus } from '@tabler/icons-react';
+import { IconCamera, IconCameraPlus, IconCar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -59,5 +59,15 @@ export function CarCover({ vehicleId }: { vehicleId: string }) {
         />
       )}
     </>
+  );
+}
+
+/** The car's main photo as a small square (a known car at check-in); a car symbol while there is none. */
+export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: number }) {
+  const cover = useLiveQuery(async () => ({ id: await coverOf(vehicleId) }), [vehicleId]);
+  return (
+    <span className="car-thumb" style={{ width: size, height: size }}>
+      {cover?.id ? <MediaImage id={cover.id} h={size} w={size} radius="0" /> : <IconCar size={Math.round(size * 0.46)} stroke={1.6} aria-hidden />}
+    </span>
   );
 }

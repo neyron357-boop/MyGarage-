@@ -2,18 +2,19 @@ import { Autocomplete, Button, Group, Modal, NumberInput, SimpleGrid, Stack, Tex
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { db } from '../../db/db';
+import { db, uid } from '../../db/db';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import type { Lang, OrderItem } from '../../domain/types';
-import { addItem, updateItem } from '../../services/estimate';
+import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
 import { MoneyInput } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction } from '../../ui/hooks';
+import { PhotoStrip } from '../../ui/PhotoStrip';
 import { VatModeField } from '../estimate/components';
 
 export type LineKind = 'labor' | 'part';
@@ -97,6 +98,9 @@ export function LineSheet({
   const [mode, setMode] = useState<VatMode>('add');
   const [part, setPart] = useState<PartState>('needed');
   const [supplierId, setSupplierId] = useState<string>();
+  // Photos of the line: the stored ones kept, and new ones picked (saved with the line).
+  const [kept, setKept] = useState<string[]>([]);
+  const [fresh, setFresh] = useState<{ id: string; file: File; src: string }[]>([]);
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
   useEffect(() => {
@@ -110,6 +114,11 @@ export function LineSheet({
     setCost(item?.costPriceFils);
     setPart(item ? partStateOf(item) : 'needed');
     setSupplierId(item?.supplierId);
+    setKept(item?.mediaIds ?? []);
+    setFresh((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.src));
+      return [];
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, lang, incl]);
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
@@ -148,12 +157,15 @@ export function LineSheet({
         patch.customerSupplied = own || undefined;
         patch.supplierId = own ? undefined : supplierId;
       }
+      let itemId = item?.id;
       if (item) {
         await updateItem(item.id, patch);
         if (status && status !== partStateOf(item)) await setProcurement(item.id, { status });
       } else {
-        await addItem(b.order.id, { kind, block: 'A', ...patch, procurementStatus: status });
+        itemId = (await addItem(b.order.id, { kind, block: 'A', ...patch, procurementStatus: status })).id;
       }
+      const before = item?.mediaIds ?? [];
+      if (itemId && (fresh.length || kept.length !== before.length)) await setLinePhotos(itemId, kept, fresh.map((p) => p.file));
       await syncStage(b.order.id);
       haptic('light');
       onClose();
@@ -244,6 +256,17 @@ export function LineSheet({
             ))}
           </div>
         )}
+        <PhotoStrip
+          name="line"
+          photos={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
+          onAdd={(files) => setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))])}
+          onRemove={(p) => {
+            if (p.src) {
+              URL.revokeObjectURL(p.src);
+              setFresh((f) => f.filter((x) => x.id !== p.id));
+            } else setKept((k) => k.filter((x) => x !== p.id));
+          }}
+        />
         {/* A line may be saved without a price (a part still to find): it cannot go to the customer until it has one. */}
         <Button size="lg" loading={busy} disabled={!title.trim()} onClick={save}>
           {t('common.save')}

@@ -1,15 +1,78 @@
 import { Loader } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight, IconX } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight, IconDownload, IconShare2, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { mediaUrl } from '../services/media';
+import { mediaBlob, mediaUrl } from '../services/media';
 import { useHistoryLayer, useLockScroll } from './historyLayer';
 
 export interface ViewerItem {
   id: string;
   title?: string;
   caption?: ReactNode;
+  /** A photo not stored yet (picked, not saved): shown from this address instead of the media store. */
+  src?: string;
+}
+
+/** The photo as a file, read ahead: sharing must start right in the tap (iOS refuses it after a wait). */
+function usePhotoFile(item?: ViewerItem) {
+  const [file, setFile] = useState<File>();
+  useEffect(() => {
+    let alive = true;
+    setFile(undefined);
+    if (!item) return;
+    const load = item.src ? fetch(item.src).then((r) => r.blob()) : mediaBlob(item.id);
+    void load
+      .then((blob) => {
+        if (!alive || !blob) return;
+        const ext = blob.type === 'image/png' ? 'png' : blob.type === 'application/pdf' ? 'pdf' : blob.type.startsWith('video/') ? 'mp4' : 'jpg';
+        const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+        setFile(new File([blob], `MyGarage-${stamp}-${item.id.slice(0, 4)}.${ext}`, { type: blob.type || 'image/jpeg' }));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [item?.id, item?.src]);
+  return file;
+}
+
+function download(file: File) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+/**
+ * Share or save the photo shown: the phone's share sheet (on an iPhone it has "Save Image" — to the
+ * Photos app — and WhatsApp, Telegram, AirDrop…); where files cannot be shared, the file is downloaded.
+ */
+function ShareButton({ item }: { item?: ViewerItem }) {
+  const { t } = useTranslation();
+  const file = usePhotoFile(item);
+  const canShare = !!file && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+  return (
+    <button
+      type="button"
+      className="cam-icon"
+      disabled={!file}
+      aria-label={canShare ? t('photos.share') : t('photos.save')}
+      onClick={() => {
+        if (!file) return;
+        if (!canShare) return download(file);
+        navigator.share({ files: [file] }).catch((e: unknown) => {
+          if ((e as Error)?.name !== 'AbortError') download(file);
+        });
+      }}
+    >
+      {canShare || !file ? <IconShare2 size={21} /> : <IconDownload size={21} />}
+    </button>
+  );
 }
 
 function useFullUrl(id?: string) {
@@ -54,7 +117,8 @@ export function PhotoViewer({
 }) {
   const { t } = useTranslation();
   const item = items[index];
-  const url = useFullUrl(item?.id);
+  const stored = useFullUrl(item?.src ? undefined : item?.id);
+  const url = item?.src ?? stored;
   const stage = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
   const [slide, setSlide] = useState({ x: 0, y: 0, animate: true });
@@ -220,7 +284,7 @@ export function PhotoViewer({
           {item.title && <div className="cam-title-main">{item.title}</div>}
           {items.length > 1 && <div className="cam-title-sub">{t('camera.of', { n: index + 1, total: items.length })}</div>}
         </div>
-        <span className="cam-icon-spacer" />
+        <ShareButton item={item} />
       </div>
       <div className="viewer-stage" ref={stage} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div className="viewer-slide" data-animate={slide.animate} style={{ transform: `translate3d(${slide.x}px, ${slide.y}px, 0) scale(${shrink})` }}>

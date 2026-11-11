@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { TZ } from '../../domain/dates';
-import type { Phase } from '../../domain/flow';
+import { lastChange, type Phase } from '../../domain/flow';
 import { phaseOf } from '../../services/flow';
 import { loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs } from '../../ui/components';
@@ -93,8 +93,8 @@ function Kanban({ jobs, covers }: { jobs: Job[]; covers?: Map<string, string> })
 }
 
 /**
- * The workshop at a glance: every car as one row, in the order of the day — look, price, wait, work,
- * pay. The chips on top count the cars on each step and filter the list.
+ * The workshop at a glance: every car as one row, the one something last happened on first. The chips
+ * on top count the cars on each step (look, price, wait, work, pay…) and filter the list.
  */
 export function BoardPage() {
   const { t } = useTranslation();
@@ -108,7 +108,8 @@ export function BoardPage() {
   const jobs: Job[] = bundles
     .map((b) => ({ b, phase: phaseOf(b) }))
     .filter((j) => STEPS.includes(j.phase))
-    .sort((x, y) => STEPS.indexOf(x.phase) - STEPS.indexOf(y.phase) || x.b.order.stageChangedAt.localeCompare(y.b.order.stageChangedAt));
+    // The freshest first: the job something last happened on is on top.
+    .sort((x, y) => lastChange(y.b).localeCompare(lastChange(x.b)));
   const dateLabel = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(new Date());
   const header = <PageHeader eyebrow={dateLabel} title={t('board.title')} />;
 

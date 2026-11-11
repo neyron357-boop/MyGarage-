@@ -25,7 +25,7 @@ import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleChec
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTime } from '../../domain/dates';
-import { EXTRA_SLOTS, FUEL_LEVELS, REQUIRED_SLOTS } from '../../domain/inspection';
+import { EXTRA_SLOTS, FUEL_LEVELS, MULKIYA_SLOTS, REQUIRED_SLOTS } from '../../domain/inspection';
 import { checkLabel, lightLabel, quickList } from '../../domain/quickLists';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatPhone } from '../../domain/phone';
@@ -318,12 +318,14 @@ export function VehicleStep({ insp, media, b }: StepProps) {
         </Text>
       </Card>
       <Card>
-        <Text fw={700}>{t('slot.mulkiya')}</Text>
+        <Text fw={700}>{t('intake.mulkiya')}</Text>
         <Text size="sm" c="dimmed" mb="sm">
           {t('intake.mulkiyaHint')}
         </Text>
         <SimpleGrid cols={{ base: 2, sm: 4 }}>
-          <PhotoSlot insp={insp} slot="mulkiya" media={media} />
+          {MULKIYA_SLOTS.map((s) => (
+            <PhotoSlot key={s} insp={insp} slot={s} media={media} />
+          ))}
         </SimpleGrid>
       </Card>
     </Stack>
@@ -343,7 +345,7 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
   const total = REQUIRED_SLOTS.length;
   const done = REQUIRED_SLOTS.filter((s) => media.some((m) => m.slot === s) || insp.skippedPhotos[s]).length;
   const shot = REQUIRED_SLOTS.filter((s) => media.some((m) => m.slot === s && m.kind === 'photo')).length;
-  const extraSlots = [...(insp.kind === 'intake' ? ['mulkiya'] : []), ...EXTRA_SLOTS.filter((s) => s !== 'extra')];
+  const extraSlots = [...(insp.kind === 'intake' ? MULKIYA_SLOTS : []), ...EXTRA_SLOTS.filter((s) => s !== 'extra')];
   const extras = media.filter((m) => m.slot === 'extra' && m.kind === 'photo');
   const video = media.find((m) => m.kind === 'video');
   const complete = done === total;
