@@ -150,6 +150,7 @@ const TAPPABLE = [
   '.tab-bar button',
   'button.tab-plus',
   'button.suggest',
+  'button.swipe-btn',
   'button.search-cancel',
   'button.photo-slot',
   '.cam button',

@@ -477,6 +477,34 @@ async function launchBrowser() {
     });
     if (!car || car[0] !== '1GKFLTE30BX000001' || car[1] !== 2011) throw new Error('the car card did not get the report data: ' + JSON.stringify(car));
   });
+  await step('archive: a swipe left takes a job off the board, a swipe in the archive brings it back', async () => {
+    // A finger's swipe from the right edge of a row to the left (touch events, as on a phone).
+    const swipeLeft = (loc) =>
+      loc.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const y = r.top + r.height / 2;
+        const x0 = r.right - 20;
+        const touch = (x) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+        const fire = (type, x, list = true) => el.dispatchEvent(new TouchEvent(type, { touches: list ? [touch(x)] : [], changedTouches: [touch(x)], bubbles: true, cancelable: true }));
+        fire('touchstart', x0);
+        for (let i = 1; i <= 12; i++) fire('touchmove', x0 - i * 28);
+        fire('touchend', x0 - 12 * 28, false);
+      });
+    await page.goto(BASE + '#/');
+    const row = page.locator('.job-row', { hasText: '31415' }).first();
+    await row.waitFor();
+    await swipeLeft(row);
+    await page.getByText(/в архиве$/).first().waitFor();
+    await page.locator('.job-row', { hasText: '31415' }).waitFor({ state: 'detached' });
+    await page.getByRole('tab', { name: /Архив/ }).click();
+    const back = page.locator('.job-row', { hasText: '31415' }).first();
+    await back.waitFor();
+    await shot('02c-archive');
+    await swipeLeft(back);
+    await page.getByText('Заказ снова на доске').first().waitFor();
+    await page.getByRole('tab', { name: /^Все/ }).click();
+    await page.locator('.job-row', { hasText: '31415' }).first().waitFor();
+  });
   await step('refused: the job closes without an invoice', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('16180');

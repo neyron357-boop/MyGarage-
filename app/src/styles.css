@@ -1149,6 +1149,50 @@ html.kb .tab-bar-wrap {
 .job-cover:active {
   transform: scale(0.985);
 }
+/* Swipe a board row left (ui/swipe.ts): the row's content slides, its action grows from the right. */
+.job-row {
+  touch-action: pan-y;
+}
+.job-row > :not(.swipe-action) {
+  transform: translateX(var(--swipe, 0px));
+  transition: transform 300ms var(--ease-ios);
+}
+.job-row[data-swiping] > :not(.swipe-action) {
+  transition: none;
+}
+.swipe-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: calc(var(--swipe, 0px) * -1);
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+  transition: width 300ms var(--ease-ios);
+}
+.job-row[data-swiping] > .swipe-action {
+  transition: none;
+}
+.swipe-btn {
+  flex: 0 0 auto;
+  min-width: 92px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  padding: 0 12px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 /* A known car's photo as a small square (CarThumb); a car symbol while it has none. */
 .car-thumb {
   flex-shrink: 0;

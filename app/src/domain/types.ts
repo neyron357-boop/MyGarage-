@@ -177,6 +177,8 @@ export interface Order {
   imported?: ImportedFrom;
   /** Scanner reports read into the job (oldest first): the fault codes and the car's data at that moment. */
   obdScans?: ObdScan[];
+  /** Taken off the board by hand (a swipe): the job itself — stage, documents, money — stays as it is. */
+  archivedAt?: string;
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;

@@ -1,5 +1,5 @@
 import { Group, Modal, Text, ThemeIcon } from '@mantine/core';
-import { IconCash, IconExternalLink, IconPackage, IconRepeat, IconTrash } from '@tabler/icons-react';
+import { IconCash, IconExternalLink, IconPackage, IconRepeat, IconTrash, type Icon } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +13,7 @@ import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
 import { useLongPress } from '../../ui/longPress';
+import { useSwipeAction } from '../../ui/swipe';
 import { PHASE_META } from '../job/phase';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { orderFlags } from '../orders/flags';
@@ -28,13 +29,32 @@ export function jobAmount(b: OrderBundle): number {
  * the car, how long it has been there, and its money. A tap opens it; a long press (right click) offers
  * to delete it.
  */
-export function JobRow({ b, phase, cover }: { b: OrderBundle; phase: Phase; cover?: string }) {
+/** What a swipe left (and the long-press menu) does with the row: to the archive, or back to the board. */
+export interface RowSwipe {
+  label: string;
+  icon: Icon;
+  color: string;
+  onCommit: () => void;
+}
+
+export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phase; cover?: string; swipe?: RowSwipe }) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
   const [menu, setMenu] = useState(false);
   const [remove, setRemove] = useState(false);
   const press = useLongPress(() => setMenu(true));
+  const sw = useSwipeAction(() => swipe?.onCommit());
+  // A long press and a swipe on the same row: both see the finger.
+  const touch = swipe
+    ? {
+        ...press.handlers,
+        onTouchStart: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchStart(e), sw.handlers.onTouchStart(e)),
+        onTouchMove: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchMove(e), sw.handlers.onTouchMove(e)),
+        onTouchEnd: () => (press.handlers.onTouchEnd(), sw.handlers.onTouchEnd()),
+        onTouchCancel: () => (press.handlers.onTouchCancel(), sw.handlers.onTouchCancel()),
+      }
+    : press.handlers;
   const m = PHASE_META[phase];
   const { flags, waitingHours } = orderFlags(b);
   const hours = phase === 'wait' && waitingHours !== undefined ? waitingHours : hoursBetween(b.order.stageChangedAt);
@@ -47,9 +67,12 @@ export function JobRow({ b, phase, cover }: { b: OrderBundle; phase: Phase; cove
     <>
       <div
         className="list-row clickable job-row"
-        {...press.handlers}
+        {...touch}
+        style={swipe ? sw.style : undefined}
+        data-swiping={sw.dragging || undefined}
         onClick={() => {
-          if (!press.consumeClick()) open();
+          if (press.consumeClick() || sw.consumeClick()) return;
+          open();
         }}
         role="button"
         tabIndex={0}
@@ -61,6 +84,23 @@ export function JobRow({ b, phase, cover }: { b: OrderBundle; phase: Phase; cove
         }}
         aria-label={`№${b.order.number} ${car}`}
       >
+        {swipe && (
+          <span className="swipe-action" style={{ background: `var(--mantine-color-${swipe.color}-6)` }} aria-hidden={!sw.open}>
+            <button
+              type="button"
+              className="swipe-btn"
+              tabIndex={sw.open ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                sw.close();
+                swipe.onCommit();
+              }}
+            >
+              <swipe.icon size={22} stroke={1.9} aria-hidden />
+              <span>{swipe.label}</span>
+            </button>
+          </span>
+        )}
         {cover ? (
           <span className="job-thumb">
             <MediaImage id={cover} h={48} w={48} radius="0" />
@@ -103,6 +143,16 @@ export function JobRow({ b, phase, cover }: { b: OrderBundle; phase: Phase; cove
               open();
             }}
           />
+          {swipe && (
+            <ListRow
+              title={swipe.label}
+              left={<swipe.icon size={20} stroke={1.8} color={`var(--mantine-color-${swipe.color}-6)`} />}
+              onClick={() => {
+                setMenu(false);
+                swipe.onCommit();
+              }}
+            />
+          )}
           <ListRow
             title={
               <Text span inherit c="red">

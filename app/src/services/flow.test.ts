@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
+import { answerLines, approveAll, archiveJob, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
 import { addPayment, quickInvoice } from './money';
 import { changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -147,5 +147,23 @@ describe('lazy flow', () => {
 
     await db.orders.update(refused.id, { stage: 'closed', imported: { system: 'eaglecart', jobId: '1', jobNo: '1', status: 'Delivered', totalFils: 0, history: true, importedAt: new Date().toISOString() } });
     await expect(reopenJob(refused.id)).rejects.toThrow();
+  });
+
+  it('archives a job off the board and back, without touching it; reopening brings it back too', async () => {
+    const o = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    const before = await state(o.id);
+    await archiveJob(o.id, true);
+    const b = (await loadOrderBundle(o.id))!;
+    expect(b.order.archivedAt).toBeTruthy();
+    expect(await state(o.id)).toEqual(before);
+    expect(b.events.some((e) => e.type === 'archived')).toBe(true);
+    await archiveJob(o.id, false);
+    expect((await db.orders.get(o.id))!.archivedAt).toBeUndefined();
+
+    await archiveJob(o.id, true);
+    await refuseAll(o.id);
+    await reopenJob(o.id);
+    expect((await db.orders.get(o.id))!.archivedAt).toBeUndefined();
   });
 });

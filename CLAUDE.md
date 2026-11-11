@@ -79,7 +79,8 @@ PWA для менеджера небольшой автомастерской в
   Шрифт Oswald — только для номерного знака (`PlateText`: раскладка своего эмирата, без гербов).
   Главное фото машины — `services/cover.ts` (`CarCover` в карточке заказа, мини-фото в строке доски).
   Ряд фото с плиткой «Фото» — `ui/PhotoStrip` (пруфы, фото строк); фото на весь экран — только `PhotoViewer`
-  (в нём «Поделиться» / «Сохранить»). Доска — свежие сверху (`lastChange` в `domain/flow.ts`).
+  (в нём «Поделиться» / «Сохранить»). Доска — свежие сверху (`lastChange` в `domain/flow.ts`). Свайп строки — `ui/swipe.ts`; архив —
+  отметка `archivedAt` (`archiveJob`), заказ при этом не меняется.
   Тема — только через `ui/scheme.ts` (`setSchemePref`; «Авто» — по солнцу в Дубае, `domain/daylight.ts`), не
   `setColorScheme` Mantine: тема у провайдера принудительная. Несколько строк заказа разом — `removeLines`.
   Excel финансов — только формат таблицы «Money Tracker» (`domain/moneySheet.ts` + шаблон `moneySheetTemplate.ts` из её

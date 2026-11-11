@@ -163,6 +163,7 @@ export async function reopenJob(orderId: string): Promise<void> {
       stageChangedAt: now,
       updatedAt: now,
       outcome: 'in_progress',
+      archivedAt: undefined,
       closedAt: undefined,
       deliveredAt: undefined,
       cancelReason: undefined,
@@ -170,6 +171,20 @@ export async function reopenJob(orderId: string): Promise<void> {
     await logEvent(orderId, 'reopened', { from: order.stage, to });
   });
   await syncStage(orderId);
+}
+
+/**
+ * Off the board and back (a swipe on the board): only a mark — the job keeps its stage, documents and
+ * money, a debt still shows under Money. Reopening a closed job brings it back on the board too.
+ */
+export async function archiveJob(orderId: string, archived: boolean): Promise<void> {
+  const order = await db.orders.get(orderId);
+  if (!order) throw new AppError('err.notFound');
+  if (!!order.archivedAt === archived) return;
+  await db.transaction('rw', db.orders, db.events, async () => {
+    await db.orders.update(orderId, { archivedAt: archived ? nowIso() : undefined });
+    await logEvent(orderId, archived ? 'archived' : 'unarchived', {});
+  });
 }
 
 /** Parts of the job that are not bought yet. */

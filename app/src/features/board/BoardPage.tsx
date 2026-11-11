@@ -1,5 +1,5 @@
 import { Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
-import { IconLayoutKanban, IconPlus } from '@tabler/icons-react';
+import { IconArchive, IconArrowBackUp, IconLayoutKanban, IconPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,17 +7,25 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { TZ } from '../../domain/dates';
 import { lastChange, type Phase } from '../../domain/flow';
-import { phaseOf } from '../../services/flow';
+import { archiveJob, phaseOf } from '../../services/flow';
 import { loadOrderBundle, type OrderBundle } from '../../services/orders';
-import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs } from '../../ui/components';
-import { useLang, usePhone } from '../../ui/hooks';
+import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast } from '../../ui/components';
+import { useAction, useLang, usePhone } from '../../ui/hooks';
 import { PHASE_META } from '../job/phase';
 import { InsecureWarning } from './BoardNotices';
-import { JobRow } from './JobRow';
+import { JobRow, type RowSwipe } from './JobRow';
 import { coverIndex } from '../../services/cover';
 
 async function loadBoard() {
   const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
+  return (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
+}
+
+/** The archive's second part: the latest closed jobs of the app (not the history carried over). */
+async function loadClosed() {
+  const orders = (await db.orders.filter((o) => (o.stage === 'closed' || o.stage === 'cancelled') && !o.imported?.history).toArray())
+    .sort((a, b) => (b.closedAt ?? b.updatedAt).localeCompare(a.closedAt ?? a.updatedAt))
+    .slice(0, 60);
   return (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
 }
 
@@ -48,7 +56,7 @@ function useEdgeFade() {
 }
 
 /** PC board: one lane per step; empty steps fold into thin strips so busy lanes get the width. */
-function Kanban({ jobs, covers }: { jobs: Job[]; covers?: Map<string, string> }) {
+function Kanban({ jobs, covers, swipe }: { jobs: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe }) {
   const { t } = useTranslation();
   const ref = useEdgeFade();
   const lanes = STEPS.map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
@@ -82,7 +90,7 @@ function Kanban({ jobs, covers }: { jobs: Job[]; covers?: Map<string, string> })
             </Group>
             <List>
               {list.map((j) => (
-                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} />
+                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} swipe={swipe(j.b)} />
               ))}
             </List>
           </div>
@@ -100,20 +108,72 @@ export function BoardPage() {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
+  const { run } = useAction();
   const bundles = useLiveQuery(loadBoard, []);
-  const covers = useLiveQuery(() => coverIndex(bundles?.map((b) => b.vehicle.id) ?? []), [bundles]);
   const mobile = usePhone();
-  const [filter, setFilter] = useState<'all' | Phase>('all');
+  const [filter, setFilter] = useState<'all' | 'archive' | Phase>('all');
+  const archive = filter === 'archive';
+  const closed = useLiveQuery(() => (archive ? loadClosed() : Promise.resolve([] as OrderBundle[])), [archive]);
+  const covers = useLiveQuery(() => coverIndex([...(bundles ?? []), ...(closed ?? [])].map((b) => b.vehicle.id)), [bundles, closed]);
   if (!bundles) return <PageSkeleton />;
-  const jobs: Job[] = bundles
-    .map((b) => ({ b, phase: phaseOf(b) }))
-    .filter((j) => STEPS.includes(j.phase))
-    // The freshest first: the job something last happened on is on top.
-    .sort((x, y) => lastChange(y.b).localeCompare(lastChange(x.b)));
-  const dateLabel = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(new Date());
-  const header = <PageHeader eyebrow={dateLabel} title={t('board.title')} />;
+  // The freshest first: the job something last happened on is on top.
+  const fresh = (x: Job, y: Job) => lastChange(y.b).localeCompare(lastChange(x.b));
+  const all: Job[] = bundles.map((b) => ({ b, phase: phaseOf(b) })).filter((j) => STEPS.includes(j.phase));
+  const jobs = all.filter((j) => !j.b.order.archivedAt).sort(fresh);
+  const archived = all.filter((j) => !!j.b.order.archivedAt).sort(fresh);
+  const done: Job[] = (closed ?? []).map((b) => ({ b, phase: phaseOf(b) }));
 
-  if (jobs.length === 0)
+  // A swipe left: off the board (with Undo), or — in the archive — back on it.
+  const toArchive = (b: OrderBundle): RowSwipe => ({
+    label: t('board.toArchive'),
+    icon: IconArchive,
+    color: 'grape',
+    onCommit: () =>
+      void run(async () => {
+        await archiveJob(b.order.id, true);
+        undoToast(t('board.archived', { n: b.order.number }), t('common.undo'), () => void archiveJob(b.order.id, false));
+      }),
+  });
+  const back = (b: OrderBundle): RowSwipe => ({
+    label: t('board.unarchive'),
+    icon: IconArrowBackUp,
+    color: 'cobalt',
+    onCommit: () => void run(() => archiveJob(b.order.id, false), 'board.unarchived'),
+  });
+
+  const dateLabel = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(new Date());
+  const header = (
+    <PageHeader
+      eyebrow={dateLabel}
+      title={t('board.title')}
+      right={
+        !mobile && (
+          <Button variant={archive ? 'filled' : 'default'} leftSection={<IconArchive size={18} />} onClick={() => setFilter(archive ? 'all' : 'archive')}>
+            {t('board.archive')}
+            {archived.length > 0 ? ` · ${archived.length}` : ''}
+          </Button>
+        )
+      }
+    />
+  );
+
+  const archiveList =
+    archived.length + done.length > 0 ? (
+      <List>
+        {archived.map((j) => (
+          <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} swipe={back(j.b)} />
+        ))}
+        {done.map((j) => (
+          <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} />
+        ))}
+      </List>
+    ) : closed ? (
+      <EmptyState icon={IconArchive} title={t('board.archiveEmpty')} />
+    ) : (
+      <PageSkeleton />
+    );
+
+  if (jobs.length === 0 && archived.length === 0 && !archive)
     return (
       <>
         {header}
@@ -134,11 +194,19 @@ export function BoardPage() {
             }
           />
         </Box>
+        {mobile && (
+          <Group justify="center" mt="md">
+            <Button variant="subtle" leftSection={<IconArchive size={18} />} onClick={() => setFilter('archive')}>
+              {t('board.archive')}
+            </Button>
+          </Group>
+        )}
       </>
     );
 
   const count = (p: Phase) => jobs.filter((j) => j.phase === p).length;
-  const shown = filter === 'all' || count(filter) === 0 ? jobs : jobs.filter((j) => j.phase === filter);
+  const phaseFilter = filter !== 'all' && filter !== 'archive' && count(filter) > 0 ? filter : undefined;
+  const shown = phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs;
   return (
     <>
       {header}
@@ -146,18 +214,30 @@ export function BoardPage() {
       {mobile ? (
         <>
           <ScrollTabs
-            value={filter !== 'all' && count(filter) === 0 ? 'all' : filter}
-            onChange={(v) => setFilter(v as 'all' | Phase)}
-            items={[{ value: 'all', label: t('board.all'), count: jobs.length }, ...STEPS.filter((p) => count(p) > 0).map((p) => ({ value: p, label: t(`job.phase.${p}`), count: count(p) }))]}
+            value={archive ? 'archive' : phaseFilter ?? 'all'}
+            onChange={(v) => setFilter(v as 'all' | 'archive' | Phase)}
+            items={[
+              { value: 'all', label: t('board.all'), count: jobs.length },
+              ...STEPS.filter((p) => count(p) > 0).map((p) => ({ value: p, label: t(`job.phase.${p}`), count: count(p) })),
+              { value: 'archive', label: t('board.archive'), count: archived.length || undefined },
+            ]}
           />
-          <List>
-            {shown.map((j) => (
-              <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} />
-            ))}
-          </List>
+          {archive ? (
+            archiveList
+          ) : shown.length ? (
+            <List>
+              {shown.map((j) => (
+                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} swipe={toArchive(j.b)} />
+              ))}
+            </List>
+          ) : (
+            <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />
+          )}
         </>
+      ) : archive ? (
+        <Box maw={720}>{archiveList}</Box>
       ) : (
-        <Kanban jobs={jobs} covers={covers} />
+        <Kanban jobs={jobs} covers={covers} swipe={toArchive} />
       )}
     </>
   );
