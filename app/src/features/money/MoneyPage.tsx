@@ -18,15 +18,17 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, formatDateTime, monthKey } from '../../domain/dates';
+import { expenseEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
-import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateLine, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
+import { proofIndex } from '../../services/proofs';
+import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { initials } from '../customers/CustomersPage';
-import { LedgerTab } from './LedgerTab';
+import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet } from './MoneyEntry';
 
 const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
@@ -191,6 +193,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const { t } = useTranslation();
   const lang = useLang();
   const [open, setOpen] = useState(addOpen);
+  const [shown, setShown] = useState<string | null>(null);
   const [month, setMonth] = useState(monthKey());
   const data = useLiveQuery(async () => {
     const [list, cats, vehicles] = await Promise.all([
@@ -198,9 +201,13 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
       db.expenseCategories.toArray(),
       db.vehicles.toArray(),
     ]);
-    return { list, cats, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
+    const photos = await proofIndex(list.map((e) => e.id));
+    return { list, cats, photos, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
   }, [month]);
+  const label = useCategoryLabel(data?.cats);
   if (!data) return <PageSkeleton />;
+  const expense = shown ? data.list.find((e) => e.id === shown) : undefined;
+  const entry = expense ? { ...expenseEntry(expense), cashAfter: 0, cardAfter: 0 } : undefined;
   const byCat = (id: string) => data.list.filter((e) => e.categoryId === id).reduce((s, e) => s + e.amountFils, 0);
   const total = data.list.reduce((s, e) => s + e.amountFils, 0);
   const cats = data.cats.filter((c) => c.active && (byCat(c.id) > 0 || c.monthlyLimitFils > 0)).sort((a, b) => byCat(b.id) - byCat(a.id));
@@ -257,9 +264,10 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
             return (
               <ListRow
                 key={e.id}
+                onClick={() => setShown(e.id)}
                 left={
-                  e.receiptMediaId ? (
-                    <Photo id={e.receiptMediaId} h={40} />
+                  data.photos.has(e.id) ? (
+                    <MediaImage id={data.photos.get(e.id)!} h={40} />
                   ) : (
                     <ThemeIcon variant="light" color="gray" size={40} radius="md">
                       <I size={19} />
@@ -282,6 +290,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
         </List>
       )}
       <EntrySheet opened={open} onClose={() => setOpen(false)} preset={OUT} />
+      {entry && <EntryDetails entry={entry} label={label(entry)} cats={data.cats} onClose={() => setShown(null)} />}
     </Stack>
   );
 }

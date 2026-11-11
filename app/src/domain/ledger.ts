@@ -29,6 +29,9 @@ export interface LedgerEntry {
   /** "order", "refund", income category, expense category id, or a cash reason ("collection"…). */
   category: string;
   note?: string;
+  /** Expenses: where it was bought and the note as typed (`note` shows both). */
+  vendor?: string;
+  expenseNote?: string;
   orderId?: string;
   vehicleId?: string;
   customerId?: string;
@@ -72,6 +75,28 @@ const dubaiTime = (iso: string) => {
 
 type Raw = Omit<LedgerEntry, 'cashAfter' | 'cardAfter'>;
 
+/** An expense as a line of the book (without the balances after it). */
+export function expenseEntry(e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardAfter'> {
+  return {
+    id: e.id,
+    source: 'expense',
+    at: sortKey(e.date, e.createdAt),
+    date: e.date,
+    kind: 'out',
+    purse: purseOf(e.method),
+    method: e.method,
+    amountFils: e.amountFils,
+    category: e.categoryId,
+    note: [e.vendor, e.note].filter(Boolean).join(' · ') || undefined,
+    vendor: e.vendor || undefined,
+    expenseNote: e.note || undefined,
+    receiptMediaId: e.receiptMediaId,
+    orderId: e.orderId,
+    vehicleId: e.vehicleId,
+    customerId: e.customerId,
+  };
+}
+
 export function buildLedger(input: LedgerInput): LedgerResult {
   const orders = new Map(input.orders.map((o) => [o.id, o]));
   const linkOf = (orderId?: string, vehicleId?: string, customerId?: string) => {
@@ -114,20 +139,7 @@ export function buildLedger(input: LedgerInput): LedgerResult {
   }
   for (const e of input.expenses) {
     if (e.voidedAt) continue;
-    raw.push({
-      id: e.id,
-      source: 'expense',
-      at: sortKey(e.date, e.createdAt),
-      date: e.date,
-      kind: 'out',
-      purse: purseOf(e.method),
-      method: e.method,
-      amountFils: e.amountFils,
-      category: e.categoryId,
-      note: [e.vendor, e.note].filter(Boolean).join(' · ') || undefined,
-      receiptMediaId: e.receiptMediaId,
-      ...linkOf(e.orderId, e.vehicleId, e.customerId),
-    });
+    raw.push({ ...expenseEntry(e), ...linkOf(e.orderId, e.vehicleId, e.customerId) });
   }
   // Cash movements not shown through their payment, income or expense: parts bought for cash,
   // supplier refunds, handing cash to the owner, corrections. Reversals of cancelled entries are

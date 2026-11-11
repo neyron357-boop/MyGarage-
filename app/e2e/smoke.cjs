@@ -413,6 +413,22 @@ async function launchBrowser() {
     await page.getByRole('dialog').waitFor();
     await shot('25-expense');
     await closeModal();
+    // Proofs: photos kept with an expense (the entry itself does not change), a paperclip on its line in the book.
+    await page.evaluate(async () => {
+      const { addExpense } = await import('/src/services/money.ts');
+      const { db } = await import('/src/db/db.ts');
+      const { dubaiDate } = await import('/src/domain/dates.ts');
+      const cat = (await db.expenseCategories.toArray()).find((c) => c.code === 'tools');
+      await addExpense({ date: dubaiDate(new Date().toISOString()), categoryId: cat.id, amountFils: 2646, vatFils: 0, method: 'cash', vendor: 'Proof Shop', note: 'Oil filter' });
+    });
+    await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить пруф' }).waitFor();
+    await page.locator('input[data-proof-input]').setInputFiles([1, 2].map((n) => ({ name: `proof-${n}.png`, mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') })));
+    await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).nth(1).waitFor();
+    await shot('25b-expense-proofs');
+    await closeModal();
+    await page.goto(BASE + '#/money?tab=book');
+    await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().getByLabel('Пруф').waitFor();
     await page.goto(BASE + '#/reports');
     await page.getByText('Валовая прибыль').first().waitFor();
     await shot('26-reports', true);

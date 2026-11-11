@@ -1,5 +1,5 @@
 import { Box, Button, Group, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPencil } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,15 +10,17 @@ import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger'
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory, IncomeCategory } from '../../domain/types';
 import { loadLedger, setOpeningBalances, updateExpense, updateIncome, voidExpense, voidIncome, type Links } from '../../services/ledger';
-import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, Photo, PlateText, SearchField } from '../../ui/components';
+import { proofIndex } from '../../services/proofs';
+import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateText, SearchField } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
 import { EntrySheet, INCOME_CATEGORIES, LinkPicker, type EntryPreset } from './MoneyEntry';
+import { Proofs } from './Proofs';
 
 type KindFilter = 'all' | 'in' | 'out';
 
 /** Label of an entry's category, whatever its source. */
-function useCategoryLabel(cats: ExpenseCategory[] | undefined) {
+export function useCategoryLabel(cats: ExpenseCategory[] | undefined) {
   const { t } = useTranslation();
   const lang = useLang();
   return (e: LedgerEntry) => {
@@ -70,19 +72,24 @@ function OpeningSheet({ opened, onClose, cash, card, cashLocked }: { opened: boo
   );
 }
 
-/** An entry opened from the book: what it was for can be corrected; a mistaken entry is cancelled. */
-function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[] }) {
+/**
+ * An entry opened from the book: what it was for can be corrected, a money out takes proofs (photos);
+ * a mistaken entry is cancelled.
+ */
+export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[] }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
   const { run, busy } = useAction();
   const [voiding, setVoiding] = useState(false);
   const editable = entry.source === 'income' || entry.source === 'expense';
-  const [note, setNote] = useState(entry.note ?? '');
+  // An expense shows its vendor with the note; only the note itself is edited here.
+  const typed = (entry.source === 'expense' ? entry.expenseNote : entry.note) ?? '';
+  const [note, setNote] = useState(typed);
   const relink = (l: Links) =>
     run(() => (entry.source === 'income' ? updateIncome(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId }) : updateExpense(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId })));
   return (
-    <Modal opened onClose={onClose} title={label}>
+    <Modal opened onClose={onClose} title={entry.vendor ? `${label} · ${entry.vendor}` : label}>
       <Stack gap="md">
         <Group justify="space-between" align="baseline">
           <Text fz={28} c={entry.kind === 'in' ? 'green.7' : 'red.7'}>
@@ -102,7 +109,6 @@ function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEntry; lab
             {t('ledger.closingText', { actual: formatAed(entry.closing.actualFils), diff: formatAed(entry.closing.diffFils) })}
           </Text>
         )}
-        {entry.receiptMediaId && <Photo id={entry.receiptMediaId} h={120} w="100%" />}
         {editable && entry.source === 'income' && (
           <div className="chip-row wrap">
             {INCOME_CATEGORIES.map((c) => (
@@ -128,12 +134,13 @@ function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEntry; lab
               label={t('ledger.note')}
               value={note}
               onChange={(e) => setNote(e.currentTarget.value)}
-              onBlur={() => note !== (entry.note ?? '') && run(() => (entry.source === 'income' ? updateIncome(entry.id, { note }) : updateExpense(entry.id, { note })))}
+              onBlur={() => note !== typed && run(() => (entry.source === 'income' ? updateIncome(entry.id, { note }) : updateExpense(entry.id, { note })))}
             />
           </>
         ) : (
           entry.note && <Text size="sm">{entry.note}</Text>
         )}
+        <Proofs entry={entry} />
         <Group justify="space-between">
           {entry.orderId ? (
             <Button variant="light" onClick={() => navigate(`/orders/${entry.orderId}`)}>
@@ -187,10 +194,11 @@ export function LedgerTab() {
   const [q, setQ] = useState('');
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
   const [opening, setOpening] = useState(false);
-  const [open, setOpen] = useState<LedgerEntry | null>(null);
+  const [opened, setOpen] = useState<Pick<LedgerEntry, 'id' | 'source'> | null>(null);
   const data = useLiveQuery(async () => {
     const [book, cats, vehicles, customers, orders] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.vehicles.toArray(), db.customers.toArray(), db.orders.toArray()]);
-    return { book, cats, vehicles: new Map(vehicles.map((v) => [v.id, v])), customers: new Map(customers.map((c) => [c.id, c])), orders: new Map(orders.map((o) => [o.id, o])) };
+    const photos = await proofIndex(book.entries.map((e) => e.id));
+    return { book, cats, photos, vehicles: new Map(vehicles.map((v) => [v.id, v])), customers: new Map(customers.map((c) => [c.id, c])), orders: new Map(orders.map((o) => [o.id, o])) };
   }, []);
   const label = useCategoryLabel(data?.cats);
   const [from, to] = monthRange(month);
@@ -212,6 +220,8 @@ export function LedgerTab() {
   }, [data, from, to, kind, purse, q, label]);
   if (!data) return <PageSkeleton />;
   const { book } = data;
+  // The sheet follows the entry as it changes (category, links); a cancelled one is gone.
+  const open = opened ? book.entries.find((e) => e.id === opened.id && e.source === opened.source) : undefined;
   const totals = periodTotals(book.entries, from, to);
   const days = new Map<string, LedgerEntry[]>();
   for (const r of rows) days.set(r.date, [...(days.get(r.date) ?? []), r]);
@@ -349,6 +359,7 @@ export function LedgerTab() {
                             </Text>
                           )}
                           <Group gap={6} wrap="nowrap">
+                            {data.photos.has(e.id) && <IconPaperclip size={14} color="var(--mantine-color-dimmed)" aria-label={t('ledger.proof')} style={{ flexShrink: 0 }} />}
                             {v && <PlateText plate={v.plate} size="xs" />}
                             <Text span size="xs" c="dimmed" lineClamp={1}>
                               {sub}

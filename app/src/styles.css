@@ -1012,6 +1012,32 @@ html.kb .tab-bar-wrap {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 2px;
 }
+/* Proofs of a money out: square photo tiles and the add tile, scrolling sideways when many. */
+.proof-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -2px;
+  padding: 2px;
+}
+.proof-row::-webkit-scrollbar {
+  display: none;
+}
+.proof-tile {
+  flex: 0 0 74px;
+  width: 74px;
+  height: 74px;
+  padding: 0;
+  overflow: hidden;
+  color: var(--mantine-color-cobalt-6);
+}
+.proof-tile > .mantine-Image-root,
+.proof-tile > .surface-soft {
+  position: absolute;
+  inset: 0;
+}
+
 /* The customer and the complaint in the job's head: plain lines that open their sheet. */
 .job-line {
   display: block;

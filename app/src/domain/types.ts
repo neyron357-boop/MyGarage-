@@ -260,7 +260,9 @@ export type MediaOwner =
   | 'invoice'
   | 'version'
   | 'payment'
-  | 'return';
+  | 'return'
+  /** A cash movement of the money book (parts bought for cash, cash handed over…): its proofs. */
+  | 'movement';
 
 export interface Media {
   id: string;

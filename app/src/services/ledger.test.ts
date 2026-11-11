@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, ImmutableError, setDb, uid } from '../db/db';
-import { periodTotals } from '../domain/ledger';
+import { expenseEntry, periodTotals } from '../domain/ledger';
 import { computeReport } from '../domain/reports';
 import { createCustomer, createVehicle } from './customers';
 import { addIncome, loadLedger, moneyOf, setOpeningBalances, updateExpense, voidExpense, voidIncome } from './ledger';
@@ -115,5 +115,15 @@ describe('money book', () => {
     expect(r.otherIncome).toBe(1000);
     expect(r.expensesNet).toBe(0);
     expect(r.grossProfit).toBe(1000);
+  });
+});
+
+describe('an expense in the book', () => {
+  it('shows the vendor with the note but keeps the note as typed for editing', async () => {
+    const e = await addExpense({ date: '2026-11-05', categoryId: await cat('tools'), amountFils: 12000, vatFils: 571, method: 'card', vendor: 'Ace Hardware', note: 'Bearing puller' });
+    const line = expenseEntry(e);
+    expect([line.note, line.vendor, line.expenseNote]).toEqual(['Ace Hardware · Bearing puller', 'Ace Hardware', 'Bearing puller']);
+    await updateExpense(e.id, { note: 'Bearing puller set' });
+    expect((await loadLedger()).entries.find((x) => x.id === e.id)!.note).toBe('Ace Hardware · Bearing puller set');
   });
 });

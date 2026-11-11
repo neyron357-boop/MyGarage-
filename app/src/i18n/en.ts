@@ -1088,6 +1088,8 @@ export const en: typeof ru = {
     voidText: 'The entry leaves the book and the reports. It is not deleted — it stays marked as cancelled.',
     voidTextCash: 'The entry leaves the book and the reports, and the cash book gets the opposite movement so the cash adds up. Nothing is deleted.',
     voided: 'Entry cancelled',
+    proof: 'Proof',
+    addProof: 'Add proof',
     paymentHint: 'A job payment is changed only in the job (refund or credit note).',
     closingText: 'Counted {{actual}}, difference {{diff}}',
     linkedTitle: 'Expenses and income',
