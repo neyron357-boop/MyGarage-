@@ -846,6 +846,13 @@ html.kb .tab-bar-wrap {
   --pl-r: 7px;
   font-size: 24px;
 }
+.plate.card {
+  --pl-bw: 2px;
+  --pl-r: 8px;
+  --pl-pt: 0.1em;
+  --pl-pb: 0.08em;
+  font-size: 28px;
+}
 .plate.xl {
   --pl-bw: 2.5px;
   --pl-r: 9px;
@@ -854,6 +861,7 @@ html.kb .tab-bar-wrap {
   font-size: 34px;
 }
 .plate.lg.pl-shj,
+.plate.card.pl-shj,
 .plate.xl.pl-shj {
   --pl-bw: 0.13em;
 }

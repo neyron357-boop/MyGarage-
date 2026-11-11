@@ -481,7 +481,7 @@ export function JobPage() {
       <Box className="surface" p="md" mb="lg">
         <CarCover vehicleId={b.vehicle.id} />
         <Group gap="sm" wrap="nowrap" justify="space-between">
-          <PlateText plate={b.vehicle.plate} size="md" />
+          <PlateText plate={b.vehicle.plate} size="card" />
           <PhasePill phase={phase} />
         </Group>
         <Group justify="space-between" wrap="nowrap" mt="sm" gap="sm">

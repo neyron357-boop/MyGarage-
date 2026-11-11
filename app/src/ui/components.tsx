@@ -108,7 +108,8 @@ const PLATE_NAME: Record<Emirate, { ar: string; lat: string }> = {
  * Dubai — "DUBAI" over the code letter; Abu Dhabi — the code in a red box, then the name;
  * Ras Al Khaimah — the name first; the others — code, the name in Arabic over Latin, number.
  */
-export function PlateText({ plate, size = 'sm' }: { plate: Plate; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' }) {
+/** Sizes: xs–lg in lists and headers, `card` — the job card (widest plate + step still fit a phone), xl — typing it. */
+export function PlateText({ plate, size = 'sm' }: { plate: Plate; size?: 'xs' | 'sm' | 'md' | 'lg' | 'card' | 'xl' }) {
   const p = normalizePlate(plate);
   const e = PLATE_NAME[p.emirate] ? p.emirate : 'DXB';
   const code = p.code ? <span className="code">{p.code}</span> : null;
