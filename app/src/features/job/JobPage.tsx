@@ -8,7 +8,6 @@ import {
   IconChecks,
   IconCircle,
   IconCircleX,
-  IconCopy,
   IconDiscount,
   IconDots,
   IconFileInvoice,
@@ -46,12 +45,11 @@ import type { OrderItem, Payment } from '../../domain/types';
 import { syncDiscount } from '../../services/discount';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, withdrawItems } from '../../services/estimate';
-import { answerLines, approveAll, dropLine, partsRequest, partsToFind, phaseOf, refuseAll, syncStage } from '../../services/flow';
+import { answerLines, approveAll, dropLine, phaseOf, refuseAll, syncStage } from '../../services/flow';
 import { simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
-import { copyText } from '../../ui/clipboard';
 import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
@@ -137,48 +135,6 @@ function ComplaintSheet({ b, opened, onClose }: { b: OrderBundle; opened: boolea
           }
         >
           {t('common.save')}
-        </Button>
-      </Stack>
-    </Modal>
-  );
-}
-
-/** Ask a supplier for the parts still to find: the message is ready, one tap opens the chat. */
-function AskSheet({ b, parts, opened, onClose }: { b: OrderBundle; parts: OrderItem[]; opened: boolean; onClose: () => void }) {
-  const { t } = useTranslation();
-  const suppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt && !!s.phone).toArray(), []) ?? [];
-  const [text, setText] = useState('');
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (opened) {
-      setText(partsRequest(b.vehicle, parts));
-      setCopied(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened]);
-  return (
-    <Modal opened={opened} onClose={onClose} title={t('job.askTitle')}>
-      <Stack gap="md">
-        <Textarea aria-label={t('job.askTitle')} autosize minRows={4} value={text} onChange={(e) => setText(e.currentTarget.value)} />
-        {suppliers.length > 0 && (
-          <div className="action-tiles">
-            {suppliers.map((s) => (
-              <a key={s.id} className="action-tile" href={whatsappUrl(s.phone!, text)} target="_blank" rel="noopener">
-                <IconBrandWhatsapp size={26} stroke={1.7} style={{ color: 'var(--mantine-color-green-6)' }} aria-hidden />
-                <span>{s.name}</span>
-              </a>
-            ))}
-          </div>
-        )}
-        <Button
-          variant="light"
-          leftSection={copied ? <IconCheck size={18} /> : <IconCopy size={18} />}
-          onClick={async () => {
-            setCopied(await copyText(text));
-            haptic('light');
-          }}
-        >
-          {copied ? t('job.copied') : t('job.copy')}
         </Button>
       </Stack>
     </Modal>
@@ -316,7 +272,6 @@ export function JobPage() {
   const [discountOpen, setDiscountOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [complaintOpen, setComplaintOpen] = useState(false);
-  const [ask, setAsk] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
 
   const orderId = b?.order.id;
@@ -345,7 +300,6 @@ export function JobPage() {
   const refusedLines = b.items.filter((i) => i.approvalState === 'declined');
   const waiting = b.items.filter(isAwaitingClient);
   const sum = sumAmounts(live.map(itemAmounts));
-  const toFind = partsToFind(b.items);
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
   const open = phase !== 'closed' && phase !== 'cancelled';
   const editable = open && !inv;
@@ -658,11 +612,6 @@ export function JobPage() {
               )}
             </Group>
           )}
-          {editable && toFind.length > 0 && (
-            <Button fullWidth mt={8} variant="light" color="green" leftSection={<IconBrandWhatsapp size={18} />} onClick={() => setAsk(true)}>
-              {t('job.askParts')} · {toFind.length}
-            </Button>
-          )}
           {live.length > 0 && (
             <Box mt="lg">
               <List>
@@ -691,7 +640,6 @@ export function JobPage() {
       <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i })} />
       <MoreSheet opened={more} onClose={() => setMore(false)} tiles={tiles} />
       <ComplaintSheet b={b} opened={complaintOpen} onClose={() => setComplaintOpen(false)} />
-      <AskSheet b={b} parts={toFind} opened={ask} onClose={() => setAsk(false)} />
       <ConfirmModal
         opened={finish}
         onClose={() => setFinish(false)}

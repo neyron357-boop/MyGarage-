@@ -2,9 +2,9 @@ import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { activeInvoice } from '../domain/invoice';
-import { isAwaitingClient, itemTitle } from '../domain/items';
+import { isAwaitingClient } from '../domain/items';
 import { partsReady } from '../domain/stages';
-import type { DecisionVia, OrderItem, SendVia, Stage, Vehicle } from '../domain/types';
+import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
 import { recordDecisions, sendVersion } from './estimate';
@@ -117,16 +117,4 @@ export async function dropLine(itemId: string): Promise<void> {
 /** Parts of the job that are not bought yet. */
 export function partsToFind(items: OrderItem[]): OrderItem[] {
   return items.filter((i) => i.kind === 'part' && !i.customerSupplied && ['draft', 'pending', 'approved'].includes(i.approvalState) && (i.procurementStatus ?? 'needed') === 'needed');
-}
-
-/**
- * A message to a parts supplier (always in English): the parts of the job that still have to be
- * found, with the car they are for.
- */
-export function partsRequest(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin'>, parts: OrderItem[]): string {
-  const car = [vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ');
-  const lines = parts.map((p) => '• ' + itemTitle(p, 'en') + (p.partNumber ? ' (' + p.partNumber + ')' : '') + (p.qty !== 1 ? ' × ' + p.qty : ''));
-  const out = ['Hi! Price and availability, please:', ...lines, '', car];
-  if (vehicle.vin) out.push('VIN: ' + vehicle.vin);
-  return out.join('\n');
 }

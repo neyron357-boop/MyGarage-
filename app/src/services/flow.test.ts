@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, dropLine, partsRequest, partsToFind, phaseOf, refuseAll, syncStage } from './flow';
+import { answerLines, approveAll, dropLine, partsToFind, phaseOf, refuseAll, syncStage } from './flow';
 import { addPayment, quickInvoice } from './money';
 import { changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -97,10 +97,5 @@ describe('lazy flow', () => {
     expect(await refuseAll(o.id)).toBe('open');
     expect((await state(o.id)).phase).toBe('work');
     expect((await quickInvoice(o.id)).totalFils).toBe(5250);
-  });
-
-  it('asks a supplier for the parts in English, with the car', () => {
-    const part = { kind: 'part', titleEn: 'Brake pads front', titleRu: 'Колодки', qty: 2, partNumber: '04465-33471' } as never;
-    expect(partsRequest({ make: 'Toyota', model: 'Camry', year: 2018, vin: 'JT123' }, [part])).toBe('Hi! Price and availability, please:\n• Brake pads front (04465-33471) × 2\n\nToyota Camry 2018\nVIN: JT123');
   });
 });

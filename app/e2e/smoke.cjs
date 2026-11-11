@@ -317,13 +317,10 @@ async function launchBrowser() {
     await dlg.getByLabel('Запчасть').fill('Фильтр салона');
     await dlg.getByLabel('Кол-во').fill('2');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByRole('button', { name: /Спросить запчасти/ }).waitFor();
-    // No price yet: the quote cannot go, the suppliers can be asked.
+    await page.getByText('Фильтр салона').first().waitFor();
+    // No price yet: the quote cannot go.
     if (!(await page.getByRole('button', { name: /^Клиенту/ }).isDisabled())) throw new Error('a line without a price must hold the quote');
-    await page.getByRole('button', { name: /Спросить запчасти/ }).click();
-    await dlg.getByText('Price and availability').waitFor();
-    await shot('30b-ask-supplier');
-    await page.locator('.mantine-Modal-close').first().click();
+    if (await page.getByRole('button', { name: /Спросить запчасти/ }).count()) throw new Error('no ask-for-parts button on the job');
     await page.getByText('Фильтр салона').first().click();
     await dlg.getByLabel('Закупка за шт.').fill('20');
     await dlg.getByLabel('Цена за шт.').fill('30');
