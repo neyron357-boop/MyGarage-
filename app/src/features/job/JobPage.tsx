@@ -20,6 +20,7 @@ import {
   IconPackage,
   IconPhone,
   IconPhoto,
+  IconRestore,
   IconScale,
   IconSend,
   IconSignature,
@@ -43,12 +44,13 @@ import { isAwaitingClient, itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
+import { canReopen } from '../../domain/stages';
 import { sumAmounts } from '../../domain/vat';
 import type { OrderItem, Payment } from '../../domain/types';
 import { syncDiscount } from '../../services/discount';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, withdrawItems } from '../../services/estimate';
-import { answerLines, approveAll, dropLine, phaseOf, refuseAll, removeLines, restoreLines, syncStage } from '../../services/flow';
+import { answerLines, approveAll, dropLine, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from '../../services/flow';
 import { simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
@@ -494,6 +496,13 @@ export function JobPage() {
         }
       >
         {t('job.handOver')}
+      </Button>
+    );
+  else if (canReopen(b.order))
+    // Closed or cancelled: back on the board in one tap (the car came back, closed by mistake).
+    bar = (
+      <Button fullWidth variant="default" loading={busy} leftSection={<IconRestore size={20} />} onClick={() => run(async () => (await reopenJob(oid), haptic('success')), 'job.reopened')}>
+        {t('job.reopen')}
       </Button>
     );
 

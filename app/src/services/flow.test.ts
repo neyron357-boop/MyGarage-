@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, dropLine, partsToFind, phaseOf, refuseAll, removeLines, restoreLines, syncStage } from './flow';
+import { answerLines, approveAll, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
 import { addPayment, quickInvoice } from './money';
 import { changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -117,5 +117,35 @@ describe('lazy flow', () => {
 
     await restoreLines(removed);
     expect((await db.items.get(draft.id))!.approvalState).toBe('draft');
+  });
+
+  it('reopens a closed job: invoiced — back to "ready", refused — back in the workshop; history stays closed', async () => {
+    const paid = await job();
+    await addItem(paid.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await approveAll(paid.id);
+    const inv = await quickInvoice(paid.id);
+    await addPayment(paid.id, { kind: 'payment', method: 'cash', amountFils: inv.totalFils });
+    await changeStage(paid.id, 'closed');
+    await reopenJob(paid.id);
+    expect(await state(paid.id)).toEqual({ phase: 'out', stage: 'ready' });
+    const b = (await loadOrderBundle(paid.id))!;
+    expect(b.order.closedAt).toBeUndefined();
+    expect(b.invoices).toHaveLength(1);
+    expect(b.events.some((e) => e.type === 'reopened')).toBe(true);
+    // And it can be handed over again.
+    await changeStage(paid.id, 'closed');
+    expect((await state(paid.id)).phase).toBe('closed');
+
+    const refused = await job();
+    await addItem(refused.id, { kind: 'labor', block: 'A', titleEn: 'Gearbox repair', unitPriceFils: 300000 });
+    await sendVersion(refused.id, { via: 'phone' });
+    expect(await refuseAll(refused.id)).toBe('closed');
+    await reopenJob(refused.id);
+    const r = (await loadOrderBundle(refused.id))!;
+    expect(r.order.outcome).toBe('in_progress');
+    expect(phaseOf(r)).toBe('look');
+
+    await db.orders.update(refused.id, { stage: 'closed', imported: { system: 'eaglecart', jobId: '1', jobNo: '1', status: 'Delivered', totalFils: 0, history: true, importedAt: new Date().toISOString() } });
+    await expect(reopenJob(refused.id)).rejects.toThrow();
   });
 });

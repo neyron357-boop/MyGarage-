@@ -3,7 +3,7 @@ import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { activeInvoice } from '../domain/invoice';
 import { isAwaitingClient } from '../domain/items';
-import { partsReady } from '../domain/stages';
+import { canReopen, partsReady, reopenStage } from '../domain/stages';
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
@@ -143,6 +143,33 @@ export async function restoreLines(items: OrderItem[]): Promise<void> {
   for (const i of items) await restoreItem(i);
   await syncDiscount(items[0].orderId);
   await syncStage(items[0].orderId);
+}
+
+/**
+ * A closed (or cancelled) job back on the board: the car came back, or "Hand over" was tapped by
+ * mistake. Its documents and money stay as they are; it goes back to "ready" when invoiced, else to
+ * the workshop, and its lines move it on from there. The journal keeps the reopening.
+ */
+export async function reopenJob(orderId: string): Promise<void> {
+  const order = await db.orders.get(orderId);
+  if (!order) throw new AppError('err.notFound');
+  if (!canReopen(order)) throw new AppError('stageErr.notAllowed');
+  const invoiced = !!activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray());
+  const to = reopenStage(order, invoiced);
+  const now = nowIso();
+  await db.transaction('rw', db.orders, db.events, async () => {
+    await db.orders.update(orderId, {
+      stage: to,
+      stageChangedAt: now,
+      updatedAt: now,
+      outcome: 'in_progress',
+      closedAt: undefined,
+      deliveredAt: undefined,
+      cancelReason: undefined,
+    });
+    await logEvent(orderId, 'reopened', { from: order.stage, to });
+  });
+  await syncStage(orderId);
 }
 
 /** Parts of the job that are not bought yet. */

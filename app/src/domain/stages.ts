@@ -132,3 +132,21 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
       return { ok: false, reason: 'stageErr.notAllowed' };
   }
 }
+
+/**
+ * A closed or cancelled job can be brought back (closed by mistake, the car came back). Not history
+ * carried over from the old system: a returning car gets a new job.
+ */
+export function canReopen(order: Pick<Order, 'stage' | 'imported'>): boolean {
+  return (order.stage === 'closed' || order.stage === 'cancelled') && !order.imported?.history;
+}
+
+/**
+ * Where a reopened job stands: invoiced — "ready" (to pay or to hand over); an appointment cancelled
+ * before the car came — an appointment again; otherwise back in the workshop (its lines move it on).
+ */
+export function reopenStage(order: Pick<Order, 'stage' | 'arrivedAt'>, invoiced: boolean): Stage {
+  if (invoiced) return 'ready';
+  if (order.stage === 'cancelled' && !order.arrivedAt) return 'booked';
+  return 'diagnostics';
+}

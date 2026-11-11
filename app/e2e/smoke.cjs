@@ -445,6 +445,12 @@ async function launchBrowser() {
     await page.getByRole('dialog', { name: 'Клиент отказался?' }).getByRole('button', { name: 'Отказ' }).click();
     await page.getByText('Закрыт').first().waitFor();
     await shot('33b-job-refused');
+    // A closed job comes back in one tap: back in the workshop, the bottom button gone.
+    await page.getByRole('button', { name: 'Возобновить' }).click();
+    await page.getByText('Заказ возобновлён').first().waitFor();
+    await page.getByRole('button', { name: 'Возобновить' }).waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await shot('33c-job-reopened');
   });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);
