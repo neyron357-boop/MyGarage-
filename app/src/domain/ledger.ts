@@ -116,7 +116,7 @@ export function buildLedger(input: LedgerInput): LedgerResult {
       purse: purseOf(p.method),
       method: p.method,
       amountFils: p.amountFils,
-      category: p.kind === 'refund' ? 'refund' : 'order',
+      category: p.kind === 'refund' ? 'refund' : p.kind === 'prepayment' ? 'prepayment' : 'order',
       note: p.reference,
       ...linkOf(p.orderId, undefined, p.customerId),
     });

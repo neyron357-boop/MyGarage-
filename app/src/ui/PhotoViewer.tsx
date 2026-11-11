@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { mediaBlob, mediaUrl } from '../services/media';
 import { useHistoryLayer, useLockScroll } from './historyLayer';
+import { canShareFile, shareOrDownload } from './share';
 
 export interface ViewerItem {
   id: string;
@@ -37,17 +38,6 @@ function usePhotoFile(item?: ViewerItem) {
   return file;
 }
 
-function download(file: File) {
-  const url = URL.createObjectURL(file);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = file.name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
-
 /**
  * Share or save the photo shown: the phone's share sheet (on an iPhone it has "Save Image" — to the
  * Photos app — and WhatsApp, Telegram, AirDrop…); where files cannot be shared, the file is downloaded.
@@ -55,20 +45,14 @@ function download(file: File) {
 function ShareButton({ item }: { item?: ViewerItem }) {
   const { t } = useTranslation();
   const file = usePhotoFile(item);
-  const canShare = !!file && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+  const canShare = canShareFile(file);
   return (
     <button
       type="button"
       className="cam-icon"
       disabled={!file}
       aria-label={canShare ? t('photos.share') : t('photos.save')}
-      onClick={() => {
-        if (!file) return;
-        if (!canShare) return download(file);
-        navigator.share({ files: [file] }).catch((e: unknown) => {
-          if ((e as Error)?.name !== 'AbortError') download(file);
-        });
-      }}
+      onClick={() => file && shareOrDownload(file)}
     >
       {canShare || !file ? <IconShare2 size={21} /> : <IconDownload size={21} />}
     </button>

@@ -51,7 +51,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           // Everything the app needs offline, including the fonts embedded into PDF documents.
           // (.woff duplicates of .woff2 are skipped: every supported browser reads woff2.)
-          globPatterns: ['**/*.{js,css,html,woff2,ttf,png,svg,webmanifest}'],
+          globPatterns: ['**/*.{js,mjs,css,html,woff2,ttf,png,svg,webmanifest}'],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           cleanupOutdatedCaches: true,
         },

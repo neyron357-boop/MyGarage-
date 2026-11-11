@@ -21,7 +21,7 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleCheck, IconCircleX, IconFileDescription, IconId, IconMinus, IconRefresh, IconTrash, IconVideo } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleCheck, IconCircleX, IconFileDescription, IconFileTypePdf, IconId, IconMinus, IconRefresh, IconTrash, IconVideo } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTime } from '../../domain/dates';
@@ -36,6 +36,7 @@ import type { OrderBundle } from '../../services/orders';
 import { AngleHint, hasAngleHint } from '../../ui/AngleHint';
 import { inAppCameraAvailable } from '../../ui/camera';
 import { CaptureButton } from '../../ui/CaptureButton';
+import { useObdImport } from '../job/ObdScan';
 import { PhotoViewer, type ViewerItem } from '../../ui/PhotoViewer';
 import { WalkaroundCamera } from '../../ui/WalkaroundCamera';
 import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
@@ -713,8 +714,18 @@ export function DashboardStep({ insp, media, b, intakeMedia }: StepProps) {
 
 export function ObdStep({ insp, media }: StepProps) {
   const { t } = useTranslation();
+  // The scanner's PDF report: its codes and the mileage come into this act, the car card gets what it lacks.
+  const obd = useObdImport(insp.orderId);
   return (
     <Stack gap="md">
+      {insp.kind === 'intake' && !insp.locked && (
+        <>
+          <Button variant="light" size="md" leftSection={<IconFileTypePdf size={18} />} onClick={obd.pick}>
+            {t('obd.import')}
+          </Button>
+          {obd.input}
+        </>
+      )}
       <Card>
         <Text size="sm" c="dimmed" mb="sm">
           {t('intake.obdHint')}

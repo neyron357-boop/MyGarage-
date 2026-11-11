@@ -1202,6 +1202,20 @@ html.kb .tab-bar-wrap {
   width: 100%;
   color: var(--app-label-2);
 }
+/* The scanner's codes on the job card (ObdLine), and the state dot in their list. */
+.job-obd {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  color: var(--app-label-2);
+}
+.obd-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
 
 /* ---------- A car's past visits under it (search) ---------- */
 .history-icon,

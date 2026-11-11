@@ -30,6 +30,7 @@ import { useAction, useLang } from '../../ui/hooks';
 import { initials } from '../customers/CustomersPage';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet } from './MoneyEntry';
+import { MoneySheetActions } from './MoneySheetActions';
 
 const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
 
@@ -419,7 +420,7 @@ export function MoneyPage() {
   const tab = MONEY_TABS.includes(asked) ? asked : 'book';
   return (
     <>
-      <PageHeader title={t('nav.money')} />
+      <PageHeader title={t('nav.money')} right={<MoneySheetActions />} />
       <ScrollTabs
         value={tab}
         onChange={(v) => setParams({ tab: v }, { replace: true })}

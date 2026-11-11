@@ -11,6 +11,7 @@ import {
   IconCircleX,
   IconDiscount,
   IconDots,
+  IconEngine,
   IconFileInvoice,
   IconFileTypePdf,
   IconHourglassHigh,
@@ -67,6 +68,7 @@ import { DiscountSheet } from '../money/DiscountSheet';
 import { PaymentModal } from '../money/PaymentPanel';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover } from './CarCover';
+import { ObdLine, useObdImport } from './ObdScan';
 import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
 import { PhasePill } from './phase';
 
@@ -289,6 +291,8 @@ export function JobPage() {
   const [customerOpen, setCustomerOpen] = useState(false);
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
+  // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
+  const obd = useObdImport(id ?? '');
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
@@ -426,6 +430,7 @@ export function JobPage() {
 
   const tiles: Tile[] = [];
   if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
+  if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
@@ -603,6 +608,7 @@ export function JobPage() {
             {b.order.complaint || t('job.complaint')}
           </Text>
         </UnstyledButton>
+        {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
         {open && mechanics.length > 0 && (
           <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('order.mechanic')}>
             {mechanics.map((m) => (
@@ -728,6 +734,7 @@ export function JobPage() {
       />
       <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i })} />
       <MoreSheet opened={more} onClose={() => setMore(false)} tiles={tiles} />
+      {obd.input}
       <ComplaintSheet b={b} opened={complaintOpen} onClose={() => setComplaintOpen(false)} />
       <ConfirmModal
         opened={finish}

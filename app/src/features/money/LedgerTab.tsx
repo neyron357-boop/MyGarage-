@@ -24,7 +24,7 @@ export function useCategoryLabel(cats: ExpenseCategory[] | undefined) {
   const { t } = useTranslation();
   const lang = useLang();
   return (e: LedgerEntry) => {
-    if (e.source === 'payment') return t(e.category === 'refund' ? 'cashReason.refund' : 'ledger.cat.order');
+    if (e.source === 'payment') return t(e.category === 'refund' ? 'cashReason.refund' : e.category === 'prepayment' ? 'cashReason.prepayment' : 'ledger.cat.order');
     if (e.source === 'income') return t(`income.category.${e.category}`);
     if (e.source === 'closing') return t('ledger.cat.closing');
     if (e.source === 'movement') return t(`cashReason.${e.category}`);

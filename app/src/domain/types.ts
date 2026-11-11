@@ -118,6 +118,20 @@ export type Outcome = 'in_progress' | 'completed' | 'repair_declined' | 'no_show
  * get no invoice or payment in MyGarage (money was not kept consistently there), so they are never
  * counted as owed and do not enter revenue or VAT reports.
  */
+/** A scanner's report imported into a job (services/obd.ts). */
+export interface ObdScan {
+  id: string;
+  importedAt: string;
+  /** When the car was scanned, as the report says. */
+  testedAt?: string;
+  tool?: string;
+  codes: { code: string; full: string; description: string; state: string; system: string }[];
+  odometer?: { value: number; unit: 'km' | 'mi' };
+  vin?: string;
+  /** The report itself (PDF in media). */
+  mediaId?: string;
+}
+
 export interface ImportedFrom {
   system: 'eaglecart';
   jobId: string;
@@ -161,6 +175,8 @@ export interface Order {
   storageWaived?: boolean;
   /** Carried over from Eaglecart. */
   imported?: ImportedFrom;
+  /** Scanner reports read into the job (oldest first): the fault codes and the car's data at that moment. */
+  obdScans?: ObdScan[];
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;

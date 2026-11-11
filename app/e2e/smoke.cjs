@@ -211,6 +211,28 @@ async function launchBrowser() {
   });
 
   const closeModal = () => page.locator('.mantine-Modal-close').first().click();
+  // A small PDF with text pieces at given places — a scanner report's layout, for the OBD import.
+  const makePdf = (lines) => {
+    const esc = (s) => s.replace(/[\\()]/g, (c) => '\\' + c);
+    const content = lines.map(([x, y, t]) => `BT /F1 12 Tf ${x} ${y} Td (${esc(t)}) Tj ET`).join('\n');
+    const objs = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+      `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`,
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ];
+    let out = '%PDF-1.4\n';
+    const offs = [];
+    objs.forEach((o, n) => {
+      offs.push(Buffer.byteLength(out));
+      out += `${n + 1} 0 obj\n${o}\nendobj\n`;
+    });
+    const xref = Buffer.byteLength(out);
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+    out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    return Buffer.from(out, 'latin1');
+  };
   let patrol;
   await step('work done, QC, ready', async () => {
     patrol = await page.evaluate(async () => { const { db } = await import('/src/db/db.ts'); const v = (await db.vehicles.toArray()).find((x) => x.model === 'Patrol'); return (await db.orders.where('vehicleId').equals(v.id).first()).id; });
@@ -430,6 +452,31 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Отменить' }).last().click();
     await page.locator('.list-row').filter({ hasText: 'Polish' }).first().waitFor();
   });
+  await step("scanner report: codes and the car's data from its PDF", async () => {
+    const pdf = makePdf([
+      [24, 698, 'Year:2011'], [24, 678, 'Make:GM'], [24, 658, 'Model:Terrain'], [24, 638, 'VIN:1GKFLTE30BX000001'],
+      [24, 618, 'Odometer:151584 miles'], [24, 598, 'Engine Size:LFW 3L 6 Dual Overhead Cam (DOHC)'], [24, 578, 'Test Time:2026-10-26 01:52:17AM'],
+      [22, 423, 'DTC'], [105, 423, 'Description'], [300, 423, 'State'], [411, 423, 'System'],
+      [24, 393, 'P0430-00'], [107, 399, 'Catalyst System Low Efficiency'], [107, 387, 'Bank 2'], [302, 393, 'Current'], [413, 393, 'Engine Control Module (ECM)'],
+      [24, 355, 'P0700-00'], [107, 367, 'Transmission Control Module'], [107, 355, 'Requested Malfunction Indicator'], [107, 343, 'Lamp (MIL) Illumination'], [302, 355, 'Passed And Failed'], [413, 355, 'Engine Control Module (ECM)'],
+      [24, 189, 'U0073-00'], [107, 195, 'Control Module Communication'], [107, 183, 'High Speed CAN Bus Off'], [302, 189, 'History'], [413, 195, 'Rear Differential Clutch'], [413, 183, 'Control Module (RDCCM)'],
+    ]);
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('dialog').getByRole('button', { name: 'Сканер' }).click()]);
+    await chooser.setFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: pdf });
+    await page.getByText('Отчёт сканера: ошибок 3').first().waitFor({ timeout: 30000 });
+    await page.getByRole('button', { name: 'Сканер' }).first().click();
+    await page.getByRole('dialog').getByText('Catalyst System Low Efficiency Bank 2').waitFor();
+    await page.getByRole('dialog').getByText('Passed And Failed · Engine Control Module (ECM)').waitFor();
+    await shot('30e-obd-report');
+    await closeModal();
+    const car = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const v = (await db.vehicles.toArray()).find((x) => x.plateSearch.endsWith('31415'));
+      return v && [v.vin, v.year, v.engine];
+    });
+    if (!car || car[0] !== '1GKFLTE30BX000001' || car[1] !== 2011) throw new Error('the car card did not get the report data: ' + JSON.stringify(car));
+  });
   await step('refused: the job closes without an invoice', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('16180');
@@ -466,6 +513,38 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByRole('button', { name: 'Закрыть день' }).click();
     await page.waitForTimeout(500);
     await shot('24-cash', true);
+    // The money sheet (Excel, as the garage's Money Tracker): the export holds the whole book; a sheet imports once.
+    const book = await page.evaluate(async () => {
+      const { exportMoneySheet } = await import('/src/services/moneySheet.ts');
+      const { readMoneyWorkbook } = await import('/src/domain/moneySheet.ts');
+      const { loadLedger } = await import('/src/services/ledger.ts');
+      const file = await exportMoneySheet();
+      return { rows: (await readMoneyWorkbook(new Uint8Array(await file.arrayBuffer()))).rows.length, entries: (await loadLedger()).entries.length, name: file.name };
+    });
+    if (!book.rows || book.rows !== book.entries || !/^Money Tracker/.test(book.name)) throw new Error('money sheet export: ' + JSON.stringify(book));
+    const sheet = await page.evaluate(async () => {
+      const { buildMoneyWorkbook } = await import('/src/domain/moneySheet.ts');
+      const b = buildMoneyWorkbook({
+        cashStartFils: 0,
+        cardStartFils: 0,
+        rows: [
+          { date: '2026-11-01', type: 'Income', amountFils: 25000, payment: 'Cash', category: 'Repair Labor', notes: 'sheet test income' },
+          { date: '2026-11-01', type: 'Expense', amountFils: 4500, payment: 'Card', category: 'Workshop Supplies', notes: 'sheet test expense' },
+        ],
+      });
+      let s = '';
+      for (const x of b) s += String.fromCharCode(x);
+      return btoa(s);
+    });
+    await page.goto(BASE + '#/money?tab=book');
+    await page.getByRole('button', { name: 'Excel' }).click();
+    await page.locator('.mantine-Modal-content button.action-tile:not([disabled])', { hasText: 'Выгрузить' }).waitFor();
+    await shot('25c-money-sheet');
+    await page.locator('input[data-money-sheet-input]').setInputFiles({ name: 'Money Tracker.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(sheet, 'base64') });
+    await page.getByText('Новых записей: 2 — приходов 1, расходов 1').waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Загрузить' }).last().click();
+    await page.getByText('Таблица загружена').first().waitFor();
+    await page.getByText('sheet test expense').first().waitFor();
     await page.goto(BASE + '#/money?tab=expenses&add=1');
     await page.getByRole('dialog').waitFor();
     await shot('25-expense');
