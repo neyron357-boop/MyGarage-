@@ -550,3 +550,24 @@ describe('the board order', () => {
     expect(lastChange({ order, items: [{ createdAt: '2026-11-10T08:10:00Z', doneAt: '2026-11-11T12:00:00Z' }], media: [{ createdAt: '2026-11-11T11:00:00Z' }] })).toBe('2026-11-11T12:00:00Z');
   });
 });
+
+describe('daylight in Dubai (the Auto theme)', () => {
+  it('knows sunrise and sunset through the year', async () => {
+    const { isDaytime, sunTimes } = await import('./daylight');
+    const local = (d: Date) => new Date(d.getTime() + 4 * 3600_000).toISOString().slice(11, 16);
+    const near = (got: string, want: string) => Math.abs(+got.slice(0, 2) * 60 + +got.slice(3) - (+want.slice(0, 2) * 60 + +want.slice(3))) <= 4;
+    const june = sunTimes(new Date('2026-06-21T08:00:00Z'));
+    expect(near(local(june.rise), '05:29')).toBe(true);
+    expect(near(local(june.set), '19:13')).toBe(true);
+    const dec = sunTimes(new Date('2026-12-21T08:00:00Z'));
+    expect(near(local(dec.rise), '07:02')).toBe(true);
+    expect(near(local(dec.set), '17:33')).toBe(true);
+    // Dubai is UTC+4: 06:30 in June is day, in December still night; 18:00 the other way round.
+    expect(isDaytime(new Date('2026-06-21T02:30:00Z'))).toBe(true);
+    expect(isDaytime(new Date('2026-12-21T02:30:00Z'))).toBe(false);
+    expect(isDaytime(new Date('2026-06-21T14:00:00Z'))).toBe(true);
+    expect(isDaytime(new Date('2026-12-21T14:00:00Z'))).toBe(false);
+    expect(isDaytime(new Date('2026-11-11T22:00:00Z'))).toBe(false); // 02:00 at night
+    expect(isDaytime(new Date('2026-11-11T08:00:00Z'))).toBe(true); // noon
+  });
+});

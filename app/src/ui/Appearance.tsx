@@ -1,15 +1,16 @@
-import { SegmentedControl, Stack, Switch, useComputedColorScheme, useMantineColorScheme } from '@mantine/core';
+import { SegmentedControl, Stack, Switch, useComputedColorScheme } from '@mantine/core';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setLang } from '../i18n';
 import { FormRow, RowGroup } from './components';
 import { hapticsAvailable, iosVersion, isApple, useHaptics } from './haptics';
 import { useLang } from './hooks';
+import { setSchemePref, useSchemePref } from './scheme';
 
 function useAppearance() {
   const { t } = useTranslation();
   const lang = useLang();
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const scheme = useSchemePref();
   return {
     lang,
     langData: [
@@ -17,13 +18,14 @@ function useAppearance() {
       { value: 'en', label: 'English' },
     ],
     setLang: (v: string) => setLang(v === 'en' ? 'en' : 'ru'),
-    scheme: colorScheme === 'dark' ? 'dark' : colorScheme === 'auto' ? 'auto' : 'light',
+    scheme,
     schemeData: [
       { value: 'light', label: t('app.themeLight') },
       { value: 'dark', label: t('app.themeDark') },
       { value: 'auto', label: t('app.themeAuto') },
     ],
-    setScheme: (v: string) => setColorScheme(v === 'dark' ? 'dark' : v === 'auto' ? 'auto' : 'light'),
+    // Auto: light by day, dark by night (sunrise and sunset in Dubai).
+    setScheme: (v: string) => setSchemePref(v === 'dark' ? 'dark' : v === 'auto' ? 'auto' : 'light'),
   };
 }
 

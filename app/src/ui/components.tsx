@@ -25,7 +25,7 @@ import {
   type Icon,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatAed, parseAed } from '../domain/money';
@@ -435,6 +435,8 @@ export function ListRow({
   right,
   onClick,
   chevron,
+  handlers,
+  selected,
 }: {
   left?: ReactNode;
   title: ReactNode;
@@ -442,9 +444,16 @@ export function ListRow({
   right?: ReactNode;
   onClick?: () => void;
   chevron?: boolean;
+  /** More pointer handlers on the row (a long press). */
+  handlers?: HTMLAttributes<HTMLDivElement>;
+  /** Picked in a selection (the row is tinted). */
+  selected?: boolean;
 }) {
   return (
     <div
+      {...handlers}
+      data-selected={selected || undefined}
+      aria-pressed={selected}
       className={`list-row${onClick ? ' clickable' : ''}`}
       onClick={onClick}
       role={onClick ? 'button' : undefined}

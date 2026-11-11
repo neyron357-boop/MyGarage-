@@ -7,12 +7,14 @@ import {
   IconCheck,
   IconChecks,
   IconCircle,
+  IconCircleCheckFilled,
   IconCircleX,
   IconDiscount,
   IconDots,
   IconFileInvoice,
   IconFileTypePdf,
   IconHourglassHigh,
+  IconListCheck,
   IconListDetails,
   IconMessage2,
   IconPackage,
@@ -46,13 +48,14 @@ import type { OrderItem, Payment } from '../../domain/types';
 import { syncDiscount } from '../../services/discount';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, withdrawItems } from '../../services/estimate';
-import { answerLines, approveAll, dropLine, phaseOf, refuseAll, syncStage } from '../../services/flow';
+import { answerLines, approveAll, dropLine, phaseOf, refuseAll, removeLines, restoreLines, syncStage } from '../../services/flow';
 import { simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
 import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
+import { useLongPress } from '../../ui/longPress';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { scrollToTop, useStack } from '../../ui/stack';
@@ -141,6 +144,12 @@ function ComplaintSheet({ b, opened, onClose }: { b: OrderBundle; opened: boolea
       </Stack>
     </Modal>
   );
+}
+
+/** A line row that a long press starts picking from (like the iPhone's lists): the press is not also a tap. */
+function PickRow({ onLong, onClick, ...row }: Parameters<typeof ListRow>[0] & { onLong?: () => void }) {
+  const press = useLongPress(() => onLong?.());
+  return <ListRow {...row} handlers={onLong ? press.handlers : undefined} onClick={onClick && (() => !press.consumeClick() && onClick())} />;
 }
 
 /** A line already told to the customer: the answer, done or not, where its part is — or take it off. */
@@ -268,6 +277,9 @@ export function JobPage() {
   const [act, setAct] = useState<OrderItem | null>(null);
   const [more, setMore] = useState(false);
   const [finish, setFinish] = useState(false);
+  // Picking lines to take off several at once (a long press on a line, or “…” → “Select”); null = not picking.
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [confirmPicked, setConfirmPicked] = useState(false);
   const [refuse, setRefuse] = useState(false);
   const [remove, setRemove] = useState(false);
   const [pay, setPay] = useState<Payment['kind'] | null>(null);
@@ -342,11 +354,35 @@ export function JobPage() {
       await syncStage(oid);
       haptic('light');
     });
+  // Picking: the lines that can come off (not the discount, not refused ones, not after the invoice).
+  const canPick = (i: OrderItem) => editable && i.kind !== 'discount' && ['draft', 'pending', 'approved'].includes(i.approvalState);
+  const picking = picked !== null && editable;
+  const togglePick = (id: string) => {
+    haptic('selection');
+    setPicked((p) => {
+      const n = new Set(p ?? []);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  };
   const partNote = (i: OrderItem) => (i.kind === 'part' && !inv ? t(`job.part.${partStateOf(i)}`) : '');
   const row = (i: OrderItem) => (
-    <ListRow
+    <PickRow
       key={i.id}
-      left={<LineMark item={i} />}
+      selected={picking && picked.has(i.id)}
+      onLong={!picking && canPick(i) ? () => setPicked(new Set([i.id])) : undefined}
+      left={
+        picking && canPick(i) ? (
+          picked.has(i.id) ? (
+            <IconCircleCheckFilled size={22} color="var(--mantine-color-cobalt-6)" aria-hidden />
+          ) : (
+            <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />
+          )
+        ) : (
+          <LineMark item={i} />
+        )
+      }
       title={
         <Text span inherit td={i.approvalState === 'declined' ? 'line-through' : undefined} c={i.approvalState === 'declined' ? 'dimmed' : undefined}>
           {itemTitle(i, docLang) || '—'}
@@ -365,7 +401,11 @@ export function JobPage() {
         )
       }
       onClick={
-        !editable || i.approvalState === 'declined'
+        picking
+          ? canPick(i)
+            ? () => togglePick(i.id)
+            : undefined
+          : !editable || i.approvalState === 'declined'
           ? undefined
           : i.kind === 'discount'
             ? () => setDiscountOpen(true)
@@ -395,6 +435,7 @@ export function JobPage() {
   tiles.push({ key: 'details', icon: IconListDetails, onClick: () => navigate(`/orders/${oid}/details`) });
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
+  if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
   tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
   let bar: ReactNode = null;
@@ -454,6 +495,41 @@ export function JobPage() {
       >
         {t('job.handOver')}
       </Button>
+    );
+
+  // Picking lines: the bar becomes Cancel · All · Delete N. Drafts go at once (with Undo); lines the
+  // customer was told are confirmed first — they stay in the history as cancelled.
+  const pickedLines = picked ? lines.filter((i) => picked.has(i.id) && canPick(i)) : [];
+  const allPicked = pickedLines.length > 0 && pickedLines.length === lines.filter(canPick).length;
+  const removePicked = () =>
+    run(async () => {
+      const removed = await removeLines(pickedLines.map((i) => i.id));
+      setPicked(null);
+      setConfirmPicked(false);
+      haptic('light');
+      if (removed.length && removed.length === pickedLines.length) undoToast(t('item.removedN', { n: removed.length }), t('common.undo'), () => void restoreLines(removed));
+      return true;
+    });
+  if (picking)
+    bar = (
+      <Group gap={10} wrap="nowrap">
+        <Button variant="default" onClick={() => setPicked(null)} style={{ flex: '0 0 auto' }}>
+          {t('common.cancel')}
+        </Button>
+        <Button variant="default" onClick={() => setPicked(allPicked ? new Set() : new Set(lines.filter(canPick).map((i) => i.id)))} style={{ flex: '0 0 auto' }}>
+          {allPicked ? t('job.pickNone') : t('job.pickAll')}
+        </Button>
+        <Button
+          color="red"
+          loading={busy}
+          disabled={!pickedLines.length}
+          leftSection={<IconTrash size={18} />}
+          onClick={() => (pickedLines.some((i) => i.approvalState !== 'draft') ? setConfirmPicked(true) : void removePicked())}
+          style={{ flex: 1 }}
+        >
+          {t('job.removeN', { n: pickedLines.length })}
+        </Button>
+      </Group>
     );
 
   return (
@@ -662,6 +738,16 @@ export function JobPage() {
         <Text mt="sm" fw={700} fz={20}>
           <Money fils={sum.gross} display />
         </Text>
+      </ConfirmModal>
+      <ConfirmModal
+        opened={confirmPicked}
+        onClose={() => setConfirmPicked(false)}
+        title={t('job.removeTitle')}
+        confirmLabel={t('job.removeN', { n: pickedLines.length })}
+        color="red"
+        onConfirm={removePicked}
+      >
+        <Text size="sm">{t('job.removeText')}</Text>
       </ConfirmModal>
       <ConfirmModal
         opened={refuse}

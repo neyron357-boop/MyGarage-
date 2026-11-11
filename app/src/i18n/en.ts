@@ -695,6 +695,7 @@ export const en: typeof ru = {
   },
   item: {
     removed: 'Removed: {{title}}',
+    removedN: 'Lines deleted: {{n}}',
     withdrawEditTitle: 'Change a sent item?',
     withdrawDeleteTitle: 'Remove the item from the estimate?',
     withdrawText: 'The item waits for the customer’s answer. It goes back to draft (or leaves the estimate); the sent version stays in the history as it was. If the customer has seen it, send the new price as a new version.',
@@ -980,7 +981,12 @@ export const en: typeof ru = {
     refuseTitle: 'The customer refused?',
     refuseText: 'Lines waiting for an answer become refused, unsent ones are deleted. With nothing to pay for, the job is closed.',
     accept: 'Accept',
-    more: { photos: 'Photos', quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', discount: 'Discount', debt: 'On credit', refuse: 'Refused', customer: 'Customer', car: 'Car', details: 'Details', claim: 'Warranty', remove: 'Delete' },
+    more: { photos: 'Photos', quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', discount: 'Discount', debt: 'On credit', refuse: 'Refused', customer: 'Customer', car: 'Car', details: 'Details', claim: 'Warranty', select: 'Select', remove: 'Delete' },
+    pickAll: 'All',
+    pickNone: 'None',
+    removeN: 'Delete · {{n}}',
+    removeTitle: 'Take the picked lines off?',
+    removeText: 'Lines the customer has already seen stay in the history as cancelled.',
   },
   invoice: {
     confirmTitle: 'Issue the invoice?',

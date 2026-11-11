@@ -1085,6 +1085,10 @@ html.kb .tab-bar-wrap {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 2px;
 }
+/* A line picked for removal (several at once on the job screen). */
+.list-row[data-selected] {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 9%, transparent);
+}
 /* A strip of photos (PhotoStrip: proofs, line photos): square tiles and the add tile, sideways when many. */
 .strip-row {
   display: flex;

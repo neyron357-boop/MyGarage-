@@ -12,7 +12,7 @@ import type { Customer, Order, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
 import { loadJobIndex, type JobHitData } from '../../services/search';
 import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, StageBadge } from '../../ui/components';
-import { useLang } from '../../ui/hooks';
+import { useLang, usePhone } from '../../ui/hooks';
 
 export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage }; history?: Order[]; historyCount?: number };
 
@@ -140,6 +140,7 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
 
 export function SearchPage() {
   const { t } = useTranslation();
+  const phone = usePhone();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -164,7 +165,8 @@ export function SearchPage() {
     <>
       <PageHeader title={t('search.title')} />
       <Box mb="lg">
-        <SearchField autoFocus placeholder={t('search.placeholder')} value={q} onChange={setQ} />
+        {/* On a phone the keyboard waits for a tap on the field (opening the tab only shows the search). */}
+        <SearchField autoFocus={!phone} placeholder={t('search.placeholder')} value={q} onChange={setQ} />
       </Box>
       {q && hits?.length === 0 && jobs?.total === 0 && (
         <EmptyState

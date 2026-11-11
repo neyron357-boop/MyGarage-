@@ -7,7 +7,7 @@ import { partsReady } from '../domain/stages';
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
-import { recordDecisions, sendVersion } from './estimate';
+import { recordDecisions, removeItem, restoreItem, sendVersion, withdrawItems } from './estimate';
 import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, type OrderBundle } from './orders';
 
 /**
@@ -112,6 +112,37 @@ export async function dropLine(itemId: string): Promise<void> {
   });
   await syncDiscount(item.orderId);
   await syncStage(item.orderId);
+}
+
+/**
+ * Several lines off the job at once (picked on the job screen): drafts are deleted and returned for
+ * "Undo"; lines the customer was told are withdrawn (still waiting for the answer) or dropped
+ * (agreed) — recorded as cancelled, the quotes sent stay as they were.
+ */
+export async function removeLines(itemIds: string[]): Promise<OrderItem[]> {
+  const items = (await db.items.bulkGet(itemIds)).filter((i): i is OrderItem => !!i && i.kind !== 'discount');
+  if (!items.length) return [];
+  const orderId = items[0].orderId;
+  if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
+  const removed: OrderItem[] = [];
+  for (const i of items.filter((x) => x.approvalState === 'draft')) {
+    const r = await removeItem(i.id);
+    if (r) removed.push(r);
+  }
+  const waiting = items.filter((x) => x.approvalState === 'pending').map((x) => x.id);
+  if (waiting.length) await withdrawItems(waiting, { cancel: true });
+  for (const i of items.filter((x) => x.approvalState === 'approved')) await dropLine(i.id);
+  await syncDiscount(orderId);
+  await syncStage(orderId);
+  return removed;
+}
+
+/** "Undo" for removeLines: the drafts come back. */
+export async function restoreLines(items: OrderItem[]): Promise<void> {
+  if (!items.length) return;
+  for (const i of items) await restoreItem(i);
+  await syncDiscount(items[0].orderId);
+  await syncStage(items[0].orderId);
 }
 
 /** Parts of the job that are not bought yet. */

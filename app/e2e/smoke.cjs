@@ -77,6 +77,10 @@ async function launchBrowser() {
   await step('search by works and parts', async () => {
     // A Russian word finds the jobs by their lines (the English title too), highlighted.
     await page.goto(BASE + '#/search');
+    // On a phone the keyboard waits for a tap: opening Search does not focus the field.
+    await page.getByPlaceholder('Номер, имя, работа, деталь…').waitFor();
+    await page.waitForTimeout(300);
+    if (await page.evaluate(() => document.activeElement?.tagName === 'INPUT')) throw new Error('search must not open the keyboard by itself');
     await page.getByPlaceholder('Номер, имя, работа, деталь…').fill('колодки');
     await page.getByRole('heading', { name: 'Заказы' }).waitFor();
     await page.locator('.search-mark', { hasText: 'Колодки' }).first().waitFor();
@@ -406,6 +410,25 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Принять' }).click();
     await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
     await page.getByText('Nissan Sunny').first().waitFor();
+    // Several lines off at once: “…” → Select, tap two, Delete · 2; Undo brings them back.
+    const dlg = page.getByRole('dialog');
+    for (const [name, price] of [['Wash', '30'], ['Polish', '80']]) {
+      await page.getByRole('button', { name: 'Работа', exact: true }).click();
+      await dlg.getByLabel('Что сделали').fill(name);
+      await dlg.getByLabel('Цена', { exact: true }).fill(price);
+      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await page.locator('.list-row').filter({ hasText: name }).first().waitFor();
+    }
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Выбрать' }).click();
+    await page.locator('.list-row').filter({ hasText: 'Wash' }).first().click();
+    await page.locator('.list-row').filter({ hasText: 'Polish' }).first().click();
+    await shot('30d-pick-lines');
+    await page.getByRole('button', { name: 'Удалить · 2' }).click();
+    await page.getByText('Удалено строк: 2').waitFor();
+    if (await page.locator('.list-row').filter({ hasText: 'Polish' }).count()) throw new Error('the picked lines are still there');
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await page.locator('.list-row').filter({ hasText: 'Polish' }).first().waitFor();
   });
   await step('refused: the job closes without an invoice', async () => {
     await page.goto(BASE + '#/orders/new');

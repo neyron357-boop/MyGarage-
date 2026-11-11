@@ -41,6 +41,7 @@ import { SearchPage } from './features/search/SearchPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
+import { useResolvedScheme } from './ui/scheme';
 import { Logo, Money, Tip } from './ui/components';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useLang, usePhone } from './ui/hooks';
@@ -395,8 +396,10 @@ function Providers({ children }: { children: React.ReactNode }) {
 
 export function App() {
   const mobile = usePhone();
+  // Light, dark, or by the sun in Dubai ("Auto") — the app decides, not the phone's dark mode.
+  const scheme = useResolvedScheme();
   return (
-    <MantineProvider theme={mobile ? phoneTheme : theme} cssVariablesResolver={cssResolver} defaultColorScheme="light">
+    <MantineProvider theme={mobile ? phoneTheme : theme} cssVariablesResolver={cssResolver} defaultColorScheme="light" forceColorScheme={scheme}>
       <Providers>
         <HashRouter>
           <Shell />

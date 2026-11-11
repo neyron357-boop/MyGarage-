@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, dropLine, partsToFind, phaseOf, refuseAll, syncStage } from './flow';
+import { answerLines, approveAll, dropLine, partsToFind, phaseOf, refuseAll, removeLines, restoreLines, syncStage } from './flow';
 import { addPayment, quickInvoice } from './money';
 import { changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -97,5 +97,25 @@ describe('lazy flow', () => {
     expect(await refuseAll(o.id)).toBe('open');
     expect((await state(o.id)).phase).toBe('work');
     expect((await quickInvoice(o.id)).totalFils).toBe(5250);
+  });
+
+  it('takes several lines off at once: drafts deleted (and back on Undo), told ones cancelled', async () => {
+    const o = await job();
+    const agreed = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await approveAll(o.id);
+    const waiting = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Brake pads', unitPriceFils: 20000 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    const draft = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Filter', unitPriceFils: 3000 });
+    const keep = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Wash', unitPriceFils: 2000 });
+
+    const removed = await removeLines([agreed.id, waiting.id, draft.id]);
+    expect(removed.map((i) => i.id)).toEqual([draft.id]);
+    expect(await db.items.get(draft.id)).toBeUndefined();
+    expect((await db.items.get(agreed.id))!.approvalState).toBe('cancelled');
+    expect((await db.items.get(waiting.id))!.approvalState).toBe('cancelled');
+    expect((await db.items.get(keep.id))!.approvalState).toBe('draft');
+
+    await restoreLines(removed);
+    expect((await db.items.get(draft.id))!.approvalState).toBe('draft');
   });
 });
