@@ -134,11 +134,11 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
 }
 
 /**
- * A closed or cancelled job can be brought back (closed by mistake, the car came back). Not history
- * carried over from the old system: a returning car gets a new job.
+ * A closed or cancelled job can be brought back (closed by mistake, the car came back) — history carried
+ * over from the old system too: it then goes on as a job of the app (services/flow.ts reopenJob).
  */
-export function canReopen(order: Pick<Order, 'stage' | 'imported'>): boolean {
-  return (order.stage === 'closed' || order.stage === 'cancelled') && !order.imported?.history;
+export function canReopen(order: Pick<Order, 'stage'>): boolean {
+  return order.stage === 'closed' || order.stage === 'cancelled';
 }
 
 /**

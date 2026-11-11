@@ -372,7 +372,8 @@ export function JobPage() {
       return n;
     });
   };
-  const partNote = (i: OrderItem) => (i.kind === 'part' && !inv ? t(`job.part.${partStateOf(i)}`) : '');
+  // Where a part is — not on a done line (it is fitted), nor after the invoice.
+  const partNote = (i: OrderItem) => (i.kind === 'part' && !inv && !i.done ? t(`job.part.${partStateOf(i)}`) : '');
   const row = (i: OrderItem) => (
     <PickRow
       key={i.id}

@@ -149,6 +149,8 @@ export async function restoreLines(items: OrderItem[]): Promise<void> {
  * A closed (or cancelled) job back on the board: the car came back, or "Hand over" was tapped by
  * mistake. Its documents and money stay as they are; it goes back to "ready" when invoiced, else to
  * the workshop, and its lines move it on from there. The journal keeps the reopening.
+ * History carried over from Eaglecart goes on as a job of the app: from now on it counts (what it owes,
+ * its invoice), and the parts of its done lines are taken as fitted.
  */
 export async function reopenJob(orderId: string): Promise<void> {
   const order = await db.orders.get(orderId);
@@ -157,8 +159,14 @@ export async function reopenJob(orderId: string): Promise<void> {
   const invoiced = !!activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray());
   const to = reopenStage(order, invoiced);
   const now = nowIso();
-  await db.transaction('rw', db.orders, db.events, async () => {
+  const history = !!order.imported?.history;
+  await db.transaction('rw', db.orders, db.items, db.events, async () => {
+    if (history) {
+      const items = await db.items.where('orderId').equals(orderId).toArray();
+      for (const i of items) if (i.kind === 'part' && i.done && (i.procurementStatus ?? 'needed') === 'needed') await db.items.update(i.id, { procurementStatus: 'installed' });
+    }
     await db.orders.update(orderId, {
+      ...(history && order.imported ? { imported: { ...order.imported, history: false } } : {}),
       stage: to,
       stageChangedAt: now,
       updatedAt: now,

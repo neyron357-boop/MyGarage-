@@ -4,7 +4,7 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
 import { answerLines, approveAll, archiveJob, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
 import { addPayment, quickInvoice } from './money';
-import { changeStage, checkIn, loadOrderBundle } from './orders';
+import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
 import { ensureSeed } from './seed';
 
@@ -119,7 +119,7 @@ describe('lazy flow', () => {
     expect((await db.items.get(draft.id))!.approvalState).toBe('draft');
   });
 
-  it('reopens a closed job: invoiced — back to "ready", refused — back in the workshop; history stays closed', async () => {
+  it('reopens a closed job: invoiced — back to "ready", refused — back in the workshop, history — a job of the app', async () => {
     const paid = await job();
     await addItem(paid.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
     await approveAll(paid.id);
@@ -145,8 +145,21 @@ describe('lazy flow', () => {
     expect(r.order.outcome).toBe('in_progress');
     expect(phaseOf(r)).toBe('look');
 
-    await db.orders.update(refused.id, { stage: 'closed', imported: { system: 'eaglecart', jobId: '1', jobNo: '1', status: 'Delivered', totalFils: 0, history: true, importedAt: new Date().toISOString() } });
-    await expect(reopenJob(refused.id)).rejects.toThrow();
+
+    // History from Eaglecart: done, never owed here — reopened, it goes on as a job of the app.
+    const old = await job();
+    const part = await addItem(old.id, { kind: 'part', block: 'A', titleEn: 'Gear used original', unitPriceFils: 300000 });
+    await db.items.update(part.id, { approvalState: 'approved', done: true, procurementStatus: undefined });
+    await db.orders.update(old.id, { stage: 'closed', imported: { system: 'eaglecart', jobId: '1', jobNo: '259', status: 'Pending', totalFils: 315000, history: true, importedAt: new Date().toISOString() } });
+    expect(bundleAmountDue((await loadOrderBundle(old.id))!)).toBe(0);
+    await reopenJob(old.id);
+    const h = (await loadOrderBundle(old.id))!;
+    expect(h.order.imported!.history).toBe(false);
+    expect(h.items[0].procurementStatus).toBe('installed');
+    expect(phaseOf(h)).toBe('work');
+    // "Done" invoices it as any job (no quote was ever sent from Eaglecart, the stage stays early).
+    expect((await quickInvoice(old.id)).totalFils).toBe(315000);
+    expect(bundleAmountDue(h)).toBe(315000);
   });
 
   it('archives a job off the board and back, without touching it; reopening brings it back too', async () => {
