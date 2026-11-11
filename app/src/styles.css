@@ -742,35 +742,89 @@ html.kb .tab-bar-wrap {
 }
 
 /* ---------- UAE number plate ---------- */
+/* Each emirate in its own layout (PlateText): white plate, black frame, condensed digits. */
 .plate {
+  --pl-pt: 0.12em;
+  --pl-px: 0.45em;
+  --pl-pb: 0.1em;
+  --pl-bw: 1.5px;
+  --pl-r: 5px;
   display: inline-flex;
   align-items: center;
-  gap: 0.42em;
+  gap: 0.32em;
   background: #fff;
   color: #101318;
-  border: 1.5px solid #101318;
-  border-radius: 5px;
-  padding: 0.12em 0.5em 0.1em;
+  border: var(--pl-bw) solid #101318;
+  border-radius: var(--pl-r);
+  padding: var(--pl-pt) var(--pl-px) var(--pl-pb);
   line-height: 1;
   white-space: nowrap;
   box-shadow: inset 0 0 0 1.5px #fff, inset 0 0 0 2.2px rgba(16, 19, 24, 0.12);
   font-family: var(--font-plate);
   vertical-align: middle;
 }
-.plate .em {
-  font-family: var(--mantine-font-family);
-  font-size: 0.5em;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: #2d323c;
-  text-transform: uppercase;
-}
 .plate .code {
   font-weight: 600;
 }
 .plate .num {
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
+}
+/* The emirate's name: Arabic over Latin letters, between the code and the number. */
+.plate .pl-name {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.07em;
+  font-family: var(--mantine-font-family);
+  line-height: 1;
+}
+.plate .pl-name .ar {
+  font-size: 0.42em;
+  font-weight: 700;
+}
+.plate .pl-name .lat {
+  font-size: 0.26em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+/* Dubai: the word DUBAI over the code letter. */
+.plate .pl-side {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05em;
+}
+.plate .pl-word {
+  font-family: var(--mantine-font-family);
+  font-size: 0.34em;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+.plate.pl-dxb {
+  gap: 0.5em;
+}
+.plate.pl-dxb .code {
+  font-size: 0.6em;
+}
+/* Abu Dhabi: the code (a number) in the red box at the plate's left edge. */
+.plate.pl-auh .code {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  margin: calc(var(--pl-pt) * -1) 0 calc(var(--pl-pb) * -1) calc(var(--pl-px) * -1);
+  padding: 0 0.2em;
+  border-radius: calc(var(--pl-r) - 2px) 0 0 calc(var(--pl-r) - 2px);
+  background: #c8102e;
+  color: #fff;
+  font-size: 0.86em;
+}
+.plate.pl-auh .code + .pl-name {
+  margin-left: 0.04em;
+}
+/* Sharjah: a heavy frame. */
+.plate.pl-shj {
+  --pl-bw: max(2px, 0.13em);
 }
 .plate.xs {
   font-size: 12px;
@@ -782,15 +836,20 @@ html.kb .tab-bar-wrap {
   font-size: 18px;
 }
 .plate.lg {
+  --pl-bw: 2px;
+  --pl-r: 7px;
   font-size: 24px;
-  border-width: 2px;
-  border-radius: 7px;
 }
 .plate.xl {
+  --pl-bw: 2.5px;
+  --pl-r: 9px;
+  --pl-pt: 0.1em;
+  --pl-pb: 0.08em;
   font-size: 34px;
-  border-width: 2.5px;
-  border-radius: 9px;
-  padding: 0.1em 0.45em 0.08em;
+}
+.plate.lg.pl-shj,
+.plate.xl.pl-shj {
+  --pl-bw: 0.13em;
 }
 
 /* ---------- Stage track ---------- */
@@ -1036,6 +1095,58 @@ html.kb .tab-bar-wrap {
 .proof-tile > .surface-soft {
   position: absolute;
   inset: 0;
+}
+
+/* The car's main photo across the top of the job's card (CarCover): edge to edge, the card's corners. */
+.job-cover {
+  display: flex;
+  width: calc(100% + 2 * var(--mantine-spacing-md));
+  margin: calc(var(--mantine-spacing-md) * -1) calc(var(--mantine-spacing-md) * -1) var(--mantine-spacing-md);
+  aspect-ratio: 16 / 9;
+  max-height: 260px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-group) var(--radius-group) 0 0;
+}
+.job-cover > .mantine-Image-root,
+.job-cover > .surface-soft {
+  position: absolute;
+  inset: 0;
+}
+/* No photo yet: a soft tile inside the card that opens the camera. */
+.job-cover[data-empty='true'] {
+  width: 100%;
+  margin: 0 0 var(--mantine-spacing-md);
+  aspect-ratio: auto;
+  min-height: 88px;
+  border-radius: 18px;
+  color: var(--mantine-color-cobalt-6);
+}
+.job-cover:active {
+  transform: scale(0.985);
+}
+/* A car's photo on its board row, the step it is on as a small badge in the corner. */
+.job-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+}
+.job-thumb > .mantine-Image-root,
+.job-thumb > .surface-soft {
+  border-radius: 12px;
+}
+.job-thumb-phase {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--app-card);
 }
 
 /* The customer and the complaint in the job's head: plain lines that open their sheet. */

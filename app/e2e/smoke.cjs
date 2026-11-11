@@ -307,6 +307,12 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Brake noise', exact: true }).click();
     await shot('30-check-in');
     await page.getByRole('button', { name: 'Принять' }).click();
+    // No photo of the car yet: the tile opens the camera; the shot becomes the car's main photo.
+    await page.getByRole('button', { name: 'Фото машины' }).waitFor();
+    await shot('30a-job-no-photo');
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Фото машины' }).click()]);
+    await chooser.setFiles({ name: 'car.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+    await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
     const dlg = page.getByRole('dialog');
     // What the mechanic found: a job and a part (the part first without a price: still to find).
     await page.getByRole('button', { name: 'Работа', exact: true }).click();

@@ -60,6 +60,7 @@ import { useSendVersion } from '../estimate/EstimatePage';
 import { DiscountSheet } from '../money/DiscountSheet';
 import { PaymentModal } from '../money/PaymentPanel';
 import { DeleteJobModal } from '../orders/DeleteJob';
+import { CarCover } from './CarCover';
 import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
 import { PhasePill } from './phase';
 
@@ -476,6 +477,7 @@ export function JobPage() {
       />
 
       <Box className="surface" p="md" mb="lg">
+        <CarCover vehicleId={b.vehicle.id} />
         <Group gap="sm" wrap="nowrap" justify="space-between">
           <PlateText plate={b.vehicle.plate} size="md" />
           <PhasePill phase={phase} />

@@ -10,7 +10,7 @@ import { activeInvoice } from '../../domain/invoice';
 import { itemAmounts } from '../../domain/items';
 import { partsToFind } from '../../services/flow';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
-import { List, ListRow, Money, PlateText } from '../../ui/components';
+import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
 import { useLongPress } from '../../ui/longPress';
 import { PHASE_META } from '../job/phase';
@@ -24,10 +24,11 @@ export function jobAmount(b: OrderBundle): number {
 }
 
 /**
- * A job on the board, in one row: the step it is on (colour and symbol), the plate, the car, how long
- * it has been there, and its money. A tap opens it; a long press (right click) offers to delete it.
+ * A job on the board, in one row: the car's photo with the step it is on (colour and symbol), the plate,
+ * the car, how long it has been there, and its money. A tap opens it; a long press (right click) offers
+ * to delete it.
  */
-export function JobRow({ b, phase }: { b: OrderBundle; phase: Phase }) {
+export function JobRow({ b, phase, cover }: { b: OrderBundle; phase: Phase; cover?: string }) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
@@ -60,9 +61,18 @@ export function JobRow({ b, phase }: { b: OrderBundle; phase: Phase }) {
         }}
         aria-label={`№${b.order.number} ${car}`}
       >
-        <ThemeIcon variant="light" color={m.color} size={40} radius="xl" style={{ flexShrink: 0 }}>
-          <m.icon size={21} stroke={1.8} />
-        </ThemeIcon>
+        {cover ? (
+          <span className="job-thumb">
+            <MediaImage id={cover} h={48} w={48} radius="0" />
+            <span className="job-thumb-phase" style={{ background: `var(--mantine-color-${m.color}-6)` }} aria-label={t(`job.phase.${phase}`)}>
+              <m.icon size={13} stroke={2.4} />
+            </span>
+          </span>
+        ) : (
+          <ThemeIcon variant="light" color={m.color} size={40} radius="xl" style={{ flexShrink: 0 }}>
+            <m.icon size={21} stroke={1.8} />
+          </ThemeIcon>
+        )}
         <div className="body">
           <Group gap={8} wrap="nowrap" justify="space-between">
             <PlateText plate={b.vehicle.plate} size="sm" />

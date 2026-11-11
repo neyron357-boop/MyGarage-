@@ -14,6 +14,7 @@ import { useLang, usePhone } from '../../ui/hooks';
 import { PHASE_META } from '../job/phase';
 import { InsecureWarning } from './BoardNotices';
 import { JobRow } from './JobRow';
+import { coverIndex } from '../../services/cover';
 
 async function loadBoard() {
   const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
@@ -47,7 +48,7 @@ function useEdgeFade() {
 }
 
 /** PC board: one lane per step; empty steps fold into thin strips so busy lanes get the width. */
-function Kanban({ jobs }: { jobs: Job[] }) {
+function Kanban({ jobs, covers }: { jobs: Job[]; covers?: Map<string, string> }) {
   const { t } = useTranslation();
   const ref = useEdgeFade();
   const lanes = STEPS.map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
@@ -81,7 +82,7 @@ function Kanban({ jobs }: { jobs: Job[] }) {
             </Group>
             <List>
               {list.map((j) => (
-                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} />
+                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} />
               ))}
             </List>
           </div>
@@ -100,6 +101,7 @@ export function BoardPage() {
   const lang = useLang();
   const navigate = useNavigate();
   const bundles = useLiveQuery(loadBoard, []);
+  const covers = useLiveQuery(() => coverIndex(bundles?.map((b) => b.vehicle.id) ?? []), [bundles]);
   const mobile = usePhone();
   const [filter, setFilter] = useState<'all' | Phase>('all');
   if (!bundles) return <PageSkeleton />;
@@ -149,12 +151,12 @@ export function BoardPage() {
           />
           <List>
             {shown.map((j) => (
-              <JobRow key={j.b.order.id} b={j.b} phase={j.phase} />
+              <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} />
             ))}
           </List>
         </>
       ) : (
-        <Kanban jobs={jobs} />
+        <Kanban jobs={jobs} covers={covers} />
       )}
     </>
   );

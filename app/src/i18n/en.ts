@@ -968,6 +968,8 @@ export const en: typeof ru = {
     remind: 'Remind',
     complaint: 'Complaint',
     client: 'Customer',
+    carPhoto: 'Car photo',
+    retakePhoto: 'Retake',
     refuseTitle: 'The customer refused?',
     refuseText: 'Lines waiting for an answer become refused, unsent ones are deleted. With nothing to pay for, the job is closed.',
     accept: 'Accept',

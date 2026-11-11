@@ -92,13 +92,54 @@ const EMIRATE_ON_PLATE: Record<Emirate, string> = {
   FUJ: 'Fujairah',
 };
 
-/** A UAE number plate as it looks on the car: emirate, code, number. */
+/** The emirate's name as each emirate's plate prints it, in Arabic and in Latin letters. */
+const PLATE_NAME: Record<Emirate, { ar: string; lat: string }> = {
+  DXB: { ar: 'دبي', lat: 'DUBAI' },
+  AUH: { ar: 'أبوظبي', lat: 'A.D' },
+  SHJ: { ar: 'الشارقة', lat: 'SHARJAH' },
+  AJM: { ar: 'عجمان', lat: 'AJMAN' },
+  RAK: { ar: 'رأس الخيمة', lat: 'RAK' },
+  UAQ: { ar: 'أم القيوين', lat: 'UAQ' },
+  FUJ: { ar: 'الفجيرة', lat: 'U.A.E' },
+};
+
+/**
+ * A UAE number plate as it looks on the car, in the layout of its emirate (no emblems):
+ * Dubai — "DUBAI" over the code letter; Abu Dhabi — the code in a red box, then the name;
+ * Ras Al Khaimah — the name first; the others — code, the name in Arabic over Latin, number.
+ */
 export function PlateText({ plate, size = 'sm' }: { plate: Plate; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' }) {
   const p = normalizePlate(plate);
+  const e = PLATE_NAME[p.emirate] ? p.emirate : 'DXB';
+  const code = p.code ? <span className="code">{p.code}</span> : null;
+  const name = (
+    <span className="pl-name" aria-hidden="true">
+      <span className="ar" lang="ar" dir="rtl">
+        {PLATE_NAME[e].ar}
+      </span>
+      <span className="lat">{PLATE_NAME[e].lat}</span>
+    </span>
+  );
   return (
-    <span className={`plate ${size}`} aria-label={`${EMIRATE_ON_PLATE[p.emirate]} ${p.code} ${p.number}`}>
-      <span className="em">{EMIRATE_ON_PLATE[p.emirate]}</span>
-      {p.code && <span className="code">{p.code}</span>}
+    <span className={`plate ${size} pl-${e.toLowerCase()}`} aria-label={`${EMIRATE_ON_PLATE[e]} ${p.code} ${p.number}`}>
+      {e === 'DXB' ? (
+        <span className="pl-side">
+          <span className="pl-word" aria-hidden="true">
+            DUBAI
+          </span>
+          {code}
+        </span>
+      ) : e === 'RAK' ? (
+        <>
+          {name}
+          {code}
+        </>
+      ) : (
+        <>
+          {code}
+          {name}
+        </>
+      )}
       <span className="num">{p.number}</span>
     </span>
   );
