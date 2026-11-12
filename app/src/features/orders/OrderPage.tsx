@@ -936,11 +936,9 @@ export function OrderPage() {
       <Grid gutter="md">
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Box className="surface" p="md" h="100%">
+            {/* The plate, then the stage once — the track and the badge say where the job is (no "step 2 of 8"). */}
             <Group justify="space-between" wrap="nowrap" align="center" mb="md" gap="sm">
               <PlateText plate={b.vehicle.plate} size="lg" />
-              <Text size="xs" c="dimmed" className="tnum" ta="right" style={{ whiteSpace: 'nowrap' }}>
-                {t('order.stepOf', { n: Math.max(1, STAGE_META[b.order.stage].step), total: 8 })}
-              </Text>
             </Group>
             <StageTrack stage={b.order.stage} />
             <Group gap={8} mt={10} wrap="wrap">
