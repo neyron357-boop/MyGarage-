@@ -641,6 +641,8 @@ export function JobPage() {
         }
       />
 
+      {/* On a computer the job keeps a readable width (like a sheet on an iPad), not the whole window. */}
+      <div className="job-body">
       <Box className="surface" p="md" mb="lg">
         <CarCover vehicleId={b.vehicle.id} />
         <Group gap="sm" wrap="nowrap" justify="space-between">
@@ -812,6 +814,7 @@ export function JobPage() {
       <NotesSection orderId={oid} notes={b.notes} editable={open} />
 
       {bar && <StickyBar>{bar}</StickyBar>}
+      </div>
 
       <LineSheet
         b={b}

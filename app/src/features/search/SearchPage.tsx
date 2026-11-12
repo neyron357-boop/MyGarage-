@@ -1,5 +1,5 @@
-import { Avatar, Box, Button, Group, Stack, Text } from '@mantine/core';
-import { IconHistory, IconPlus, IconUserSearch } from '@tabler/icons-react';
+import { ActionIcon, Avatar, Box, Button, Group, Stack, Text } from '@mantine/core';
+import { IconBrandWhatsapp, IconHistory, IconPhone, IconPlus, IconUserSearch } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { formatPhone } from '../../domain/phone';
 import { matchJobs, splitWords, wordMatches, type JobMatch, type Term } from '../../domain/search';
 import type { Customer, Order, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
+import { whatsappUrl } from '../../services/messages';
 import { loadJobIndex, type JobHitData } from '../../services/search';
 import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, StageBadge } from '../../ui/components';
 import { useLang, usePhone } from '../../ui/hooks';
@@ -156,6 +157,18 @@ export function SearchPage() {
   // Read once (and again when the data changes); each letter only filters it.
   const jobIndex = useLiveQuery(() => loadJobIndex(lang), [lang]);
   const jobs = useMemo(() => (jobIndex && dq.trim() ? matchJobs(jobIndex, dq) : undefined), [jobIndex, dq]);
+  // Suppliers too: "toyota headlights" — who to write to, one tap from the result.
+  const allSuppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []);
+  const suppliers = useMemo(() => {
+    const words = dq.toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+    if (!words.length || !allSuppliers) return [];
+    return allSuppliers
+      .filter((s) => {
+        const hay = `${s.name} ${s.makes?.join(' ') ?? ''} ${s.parts ?? ''} ${s.address ?? ''} ${s.notes ?? ''}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      })
+      .slice(0, 6);
+  }, [allSuppliers, dq]);
   const recent = useLiveQuery(async () => {
     const orders = await db.orders.orderBy('createdAt').reverse().limit(8).toArray();
     const [vs, cs] = await Promise.all([db.vehicles.bulkGet(orders.map((o) => o.vehicleId)), db.customers.bulkGet(orders.map((o) => o.customerId))]);
@@ -168,7 +181,7 @@ export function SearchPage() {
         {/* On a phone the keyboard waits for a tap on the field (opening the tab only shows the search). */}
         <SearchField autoFocus={!phone} placeholder={t('search.placeholder')} value={q} onChange={setQ} />
       </Box>
-      {q && hits?.length === 0 && jobs?.total === 0 && (
+      {q && hits?.length === 0 && jobs?.total === 0 && !suppliers.length && (
         <EmptyState
           icon={IconUserSearch}
           title={t('search.noResults')}
@@ -242,6 +255,32 @@ export function SearchPage() {
           <List key="jobs">
             {jobs.matches.map((m) => (
               <JobRow key={m.doc.orderId} m={m} onClick={() => navigate(`/orders/${m.doc.orderId}`)} />
+            ))}
+          </List>
+        </Section>
+      )}
+      {q && suppliers.length > 0 && (
+        <Section title={t('nav.suppliers')} mt={hits?.length || jobs?.total ? 'xl' : 0}>
+          <List key="suppliers">
+            {suppliers.map((s) => (
+              <ListRow
+                key={s.id}
+                title={s.name}
+                subtitle={[s.service ? t('suppliers.contractor') : '', s.makes?.join(', '), s.parts].filter(Boolean).join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)}
+                onClick={() => navigate(`/parts?tab=suppliers&q=${encodeURIComponent(s.name)}`)}
+                right={
+                  s.phone ? (
+                    <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+                      <ActionIcon component="a" href={whatsappUrl(s.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                        <IconBrandWhatsapp size={19} />
+                      </ActionIcon>
+                      <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                        <IconPhone size={18} />
+                      </ActionIcon>
+                    </Group>
+                  ) : undefined
+                }
+              />
             ))}
           </List>
         </Section>

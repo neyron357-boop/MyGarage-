@@ -103,7 +103,7 @@ import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { CustomerModal } from '../customers/forms';
 import { DecisionModal, DoneToggle, ItemRow, ResolveBModal, VersionCard } from '../estimate/components';
 import { PaymentModal, PaymentPanel } from '../money/PaymentPanel';
-import { ProcurementModal } from '../parts/PartsPage';
+import { ProcurementModal } from '../parts/Procurement';
 import { orderFlags } from './flags';
 import { nextStep, type StepAction } from './nextStep';
 import { DeleteJobModal } from './DeleteJob';

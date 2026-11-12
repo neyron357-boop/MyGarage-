@@ -135,7 +135,7 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
           </SelectCard>
         </SimpleGrid>
         <Text size="sm" c="dimmed">
-          {t('send.to', { name: customer.name, phone: formatPhone(phone) })} · {t(`lang.${request.lang}`)}
+          {[customer.name || t('customer.noName'), phone ? formatPhone(phone) : ''].filter(Boolean).join(', ')} · {t(`lang.${request.lang}`)}
         </Text>
         <Box p="sm" style={{ background: channel === 'whatsapp' ? 'var(--mantine-color-green-light)' : 'var(--mantine-color-cobalt-light)', borderRadius: '14px 14px 4px 14px' }}>
           <Textarea value={text} onChange={(e) => setText(e.currentTarget.value)} autosize minRows={5} maxRows={14} variant="unstyled" styles={{ input: { fontSize: 14, lineHeight: 1.45 } }} />

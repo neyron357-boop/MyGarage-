@@ -3524,3 +3524,7 @@ html.kb .screen-bottom > .sticky-bar {
   border-top: 3px dotted currentColor;
   opacity: 0.6;
 }
+/* The job on a computer: a readable column, not the whole window. */
+.job-body {
+  max-width: 860px;
+}

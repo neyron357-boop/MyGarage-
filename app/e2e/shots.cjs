@@ -55,7 +55,8 @@ async function launchBrowser() {
     await go('#/');
     await shot(`${prefix}-01-board`);
     await shot(`${prefix}-01b-board-scrolled`, { scroll: 520 });
-    await page.locator('.screen[data-role="top"] .job-row').first().click();
+    // A job with lines (not an appointment): its screen, its sheets.
+    await page.locator('.screen[data-role="top"] .job-row').filter({ hasText: /Цена|Ждём|В работе|Price|Waiting|In work/ }).first().click();
     await settle(900);
     const order = await page.evaluate(() => location.hash);
     await shot(`${prefix}-02-job`);

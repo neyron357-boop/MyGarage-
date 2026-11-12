@@ -856,6 +856,11 @@ export const en: typeof ru = {
   proc: { needed: 'To order', ordered: 'Ordered', in_transit: 'In transit', received: 'Received', installed: 'Installed', returned: 'Returned', cancelled: 'Cancelled' },
   parts: {
     request: 'Request',
+    vatShort: 'VAT',
+    comes: 'Arrives',
+    paidCashShort: 'From the cash box',
+    vat5: 'VAT 5 % of the cost',
+    refundShort: 'Refund',
     requestPhotos: 'Request · {{n}} photos',
     nOf: '{{n}} of {{of}}',
     came: 'Arrived',

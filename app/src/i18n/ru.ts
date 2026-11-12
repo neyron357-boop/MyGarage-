@@ -854,6 +854,11 @@ export const ru = {
   proc: { needed: 'Нужно заказать', ordered: 'Заказано', in_transit: 'Едет', received: 'Получено', installed: 'Установлено', returned: 'Возврат', cancelled: 'Отменено' },
   parts: {
     request: 'Запрос',
+    vatShort: 'VAT',
+    comes: 'Будет',
+    paidCashShort: 'Из кассы',
+    vat5: 'VAT 5 % от закупки',
+    refundShort: 'Вернут',
     requestPhotos: 'Запрос · фото {{n}}',
     nOf: '{{n}} из {{of}}',
     came: 'Пришло',

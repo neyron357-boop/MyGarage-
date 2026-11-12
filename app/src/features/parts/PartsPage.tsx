@@ -1,4 +1,4 @@
-import { Box, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { Box, Button, Group, Stack, Text, ThemeIcon } from '@mantine/core';
 import {
   IconArrowBackUp,
   IconCheck,
@@ -12,7 +12,7 @@ import {
   type Icon,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -20,12 +20,11 @@ import { dubaiDate, formatDate } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
 import { roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
-import type { OrderItem, ProcurementStatus, SupplierReturn } from '../../domain/types';
-import { closeReturn, createReturn, saveSupplier, setProcurement } from '../../services/parts';
-import { CaptureButton } from '../../ui/CaptureButton';
-import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateText, ScrollTabs, SelectCard } from '../../ui/components';
-import { DateField } from '../../ui/DateFields';
+import type { OrderItem } from '../../domain/types';
+import { closeReturn } from '../../services/parts';
+import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
+import { ProcurementModal } from './Procurement';
 import { SuppliersTab } from './Suppliers';
 
 const STATUS_META: Record<string, { icon: Icon; color: string }> = {
@@ -37,113 +36,6 @@ const STATUS_META: Record<string, { icon: Icon; color: string }> = {
   returned: { icon: IconArrowBackUp, color: 'red' },
   cancelled: { icon: IconArrowBackUp, color: 'gray' },
 };
-
-export function ProcurementModal({ item, onClose }: { item: OrderItem | null; onClose: () => void }) {
-  const { t } = useTranslation();
-  const lang = useLang();
-  const { run, busy } = useAction();
-  const suppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).sortBy('name'), []);
-  const [status, setStatus] = useState<ProcurementStatus>('needed');
-  const [supplierId, setSupplierId] = useState<string | null>(null);
-  const [newSupplier, setNewSupplier] = useState('');
-  const [cost, setCost] = useState<number | undefined>();
-  const [vat, setVat] = useState<number | undefined>();
-  const [expected, setExpected] = useState<string | undefined>();
-  const [receipt, setReceipt] = useState<File>();
-  const [paidCash, setPaidCash] = useState(false);
-  const [ret, setRet] = useState(false);
-  const [retReason, setRetReason] = useState('');
-  const [retAmount, setRetAmount] = useState<number | undefined>();
-  const [retType, setRetType] = useState<SupplierReturn['refundType']>('money');
-  useEffect(() => {
-    if (!item) return;
-    setStatus(item.procurementStatus === 'needed' ? 'ordered' : item.procurementStatus === 'ordered' || item.procurementStatus === 'in_transit' ? 'received' : item.procurementStatus ?? 'needed');
-    setSupplierId(item.supplierId ?? null);
-    setCost(item.costPriceFils);
-    setVat(item.purchaseVatFils);
-    setExpected(item.expectedAt);
-    setReceipt(undefined);
-    setPaidCash(false);
-    setRet(false);
-    setRetAmount(item.costPriceFils !== undefined ? roundFils(item.costPriceFils * item.qty) + (item.purchaseVatFils ?? 0) : undefined);
-  }, [item]);
-  if (!item) return null;
-  const save = () =>
-    run(async () => {
-      let sid = supplierId ?? undefined;
-      if (!sid && newSupplier.trim()) sid = (await saveSupplier({ name: newSupplier })).id;
-      await setProcurement(item.id, { status, supplierId: sid, costPriceFils: cost, purchaseVatFils: vat, expectedAt: expected, receipt, paidCash });
-      onClose();
-    }, 'common.saved');
-  const steps: ProcurementStatus[] = ['needed', 'ordered', 'in_transit', 'received'];
-  return (
-    <Modal opened onClose={onClose} title={itemTitle(item, lang)} size="lg">
-      <Stack gap="md">
-        <SimpleGrid cols={4} spacing={6}>
-          {steps.map((s) => {
-            const m = STATUS_META[s];
-            return (
-              <UnstyledButton key={s} className="choice-card" data-active={status === s} onClick={() => setStatus(s)} p={8}>
-                <Stack gap={4} align="center">
-                  <m.icon size={20} color={`var(--mantine-color-${m.color}-6)`} />
-                  <Text size="xs" fw={700} ta="center" lh={1.2}>
-                    {t(`proc.${s}`)}
-                  </Text>
-                </Stack>
-              </UnstyledButton>
-            );
-          })}
-        </SimpleGrid>
-        <Select label={t('parts.supplier')} placeholder={t('parts.pickSupplier')} searchable clearable value={supplierId} onChange={setSupplierId} data={(suppliers ?? []).map((s) => ({ value: s.id, label: s.name }))} />
-        {!supplierId && <TextInput label={t('parts.newSupplier')} value={newSupplier} onChange={(e) => setNewSupplier(e.currentTarget.value)} />}
-        <SimpleGrid cols={2}>
-          <MoneyInput label={t('parts.costPerUnit')} value={cost} onChange={setCost} />
-          <MoneyInput label={t('parts.purchaseVat')} value={vat} onChange={setVat} description={cost ? <Text span size="xs" c="cobalt.6" style={{ cursor: 'pointer' }} onClick={() => setVat(roundFils(roundFils(cost * item.qty) * 0.05))}>{t('expense.vatFromGross')}</Text> : undefined} />
-        </SimpleGrid>
-        {(status === 'ordered' || status === 'in_transit') && <DateField label={t('parts.expected')} value={expected} onChange={setExpected} />}
-        {status === 'received' && (
-          <Box className="surface-soft" p="sm">
-            <Group justify="space-between">
-              <CaptureButton variant="light" camera={false} leftSection={<IconReceipt2 size={18} />} onFiles={(f) => setReceipt(f[0])}>
-                {receipt ? t('parts.receiptAttached') : t('parts.receiptPhoto')}
-              </CaptureButton>
-              {item.receiptMediaId && <Photo id={item.receiptMediaId} h={48} />}
-            </Group>
-            <Checkbox mt="sm" label={t('parts.paidCash')} checked={paidCash} onChange={(e) => setPaidCash(e.currentTarget.checked)} />
-          </Box>
-        )}
-        <Button onClick={save} loading={busy}>
-          {t('common.save')}
-        </Button>
-        {['ordered', 'in_transit', 'received'].includes(item.procurementStatus ?? '') && !ret && (
-          <Button variant="subtle" color="red" leftSection={<IconArrowBackUp size={16} />} onClick={() => setRet(true)}>
-            {t('parts.return')}
-          </Button>
-        )}
-        {ret && (
-          <Box className="surface-soft" p="sm">
-            <Stack gap="sm">
-              <Textarea label={t('common.reason')} value={retReason} onChange={(e) => setRetReason(e.currentTarget.value)} placeholder={t('parts.returnReasonHint')} autosize />
-              <MoneyInput label={t('parts.expectedRefund')} value={retAmount} onChange={setRetAmount} />
-              <SimpleGrid cols={3} spacing={6}>
-                {(['money', 'replacement', 'credit'] as const).map((x) => (
-                  <SelectCard key={x} active={retType === x} onClick={() => setRetType(x)}>
-                    <Text size="xs" fw={700} ta="center">
-                      {t(`refund.${x}`)}
-                    </Text>
-                  </SelectCard>
-                ))}
-              </SimpleGrid>
-              <Button color="red" disabled={!retReason.trim()} onClick={() => run(async () => { await createReturn(item.id, { reason: retReason, expectedRefundFils: retAmount ?? 0, refundType: retType }); onClose(); }, 'common.saved')}>
-                {t('parts.createReturn')}
-              </Button>
-            </Stack>
-          </Box>
-        )}
-      </Stack>
-    </Modal>
-  );
-}
 
 async function loadParts() {
   const orders = await db.orders.filter((o) => !['closed', 'cancelled'].includes(o.stage)).toArray();
@@ -223,7 +115,7 @@ export function PartsPage() {
 
   return (
     <>
-      <PageHeader title={t('nav.parts')} subtitle={t('parts.subtitle')} />
+      <PageHeader title={t('nav.parts')} />
       <ScrollTabs
         value={tab}
         onChange={(v) => setParams({ tab: v }, { replace: true })}

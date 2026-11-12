@@ -24,7 +24,7 @@ const RETURN_DAYS = [3, 7, 14] as const;
  * 14 days (a reminder comes before the day) — and the proof of it, a photo of the receipt or a screenshot
  * of the chat, kept with the line.
  */
-export function ReturnTerms({ item }: { item: OrderItem }) {
+export function ReturnTerms({ item, withProof = true }: { item: OrderItem; withProof?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
   const proofs = useLiveQuery(() => db.media.where('ownerId').equals(item.id).filter((m) => m.slot === 'deal').sortBy('createdAt'), [item.id]) ?? [];
@@ -51,7 +51,7 @@ export function ReturnTerms({ item }: { item: OrderItem }) {
           </button>
         ))}
       </div>
-      <div style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 10, display: withProof ? undefined : 'none' }}>
         <PhotoStrip
           name="deal"
           addLabel={t('parts.proof')}

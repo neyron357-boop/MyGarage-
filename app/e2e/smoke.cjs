@@ -660,6 +660,11 @@ async function launchBrowser() {
     await page.locator('.mantine-Modal-close').last().click();
     await page.waitForTimeout(300);
     await shot('34h-job-v07', true);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(400);
+    await shot('34h2-job-v07-desktop', true);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(300);
     // On the board: the promised time beside the plate, the paint shop's sign on the row.
     await page.goto(BASE + '#/');
     const row = page.locator('.job-row', { hasText: '61803' }).first();
@@ -678,6 +683,9 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByText('Марки').waitFor();
     await shot('35b-supplier-card');
     await page.locator('.mantine-Modal-close').first().click();
+    // The search finds suppliers by make and what they sell.
+    await page.goto(BASE + '#/search?q=' + encodeURIComponent('nissan фары'));
+    await front('.list-row').filter({ hasText: 'Gulf Lights' }).waitFor();
     await page.goto(BASE + '#/more');
     await page.getByText('На другое устройство').click();
     await page.getByRole('dialog').getByRole('button', { name: /^Отправить \d/ }).waitFor();
@@ -756,6 +764,14 @@ async function launchBrowser() {
     await shot('26-reports', true);
     await page.goto(BASE + '#/parts');
     await shot('27-parts', true);
+    // A part being bought: the iOS form — state, supplier, cost, receipt, return terms.
+    await page.goto(BASE + '#/parts?tab=ordered');
+    await front('.list-row.clickable').first().click();
+    const buy = page.getByRole('dialog');
+    await buy.getByLabel('Закупка за ед. (без VAT)').waitFor();
+    await buy.locator('.group-title', { hasText: /^Возврат/ }).waitFor();
+    await shot('27b-procurement');
+    await page.locator('.mantine-Modal-close').first().click();
     await page.goto(BASE + '#/settings?tab=rules');
     await shot('28-settings', true);
   });

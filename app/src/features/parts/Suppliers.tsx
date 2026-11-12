@@ -3,6 +3,7 @@ import { IconBrandWhatsapp, IconFileSpreadsheet, IconMapPin, IconPhone, IconPlus
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
 import { CAR_MAKES, canonicalMake, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
@@ -131,7 +132,9 @@ export function SuppliersTab() {
   const { t } = useTranslation();
   const { run } = useAction();
   const all = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).sortBy('name'), []);
-  const [q, setQ] = useState('');
+  // Opened from the search: the supplier found is the one shown.
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(params.get('q') ?? '');
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
   const input = useRef<HTMLInputElement>(null);
   if (!all) return null;
@@ -168,7 +171,7 @@ export function SuppliersTab() {
           }}
         />
       </Group>
-      {all.length > 6 && <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} />}
+      {(all.length > 6 || q) && <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} />}
       {all.length === 0 ? (
         <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} />
       ) : (
