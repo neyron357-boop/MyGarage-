@@ -97,6 +97,11 @@ export async function lockMediaOf(ownerIds: string[]): Promise<void> {
 
 const urlCache = new Map<string, string>();
 
+/** The address of a photo made before (a list shown again draws it at once, with no empty frame). */
+export function cachedMediaUrl(id: string, thumb = false): string | undefined {
+  return urlCache.get(`${id}:${thumb ? 't' : 'f'}`);
+}
+
 export async function mediaUrl(id: string, thumb = false): Promise<string | undefined> {
   const key = `${id}:${thumb ? 't' : 'f'}`;
   const cached = urlCache.get(key);

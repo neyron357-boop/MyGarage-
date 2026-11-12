@@ -5,3 +5,5 @@ dist-single
 .env
 test-results
 screenshots
+
+dist-prof

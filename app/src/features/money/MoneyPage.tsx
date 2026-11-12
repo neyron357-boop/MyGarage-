@@ -12,7 +12,6 @@ import {
   IconUserDollar,
   type Icon,
 } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -26,7 +25,7 @@ import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../servic
 import { proofIndex } from '../../services/proofs';
 import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { initials } from '../customers/CustomersPage';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
@@ -59,8 +58,8 @@ function MethodPicker({ value, onChange }: { value: PayMethod; onChange: (m: Pay
 function CashTab() {
   const { t } = useTranslation();
   const { run, busy } = useAction();
-  const st = useLiveQuery(cashState, []);
-  const closings = useLiveQuery(() => db.cashClosings.orderBy('date').reverse().limit(30).toArray(), []);
+  const st = useScreenLiveQuery(cashState, []);
+  const closings = useScreenLiveQuery(() => db.cashClosings.orderBy('date').reverse().limit(30).toArray(), []);
   const [moveOpen, setMoveOpen] = useState(false);
   const [dir, setDir] = useState<'in' | 'out'>('out');
   const [reason, setReason] = useState<CashReason>('collection');
@@ -197,7 +196,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const [open, setOpen] = useState(addOpen);
   const [shown, setShown] = useState<string | null>(null);
   const [month, setMonth] = useState(monthKey());
-  const data = useLiveQuery(async () => {
+  const data = useScreenLiveQuery(async () => {
     const [list, cats, vehicles] = await Promise.all([
       db.expenses.filter((e) => e.date.startsWith(month) && !e.voidedAt).reverse().sortBy('date'),
       db.expenseCategories.toArray(),
@@ -303,7 +302,7 @@ function SalariesTab() {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [month, setMonth] = useState(monthKey());
-  const data = useLiveQuery(async () => ({ emps: await db.employees.filter((e) => e.active).toArray(), pays: await db.salaryPayments.where('month').equals(month).toArray() }), [month]);
+  const data = useScreenLiveQuery(async () => ({ emps: await db.employees.filter((e) => e.active).toArray(), pays: await db.salaryPayments.where('month').equals(month).toArray() }), [month]);
   const [pay, setPay] = useState<{ employeeId: string; kind: SalaryPayment['kind'] } | null>(null);
   const [amount, setAmount] = useState<number>();
   const [method, setMethod] = useState<PayMethod>('cash');
@@ -365,7 +364,7 @@ function SalariesTab() {
 function DebtsTab() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const list = useLiveQuery(async () => {
+  const list = useScreenLiveQuery(async () => {
     const orders = await db.orders.where('stage').anyOf('delivered', 'closed').toArray();
     const bundles = (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
     return bundles.filter((b) => bundleAmountDue(b) > 0);

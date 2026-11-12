@@ -1,7 +1,7 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, Textarea } from '@mantine/core';
 import { IconBrandTelegram, IconBrandWhatsapp, IconCheck, IconCopy, IconPhoto, IconShare } from '@tabler/icons-react';
 import { mediaBlob } from '../services/media';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatPhone } from '../domain/phone';
 import type { Channel, Customer, Lang } from '../domain/types';
@@ -12,6 +12,7 @@ import { haptic } from './haptics';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
 import { SelectCard } from './components';
 import { useErrorText } from './hooks';
+import { LazySheet } from './lazy';
 
 export interface SendRequest {
   text: string;
@@ -46,7 +47,21 @@ function usePhotoFiles(ids: string[] | undefined) {
   return files;
 }
 
-export function SendDialog({ customer, request, onClose, onSent }: { customer: Customer; request: SendRequest | null; onClose: () => void; onSent?: () => void }) {
+type SendProps = { customer: Customer; request: SendRequest | null; onClose: () => void; onSent?: () => void };
+
+/**
+ * The message to the customer, as a sheet: it slides up when there is something to send and slides away
+ * once it went; nothing of it is made before it is first asked for.
+ */
+export function SendDialog(props: SendProps) {
+  return <LazySheet opened={!!props.request}>{(o) => <SendSheet {...props} shown={o} />}</LazySheet>;
+}
+
+function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProps & { shown: boolean }) {
+  // While it slides away it keeps showing what it showed.
+  const last = useRef(live);
+  if (live) last.current = live;
+  const request = live ?? last.current;
   const { t } = useTranslation();
   const errorText = useErrorText();
   const [text, setText] = useState('');
@@ -58,12 +73,12 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
   const canSharePhotos = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
 
   useEffect(() => {
-    if (request) {
-      setText(request.text);
+    if (live) {
+      setText(live.text);
       setOpened(false);
       setCopied(false);
     }
-  }, [request]);
+  }, [live]);
 
   if (!request) return null;
   const phone = customer.whatsapp || customer.phone;
@@ -114,7 +129,7 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
   };
 
   return (
-    <Modal opened={!!request} onClose={onClose} title={t('send.title')} size="lg">
+    <Modal opened={shown && !!live} onClose={onClose} title={t('send.title')} size="lg">
       <Stack gap="md">
         <SimpleGrid cols={2} spacing="xs">
           <SelectCard active={channel === 'whatsapp'} onClick={() => setChannel('whatsapp')}>

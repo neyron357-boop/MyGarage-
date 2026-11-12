@@ -1,12 +1,12 @@
 import { Badge, Text, UnstyledButton } from '@mantine/core';
 import { IconHistory } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { hoursBetween, nowIso } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
 import type { Order, Settings } from '../../domain/types';
+import { useScreenLiveQuery } from '../../ui/hooks';
 
 /** The car's visit before this one, and whether its work is still under the garage's warranty. */
 async function previousVisit(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'>, lang: 'ru' | 'en') {
@@ -27,7 +27,7 @@ async function previousVisit(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'
 export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'>; settings: Pick<Settings, 'warrantyLaborMonths'>; lang: 'ru' | 'en' }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const prev = useLiveQuery(() => previousVisit(order, lang), [order.id, order.vehicleId, lang]);
+  const prev = useScreenLiveQuery(() => previousVisit(order, lang), [order.id, order.vehicleId, lang]);
   if (!prev) return null;
   const at = prev.order.closedAt ?? prev.order.deliveredAt ?? prev.order.createdAt;
   const days = Math.max(0, Math.floor(hoursBetween(at, nowIso()) / 24));

@@ -565,10 +565,14 @@ async function launchBrowser() {
     const ask = page.getByRole('dialog', { name: 'Закрыть без оплаты?' });
     await ask.getByText('210,00').waitFor();
     await shot('33d-close-unpaid');
-    await ask.getByRole('button', { name: 'Закрыть' }).click();
+    // Two ways: paid to the owner (the usual), or no money at all — here, no money.
+    await ask.getByRole('button', { name: 'Оплата у главного' }).waitFor();
+    await ask.getByRole('button', { name: 'Денег не будет' }).click();
+    await ask.waitFor({ state: 'hidden' });
     await page.getByText('Закрыт').first().waitFor();
     await page.locator('.list-row').filter({ hasText: 'Без оплаты' }).filter({ hasText: '210,00' }).first().waitFor();
-    if (await page.getByRole('button', { name: /^Оплата/ }).count()) throw new Error('a job closed without payment still asks for it');
+    // (the main button of a job to be paid: «Оплата · сумма»)
+    if (await page.getByRole('button', { name: /^Оплата ·/ }).count()) throw new Error('a job closed without payment still asks for it');
     await shot('33e-job-unpaid', true);
     unpaidJob = page.url();
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -580,6 +584,40 @@ async function launchBrowser() {
     const top = page.locator('.screen[data-role="top"]');
     await top.getByText('Всего долгов').waitFor();
     if (await top.getByText('57721').count()) throw new Error('a job closed without payment shows as a debt');
+  });
+  await step('paid to the owner: closed, nothing in the cash', async () => {
+    const cashOf = () => page.evaluate(async () => {
+      const { cashState } = await import('/src/services/money.ts');
+      return (await cashState()).expected;
+    });
+    const before = await cashOf();
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('24680');
+    await page.getByRole('button', { name: 'Принять', exact: true }).click();
+    const dlg = page.getByRole('dialog');
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Gearbox repair');
+    await dlg.getByLabel('Цена', { exact: true }).fill('1000');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByRole('button', { name: 'Оплата · 1 050,00 AED' }).waitFor();
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'Без оплаты' }).click();
+    const ask = page.getByRole('dialog', { name: 'Закрыть без оплаты?' });
+    await ask.getByText('1 050,00').waitFor();
+    await shot('33h-close-owner');
+    await ask.getByRole('button', { name: 'Оплата у главного' }).click();
+    await ask.waitFor({ state: 'hidden' });
+    await page.getByText('Закрыт').first().waitFor();
+    if (await page.getByRole('button', { name: /^Оплата ·/ }).count()) throw new Error('a job paid to the owner still asks for payment');
+    await page.locator('.list-row').filter({ hasText: 'Оплата у главного' }).filter({ hasText: '1 050,00' }).first().waitFor();
+    await shot('33i-job-owner', true);
+    if ((await cashOf()) !== before) throw new Error('paid to the owner must not touch the cash');
+    await page.goto(BASE + '#/money?tab=debts');
+    await page.locator('.screen[data-role="top"]').getByText('Всего долгов').waitFor();
+    if (await page.locator('.screen[data-role="top"]').getByText('24680').count()) throw new Error('paid to the owner is not a debt');
   });
   await step('v0.7: due time, notes, offers, return terms, work outside, mechanic, report', async () => {
     await page.goto(BASE + '#/orders/new');

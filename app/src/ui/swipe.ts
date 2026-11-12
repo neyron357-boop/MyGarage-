@@ -21,19 +21,30 @@ export interface SwipeSpec {
  *
  * The row sets `style` (the offset as --swipe), `data-swiping` and `data-past`; its children slide
  * (CSS, `.swipe-row`), the action layers under them (`.swipe-action`) grow from their edge.
+ *
+ * Under the finger the offset is written straight to the row (its --swipe), frame by frame: the row is
+ * not rendered again while it follows the finger — only when it starts, crosses the line and comes to rest.
  */
 export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'full'>; leading?: Pick<SwipeSpec, 'onCommit' | 'full'> }, actionWidth = 88) {
-  const [dx, setDxState] = useState(0);
+  // Where the row rests (shut, a button open, flown out) — a render; where the finger has it — no render.
+  const [rest, setRest] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [past, setPast] = useState(false);
   const off = useRef(0);
+  const row = useRef<HTMLElement | null>(null);
   const start = useRef<{ x: number; y: number; base: number; w: number; axis?: 'x' | 'y'; past?: boolean } | null>(null);
   const swiped = useRef(false);
   const live = useRef(spec);
   live.current = spec;
-  const setDx = (v: number) => {
+  const follow = (v: number) => {
     off.current = v;
-    setDxState(v);
+    row.current?.style.setProperty('--swipe', `${v}px`);
+  };
+  // To a place of rest: it eases there (the finger's "no transition" is lifted in the same frame).
+  const setDx = (v: number) => {
+    row.current?.removeAttribute('data-swiping');
+    follow(v);
+    setRest(v);
   };
   const sideOf = (v: number) => (v < 0 ? live.current.trailing : v > 0 ? live.current.leading : undefined);
   const commit = (to: number) => {
@@ -55,6 +66,7 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
       const t = e.touches[0];
       // The strip along the left edge belongs to "Back" (ui/stack): a touch there never swipes a row.
       if (t.clientX < 28) return;
+      row.current = e.currentTarget;
       start.current = { x: t.clientX, y: t.clientY, base: off.current, w: e.currentTarget.offsetWidth };
     },
     onTouchMove: (e: TouchEvent<HTMLElement>) => {
@@ -74,6 +86,7 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
       if (v > 0 && !live.current.leading) v = v * 0.12;
       if (Math.abs(v) > s.w) v = Math.sign(v) * (s.w + (Math.abs(v) - s.w) * 0.25);
       swiped.current = true;
+      if (!dragging) row.current?.setAttribute('data-swiping', 'true');
       setDragging(true);
       const side = sideOf(v);
       const isPast = !!side && side.full !== false && Math.abs(v) > s.w * 0.5;
@@ -82,7 +95,7 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
         setPast(isPast);
         haptic('selection');
       }
-      setDx(v);
+      follow(v);
     },
     onTouchEnd: () => {
       const s = start.current;
@@ -107,11 +120,11 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
   };
   return {
     handlers,
-    style: { '--swipe': `${dx}px` } as CSSProperties,
+    style: { '--swipe': `${rest}px` } as CSSProperties,
     dragging,
     past,
     /** Which side's button is uncovered. */
-    open: dx < 0 ? ('trailing' as const) : dx > 0 ? ('leading' as const) : undefined,
+    open: rest < 0 ? ('trailing' as const) : rest > 0 ? ('leading' as const) : undefined,
     close: () => setDx(0),
     /** The click that ends a swipe, or a tap on an open row, is not a tap on the row. */
     consumeClick: () => {

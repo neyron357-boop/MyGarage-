@@ -1,6 +1,6 @@
+import { useScreenLiveQuery } from '../../ui/hooks';
 import { Alert, Avatar, Badge, Box, Button, Group, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconCar, IconNote, IconPencil, IconPlus } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -20,7 +20,7 @@ export function CustomerPage() {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [addCar, setAddCar] = useState(false);
-  const data = useLiveQuery(async () => {
+  const data = useScreenLiveQuery(async () => {
     const c = await db.customers.get(id!);
     if (!c) return null;
     const [cars, orders] = await Promise.all([db.vehicles.where('customerId').equals(c.id).toArray(), db.orders.where('customerId').equals(c.id).reverse().sortBy('createdAt')]);

@@ -93,6 +93,31 @@ describe('parts: return terms, part of an order, work outside', () => {
   });
 });
 
+describe('paid to the owner (the manager took no money)', () => {
+  it('closes the job, owes nothing, nothing in the cash or the money book, the revenue stays', async () => {
+    const o = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Engine overhaul', unitPriceFils: 200000 });
+    await approveAll(o.id);
+    const { quickInvoice } = await import('./money');
+    const { closeUnpaid } = await import('./flow');
+    const { jobProfit } = await import('../domain/profit');
+    const doc = await quickInvoice(o.id);
+    const cashBefore = await db.cashMovements.count();
+    await closeUnpaid(o.id, 'owner');
+    const b = (await loadOrderBundle(o.id))!;
+    expect(b.order).toMatchObject({ stage: 'closed', outcome: 'completed', waived: { fils: doc.totalFils, via: 'owner' } });
+    expect(b.payments).toHaveLength(0);
+    expect(await db.cashMovements.count()).toBe(cashBefore);
+    expect(b.events.find((e) => e.type === 'closed_owner')?.payload).toEqual({ fils: doc.totalFils });
+    expect(b.events.some((e) => e.type === 'closed_unpaid')).toBe(false);
+    const { bundleAmountDue } = await import('./orders');
+    expect(bundleAmountDue(b)).toBe(0);
+    // The garage's revenue all the same (let go — it would be cut).
+    expect(jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: [] }).revenue).toBe(doc.subtotalFils);
+    expect(jobProfit({ order: { waived: { at: '', fils: doc.totalFils } }, items: b.items, invoices: b.invoices, expenses: [] }).revenue).toBe(0);
+  });
+});
+
 describe('suppliers from a list', () => {
   it('adds the new ones from a CSV, leaves those already here', async () => {
     const csv = 'Name,Phone,Brands,Type\nAl Wasl Parts,050 123 4567,"Toyota, Lexus",New\nSharjah Used,055 999 8877,Nissan,Used\n';

@@ -11,7 +11,6 @@ import {
   IconTruckDelivery,
   type Icon,
 } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -25,7 +24,7 @@ import { syncStage } from '../../services/flow';
 import { closeReturn, setProcurement } from '../../services/parts';
 import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { ProcurementModal } from './Procurement';
 import { SuppliersTab } from './Suppliers';
@@ -62,7 +61,7 @@ export function PartsPage() {
   const [params, setParams] = useSearchParams();
   const explicitTab = params.get('tab');
   const [proc, setProc] = useState<OrderItem | null>(null);
-  const data = useLiveQuery(loadParts, []);
+  const data = useScreenLiveQuery(loadParts, []);
   const today = dubaiDate();
   const needed = (data?.items ?? []).filter((i) => (i.procurementStatus ?? 'needed') === 'needed');
   const ordered = (data?.items ?? []).filter((i) => i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit');

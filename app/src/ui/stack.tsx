@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
+import { NavigationType, UNSAFE_LocationContext as LocationContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { layers } from './historyLayer';
 
 /*
@@ -152,9 +152,15 @@ export interface ScreenInfo {
   /** The action bar of the screen is rendered here (pinned to its bottom edge). */
   bottom: HTMLElement;
   scroller: React.RefObject<HTMLDivElement>;
-  active: boolean;
   /** Presented from the bottom: its way out is "Cancel", not "‹ Back". */
   modal: boolean;
+  /**
+   * In front or not — without rendering the screen again when it steps back under another one:
+   * `front()` tells it now, `wakes()` counts its returns to the front, `watch(cb)` hears each return.
+   */
+  front: () => boolean;
+  wakes: () => number;
+  watch: (cb: () => void) => () => void;
 }
 
 const ScreenContext = createContext<ScreenInfo | null>(null);
@@ -172,6 +178,15 @@ interface StackInfo {
 const StackContext = createContext<StackInfo | null>(null);
 export function useStack(): StackInfo | null {
   return useContext(StackContext);
+}
+
+const BackContext = createContext<StackInfo['back'] | null>(null);
+/**
+ * "Back" through the stack (null on a PC), and nothing else: it never changes, so a screen that only
+ * needs to go back is not rendered again on every move of the stack (`useStack` is, for its label).
+ */
+export function useStackBack(): StackInfo['back'] | null {
+  return useContext(BackContext);
 }
 
 /** Scroll the screen in front (or the page on a PC) to the top. */
@@ -249,7 +264,15 @@ function contentReady(el: HTMLElement): Promise<void> {
 
 /* ---------------- One screen ---------------- */
 
-function Screen({ entry, role, children }: { entry: Entry; role: 'top' | 'below' | 'out'; children: ReactNode }) {
+type Render = (location: Location, entryId: string) => ReactNode;
+
+/*
+ * A screen renders only when something in it changes. The stack moving — a screen pushed over it, the
+ * end of an animation, the way back to it — leaves its content as it was (the same elements, so React
+ * does not go into it), and stepping back under another screen is not a change either: what reads the
+ * database rests (`useScreenLiveQuery`) and wakes when the screen is in front again.
+ */
+const Screen = memo(function Screen({ entry, role, render }: { entry: Entry; role: 'top' | 'below' | 'out'; render: Render }) {
   const [nav] = useState(() => {
     const d = document.createElement('div');
     d.className = 'screen-nav';
@@ -271,25 +294,57 @@ function Screen({ entry, role, children }: { entry: Entry; role: 'top' | 'below'
       bottom.remove();
     };
   }, [nav, bottom]);
+  const front = useRef({ on: role === 'top', wakes: 0, subs: new Set<() => void>() });
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
     // Screens under the one in front cannot be reached (focus, taps, screen readers).
-    el.toggleAttribute('inert', role !== 'top');
+    ref.current?.toggleAttribute('inert', role !== 'top');
+    const f = front.current;
+    const on = role === 'top';
+    if (on === f.on) return;
+    f.on = on;
+    if (!on) return;
+    f.wakes += 1;
+    f.subs.forEach((cb) => cb());
   }, [role]);
   const modal = isModal(entry.location.pathname);
-  const info = useMemo<ScreenInfo>(() => ({ nav, bottom, scroller, active: role === 'top', modal }), [nav, bottom, role, modal]);
+  const info = useMemo<ScreenInfo>(
+    () => ({
+      nav,
+      bottom,
+      scroller,
+      modal,
+      front: () => front.current.on,
+      wakes: () => front.current.wakes,
+      watch: (cb) => {
+        front.current.subs.add(cb);
+        return () => {
+          front.current.subs.delete(cb);
+        };
+      },
+    }),
+    [nav, bottom, modal],
+  );
+  // Made once per place in the history (its address and history key), not on every move of the stack.
+  const { pathname, search, hash, key } = entry.location;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const content = useMemo(() => render(entry.location, entry.id), [render, entry.id, pathname, search, hash, key]);
+  // Inside, the address is the screen's own: another screen opening changes the router's location, and
+  // react-router's <Routes> reads that even when given its own — every screen of the stack would render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const where = useMemo(() => ({ location: entry.location, navigationType: NavigationType.Pop }), [pathname, search, hash, key]);
   return (
     <section ref={ref} className="screen" data-id={entry.id} data-role={role} data-tabbar={showsTabBar(entry.location.pathname)} data-modal={isModal(entry.location.pathname) || undefined}>
       <div className="screen-scroll" ref={scroller}>
         <div className="screen-body">
-          <ScreenContext.Provider value={info}>{children}</ScreenContext.Provider>
+          <LocationContext.Provider value={where}>
+            <ScreenContext.Provider value={info}>{content}</ScreenContext.Provider>
+          </LocationContext.Provider>
         </div>
       </div>
       <div className="screen-dim" aria-hidden />
     </section>
   );
-}
+});
 
 /* ---------------- The stack ---------------- */
 
@@ -333,7 +388,7 @@ function watchBrowserSwipes(): () => void {
   };
 }
 
-export function PhoneStack({ render, onTop }: { render: (location: Location, entryId: string) => ReactNode; onTop?: (location: Location) => void }) {
+export function PhoneStack({ render, onTop }: { render: Render; onTop?: (location: Location) => void }) {
   const location = useLocation();
   const action = useNavigationType();
   const navigate = useNavigate();
@@ -449,20 +504,20 @@ export function PhoneStack({ render, onTop }: { render: (location: Location, ent
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anim?.seq]);
 
-  const back = useCallback(
-    (fallback?: string) => {
-      const m = modelRef.current;
-      const t = m.entries[m.entries.length - 1];
-      const p = m.entries[m.entries.length - 2];
-      if (p && t) {
-        navigate(Math.min(-1, p.idx - t.idx));
-        return;
-      }
-      hintNavigation('pop');
-      navigate(fallback ?? '/', { replace: true });
-    },
-    [navigate],
-  );
+  // The router's navigate changes with every address; "Back" must not (the screens read it).
+  const navRef = useRef(navigate);
+  navRef.current = navigate;
+  const back = useCallback((fallback?: string) => {
+    const m = modelRef.current;
+    const t = m.entries[m.entries.length - 1];
+    const p = m.entries[m.entries.length - 2];
+    if (p && t) {
+      navRef.current(Math.min(-1, p.idx - t.idx));
+      return;
+    }
+    hintNavigation('pop');
+    navRef.current(fallback ?? '/', { replace: true });
+  }, []);
 
   // The back swipe from the left edge.
   useEffect(() => {
@@ -613,15 +668,15 @@ export function PhoneStack({ render, onTop }: { render: (location: Location, ent
   const outAbove = anim && (anim.kind === 'pop' || anim.kind === 'dismiss');
 
   return (
-    <StackContext.Provider value={stack}>
-      <div className="stack" ref={rootRef} data-out={out ? (outAbove ? 'above' : 'below') : undefined}>
-        {shown.map(({ entry, role }) => (
-          <Screen key={entry.id} entry={entry} role={role}>
-            {render(entry.location, entry.id)}
-          </Screen>
-        ))}
-      </div>
-    </StackContext.Provider>
+    <BackContext.Provider value={back}>
+      <StackContext.Provider value={stack}>
+        <div className="stack" ref={rootRef} data-out={out ? (outAbove ? 'above' : 'below') : undefined}>
+          {shown.map(({ entry, role }) => (
+            <Screen key={entry.id} entry={entry} role={role} render={render} />
+          ))}
+        </div>
+      </StackContext.Provider>
+    </BackContext.Provider>
   );
 }
 

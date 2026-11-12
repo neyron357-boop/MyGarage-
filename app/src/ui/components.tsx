@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Button, Group, Image, Loader, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, Image, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, Tooltip, UnstyledButton } from '@mantine/core';
 import {
   IconAlertTriangle,
   IconArchive,
@@ -31,7 +31,8 @@ import { useNavigate } from 'react-router-dom';
 import { formatAed, parseAed } from '../domain/money';
 import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
-import { mediaUrl } from '../services/media';
+import { cachedMediaUrl, mediaUrl } from '../services/media';
+import { LazySheet } from './lazy';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
 import { useScreen, useScreenTitle, useStack } from './stack';
@@ -322,17 +323,28 @@ export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: R
     if (!title || !head) return;
     const target: HTMLElement | Window = screen?.scroller.current ?? window;
     let frame = 0;
+    // Written only when they change: a scroll far below the title touches no style at all.
+    let shownO = '';
+    let shownScrolled = '';
     const update = () => {
       frame = 0;
       const bar = barRef.current;
       const barBottom = bar?.getBoundingClientRect().bottom ?? 44;
       // How much of the large title is still below the bar: it fades over its last 28 px.
       const left = title.getBoundingClientRect().bottom - barBottom;
-      head.style.setProperty('--title-o', Math.max(0, Math.min(1, left / 28)).toFixed(3));
+      const o = Math.max(0, Math.min(1, left / 28)).toFixed(2);
+      if (o !== shownO) {
+        shownO = o;
+        head.style.setProperty('--title-o', o);
+      }
       setCompact(left <= 8);
       // Content under the bar: the scroll edge shows (iOS 26).
       const y = target instanceof Window ? target.scrollY : target.scrollTop;
-      if (bar) bar.dataset.scrolled = String(y > 2);
+      const scrolled = String(y > 2);
+      if (bar && scrolled !== shownScrolled) {
+        shownScrolled = scrolled;
+        bar.dataset.scrolled = scrolled;
+      }
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
@@ -951,21 +963,21 @@ export function MoneyInput({
 }
 
 export function MediaImage({ id, thumb = true, h = 90, w, radius = 'md', onClick }: { id: string; thumb?: boolean; h?: number | string; w?: number | string; radius?: string; onClick?: () => void }) {
-  const [url, setUrl] = useState<string>();
+  // A photo shown before is drawn at once (a list coming back, a row rendered again); a new one waits in
+  // a quiet grey square (no spinner per photo), then is decoded off the main thread.
+  const key = `${id}:${thumb}`;
+  const [loaded, setLoaded] = useState<{ key: string; url?: string }>();
+  const url = cachedMediaUrl(id, thumb) ?? (loaded?.key === key ? loaded.url : undefined);
   useEffect(() => {
+    if (cachedMediaUrl(id, thumb)) return;
     let alive = true;
-    void mediaUrl(id, thumb).then((u) => alive && setUrl(u));
+    void mediaUrl(id, thumb).then((u) => alive && setLoaded({ key, url: u }));
     return () => {
       alive = false;
     };
-  }, [id, thumb]);
-  if (!url)
-    return (
-      <Box h={h} w={w ?? h} className="surface-soft" style={{ display: 'grid', placeItems: 'center' }}>
-        <Loader size="xs" />
-      </Box>
-    );
-  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" />;
+  }, [id, thumb, key]);
+  if (!url) return <Box h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
+  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" />;
 }
 
 /** Thumbnail that opens the full photo. */
@@ -1011,16 +1023,7 @@ export function Field({ label, children }: { label: ReactNode; children: ReactNo
  * The confirm button shows progress; the sheet closes only when `onConfirm` resolves to a truthy value
  * (use `run(async () => { ...; return true; })`, which resolves to undefined on error).
  */
-export function ConfirmModal({
-  opened,
-  onClose,
-  title,
-  children,
-  confirmLabel,
-  color,
-  icon,
-  onConfirm,
-}: {
+type ConfirmProps = {
   opened: boolean;
   onClose: () => void;
   title: ReactNode;
@@ -1029,33 +1032,63 @@ export function ConfirmModal({
   color?: string;
   icon?: ReactNode;
   onConfirm: () => Promise<unknown>;
-}) {
+  /** A second way to go (an action sheet of two): both full width, the sheet's × is the way back. */
+  secondary?: { label: ReactNode; color?: string; onClick: () => Promise<unknown> };
+};
+
+/* Made only once it is first asked for (a job keeps several of these, mostly never opened). */
+export function ConfirmModal(props: ConfirmProps) {
+  return <LazySheet opened={props.opened}>{(o) => <ConfirmSheet {...props} opened={o} />}</LazySheet>;
+}
+
+function ConfirmSheet({
+  opened,
+  onClose,
+  title,
+  children,
+  confirmLabel,
+  color,
+  icon,
+  onConfirm,
+  secondary,
+}: ConfirmProps) {
   const { t } = useTranslation();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<false | 'main' | 'second'>(false);
+  const go = async (which: 'main' | 'second', fn: () => Promise<unknown>) => {
+    setBusy(which);
+    try {
+      if (await fn()) onClose();
+    } catch {
+      // the action reports its own error
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (secondary)
+    return (
+      <Modal opened={opened} onClose={onClose} title={title}>
+        <Stack gap="md">
+          <Box>{children}</Box>
+          <Stack gap="xs">
+            <Button size="lg" color={color} leftSection={icon} loading={busy === 'main'} disabled={busy === 'second'} data-autofocus onClick={() => void go('main', onConfirm)}>
+              {confirmLabel}
+            </Button>
+            <Button size="lg" variant="light" color={secondary.color} loading={busy === 'second'} disabled={busy === 'main'} onClick={() => void go('second', secondary.onClick)}>
+              {secondary.label}
+            </Button>
+          </Stack>
+        </Stack>
+      </Modal>
+    );
   return (
     <Modal opened={opened} onClose={onClose} title={title}>
       <Stack gap="md">
         <Box>{children}</Box>
         <Group grow gap="xs">
-          <Button variant="default" onClick={onClose} disabled={busy}>
+          <Button variant="default" onClick={onClose} disabled={!!busy}>
             {t('common.cancel')}
           </Button>
-          <Button
-            color={color}
-            leftSection={icon}
-            loading={busy}
-            data-autofocus
-            onClick={async () => {
-              setBusy(true);
-              try {
-                if (await onConfirm()) onClose();
-              } catch {
-                // the action reports its own error
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
+          <Button color={color} leftSection={icon} loading={busy === 'main'} data-autofocus onClick={() => void go('main', onConfirm)}>
             {confirmLabel}
           </Button>
         </Group>

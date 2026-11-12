@@ -14,24 +14,25 @@ import {
   IconX,
   type Icon,
 } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
 import type { Task, TaskKind } from '../../domain/today';
-import type { Customer } from '../../domain/types';
+import type { Customer, Supplier } from '../../domain/types';
 import { simpleMessage } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { loadPast, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
 import { Money, PlateText } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { useAutoAnimate } from '../../ui/motion';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { useDueLabel } from '../job/Due';
+
+const NONE: Supplier[] = [];
 
 const META: Record<TaskKind, { icon: Icon; color: string }> = {
   promised: { icon: IconClock, color: 'orange' },
@@ -54,17 +55,18 @@ const META: Record<TaskKind, { icon: Icon; color: string }> = {
  * (one row of the screen however much there is to do): what is late comes first, in red. A tap opens
  * the job (or the message, for a customer).
  */
-export function TodayList({ bundles }: { bundles: OrderBundle[] }) {
+export const TodayList = memo(function TodayList({ bundles }: { bundles: OrderBundle[] }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
   const { run } = useAction();
   const dueLabel = useDueLabel();
-  const past = useLiveQuery(() => loadPast(), [bundles.length]);
-  const suppliers = useLiveQuery(() => db.suppliers.toArray(), []) ?? [];
+  // Every past job of the last year: read again only once the board is back (not during the way back).
+  const past = useScreenLiveQuery(() => loadPast(), [bundles.length], 600);
+  const suppliers = useScreenLiveQuery(() => db.suppliers.toArray(), [], 600) ?? NONE;
   const [send, setSend] = useState<{ request: SendRequest; customer: Customer; task: Task } | null>(null);
   const strip = useAutoAnimate<HTMLDivElement>();
-  const tasks = tasksFor(bundles, past);
+  const tasks = useMemo(() => tasksFor(bundles, past), [bundles, past]);
   if (!tasks.length) return null;
 
   const byOrder = new Map(bundles.map((b) => [b.order.id, b]));
@@ -174,4 +176,4 @@ export function TodayList({ bundles }: { bundles: OrderBundle[] }) {
       )}
     </div>
   );
-}
+});

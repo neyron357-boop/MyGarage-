@@ -1,6 +1,6 @@
+import { useScreenLiveQuery } from '../../ui/hooks';
 import { Avatar, Box, Button, Text } from '@mantine/core';
 import { IconPlus, IconUsers } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -23,7 +23,7 @@ export function CustomersPage() {
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
-  const list = useLiveQuery(async () => {
+  const list = useScreenLiveQuery(async () => {
     const [cs, vs, orders] = await Promise.all([db.customers.orderBy('name').toArray(), db.vehicles.toArray(), db.orders.toArray()]);
     const s = q.trim().toLowerCase();
     const digits = s.replace(/\D/g, '').replace(/^0+/, '');

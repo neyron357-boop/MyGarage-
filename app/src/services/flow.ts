@@ -101,23 +101,26 @@ export async function refuseAll(orderId: string): Promise<'closed' | 'open'> {
 }
 
 /**
- * The car leaves and nothing is owed — no payment, no debt (warranty, goodwill, the money will not come).
- * What was due is let go on the job (`waived`, with the amount, in the journal too), a signed debt is
- * written off; the invoice, payments and lines stay as they are. Reopening the job brings the amount back.
+ * The car leaves and the manager takes no money for it — no payment, no debt, nothing in his cash or
+ * money book. Either the customer settled with the garage's owner directly (`via: 'owner'` — the manager
+ * does not know how; the revenue is still the garage's), or the money will not come at all (warranty,
+ * goodwill). What was due is noted on the job (`waived`, with the amount, in the journal too), a signed
+ * debt is written off; the invoice, payments and lines stay as they are. Reopening the job brings the
+ * amount back.
  */
-export async function closeUnpaid(orderId: string): Promise<void> {
+export async function closeUnpaid(orderId: string, via?: 'owner'): Promise<void> {
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
   const due = bundleAmountDue(b);
   if (!canCloseUnpaid(b.order.stage, due)) throw new AppError('stageErr.notAllowed');
   const now = nowIso();
-  const waived = { at: now, fils: due };
+  const waived = via ? { at: now, fils: due, via } : { at: now, fils: due };
   const check = checkTransition(b.order.stage, 'closed', { ...stageContext(b), order: { ...b.order, waived }, amountDueFils: 0 });
   if (!check.ok) throw new AppError(check.reason);
   await db.transaction('rw', db.orders, db.debts, db.events, async () => {
     await db.orders.update(orderId, { waived, updatedAt: now });
     for (const d of b.debts) if (d.status === 'open') await db.debts.update(d.id, { status: 'written_off' });
-    await logEvent(orderId, 'closed_unpaid', { fils: due });
+    await logEvent(orderId, via === 'owner' ? 'closed_owner' : 'closed_unpaid', { fils: due });
   });
   await changeStage(orderId, 'closed');
 }

@@ -1,6 +1,5 @@
 import { Box, Button, Group, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core';
 import { IconChartBar, IconDownload, IconFileTypePdf, IconShare } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
@@ -11,7 +10,7 @@ import { downloadBlob, toCsv } from '../../services/backup';
 import { openPdf } from '../../services/documents';
 import { EmptyState, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, ScrollTabs, Section } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 
 type Period = 'today' | 'week' | 'month' | 'custom';
 
@@ -101,7 +100,7 @@ export function ReportsPage() {
   const [from, setFrom] = useState<string>();
   const [to, setTo] = useState<string>();
   const [f, tt] = range(period, from ?? '', to ?? '');
-  const data = useLiveQuery(async () => {
+  const data = useScreenLiveQuery(async () => {
     const [orders, invoices, items, allExpenses, payments, closings, cats, incomes] = await Promise.all([
       db.orders.toArray(),
       db.invoices.toArray(),

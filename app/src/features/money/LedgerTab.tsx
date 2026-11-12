@@ -1,6 +1,5 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -13,7 +12,7 @@ import { loadLedger, setOpeningBalances, updateExpense, updateIncome, voidExpens
 import { proofIndex } from '../../services/proofs';
 import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateText, SearchField } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { EntrySheet, INCOME_CATEGORIES, LinkPicker, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
 
@@ -195,7 +194,7 @@ export function LedgerTab() {
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
   const [opening, setOpening] = useState(false);
   const [opened, setOpen] = useState<Pick<LedgerEntry, 'id' | 'source'> | null>(null);
-  const data = useLiveQuery(async () => {
+  const data = useScreenLiveQuery(async () => {
     const [book, cats, vehicles, customers, orders] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.vehicles.toArray(), db.customers.toArray(), db.orders.toArray()]);
     const photos = await proofIndex(book.entries.map((e) => e.id));
     return { book, cats, photos, vehicles: new Map(vehicles.map((v) => [v.id, v])), customers: new Map(customers.map((c) => [c.id, c])), orders: new Map(orders.map((o) => [o.id, o])) };

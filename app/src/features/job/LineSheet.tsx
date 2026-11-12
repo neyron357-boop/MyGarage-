@@ -8,7 +8,7 @@ import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
-import type { Lang, OrderItem, Outsource, PartOffer } from '../../domain/types';
+import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '../../domain/types';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
@@ -39,35 +39,85 @@ const words = (s: string) => s.toLowerCase().split(/[^a-zа-яё0-9]+/i).filter(
  * The quick chips are the most used ones — first those that went with a similar complaint before
  * ("brake noise" → brake pads).
  */
-export function useSuggestions(lang: Lang, complaint = '') {
-  return useLiveQuery(async () => {
-    const [templates, items, orders] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray(), db.orders.toArray()]);
-    const maps: Record<LineKind, Map<string, Suggestion>> = { labor: new Map(), part: new Map() };
-    const mine = new Set(words(complaint));
-    const alike = new Set(mine.size ? orders.filter((o) => words(o.complaint ?? '').some((w) => mine.has(w))).map((o) => o.id) : []);
-    const put = (kind: LineKind, s: Omit<Suggestion, 'uses'>, uses: number) => {
-      const title = (lang === 'ru' ? s.titleRu || s.titleEn : s.titleEn || s.titleRu).trim();
-      if (!title) return;
-      const had = maps[kind].get(title);
-      if (had) had.uses += uses;
-      else maps[kind].set(title, { ...s, uses });
+export function useSuggestions(lang: Lang, complaint = '', enabled = true) {
+  // Read once (not a live query over every line of every job), once the screen has slid in (its slide
+  // is not shared with reading every line of every job), and kept for a minute: the next job has them at once.
+  const key = `${lang}|${complaint}`;
+  const [value, setValue] = useState(() => cachedSuggestions(key));
+  useEffect(() => {
+    if (!enabled) return;
+    const hit = cachedSuggestions(key);
+    if (hit) {
+      setValue(hit);
+      return;
+    }
+    let alive = true;
+    const id = window.setTimeout(() => {
+      void loadSuggestions(lang, complaint).then((v) => {
+        suggestionCache.set(key, { at: Date.now(), v });
+        if (alive) setValue(v);
+      });
+    }, 650);
+    return () => {
+      alive = false;
+      window.clearTimeout(id);
     };
-    // Newest first, so a title keeps its latest price.
-    const sorted = [...items].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-    for (const it of sorted)
-      if (it.kind === 'labor' || it.kind === 'part')
-        put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, gross: it.unitGrossFils, rate: it.vatRateBp }, alike.has(it.orderId) ? 50 : 1);
-    for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, 0);
-    const pack = (m: Map<string, Suggestion>): Suggestions => ({
-      list: m,
-      top: [...m.entries()]
-        .filter(([, s]) => s.price > 0)
-        .sort((a, b) => b[1].uses - a[1].uses)
-        .slice(0, 12)
-        .map(([k]) => k),
-    });
-    return { labor: pack(maps.labor), part: pack(maps.part) };
-  }, [lang, complaint]);
+  }, [key, lang, complaint, enabled]);
+  return enabled ? value : undefined;
+}
+
+type SuggestionSet = { labor: Suggestions; part: Suggestions };
+const suggestionCache = new Map<string, { at: number; v: SuggestionSet }>();
+function cachedSuggestions(key: string): SuggestionSet | undefined {
+  const hit = suggestionCache.get(key);
+  return hit && Date.now() - hit.at < 60_000 ? hit.v : undefined;
+}
+/** A line saved: the next look at the suggestions reads them again (with its title and price). */
+export function forgetSuggestions(): void {
+  suggestionCache.clear();
+  sources = undefined;
+}
+
+/*
+ * What the suggestions are made of — every line ever typed (thousands, with the history carried over),
+ * newest first, the price list and the jobs' complaints — read once a minute, not for every job opened.
+ */
+type Sources = { at: number; templates: JobTemplate[]; items: OrderItem[]; orders: Pick<Order, 'id' | 'complaint'>[] };
+let sources: Sources | undefined;
+async function suggestionSources(): Promise<Sources> {
+  if (sources && Date.now() - sources.at < 60_000) return sources;
+  const [templates, items, orders] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray(), db.orders.toArray()]);
+  items.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  sources = { at: Date.now(), templates, items, orders: orders.map((o) => ({ id: o.id, complaint: o.complaint })) };
+  return sources;
+}
+
+async function loadSuggestions(lang: Lang, complaint: string): Promise<SuggestionSet> {
+  const { templates, items, orders } = await suggestionSources();
+  const maps: Record<LineKind, Map<string, Suggestion>> = { labor: new Map(), part: new Map() };
+  const mine = new Set(words(complaint));
+  const alike = new Set(mine.size ? orders.filter((o) => words(o.complaint ?? '').some((w) => mine.has(w))).map((o) => o.id) : []);
+  const put = (kind: LineKind, s: Omit<Suggestion, 'uses'>, uses: number) => {
+    const title = (lang === 'ru' ? s.titleRu || s.titleEn : s.titleEn || s.titleRu).trim();
+    if (!title) return;
+    const had = maps[kind].get(title);
+    if (had) had.uses += uses;
+    else maps[kind].set(title, { ...s, uses });
+  };
+  // Newest first, so a title keeps its latest price.
+  for (const it of items)
+    if (it.kind === 'labor' || it.kind === 'part')
+      put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, gross: it.unitGrossFils, rate: it.vatRateBp }, alike.has(it.orderId) ? 50 : 1);
+  for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, 0);
+  const pack = (m: Map<string, Suggestion>): Suggestions => ({
+    list: m,
+    top: [...m.entries()]
+      .filter(([, s]) => s.price > 0)
+      .sort((a, b) => b[1].uses - a[1].uses)
+      .slice(0, 12)
+      .map(([k]) => k),
+  });
+  return { labor: pack(maps.labor), part: pack(maps.part) };
 }
 
 /** Add or edit one line: what was done (or which part), quantity and price; for a part — where it stands. */
@@ -196,6 +246,7 @@ export function LineSheet({
       const before = item?.mediaIds ?? [];
       if (itemId && (fresh.length || kept.length !== before.length)) await setLinePhotos(itemId, kept, fresh.map((p) => p.file));
       await syncStage(b.order.id);
+      forgetSuggestions();
       haptic('light');
       onClose();
     });

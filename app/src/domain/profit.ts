@@ -33,7 +33,8 @@ export function jobProfit(input: {
   const live = liveLines(input.items);
   let revenue = inv ? inv.subtotalFils : live.reduce((s, i) => s + itemAmounts(i).net, 0);
   const gross = inv ? inv.totalFils : live.reduce((s, i) => s + itemAmounts(i).gross, 0);
-  if (input.order.waived && gross > 0) revenue -= roundFils((input.order.waived.fils * revenue) / gross);
+  // Let go (the money will not come) — off the revenue; settled with the owner — the garage's all the same.
+  if (input.order.waived && input.order.waived.via !== 'owner' && gross > 0) revenue -= roundFils((input.order.waived.fils * revenue) / gross);
   const counted = live.filter((i) => i.kind !== 'discount' && !i.customerSupplied);
   const cost = (i: OrderItem) => (i.costPriceFils !== undefined ? roundFils(i.costPriceFils * (i.qty || 1)) : 0);
   const parts = counted.filter((i) => i.kind === 'part').reduce((s, i) => s + cost(i), 0);

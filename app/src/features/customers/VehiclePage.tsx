@@ -1,6 +1,5 @@
 import { Alert, Box, Button, Group, Select, SimpleGrid, Stack, Text, Timeline } from '@mantine/core';
 import { IconAlertTriangle, IconGauge, IconPencil, IconPlus, IconUser } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -9,7 +8,7 @@ import { formatDate } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { changeVehicleOwner } from '../../services/customers';
 import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { VehicleModal } from './forms';
 import { LinkedMoney } from '../money/MoneyEntry';
 
@@ -21,7 +20,7 @@ export function VehiclePage() {
   const { run } = useAction();
   const [edit, setEdit] = useState(false);
   const [ownerPick, setOwnerPick] = useState<string | null>(null);
-  const data = useLiveQuery(async () => {
+  const data = useScreenLiveQuery(async () => {
     const v = await db.vehicles.get(id!);
     if (!v) return null;
     const [owner, orders, owners, customers] = await Promise.all([

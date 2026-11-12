@@ -485,17 +485,16 @@ html.kb .screen > .screen-bottom {
   z-index: 3;
   height: var(--edge-h, 0px);
   pointer-events: none;
+  /* A gradient only (no blur under it: a blur over the scrolling content is redrawn on every frame of
+     a scroll or a slide, on top of the bars' own glass): dense at the bottom, so no sharp words peek
+     between the floating bars, easing out over the top third. */
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--app-canvas) 96%, transparent) 0%,
-    color-mix(in srgb, var(--app-canvas) 82%, transparent) 45%,
+    color-mix(in srgb, var(--app-canvas) 98%, transparent) 0%,
+    color-mix(in srgb, var(--app-canvas) 90%, transparent) 40%,
+    color-mix(in srgb, var(--app-canvas) 55%, transparent) 70%,
     color-mix(in srgb, var(--app-canvas) 0%, transparent) 100%
   );
-  /* …and blurs (the progressive edge of iOS 26): no sharp words peeking between the floating bars. */
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  -webkit-mask-image: linear-gradient(to top, #000 60%, transparent);
-  mask-image: linear-gradient(to top, #000 60%, transparent);
 }
 .screen[data-tabbar='true'] {
   --edge-h: calc(var(--bar-zone) + 26px);

@@ -33,11 +33,11 @@ import {
   IconTool,
   IconTrash,
   IconUser,
+  IconUserDollar,
   IconUserPlus,
   IconUserX,
   type Icon,
 } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -69,9 +69,10 @@ import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleto
 import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
-import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
+import { useAction, useLang, useOrderBundle, useScreenLiveQuery } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
-import { scrollToTop, useStack } from '../../ui/stack';
+import { LazySheet } from '../../ui/lazy';
+import { scrollToTop, useStackBack } from '../../ui/stack';
 import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
 import { useSendVersion } from '../estimate/EstimatePage';
@@ -299,13 +300,14 @@ export function JobPage() {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
-  const stack = useStack();
+  const stackBack = useStackBack();
   const { run, busy } = useAction();
   const b = useOrderBundle(id);
   // Quick lines in the language of this job's documents (English by default), as they will be printed.
-  const suggestions = useSuggestions(b?.order.docLanguage ?? 'en', b?.order.complaint);
+  // Read a moment after the job slid in, and only while lines can still be added.
+  const suggestions = useSuggestions(b?.order.docLanguage ?? 'en', b?.order.complaint, !!b && !['closed', 'cancelled'].includes(b.order.stage) && !activeInvoice(b.invoices));
   const sv = useSendVersion(b);
-  const mechanics = useLiveQuery(() => db.employees.filter((e) => e.active).toArray(), []) ?? [];
+  const mechanics = useScreenLiveQuery(() => db.employees.filter((e) => e.active).toArray(), []) ?? [];
   const [sheet, setSheet] = useState<{ kind: LineKind; item?: OrderItem } | null>(null);
   // While the sheet slides away it keeps showing what it showed (not "Add labour" for a part).
   const lastSheet = useRef(sheet);
@@ -330,7 +332,7 @@ export function JobPage() {
   const [profitShown, setProfitShown] = useState(false);
   // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
   const obd = useObdImport(id ?? '');
-  const expenses = useLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
+  const expenses = useScreenLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
@@ -524,9 +526,17 @@ export function JobPage() {
   );
   const invOff = inv ? inv.lines.filter((l) => l.kind === 'discount') : [];
   const paid = paidNet(b.payments);
-  // Closed without payment: the amount let go, under the total.
+  // Closed without the manager taking the money, under the total: paid to the owner (neutral), or let go (orange).
   const waivedRow = b.order.waived ? (
-    <ListRow left={<IconCashOff size={20} stroke={1.8} color="var(--mantine-color-orange-6)" aria-hidden />} title={<Text span c="orange.7" inherit>{t('job.unpaid')}</Text>} right={<Money fils={b.order.waived.fils} c="orange.7" />} />
+    b.order.waived.via === 'owner' ? (
+      <ListRow
+        left={<IconUserDollar size={20} stroke={1.8} color="var(--mantine-color-cobalt-6)" aria-hidden />}
+        title={<Text span c="dimmed" inherit>{t('job.paidOwner')}</Text>}
+        right={<Money fils={b.order.waived.fils} c="dimmed" />}
+      />
+    ) : (
+      <ListRow left={<IconCashOff size={20} stroke={1.8} color="var(--mantine-color-orange-6)" aria-hidden />} title={<Text span c="orange.7" inherit>{t('job.unpaid')}</Text>} right={<Money fils={b.order.waived.fils} c="orange.7" />} />
+    )
   ) : null;
   // What the job earns (without VAT, less parts, work outside, expenses) — once some cost is known.
   const profit = jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: expenses ?? [] });
@@ -877,20 +887,36 @@ export function JobPage() {
       )}
       </div>
 
-      <LineSheet
-        b={b}
-        kind={shownSheet?.kind ?? 'labor'}
-        item={shownSheet?.item}
-        opened={!!sheet}
-        onClose={() => setSheet(null)}
-        onDelete={sheet?.item ? () => removeLine(sheet.item!) : undefined}
-        suggestions={shownSheet ? suggestions?.[shownSheet.kind] : undefined}
-      />
+      <LazySheet opened={!!sheet} warm={editable}>
+        {(o) => (
+          <LineSheet
+            b={b}
+            kind={shownSheet?.kind ?? 'labor'}
+            item={shownSheet?.item}
+            opened={o}
+            onClose={() => setSheet(null)}
+            onDelete={sheet?.item ? () => removeLine(sheet.item!) : undefined}
+            suggestions={shownSheet ? suggestions?.[shownSheet.kind] : undefined}
+          />
+        )}
+      </LazySheet>
       <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i })} />
-      <MoreSheet opened={more} onClose={() => setMore(false)} tiles={tiles} />
-      <MechanicSheet b={b} opened={mechanicOpen} onClose={() => setMechanicOpen(false)} />
+      <LazySheet opened={more}>
+        {(o) => (
+          <MoreSheet opened={o} onClose={() => setMore(false)} tiles={tiles} />
+        )}
+      </LazySheet>
+      <LazySheet opened={mechanicOpen}>
+        {(o) => (
+          <MechanicSheet b={b} opened={o} onClose={() => setMechanicOpen(false)} />
+        )}
+      </LazySheet>
       {obd.input}
-      <ComplaintSheet b={b} opened={complaintOpen} onClose={() => setComplaintOpen(false)} />
+      <LazySheet opened={complaintOpen}>
+        {(o) => (
+          <ComplaintSheet b={b} opened={o} onClose={() => setComplaintOpen(false)} />
+        )}
+      </LazySheet>
       <ConfirmModal
         opened={finish}
         onClose={() => setFinish(false)}
@@ -940,36 +966,51 @@ export function JobPage() {
         opened={unpaid}
         onClose={() => setUnpaid(false)}
         title={t('job.unpaidTitle')}
-        confirmLabel={t('job.unpaidClose')}
-        color="orange"
+        // The usual case first: the customer settled with the owner. Nothing goes into the cash either way.
+        confirmLabel={t('job.paidOwner')}
         onConfirm={() =>
           run(async () => {
-            await closeUnpaid(oid);
+            await closeUnpaid(oid, 'owner');
             haptic('success');
             scrollToTop();
             return true;
           })
         }
+        secondary={{
+          label: t('job.noMoney'),
+          color: 'orange',
+          onClick: () =>
+            run(async () => {
+              await closeUnpaid(oid);
+              haptic('success');
+              scrollToTop();
+              return true;
+            }),
+        }}
       >
         <Text size="sm">{t('job.unpaidText')}</Text>
         <Text mt="sm" fw={700} fz={20}>
           <Money fils={due} display />
         </Text>
       </ConfirmModal>
-      <DeleteJobModal
-        order={b.order}
-        opened={remove}
-        onClose={() => setRemove(false)}
-        // The job's screen goes back first (it must not show an empty page), then the job is deleted.
-        beforeDelete={async () => {
-          if (stack) stack.back('/');
-          else navigate('/');
-          await new Promise((r) => setTimeout(r, 520));
-        }}
-      />
+      <LazySheet opened={remove}>
+        {(o) => (
+          <DeleteJobModal
+            order={b.order}
+            opened={o}
+            onClose={() => setRemove(false)}
+            // The job's screen goes back first (it must not show an empty page), then the job is deleted.
+            beforeDelete={async () => {
+              if (stackBack) stackBack('/');
+              else navigate('/');
+              await new Promise((r) => setTimeout(r, 520));
+            }}
+          />
+        )}
+      </LazySheet>
       {pay && <PaymentModal b={b} opened onClose={() => setPay(null)} kind={pay} />}
-      <DiscountSheet b={b} opened={discountOpen} onClose={() => setDiscountOpen(false)} />
-      <CustomerModal opened={customerOpen} onClose={() => setCustomerOpen(false)} customer={c} />
+      <LazySheet opened={discountOpen}>{(o) => <DiscountSheet b={b} opened={o} onClose={() => setDiscountOpen(false)} />}</LazySheet>
+      <LazySheet opened={customerOpen}>{(o) => <CustomerModal opened={o} onClose={() => setCustomerOpen(false)} customer={c} />}</LazySheet>
       <SendDialog customer={c} request={sv.send} onClose={() => sv.setSend(null)} onSent={() => void syncStage(oid)} />
       <SendDialog customer={c} request={send} onClose={() => setSend(null)} />
     </>

@@ -1,9 +1,9 @@
 import { Group, Modal, Text, ThemeIcon } from '@mantine/core';
 import { IconBuildingFactory2, IconCash, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { hoursBetween, nowIso, shortDuration, TZ, whenParts } from '../../domain/dates';
+import { dueShort, hoursBetween, nowIso, shortDuration } from '../../domain/dates';
 import type { Phase } from '../../domain/flow';
 import { liveLines } from '../../domain/flow';
 import { activeInvoice } from '../../domain/invoice';
@@ -12,6 +12,7 @@ import { partsToFind } from '../../services/flow';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { useLang } from '../../ui/hooks';
+import { LazySheet } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { useSwipeAction } from '../../ui/swipe';
 import { PHASE_META } from '../job/phase';
@@ -37,7 +38,16 @@ export interface RowSwipe {
   onCommit: () => void;
 }
 
-export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phase; cover?: string; swipe?: RowSwipe }) {
+type RowProps = { b: OrderBundle; phase: Phase; cover?: string; swipe?: RowSwipe; /** Changes every few minutes: "how long" and "late" move on. */ tick?: number };
+
+/**
+ * A row renders again only when its job changed (the board keeps the same bundle for a job that did
+ * not — `loadBoard`), its photo or step did, or the clock moved on: the board refreshing, the stack
+ * moving, a swipe on another row leave it alone.
+ */
+export const JobRow = memo(JobRowView, (a, z) => a.b === z.b && a.phase === z.phase && a.cover === z.cover && a.tick === z.tick && a.swipe?.label === z.swipe?.label);
+
+function JobRowView({ b, phase, cover, swipe }: RowProps) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
@@ -70,12 +80,7 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
   const due = working ? b.order.promisedReadyAt : undefined;
   const dueLate = !!due && due < nowIso();
   // Short enough to stand beside the plate: the time today, the weekday and the time on another day.
-  const dueText = due ? (() => {
-    const w = whenParts(due, lang);
-    if (w.today) return w.time;
-    const wd = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { weekday: 'short', timeZone: TZ }).format(new Date(due)).replace('.', '');
-    return `${wd} ${w.time}`;
-  })() : '';
+  const dueText = due ? dueShort(due, lang) : '';
   const open = () => navigate(`/orders/${b.order.id}`);
   return (
     <>
@@ -159,7 +164,9 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
         </div>
       </div>
       {/* The row's actions (long press), a sheet like the iPhone's context menu. */}
-      <Modal opened={menu} onClose={() => setMenu(false)} title={`№${b.order.number} · ${car}`.trim()}>
+      <LazySheet opened={menu}>
+        {(o) => (
+      <Modal opened={o} onClose={() => setMenu(false)} title={`№${b.order.number} · ${car}`.trim()}>
         <List>
           <ListRow
             title={t('common.open')}
@@ -194,7 +201,9 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
           />
         </List>
       </Modal>
-      <DeleteJobModal order={b.order} opened={remove} onClose={() => setRemove(false)} />
+        )}
+      </LazySheet>
+      <LazySheet opened={remove}>{(o) => <DeleteJobModal order={b.order} opened={o} onClose={() => setRemove(false)} />}</LazySheet>
     </>
   );
 }

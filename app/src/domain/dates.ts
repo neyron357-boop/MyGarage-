@@ -130,11 +130,39 @@ export function whenParts(iso: string, lang: Lang, now: string = nowIso()): { da
   if (diff === 0) return { day: '', time, today: true };
   if (diff === 1) return { day: ru ? 'завтра' : 'tomorrow', time, today: false };
   if (diff === -1) return { day: ru ? 'вчера' : 'yesterday', time, today: false };
-  if (diff > 1 && diff < 7) {
-    const wd = new Intl.DateTimeFormat(ru ? 'ru-RU' : 'en-GB', { weekday: 'short', timeZone: TZ }).format(new Date(iso));
-    return { day: wd.replace('.', ''), time, today: false };
-  }
+  if (diff > 1 && diff < 7) return { day: weekdayShort(iso, lang), time, today: false };
   return { day: formatDate(day).slice(0, 5), time, today: false };
+}
+
+/*
+ * Formatters are made once per language and kept: making an Intl formatter costs far more than using
+ * one, and the board and the job ask for dates on every render.
+ */
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
+function fmt(lang: Lang, key: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const k = `${lang}:${key}`;
+  let f = fmtCache.get(k);
+  if (!f) {
+    f = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { timeZone: TZ, ...opts });
+    fmtCache.set(k, f);
+  }
+  return f;
+}
+
+/** "пт", "Fri" — the weekday in Dubai, short. */
+export function weekdayShort(iso: string, lang: Lang): string {
+  return fmt(lang, 'wd', { weekday: 'short' }).format(new Date(iso)).replace('.', '');
+}
+
+/** "четверг, 12 ноября" — the day in words (the board's header). */
+export function dayLong(iso: string | Date, lang: Lang): string {
+  return fmt(lang, 'long', { weekday: 'long', day: 'numeric', month: 'long' }).format(typeof iso === 'string' ? new Date(iso) : iso);
+}
+
+/** On a board row: the time today, the weekday and the time on another day. */
+export function dueShort(iso: string, lang: Lang, now: string = nowIso()): string {
+  const w = whenParts(iso, lang, now);
+  return w.today ? w.time : `${weekdayShort(iso, lang)} ${w.time}`;
 }
 
 export function hoursBetween(fromIso: string, toIso: string = nowIso()): number {

@@ -185,7 +185,16 @@ export interface Order {
    * Closed without payment and without a debt (warranty, goodwill, the money will not come): what was
    * due then is let go — the job owes nothing. Reopening the job takes it back.
    */
-  waived?: { at: string; fils: number };
+  waived?: {
+    at: string;
+    fils: number;
+    /**
+     * 'owner' — the customer settled with the garage's owner directly (the manager does not know how):
+     * the job is closed and owes nothing, and nothing goes into the manager's cash or money book. The
+     * revenue stays the garage's (the profit is not cut). Without it — the money will not come at all.
+     */
+    via?: 'owner';
+  };
   /** "How is the car?" asked a few days after the car left (or the reminder dismissed): it leaves the Today list. */
   followedUpAt?: string;
   stageChangedAt: string;

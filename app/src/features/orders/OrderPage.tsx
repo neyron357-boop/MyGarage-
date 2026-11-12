@@ -107,7 +107,7 @@ import { ProcurementModal } from '../parts/Procurement';
 import { orderFlags } from './flags';
 import { nextStep, type StepAction } from './nextStep';
 import { DeleteJobModal } from './DeleteJob';
-import { useStack } from '../../ui/stack';
+import { useStackBack } from '../../ui/stack';
 
 const ctxOf = (b: OrderBundle) => ({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils });
 
@@ -724,7 +724,7 @@ function JournalTab({ b }: { b: OrderBundle }) {
     if (type === 'decision') return `v${p.version} · ${t(`via.${p.via}`)} · ✓ ${p.approved} · ✕ ${p.declined}${p.note ? ` · ${p.note}` : ''}`;
     if (type === 'payment') return `${t(`payment.kind.${p.kind}`)} · ${t(`payment.method.${p.method}`)} · ${formatAed(Number(p.amount))}`;
     if (type === 'message') return `${p.channel}`;
-    if (type === 'closed_unpaid') return formatAed(Number(p.fils ?? 0));
+    if (type === 'closed_unpaid' || type === 'closed_owner') return formatAed(Number(p.fils ?? 0));
     if (type === 'invoice' || type === 'credit_note') return String(p.number ?? '');
     if (type === 'discount') return [formatAed(Number(p.amount ?? 0)), p.pct ? `${Number(p.pct) / 100} %` : '', p.invoice ? `${p.credit} → ${p.invoice}` : ''].filter(Boolean).join(' · ');
     if (type === 'item_added' || type === 'done' || type === 'undone') return String(p.title ?? '');
@@ -781,7 +781,7 @@ export function OrderPage() {
   const [decline, setDecline] = useState(false);
   const [noShow, setNoShow] = useState(false);
   const [remove, setRemove] = useState(false);
-  const stack = useStack();
+  const stackBack = useStackBack();
   const [decide, setDecide] = useState<EstimateVersion | null>(null);
   const [pay, setPay] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
@@ -1099,7 +1099,7 @@ export function OrderPage() {
         onClose={() => setRemove(false)}
         // The job's screen goes back first (it must not show an empty page), then the job is deleted.
         beforeDelete={async () => {
-          if (stack) stack.back('/');
+          if (stackBack) stackBack('/');
           else navigate('/');
           await new Promise((r) => setTimeout(r, 520));
         }}

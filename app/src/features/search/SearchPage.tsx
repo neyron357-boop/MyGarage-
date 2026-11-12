@@ -1,6 +1,5 @@
 import { ActionIcon, Avatar, Box, Button, Group, Stack, Text } from '@mantine/core';
 import { IconBrandWhatsapp, IconHistory, IconPhone, IconPlus, IconUserSearch } from '@tabler/icons-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -13,7 +12,7 @@ import { search, type SearchHit } from '../../services/customers';
 import { whatsappUrl } from '../../services/messages';
 import { loadJobIndex, type JobHitData } from '../../services/search';
 import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, StageBadge } from '../../ui/components';
-import { useLang, usePhone } from '../../ui/hooks';
+import { useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 
 export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage }; history?: Order[]; historyCount?: number };
 
@@ -22,7 +21,7 @@ export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stag
  * — so the history stays in sight also once a new job for the car is open.
  */
 export function useSearch(q: string) {
-  return useLiveQuery(async () => {
+  return useScreenLiveQuery(async () => {
     const hits = await search(q);
     const ids = hits.map((h) => h.vehicle?.id).filter((x): x is string => !!x);
     const orders = ids.length ? await db.orders.where('vehicleId').anyOf(ids).toArray() : [];
@@ -150,10 +149,10 @@ export function SearchPage() {
   const dq = useDeferredValue(q);
   const hits = useSearch(dq);
   // Read once (and again when the data changes); each letter only filters it.
-  const jobIndex = useLiveQuery(() => loadJobIndex(lang), [lang]);
+  const jobIndex = useScreenLiveQuery(() => loadJobIndex(lang), [lang], 600);
   const jobs = useMemo(() => (jobIndex && dq.trim() ? matchJobs(jobIndex, dq) : undefined), [jobIndex, dq]);
   // Suppliers too: "toyota headlights" — who to write to, one tap from the result.
-  const allSuppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []);
+  const allSuppliers = useScreenLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []);
   const suppliers = useMemo(() => {
     const words = dq.toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
     if (!words.length || !allSuppliers) return [];
@@ -164,7 +163,7 @@ export function SearchPage() {
       })
       .slice(0, 6);
   }, [allSuppliers, dq]);
-  const recent = useLiveQuery(async () => {
+  const recent = useScreenLiveQuery(async () => {
     const orders = await db.orders.orderBy('createdAt').reverse().limit(8).toArray();
     const [vs, cs] = await Promise.all([db.vehicles.bulkGet(orders.map((o) => o.vehicleId)), db.customers.bulkGet(orders.map((o) => o.customerId))]);
     return orders.map((o, i) => ({ o, v: vs[i], c: cs[i] }));
