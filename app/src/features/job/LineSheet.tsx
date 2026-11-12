@@ -1,4 +1,5 @@
-import { Autocomplete, Button, Group, Modal, NumberInput, SimpleGrid, Stack, Text } from '@mantine/core';
+import { ActionIcon, Autocomplete, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
+import { IconMinus, IconPlus } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,11 +12,10 @@ import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
-import { MoneyInput } from '../../ui/components';
+import { FormRow, MoneyInput, RowGroup } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { typedOnly, useAction } from '../../ui/hooks';
+import { typedOnly, useAction, useLang } from '../../ui/hooks';
 import { PhotoStrip } from '../../ui/PhotoStrip';
-import { VatModeField } from '../estimate/components';
 
 export type LineKind = 'labor' | 'part';
 /** A line typed before: its latest net price, VAT-inclusive price if typed with VAT, and VAT rate (0 — no VAT). */
@@ -87,6 +87,7 @@ export function LineSheet({
   const { t } = useTranslation();
   // The lines go on the customer's documents: names in the job's document language (English by default).
   const lang = b.order.docLanguage;
+  const uiLang = useLang();
   const { run, busy } = useAction();
   const suppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []) ?? [];
   const [title, setTitle] = useState('');
@@ -170,92 +171,132 @@ export function LineSheet({
       haptic('light');
       onClose();
     });
+  const rate = taxRate / 100;
+  // The total under the price is for the manager: in the app's language (the line itself is in the documents' one).
+  const totalNote =
+    lineTotal && lineTotal.gross !== 0
+      ? mode === 'none'
+        ? t('item.vatTotalNone', { total: formatAed(lineTotal.gross, uiLang) })
+        : t('item.vatTotal', { total: formatAed(lineTotal.gross, uiLang), vat: formatAed(lineTotal.vat, uiLang, false) })
+      : undefined;
+  const nameLabel = kind === 'labor' ? t('qi.workName') : t('qi.partName');
   return (
-    <Modal opened={opened} onClose={onClose} title={item ? t('item.edit') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')}>
-      <Stack gap="md">
+    <Modal opened={opened} onClose={onClose} title={item ? t('item.edit') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
+      <Stack gap="lg">
         {!item && (suggestions?.top.length ?? 0) > 0 && (
-          <div className="chip-row" aria-label={t('qi.frequent')}>
-            {suggestions!.top.map((name) => (
+          // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
+          <div className="line-quick" aria-label={t('qi.frequent')}>
+            {suggestions!.top.slice(0, 6).map((name) => (
               <button key={name} type="button" className="chip" data-active={title === name} onClick={() => pick(name)}>
-                {name}
+                <span className="quick-name">{name}</span>
                 <span className="chip-note">{formatAed(suggested(suggestions!.list.get(name)!).price, lang, false)}</span>
               </button>
             ))}
           </div>
         )}
-        <Autocomplete
-          label={kind === 'labor' ? t('qi.workName') : t('qi.partName')}
-          placeholder={kind === 'labor' ? t('qi.workPlaceholder') : t('qi.partPlaceholder')}
-          data={names}
-          filter={typedOnly}
-          limit={8}
-          value={title}
-          renderOption={({ option }) => {
-            const s = suggestions?.list.get(option.value);
-            const p = s?.price ? suggested(s).price : undefined;
-            return (
-              <Group justify="space-between" wrap="nowrap" w="100%" gap="sm">
-                <Text size="sm" lineClamp={2}>
-                  {option.value}
-                </Text>
-                {!!p && (
-                  <Text size="sm" c="dimmed" className="tnum" style={{ flexShrink: 0 }}>
-                    {formatAed(p)}
-                  </Text>
-                )}
-              </Group>
-            );
-          }}
-          onChange={(v) => {
-            setTitle(v);
-            const s = suggestions?.list.get(v);
-            if (s) {
-              setPicked(s);
-              if ((price === undefined || price === 0) && s.price) takeSuggestion(s);
-            }
-          }}
-          autoComplete="off"
-          // With quick chips on screen the keyboard waits for a tap: it would cover them.
-          data-autofocus={item || !suggestions?.top.length ? true : undefined}
-        />
-        {kind === 'part' && (
-          <div className="chip-row" aria-label={t('job.partState')}>
-            {PART_STATES.map((s) => (
-              <button key={s} type="button" className="chip" data-active={part === s} onClick={() => setPart(s)}>
-                {t(`job.part.${s}`)}
-              </button>
-            ))}
+
+        {/* What it is: the name, large; for a part — where it stands. */}
+        <div className="ios-group">
+          <div className="ios-row left line-name">
+            <Autocomplete
+              aria-label={nameLabel}
+              placeholder={kind === 'labor' ? t('qi.workPlaceholder') : t('qi.partPlaceholder')}
+              data={names}
+              filter={typedOnly}
+              limit={8}
+              value={title}
+              w="100%"
+              renderOption={({ option }) => {
+                const s = suggestions?.list.get(option.value);
+                const p = s?.price ? suggested(s).price : undefined;
+                return (
+                  <Group justify="space-between" wrap="nowrap" w="100%" gap="sm">
+                    <Text size="sm" lineClamp={2}>
+                      {option.value}
+                    </Text>
+                    {!!p && (
+                      <Text size="sm" c="dimmed" className="tnum" style={{ flexShrink: 0 }}>
+                        {formatAed(p)}
+                      </Text>
+                    )}
+                  </Group>
+                );
+              }}
+              onChange={(v) => {
+                setTitle(v);
+                const s = suggestions?.list.get(v);
+                if (s) {
+                  setPicked(s);
+                  if ((price === undefined || price === 0) && s.price) takeSuggestion(s);
+                }
+              }}
+              autoComplete="off"
+              // With quick chips on screen the keyboard waits for a tap: it would cover them.
+              data-autofocus={item || !suggestions?.top.length ? true : undefined}
+            />
           </div>
-        )}
+          {kind === 'part' && (
+            <div className="ios-row">
+              <SegmentedControl
+                fullWidth
+                value={part}
+                onChange={(v) => setPart(v as PartState)}
+                aria-label={t('job.partState')}
+                data={PART_STATES.map((s) => ({ value: s, label: t(`job.part.${s}`) }))}
+                style={{ flex: 1 }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* How much: rows as in the iPhone's settings — the label on the left, the value on the right. */}
         {!own && (
-          <>
+          <RowGroup mt={0} note={totalNote}>
             {kind === 'part' && (
-              // What the supplier asks comes first: the customer's price follows it with the markup.
-              <SimpleGrid cols={2}>
-                <NumberInput label={t('qi.qty')} min={0.1} step={1} decimalScale={2} value={qty} onChange={(v) => setQty(Number(v) || 1)} inputMode="decimal" />
+              <FormRow label={t('qi.qty')}>
+                <QtyStepper value={qty} onChange={setQty} label={t('qi.qty')} />
+              </FormRow>
+            )}
+            {kind === 'part' && (
+              <FormRow label={t('qi.costShort')}>
                 <MoneyInput
-                  label={t('qi.cost')}
+                  label={undefined}
+                  ariaLabel={t('qi.cost')}
                   value={cost}
                   onChange={(c) => {
                     if (!price || price === fromCost(cost)) setPrice(fromCost(c));
                     setCost(c);
                   }}
                 />
-              </SimpleGrid>
+              </FormRow>
             )}
-            <MoneyInput label={kind === 'part' ? t('qi.unitPrice') : t('qi.price')} value={price} onChange={setPrice} />
-            <VatModeField mode={mode} onChange={setMode} rateBp={taxRate} total={lineTotal} />
-          </>
+            <FormRow label={kind === 'part' ? t('qi.priceShort') : t('qi.price')}>
+              <MoneyInput label={undefined} ariaLabel={kind === 'part' ? t('qi.unitPrice') : t('qi.price')} value={price} onChange={setPrice} />
+            </FormRow>
+            <FormRow label="VAT">
+              <SegmentedControl
+                value={mode}
+                onChange={(m) => setMode(m as VatMode)}
+                aria-label={t('item.vatMode.label')}
+                data={(['add', 'incl', 'none'] as const).map((m) => ({ value: m, label: t(`item.vatShort.${m}`, { rate }) }))}
+              />
+            </FormRow>
+          </RowGroup>
         )}
+
         {kind === 'part' && !own && suppliers.length > 0 && (
-          <div className="chip-row" aria-label={t('job.supplier')}>
-            {suppliers.map((s) => (
-              <button key={s.id} type="button" className="chip" data-active={supplierId === s.id} onClick={() => setSupplierId(supplierId === s.id ? undefined : s.id)}>
-                {s.name}
-              </button>
-            ))}
+          <div>
+            <div className="group-title">{t('job.supplier')}</div>
+            <div className="chip-row" aria-label={t('job.supplier')}>
+              {suppliers.map((s) => (
+                <button key={s.id} type="button" className="chip" data-active={supplierId === s.id} onClick={() => setSupplierId(supplierId === s.id ? undefined : s.id)}>
+                  {s.name}
+                </button>
+              ))}
+            </div>
           </div>
         )}
+
         <PhotoStrip
           name="line"
           photos={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
@@ -278,5 +319,36 @@ export function LineSheet({
         )}
       </Stack>
     </Modal>
+  );
+}
+
+/** A quantity with − and + beside it (and typed when it is not a whole number). */
+function QtyStepper({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const step = (d: number) => onChange(Math.max(1, Math.round((value + d) * 100) / 100));
+  return (
+    <Group gap={6} wrap="nowrap" className="qty-stepper">
+      <ActionIcon variant="light" color="gray" size={36} radius="xl" aria-label="−" disabled={value <= 1} onClick={() => step(-1)}>
+        <IconMinus size={18} />
+      </ActionIcon>
+      <TextInput
+        aria-label={label}
+        inputMode="decimal"
+        value={text}
+        w={56}
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => {
+          setText(e.currentTarget.value);
+          const n = Number(e.currentTarget.value.replace(',', '.'));
+          if (n > 0) onChange(n);
+        }}
+        onBlur={() => setText(String(value))}
+        styles={{ input: { textAlign: 'center', fontVariantNumeric: 'tabular-nums' } }}
+      />
+      <ActionIcon variant="light" color="gray" size={36} radius="xl" aria-label="+" onClick={() => step(1)}>
+        <IconPlus size={18} />
+      </ActionIcon>
+    </Group>
   );
 }

@@ -813,8 +813,11 @@ export function MoneyInput({
   error,
   autoFocus,
   size = 'md',
+  ariaLabel,
 }: {
   label: ReactNode;
+  /** In a row whose label is beside it: the field's name for screen readers (and tests). */
+  ariaLabel?: string;
   value: number | undefined;
   onChange: (fils: number | undefined) => void;
   required?: boolean;
@@ -832,6 +835,7 @@ export function MoneyInput({
   return (
     <TextInput
       label={label}
+      aria-label={ariaLabel}
       description={description}
       required={required}
       inputMode="decimal"

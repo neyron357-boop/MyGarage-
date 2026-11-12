@@ -367,7 +367,7 @@ async function launchBrowser() {
     await page.getByText('Фильтр салона').first().click();
     await dlg.getByLabel('Закупка за шт.').fill('20');
     await dlg.getByLabel('Цена за шт.').fill('30');
-    await dlg.getByRole('button', { name: 'Заказано' }).click();
+    await dlg.getByText('Заказано', { exact: true }).click();
     // A photo on the line (the part): picked in the sheet, saved with it; any photo can be shared or saved.
     await dlg.locator('input[data-photo-input="line"]').setInputFiles({ name: 'part.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await dlg.locator('.strip-tile img').first().waitFor();
@@ -388,7 +388,7 @@ async function launchBrowser() {
     await dlg.getByLabel('Что сделали').fill('RTA test fee');
     await dlg.getByLabel('Цена', { exact: true }).fill('100');
     await dlg.getByText('Итого 105,00 AED, в т. ч. VAT 5,00').waitFor();
-    await dlg.getByText('Без VAT', { exact: true }).click();
+    await dlg.getByText('Без', { exact: true }).click();
     await dlg.getByText('Итого 100,00 AED, без VAT').waitFor();
     await shot('31a-line-no-vat');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
