@@ -131,7 +131,8 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
         data={CAR_MAKES}
         filter={typedOnly}
         limit={8}
-        value={make}
+        // A make picked from the chips is shown by its chip: the field is for any other make.
+        value={makes.includes(canon) ? '' : make}
         onChange={(v) => {
           if (canonicalMake(v) !== canon) onModel('');
           onMake(v);
@@ -149,7 +150,18 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
               ))}
             </div>
           )}
-          <Autocomplete mt="sm" aria-label={t('vehicle.model')} placeholder={t('vehicle.model')} data={catalogue} filter={typedOnly} limit={8} value={model} onChange={onModel} autoComplete="off" />
+          <Autocomplete
+            mt="sm"
+            aria-label={t('vehicle.model')}
+            placeholder={models.length ? t('newOrder.otherModel') : t('vehicle.model')}
+            data={catalogue}
+            filter={typedOnly}
+            limit={8}
+            // Likewise the model: a chip shows it, the field takes any other.
+            value={models.includes(canonicalModel(make, model)) ? '' : model}
+            onChange={onModel}
+            autoComplete="off"
+          />
         </Box>
       )}
     </Box>

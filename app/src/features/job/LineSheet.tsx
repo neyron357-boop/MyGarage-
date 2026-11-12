@@ -242,7 +242,7 @@ export function LineSheet({
             {suggestions!.top.slice(0, 6).map((name) => (
               <button key={name} type="button" className="chip" data-active={title === name} onClick={() => pick(name)}>
                 <span className="quick-name">{name}</span>
-                <span className="chip-note">{formatAed(suggested(suggestions!.list.get(name)!).price, lang, false)}</span>
+                <span className="chip-note">{formatAed(suggested(suggestions!.list.get(name)!).price, uiLang, false)}</span>
               </button>
             ))}
           </div>
@@ -284,8 +284,9 @@ export function LineSheet({
                 }
               }}
               autoComplete="off"
-              // With quick chips on screen the keyboard waits for a tap: it would cover them.
-              data-autofocus={item || !suggestions?.top.length ? true : undefined}
+              // The keyboard waits for a tap when the chips are on screen (it would cover them) and when a line is
+              // edited (it is the price or the state that changes, not the name).
+              data-autofocus={!item && !suggestions?.top.length ? true : undefined}
             />
           </div>
           {kind === 'part' && (
@@ -471,9 +472,12 @@ export function LineSheet({
           }}
         />
         {/* A line may be saved without a price (a part still to find): it cannot go to the customer until it has one. */}
-        <Button size="lg" loading={busy} disabled={!title.trim()} onClick={save}>
-          {t('common.save')}
-        </Button>
+        {/* Pinned to the bottom of the sheet: "Save" is in reach however long the form is. */}
+        <div className="sheet-footer">
+          <Button size="lg" fullWidth loading={busy} disabled={!title.trim()} onClick={save}>
+            {t('common.save')}
+          </Button>
+        </div>
         {item && onDelete && (
           <Button variant="subtle" color="red" onClick={onDelete}>
             {t('common.delete')}

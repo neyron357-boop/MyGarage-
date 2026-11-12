@@ -396,7 +396,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
               <Button leftSection={<IconFileTypePdf size={18} />} loading={busy} onClick={() => run(async () => openPdf(await inspectionPdf(insp.id)))}>
                 {t('common.openPdf')}
               </Button>
-              <Button variant="white" leftSection={<IconSend size={18} />} onClick={() => offerSend(insp)}>
+              <Button variant="default" leftSection={<IconSend size={18} />} onClick={() => offerSend(insp)}>
                 {t('common.sendClient')}
               </Button>
               <Button variant="subtle" color="dark" onClick={() => navigate(`/orders/${b.order.id}`)}>

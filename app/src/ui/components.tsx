@@ -847,6 +847,8 @@ export function MoneyInput({
       }
       rightSectionWidth={48}
       value={text}
+      // In a form row (no label above) an empty amount still reads as a field: "0" in grey.
+      placeholder={label === undefined ? '0' : undefined}
       error={error}
       autoFocus={autoFocus}
       // Tapping a filled amount selects it, so typing replaces the old price instead of appending.

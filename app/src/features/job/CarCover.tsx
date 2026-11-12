@@ -76,13 +76,15 @@ export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: n
  * The car's VIN photo as a small tile in the job's card: without one, a tap opens the camera; with one,
  * the thumbnail — a tap shows it full screen (the VIN typed on the car as its title), to retake or share.
  */
-export function VinTile({ vehicleId, vin }: { vehicleId: string; vin?: string }) {
+export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?: string; hideEmpty?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
   const photo = useLiveQuery(async () => ({ id: await vinPhotoOf(vehicleId) }), [vehicleId]);
   const [viewing, setViewing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const take = () => input.current?.click();
+  // A closed job shows the VIN photo if there is one — not an empty tile asking for it.
+  if (hideEmpty && !photo?.id) return null;
   return (
     <>
       <button

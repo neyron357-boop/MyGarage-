@@ -192,7 +192,7 @@ export function WhoChips({ value, onChange }: { value?: string; onChange: (id: s
   return (
     <div>
       <div className="group-title">{t('job.who')}</div>
-      <div className="chip-row" aria-label={t('job.who')}>
+      <div className="chip-row wrap" aria-label={t('job.who')}>
         {staff.map((e: Employee) => (
           <button key={e.id} type="button" className="chip" data-active={value === e.id} onClick={() => onChange(value === e.id ? undefined : e.id)}>
             {e.name}
@@ -209,7 +209,7 @@ export const DAY_CHOICES = [0, 1, 2, 7] as const;
 export function DaysChips({ value, onChange, label }: { value?: number; onChange: (d: number | undefined) => void; label: string }) {
   const { t } = useTranslation();
   return (
-    <div className="chip-row" aria-label={label}>
+    <div className="chip-row wrap" aria-label={label}>
       {DAY_CHOICES.map((d) => (
         <button key={d} type="button" className="chip" data-active={value === d} onClick={() => onChange(value === d ? undefined : d)}>
           {t(`offer.days${d}`)}

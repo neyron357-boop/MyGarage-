@@ -372,7 +372,8 @@ export function PhotosStep({ insp, media, intakeMedia }: StepProps) {
       <Card>
         <Group justify="space-between" mb={6} wrap="nowrap" align="flex-start">
           <Text size="sm" fw={600}>
-            {live ? t(insp.kind === 'handover' ? 'camera.startHintHandover' : 'camera.startHint') : insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hintOptional')}
+            {/* The hint is for starting; once every side is shot the count says it all. */}
+            {complete ? '' : live ? t(insp.kind === 'handover' ? 'camera.startHintHandover' : 'camera.startHint') : insp.kind === 'handover' ? t('photos.hintHandover') : t('photos.hintOptional')}
           </Text>
           <Text fw={800} className="display tnum" fz={18} c={complete ? 'green' : undefined} style={{ flexShrink: 0 }}>
             {done} / {total}

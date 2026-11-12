@@ -120,8 +120,9 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
             </span>
           </span>
         ) : (
-          <ThemeIcon variant="light" color={m.color} size={40} radius="xl" style={{ flexShrink: 0 }}>
-            <m.icon size={21} stroke={1.8} />
+          // The same 48 pt square as a photo: the plates of all the rows line up.
+          <ThemeIcon variant="light" color={m.color} size={48} radius={12} style={{ flexShrink: 0 }}>
+            <m.icon size={23} stroke={1.8} />
           </ThemeIcon>
         )}
         <div className="body">

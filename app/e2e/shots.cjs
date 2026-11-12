@@ -78,10 +78,10 @@ async function launchBrowser() {
     await settle(700);
     await shot(`${prefix}-02e-job-part`);
     await closeSheet();
-    // Jobs on the other steps: waiting for the customer, in work.
-    for (const k of [1, 2]) {
+    // Jobs on the other steps: waiting for the customer's answer, in work.
+    for (const [k, step] of [[1, /Ждём|Waiting/], [2, /В работе|In work/]]) {
       await go('#/');
-      await page.locator('.screen[data-role="top"] .job-row').nth(k).click();
+      await page.locator('.screen[data-role="top"] .job-row').filter({ hasText: step }).first().click();
       await settle(900);
       await shot(`${prefix}-02f-job-${k}`);
     }
@@ -119,6 +119,10 @@ async function launchBrowser() {
 
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, locale: 'ru-RU' });
   const dp = await desk.newPage();
+  // The computer's browser has its own (empty) storage: the demo first, as on the phone.
+  await dp.goto(BASE + '#/settings?tab=data');
+  await dp.getByRole('button', { name: 'Загрузить демо-данные' }).click();
+  await dp.waitForTimeout(1500);
   await dp.goto(BASE + '#/');
   await dp.waitForTimeout(1200);
   await dp.screenshot({ path: `${OUT}/desktop-01-board.png` });

@@ -341,7 +341,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           </Group>
           <LinkPicker value={link} onChange={setLink} />
         </div>
-        <TextInput label={t('ledger.note')} placeholder={t(kind === 'in' ? 'ledger.notePlaceholderIn' : 'ledger.notePlaceholderOut')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
+        <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
         <UnstyledButton onClick={() => setMore((m) => !m)}>
           <Group gap={4} c="cobalt.6">
             <Text size="sm" fw={600} c="cobalt.6">

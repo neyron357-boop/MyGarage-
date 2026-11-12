@@ -1,4 +1,4 @@
-import { Button, Modal, Stack, TextInput } from '@mantine/core';
+import { Button, Modal, Stack } from '@mantine/core';
 import { IconClock } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,9 @@ export function useDueLabel() {
     return w.day ? t('job.dueAtDay', { day: w.day, time: w.time }) : t('job.dueAt', { time: w.time });
   };
 }
+
+/** The hours offered for "other time": the working day. */
+const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 /** Quick choices of when the car will be ready: in two hours, this evening, tomorrow… */
 function quickTimes(now = nowIso()) {
@@ -42,7 +45,15 @@ export function DueChip({ order, lang }: { order: Pick<Order, 'id' | 'promisedRe
   const { run, busy } = useAction();
   const label = useDueLabel();
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState<string>();
+  const today = dubaiDate();
+  // The day picked for "other time": the promised one, or today (tomorrow once the working day is over).
+  const [day, setDay] = useState(() => (order.promisedReadyAt ? dubaiDate(order.promisedReadyAt) : Number(dubaiTime(nowIso()).slice(0, 2)) >= 19 ? shiftDay(today, 1) : today));
+  const days = Array.from({ length: 7 }, (_, n) => {
+    const d = shiftDay(today, n);
+    const w = whenParts(dubaiAt(d, 12), lang);
+    const word = n === 0 ? t('offer.days0') : w.day;
+    return { day: d, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}` };
+  });
   const due = order.promisedReadyAt;
   const late = !!due && due < nowIso();
   const set = (iso: string | undefined) =>
@@ -77,19 +88,27 @@ export function DueChip({ order, lang }: { order: Pick<Order, 'id' | 'promisedRe
               );
             })}
           </div>
-          {/* Any day and hour: the phone's own date and time wheels (Dubai time). */}
-          <TextInput
-            type="datetime-local"
-            label={t('job.dueOther')}
-            value={custom ?? (due ? `${dubaiDate(due)}T${dubaiTime(due)}` : '')}
-            // The wheels change the value as they turn: it is taken when the picker closes.
-            onChange={(e) => setCustom(e.currentTarget.value)}
-            onBlur={() => {
-              const m = custom ? /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(custom) : null;
-              setCustom(undefined);
-              if (m) void set(dubaiAt(m[1], Number(m[2]), Number(m[3])));
-            }}
-          />
+          {/* Any other day and hour, two taps: the day, then the time (Dubai time). */}
+          <div>
+            <div className="group-title">{t('job.dueOther')}</div>
+            <div className="chip-row wrap" aria-label={t('job.dueDay')}>
+              {days.map((d) => (
+                <button key={d.day} type="button" className="chip" data-active={day === d.day} onClick={() => (setDay(d.day), haptic('selection'))}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            <div className="chip-row wrap" style={{ marginTop: 10 }} aria-label={t('job.dueTime')}>
+              {HOURS.map((h) => {
+                const iso = dubaiAt(day, h);
+                return (
+                  <button key={h} type="button" className="chip tnum" data-active={due === iso} disabled={iso < nowIso()} onClick={() => set(iso)}>
+                    {`${String(h).padStart(2, '0')}:00`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           {due && (
             <Button variant="subtle" color="red" loading={busy} onClick={() => set(undefined)}>
               {t('job.dueClear')}

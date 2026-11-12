@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Button, Group, Modal, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import {
   IconBrandWhatsapp,
   IconCamera,
@@ -25,6 +25,7 @@ import {
   IconPackage,
   IconPhone,
   IconPhoto,
+  IconPointFilled,
   IconRestore,
   IconScale,
   IconSend,
@@ -92,7 +93,8 @@ function LineMark({ item }: { item: OrderItem }) {
   if (item.approvalState === 'pending') return <IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />;
   if (item.approvalState === 'approved') return item.done ? <IconChecks size={20} stroke={2.2} color="var(--mantine-color-green-6)" aria-hidden /> : <IconCheck size={20} stroke={2.2} color="var(--mantine-color-cobalt-6)" aria-hidden />;
   if (item.approvalState === 'declined') return <IconCircleX size={20} stroke={1.9} color="var(--mantine-color-red-6)" aria-hidden />;
-  return <IconCircle size={20} stroke={1.9} color="var(--app-label-3)" aria-hidden />;
+  // Not told to the customer yet: a small dot (an empty circle would read as a box to tick).
+  return <IconPointFilled size={20} color="var(--app-label-3)" aria-hidden />;
 }
 
 interface Tile {
@@ -221,13 +223,14 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
         )}
         {part && !invoiced && (
           <>
-            <div className="chip-row" aria-label={t('job.partState')}>
-              {PART_STATES.filter((s) => s !== 'customer').map((s) => (
-                <button key={s} type="button" className="chip" data-active={state === s} onClick={() => setPart(s)}>
-                  {t(`job.part.${s}`)}
-                </button>
-              ))}
-            </div>
+            {/* The same switch as in the line's sheet: to find · ordered · here. */}
+            <SegmentedControl
+              fullWidth
+              aria-label={t('job.partState')}
+              value={state === 'customer' ? 'received' : state}
+              onChange={(v) => void setPart(v as PartState)}
+              data={PART_STATES.filter((s) => s !== 'customer').map((s) => ({ value: s, label: t(`job.part.${s}`) }))}
+            />
             <SupplierChips value={i.supplierId} make={b.vehicle.make} onChange={(s) => void run(() => setProcurement(i.id, { status: i.procurementStatus ?? 'needed', supplierId: s ?? '' }))} />
             {state === 'needed' && <RequestButton vehicle={b.vehicle} item={i} supplierId={i.supplierId} photoIds={i.mediaIds ?? []} />}
             {state === 'ordered' && i.qty > 1 && Number.isInteger(i.qty) && <ReceivedRow item={i} />}
@@ -497,10 +500,14 @@ export function JobPage() {
   ) : null;
   const hasAgreed = live.some((i) => i.kind !== 'discount' && i.approvalState === 'approved');
 
+  // The '…' tiles keep their places: the ones every job has first (customer, car, mechanic, photos), then
+  // what this step brings, and the destructive ones always last.
   const tiles: Tile[] = [];
+  tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
+  tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
+  if (open) tiles.push({ key: 'mechanic', icon: IconClipboardList, onClick: () => setMechanicOpen(true) });
   if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
-  if (open) tiles.push({ key: 'mechanic', icon: IconClipboardList, onClick: () => setMechanicOpen(true) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
@@ -510,12 +517,10 @@ export function JobPage() {
   if (inv && due > 0 && phase === 'pay') tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => navigate(`/orders/${oid}/details?tab=payments`) });
   // The car leaves and nothing is owed: no payment, no debt (warranty, goodwill, the money will not come).
   if (canCloseUnpaid(b.order.stage, due)) tiles.push({ key: 'unpaid', icon: IconCashOff, color: 'orange', onClick: () => setUnpaid(true) });
-  tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
-  tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
-  tiles.push({ key: 'details', icon: IconListDetails, onClick: () => navigate(`/orders/${oid}/details`) });
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
-  if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
+  tiles.push({ key: 'details', icon: IconListDetails, onClick: () => navigate(`/orders/${oid}/details`) });
+  if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
   let bar: ReactNode = null;
@@ -661,10 +666,12 @@ export function JobPage() {
                 </Text>
               )}
             </UnstyledButton>
-          ) : (
+          ) : open ? (
             <Button variant="light" size="compact-md" leftSection={<IconUserPlus size={16} />} onClick={() => setCustomerOpen(true)}>
               {t('job.client')}
             </Button>
+          ) : (
+            <span />
           )}
           {c.phone && (
             <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -677,18 +684,21 @@ export function JobPage() {
             </Group>
           )}
         </Group>
-        <UnstyledButton className="job-line job-complaint" mt="sm" onClick={open ? () => setComplaintOpen(true) : undefined} aria-label={t('job.complaint')}>
-          <IconMessage2 size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
-          <Text size="sm" c={b.order.complaint ? undefined : 'dimmed'} lineClamp={3}>
-            {b.order.complaint || t('job.complaint')}
-          </Text>
-        </UnstyledButton>
+        {(open || !!b.order.complaint) && (
+          <UnstyledButton className="job-line job-complaint" mt="sm" onClick={open ? () => setComplaintOpen(true) : undefined} aria-label={t('job.complaint')}>
+            <IconMessage2 size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+            <Text size="sm" c={b.order.complaint ? undefined : 'dimmed'} lineClamp={3}>
+              {b.order.complaint || t('job.complaint')}
+            </Text>
+          </UnstyledButton>
+        )}
         <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
         {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
         {/* When the car was promised, the mechanics (who does the job) and, on the right, the car's VIN photo. */}
         <div className="job-foot">
           {open ? (
-            <div className="chip-row" aria-label={t('order.mechanic')}>
+            // Wrapping, not scrolling: every mechanic stays in sight, one tap away.
+            <div className="chip-row wrap" aria-label={t('order.mechanic')}>
               {phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
               {mechanics.map((m) => (
                 <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
@@ -699,21 +709,10 @@ export function JobPage() {
           ) : (
             <span />
           )}
-          <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} />
+          <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} hideEmpty={!open} />
         </div>
       </Box>
 
-      {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
-        // Building the quote: the usual jobs for such a complaint, one tap each (name, last price).
-        <div className="chip-row" style={{ marginBottom: 12 }} aria-label={t('qi.frequent')}>
-          {quick.map(([name, s]) => (
-            <button key={name} type="button" className="chip" onClick={() => quickAdd(s)}>
-              {name}
-              <span className="chip-note">{formatAed(s.gross ?? s.price, docLang, false)}</span>
-            </button>
-          ))}
-        </div>
-      )}
       {inv ? (
         <>
           <List>
@@ -793,6 +792,18 @@ export function JobPage() {
               )}
               {lines.length > 0 && copyButton(44)}
             </Group>
+          )}
+          {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
+            // Building the quote: the usual jobs for such a complaint, one tap each (name, last price) — under
+            // the lines, where the work is added.
+            <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('qi.frequent')}>
+              {quick.map(([name, s]) => (
+                <button key={name} type="button" className="chip" onClick={() => quickAdd(s)}>
+                  {name}
+                  <span className="chip-note">{formatAed(s.gross ?? s.price, lang, false)}</span>
+                </button>
+              ))}
+            </div>
           )}
           {live.length > 0 && (
             <Box mt="lg">

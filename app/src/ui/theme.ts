@@ -255,6 +255,15 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--viz-1': '#007aff',
     '--viz-2': '#ff9500',
     '--viz-3': '#34c759',
+    // In daylight (the light theme is the day in Dubai) green and orange buttons take the deeper shade
+    // ("Increase contrast" of iOS): white words on them, and green or orange words on a pale tint, stay
+    // readable in the sun.
+    '--mantine-color-green-filled': 'var(--mantine-color-green-8)',
+    '--mantine-color-green-filled-hover': 'var(--mantine-color-green-9)',
+    '--mantine-color-green-light-color': 'var(--mantine-color-green-8)',
+    '--mantine-color-orange-filled': 'var(--mantine-color-orange-8)',
+    '--mantine-color-orange-filled-hover': 'var(--mantine-color-orange-9)',
+    '--mantine-color-orange-light-color': 'var(--mantine-color-orange-8)',
   },
   dark: {
     '--app-canvas': '#000000',

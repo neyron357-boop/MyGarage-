@@ -177,7 +177,8 @@ a {
 .mantine-SegmentedControl-control::before {
   display: none;
 }
-[data-mantine-color-scheme='dark'] .mantine-SegmentedControl-indicator {
+/* In the dark the plain segment is grey; a tinted one (income green, expense red) keeps its colour. */
+[data-mantine-color-scheme='dark'] .mantine-SegmentedControl-root:not([style*='--sc-color']) .mantine-SegmentedControl-indicator {
   background: #636366;
 }
 .mantine-SegmentedControl-label {
@@ -490,6 +491,11 @@ html.kb .screen > .screen-bottom {
     color-mix(in srgb, var(--app-canvas) 82%, transparent) 45%,
     color-mix(in srgb, var(--app-canvas) 0%, transparent) 100%
   );
+  /* …and blurs (the progressive edge of iOS 26): no sharp words peeking between the floating bars. */
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(to top, #000 60%, transparent);
+  mask-image: linear-gradient(to top, #000 60%, transparent);
 }
 .screen[data-tabbar='true'] {
   --edge-h: calc(var(--bar-zone) + 26px);
@@ -1200,8 +1206,9 @@ html.kb .tab-bar-wrap {
   display: flex;
   width: calc(100% + 2 * var(--mantine-spacing-md));
   margin: calc(var(--mantine-spacing-md) * -1) calc(var(--mantine-spacing-md) * -1) var(--mantine-spacing-md);
-  aspect-ratio: 16 / 9;
-  max-height: 260px;
+  /* Wide and not too tall: the job's lines still come into sight on a phone. */
+  aspect-ratio: 2 / 1;
+  max-height: 220px;
   padding: 0;
   overflow: hidden;
   border-radius: var(--radius-group) var(--radius-group) 0 0;
@@ -1280,7 +1287,7 @@ html.kb .tab-bar-wrap {
 /* The foot of the job's card: the mechanics' chips, the VIN photo tile on the right. */
 .job-foot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   margin-top: 12px;
 }
@@ -1300,7 +1307,7 @@ html.kb .tab-bar-wrap {
   overflow: hidden;
   border-radius: 14px;
   color: var(--mantine-color-cobalt-6);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   gap: 1px;
 }
@@ -1318,7 +1325,7 @@ html.kb .tab-bar-wrap {
   padding: 1px 0 2px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.04em;
 }
 /* A car's photo on its board row, the step it is on as a small badge in the corner. */
@@ -3081,9 +3088,13 @@ html.kb .screen-bottom > .sticky-bar {
   color: #fff;
 }
 
-/* Notifications: below the status bar, not under it */
+/* Notifications: under the navigation bar, not over its buttons (‹, ×, …). No coloured stripe at the
+   side: a banner says it in its icon and words. */
 .mantine-Notifications-root[data-position^='top'] {
-  top: calc(env(safe-area-inset-top, 0px) + 10px) !important;
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 6px) !important;
+}
+.mantine-Notification-root::before {
+  display: none;
 }
 
 /* ---------- Misc ---------- */
@@ -3527,4 +3538,61 @@ html.kb .screen-bottom > .sticky-bar {
 /* The job on a computer: a readable column, not the whole window. */
 .job-body {
   max-width: 860px;
+}
+
+/* ---------- Sideways rows run to the edge (as on iOS) ----------
+   A row of tabs or chips that scrolls sideways reaches the edge of the screen, the card or the sheet
+   (its first item still lines up with the text), instead of being cut at the padding as if broken. */
+.screen-body .scroll-tabs,
+.screen-body .job-body > .chip-row:not(.wrap) {
+  margin-inline: calc(-1 * var(--page-pad));
+  padding-inline: var(--page-pad);
+  scroll-padding-inline: var(--page-pad);
+}
+.screen-body .surface .chip-row:not(.wrap) {
+  margin-inline: -16px;
+  padding-inline: 16px;
+  scroll-padding-inline: 16px;
+}
+.ios-row > .chip-row:not(.wrap) {
+  margin-right: -16px;
+  padding-right: 16px;
+}
+.ios-row > .chip-row:not(.wrap):first-child {
+  margin-left: -16px;
+  padding-left: 16px;
+}
+@media (max-width: 48em) {
+  .mg-sheet .mantine-Modal-body .chip-row:not(.wrap):not(.ios-row > .chip-row) {
+    margin-inline: -20px;
+    padding-inline: 20px;
+    scroll-padding-inline: 20px;
+  }
+}
+/* The sheet's main button stays in reach at the bottom while the form scrolls. */
+.sheet-grouped {
+  --sheet-bg: var(--app-canvas);
+}
+[data-mantine-color-scheme='dark'] .sheet-grouped {
+  --sheet-bg: var(--app-card);
+}
+.sheet-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: -4px;
+  padding: 12px 0 2px;
+  background: linear-gradient(to top, var(--sheet-bg, var(--app-canvas)) 72%, transparent);
+}
+/* A choice that cannot be taken (an hour already past). */
+.chip:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+/* A row of chips on its own on the page (not in a card): it runs to the screen edge too. */
+.screen-body .chip-row.bleed:not(.wrap) {
+  margin-inline: calc(-1 * var(--page-pad));
+  padding-inline: var(--page-pad);
+  scroll-padding-inline: var(--page-pad);
 }

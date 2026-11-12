@@ -388,7 +388,7 @@ function Providers({ children }: { children: React.ReactNode }) {
   const mobile = usePhone();
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
-      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={2} autoClose={2600} transitionDuration={260} />
+      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />
       {children}
     </DatesProvider>
   );

@@ -108,10 +108,10 @@ function BusinessTab({ s }: { s: Settings }) {
   const { v, set, dirty } = useDraft(s);
   return (
     <Stack gap="md">
-      <Card title={t('settings.identity')} description={t('settings.identityHint')}>
+      <Card title={t('settings.identity')}>
         <Group gap="md" mb="md" wrap="nowrap">
           {v.logoDataUrl ? (
-            <Image src={v.logoDataUrl} h={64} w={64} fit="contain" radius="md" bg="var(--app-soft)" />
+            <Image src={v.logoDataUrl} h={64} w={64} fit="contain" radius="md" bg="var(--mantine-color-white)" p={4} />
           ) : (
             <ThemeIcon size={64} radius="md" variant="light" color="gray">
               <IconBuildingStore size={30} />
@@ -134,7 +134,7 @@ function BusinessTab({ s }: { s: Settings }) {
         </Group>
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <TextInput label={t('settings.name')} value={v.name} onChange={(e) => set({ name: e.currentTarget.value })} />
-          <TextInput label="TRN" description={t('settings.trnHint')} value={v.trn} onChange={(e) => set({ trn: e.currentTarget.value })} />
+          <TextInput label="TRN" value={v.trn} onChange={(e) => set({ trn: e.currentTarget.value })} />
           {/* The right-hand side of the document header, as on the garage's invoices. */}
           <TextInput label={t('settings.nameAr')} dir="rtl" value={v.nameAr ?? ''} onChange={(e) => set({ nameAr: e.currentTarget.value })} />
           <TextInput label={t('settings.addressAr')} dir="rtl" value={v.addressAr ?? ''} onChange={(e) => set({ addressAr: e.currentTarget.value })} />
@@ -645,7 +645,7 @@ export function SettingsPage() {
   );
   return (
     <>
-      <PageHeader title={t('nav.settings')} subtitle={t(`settings.tabHint.${tab}`)} />
+      <PageHeader title={t('nav.settings')} />
       {mobile ? (
         <>
           <ScrollTabs value={tab} onChange={openTab} items={TABS.map((x) => ({ value: x.key, label: t(`settings.tab.${x.key}`) }))} />

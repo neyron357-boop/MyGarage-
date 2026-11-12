@@ -83,7 +83,8 @@ export function useAction() {
 export const typedOnly: OptionsFilter = ({ options, search, limit }) => {
   const q = search.trim().toLowerCase();
   if (!q) return [];
-  const items = options.filter((o): o is ComboboxItem => 'value' in o);
+  // What is already typed in full is not offered again (the list would only cover the form).
+  const items = options.filter((o): o is ComboboxItem => 'value' in o && o.label.toLowerCase() !== q);
   const starts = items.filter((o) => o.label.toLowerCase().startsWith(q));
   const contains = items.filter((o) => !o.label.toLowerCase().startsWith(q) && o.label.toLowerCase().includes(q));
   return [...starts, ...contains].slice(0, limit);

@@ -102,35 +102,30 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
   const car = v ? [v.make, v.model].filter(Boolean).join(' ') : '';
   const shown = m.fields.slice(0, 3);
   const more = m.fields.length - shown.length;
+  // The car first (that is what the manager looks for), what matched under it in one line.
   return (
     <ListRow
       onClick={onClick}
       chevron
-      title={
-        m.byNumber ? (
-          car || nameOf(c) || `№${o.number}`
-        ) : (
-          <>
-            {shown.map((f, i) => (
-              <Fragment key={i}>
-                {i > 0 && ' · '}
-                {f.kind !== 'item' && <Text span inherit c="dimmed">{`${t(`search.field.${f.kind}`)}: `}</Text>}
-                <Marked text={f.text} terms={m.highlight} />
-              </Fragment>
-            ))}
-            {more > 0 && <Text span inherit c="dimmed">{` +${more}`}</Text>}
-          </>
-        )
-      }
+      title={<PlateLine plate={v?.plate}>{car || nameOf(c) || `№${o.number}`}</PlateLine>}
       subtitle={
         <Stack gap={4} align="flex-start">
-          <PlateLine plate={v?.plate}>{[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}</PlateLine>
+          {!m.byNumber && (
+            <Text span inherit lineClamp={1} style={{ maxWidth: '100%' }}>
+              {shown.map((f, i) => (
+                <Fragment key={i}>
+                  {i > 0 && ' · '}
+                  {f.kind !== 'item' && <Text span inherit c="dimmed">{`${t(`search.field.${f.kind}`)}: `}</Text>}
+                  <Marked text={f.text} terms={m.highlight} />
+                </Fragment>
+              ))}
+              {more > 0 && <Text span inherit c="dimmed">{` +${more}`}</Text>}
+            </Text>
+          )}
           <Group gap={6} wrap="nowrap" style={{ maxWidth: '100%' }}>
-            {(!m.byNumber && car) || nameOf(c) ? (
-              <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
-                {[!m.byNumber && car, nameOf(c)].filter(Boolean).join(' · ')}
-              </Text>
-            ) : null}
+            <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
+              {[`№${o.number}`, formatDate(o.createdAt), car ? nameOf(c) : ''].filter(Boolean).join(' · ')}
+            </Text>
             <StageBadge stage={o.stage} size="sm" />
           </Group>
         </Stack>

@@ -410,7 +410,7 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.getByText('В работе').first().waitFor();
     await page.getByText('Фильтр салона').first().click();
-    await dlg.getByRole('button', { name: 'Есть' }).click();
+    await dlg.getByText('Есть', { exact: true }).click();
     await shot('31b-line-actions');
     await page.locator('.mantine-Modal-close').first().click();
     await page.getByRole('button', { name: /^Готово/ }).click();
@@ -418,6 +418,8 @@ async function launchBrowser() {
     await page.getByText(/INV-/).first().waitFor();
     // A discount after the invoice: credit note and a new invoice (10 % of 320.50 = 32.05).
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Скидка' }).waitFor();
+    await page.waitForTimeout(500);
     await shot('32a-more');
     await dlg.getByRole('button', { name: 'Скидка' }).click();
     await dlg.getByText('%', { exact: true }).click();
@@ -627,7 +629,7 @@ async function launchBrowser() {
     await page.getByText('В работе').first().waitFor();
     // Bought: the seller takes it back within 7 days, the receipt photo kept with the line.
     await page.locator('.list-row', { hasText: 'Headlight LH' }).first().click();
-    await dlg.getByRole('button', { name: 'Заказано' }).click();
+    await dlg.getByText('Заказано', { exact: true }).click();
     await dlg.getByRole('button', { name: '7 дн.' }).click();
     await dlg.locator('input[data-photo-input="deal"]').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await dlg.locator('.strip-tile img').first().waitFor();

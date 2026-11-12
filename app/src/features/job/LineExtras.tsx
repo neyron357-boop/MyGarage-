@@ -41,7 +41,7 @@ export function ReturnTerms({ item, withProof = true }: { item: OrderItem; withP
         {t('parts.returnTitle')}
         {item.returnBy && !item.noReturn ? ` · ${t('parts.returnUntil', { date: formatDate(item.returnBy).slice(0, 5) })}` : ''}
       </div>
-      <div className="chip-row" aria-label={t('parts.returnTitle')}>
+      <div className="chip-row wrap" aria-label={t('parts.returnTitle')}>
         <button type="button" className="chip" data-active={!!item.noReturn} onClick={() => void set(item.noReturn ? undefined : 'none')}>
           {t('parts.noReturn')}
         </button>
@@ -116,7 +116,7 @@ export function OutsourceActions({ item, make }: { item: OrderItem; make?: strin
   return (
     <div>
       <div className="group-title">{t('outsource.title')}</div>
-      <div className="chip-row" aria-label={t('outsource.state')}>
+      <div className="chip-row wrap" aria-label={t('outsource.state')}>
         {(['todo', 'out', 'back'] as const).map((s) => (
           <button key={s} type="button" className="chip" data-active={o.state === s} onClick={() => void run(async () => (await setOutsource(item.id, { ...o, state: s }), haptic('selection')))}>
             {t(`outsource.states.${s}`)}

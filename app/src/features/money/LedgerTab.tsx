@@ -1,4 +1,4 @@
-import { Box, Button, Group, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
@@ -110,7 +110,7 @@ export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEnt
           </Text>
         )}
         {editable && entry.source === 'income' && (
-          <div className="chip-row wrap">
+          <div className="chip-row bleed">
             {INCOME_CATEGORIES.map((c) => (
               <button key={c} type="button" className="chip" data-active={entry.category === c} onClick={() => run(() => updateIncome(entry.id, { category: c as IncomeCategory }))}>
                 {t(`income.category.${c}`)}
@@ -279,26 +279,19 @@ export function LedgerTab() {
             </Stack>
           ))}
         </SimpleGrid>
-        <Text size="xs" c="dimmed" mt="sm">
-          {t('ledger.rule')}
-        </Text>
       </Box>
 
-      <Stack gap="xs">
-        <SegmentedControl
-          fullWidth
-          value={kind}
-          onChange={(v) => setKind(v as KindFilter)}
-          data={[
-            { value: 'all', label: t('ledger.all') },
-            { value: 'in', label: t('ledger.ins') },
-            { value: 'out', label: t('ledger.outs') },
-          ]}
-        />
-        <div className="chip-row">
-          {(['all', 'cash', 'card'] as const).map((p) => (
-            <button key={p} type="button" className="chip" data-active={purse === p} onClick={() => setPurse(p)}>
-              {p === 'all' ? t('ledger.allPurses') : t(`payment.method.${p}`)}
+      {/* One row of filters — income or expenses, cash or card (a second tap takes one off) — and the search. */}
+      <Stack gap="xs" maw={560}>
+        <div className="chip-row wrap">
+          {(['in', 'out'] as const).map((k) => (
+            <button key={k} type="button" className="chip" data-active={kind === k} aria-pressed={kind === k} onClick={() => setKind(kind === k ? 'all' : k)}>
+              {k === 'in' ? t('ledger.ins') : t('ledger.outs')}
+            </button>
+          ))}
+          {(['cash', 'card'] as const).map((p) => (
+            <button key={p} type="button" className="chip" data-active={purse === p} aria-pressed={purse === p} onClick={() => setPurse(purse === p ? 'all' : p)}>
+              {t(`payment.method.${p}`)}
             </button>
           ))}
         </div>

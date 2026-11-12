@@ -9,9 +9,11 @@ import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 import { canShareFile, downloadFile } from '../../ui/share';
 
+/** "3,4 МБ" / "3.4 MB": the size in the interface's own number format. */
 function size(bytes: number, lang: string): string {
   const mb = bytes / 1024 / 1024;
-  return mb >= 1 ? `${mb.toFixed(mb >= 10 ? 0 : 1)} ${lang === 'ru' ? 'МБ' : 'MB'}` : `${Math.max(1, Math.round(bytes / 1024))} ${lang === 'ru' ? 'КБ' : 'KB'}`;
+  const n = (x: number, digits: number) => x.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US', { maximumFractionDigits: digits });
+  return mb >= 1 ? `${n(mb, mb >= 10 ? 0 : 1)} ${lang === 'ru' ? 'МБ' : 'MB'}` : `${Math.max(1, Math.round(bytes / 1024))} ${lang === 'ru' ? 'КБ' : 'KB'}`;
 }
 
 /**
