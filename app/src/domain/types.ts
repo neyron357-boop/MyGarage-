@@ -179,6 +179,11 @@ export interface Order {
   obdScans?: ObdScan[];
   /** Taken off the board by hand (a swipe): the job itself — stage, documents, money — stays as it is. */
   archivedAt?: string;
+  /**
+   * Closed without payment and without a debt (warranty, goodwill, the money will not come): what was
+   * due then is let go — the job owes nothing. Reopening the job takes it back.
+   */
+  waived?: { at: string; fils: number };
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;

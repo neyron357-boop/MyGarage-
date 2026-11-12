@@ -199,7 +199,9 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
 export function bundleAmountDue(b: OrderBundle): number {
   // History from Eaglecart: payments were not kept there consistently, so nothing is shown as owed.
   if (b.order.imported?.history) return 0;
-  return amountDue(summarize(b.items).approvedGross, b.invoices, b.payments);
+  const due = amountDue(summarize(b.items).approvedGross, b.invoices, b.payments);
+  // Closed without payment: nothing is owed (money paid over is still shown as such).
+  return b.order.waived ? Math.min(0, due) : due;
 }
 
 export function stageContext(b: OrderBundle): StageContext {

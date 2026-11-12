@@ -14,7 +14,7 @@ import {
   resolveBlockB,
   summarize,
 } from './items';
-import { checkTransition, isBackward, type StageContext } from './stages';
+import { canCloseUnpaid, checkTransition, isBackward, type StageContext } from './stages';
 import { flowStage, jobPhase, nothingToBill, stepToward, type FlowFacts } from './flow';
 import { activeInvoice, amountDue, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from './invoice';
 import { apportion, discountPctLabel, discountPrice, splitDiscount, spreadDiscount } from './discount';
@@ -320,6 +320,17 @@ describe('stage transitions', () => {
     expect(checkTransition('intake', 'closed', base({ invoiced: true, amountDueFils: 0 })).ok).toBe(true);
     expect(checkTransition('in_progress', 'closed', base({ invoiced: true, amountDueFils: 100, debtSigned: true })).ok).toBe(true);
     expect(checkTransition('booked', 'closed', base({ invoiced: true })).ok).toBe(false);
+  });
+  it('closes without payment and without a debt once what is due is let go', () => {
+    const waived = order({ waived: { at: '2026-11-12T10:00:00Z', fils: 10500 } });
+    expect(checkTransition('in_progress', 'closed', base({ order: waived, items: [item({ approvalState: 'approved' })] })).ok).toBe(true);
+    expect(checkTransition('ready', 'closed', base({ order: waived, invoiced: true, amountDueFils: 10500 })).ok).toBe(true);
+    expect(checkTransition('booked', 'closed', base({ order: waived })).ok).toBe(false);
+    expect(canCloseUnpaid('in_progress', 10500)).toBe(true);
+    expect(canCloseUnpaid('delivered', 10500)).toBe(true);
+    expect(canCloseUnpaid('ready', 0)).toBe(false);
+    expect(canCloseUnpaid('booked', 10500)).toBe(false);
+    expect(canCloseUnpaid('closed', 10500)).toBe(false);
   });
   it('declined repair goes straight to ready', () => {
     expect(checkTransition('awaiting_approval', 'ready', base()).ok).toBe(false);

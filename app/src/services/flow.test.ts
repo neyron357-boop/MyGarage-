@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
-import { addPayment, quickInvoice } from './money';
+import { answerLines, approveAll, archiveJob, closeUnpaid, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
+import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
 import { ensureSeed } from './seed';
@@ -160,6 +160,57 @@ describe('lazy flow', () => {
     // "Done" invoices it as any job (no quote was ever sent from Eaglecart, the stage stays early).
     expect((await quickInvoice(old.id)).totalFils).toBe(315000);
     expect(bundleAmountDue(h)).toBe(315000);
+  });
+
+  it('closes without payment and without a debt: invoiced, in the workshop, or gone with a signed debt', async () => {
+    // Invoiced, part paid: the rest is let go, the invoice and payment stay.
+    const inv = await job();
+    await addItem(inv.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await approveAll(inv.id);
+    const doc = await quickInvoice(inv.id);
+    await addPayment(inv.id, { kind: 'payment', method: 'cash', amountFils: 5000 });
+    await expect(changeStage(inv.id, 'closed')).rejects.toThrow();
+    await closeUnpaid(inv.id);
+    let b = (await loadOrderBundle(inv.id))!;
+    expect(b.order).toMatchObject({ stage: 'closed', outcome: 'completed', waived: { fils: doc.totalFils - 5000 } });
+    expect(b.order.deliveredAt).toBeTruthy();
+    expect(bundleAmountDue(b)).toBe(0);
+    expect(phaseOf(b)).toBe('closed');
+    expect(b.invoices[0].status).toBe('issued');
+    expect(b.events.find((e) => e.type === 'closed_unpaid')?.payload).toEqual({ fils: 5500 });
+    // Reopened: what it owes counts again.
+    await reopenJob(inv.id);
+    b = (await loadOrderBundle(inv.id))!;
+    expect(b.order.waived).toBeUndefined();
+    expect(bundleAmountDue(b)).toBe(5500);
+    expect(phaseOf(b)).toBe('pay');
+
+    // Agreed work, no invoice (warranty, for free): closed as it is.
+    const free = await job();
+    await addItem(free.id, { kind: 'labor', block: 'A', titleEn: 'Rework', unitPriceFils: 20000 });
+    await approveAll(free.id);
+    await closeUnpaid(free.id);
+    b = (await loadOrderBundle(free.id))!;
+    expect(b.order.stage).toBe('closed');
+    expect(b.invoices).toHaveLength(0);
+    expect(b.order.waived!.fils).toBe(21000);
+
+    // Gone with a signed debt: the debt is written off.
+    const owed = await job();
+    await addItem(owed.id, { kind: 'labor', block: 'A', titleEn: 'Brakes', unitPriceFils: 10000 });
+    await approveAll(owed.id);
+    await quickInvoice(owed.id);
+    await createDebt(owed.id, 10500, '2030-01-01', new Blob([new Uint8Array([137, 80, 78, 71, 1])], { type: 'image/png' }));
+    await closeUnpaid(owed.id);
+    b = (await loadOrderBundle(owed.id))!;
+    expect(b.order.stage).toBe('closed');
+    expect(b.debts[0].status).toBe('written_off');
+    expect(bundleAmountDue(b)).toBe(0);
+
+    // Nothing due (a look, nothing agreed), or already closed: not this way.
+    const look = await job();
+    await expect(closeUnpaid(look.id)).rejects.toThrow();
+    await expect(closeUnpaid(free.id)).rejects.toThrow();
   });
 
   it('archives a job off the board and back, without touching it; reopening brings it back too', async () => {

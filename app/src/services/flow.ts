@@ -3,12 +3,12 @@ import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { activeInvoice } from '../domain/invoice';
 import { isAwaitingClient } from '../domain/items';
-import { canReopen, partsReady, reopenStage } from '../domain/stages';
+import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } from '../domain/stages';
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
 import { recordDecisions, removeItem, restoreItem, sendVersion, withdrawItems } from './estimate';
-import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, type OrderBundle } from './orders';
+import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, stageContext, type OrderBundle } from './orders';
 
 /**
  * The lazy flow: one-tap actions on a job ("agreed", "refused", "drop this line") that also keep its
@@ -100,6 +100,28 @@ export async function refuseAll(orderId: string): Promise<'closed' | 'open'> {
   return 'closed';
 }
 
+/**
+ * The car leaves and nothing is owed — no payment, no debt (warranty, goodwill, the money will not come).
+ * What was due is let go on the job (`waived`, with the amount, in the journal too), a signed debt is
+ * written off; the invoice, payments and lines stay as they are. Reopening the job brings the amount back.
+ */
+export async function closeUnpaid(orderId: string): Promise<void> {
+  const b = await loadOrderBundle(orderId);
+  if (!b) throw new AppError('err.notFound');
+  const due = bundleAmountDue(b);
+  if (!canCloseUnpaid(b.order.stage, due)) throw new AppError('stageErr.notAllowed');
+  const now = nowIso();
+  const waived = { at: now, fils: due };
+  const check = checkTransition(b.order.stage, 'closed', { ...stageContext(b), order: { ...b.order, waived }, amountDueFils: 0 });
+  if (!check.ok) throw new AppError(check.reason);
+  await db.transaction('rw', db.orders, db.debts, db.events, async () => {
+    await db.orders.update(orderId, { waived, updatedAt: now });
+    for (const d of b.debts) if (d.status === 'open') await db.debts.update(d.id, { status: 'written_off' });
+    await logEvent(orderId, 'closed_unpaid', { fils: due });
+  });
+  await changeStage(orderId, 'closed');
+}
+
 /** An agreed line that will not be done after all (the customer changed their mind, no part): off the job. */
 export async function dropLine(itemId: string): Promise<void> {
   const item = await db.items.get(itemId);
@@ -172,6 +194,8 @@ export async function reopenJob(orderId: string): Promise<void> {
       updatedAt: now,
       outcome: 'in_progress',
       archivedAt: undefined,
+      // Closed without payment by mistake: what it owes counts again.
+      waived: undefined,
       closedAt: undefined,
       deliveredAt: undefined,
       cancelReason: undefined,

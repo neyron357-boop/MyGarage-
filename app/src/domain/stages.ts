@@ -123,6 +123,8 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
       if (!ctx.handoverSigned) return { ok: false, reason: 'stageErr.handoverNotSigned' };
       return ctx.amountDueFils <= 0 || ctx.debtSigned ? { ok: true } : { ok: false, reason: 'stageErr.unpaid' };
     case 'closed':
+      // Closed without payment and without a debt: whatever was due is let go (services/flow.ts closeUnpaid).
+      if (ctx.order.waived) return { ok: true };
       if (from === 'delivered') return ctx.amountDueFils <= 0 ? { ok: true } : { ok: false, reason: 'stageErr.unpaid' };
       // Quick path: the car leaves with an issued invoice that is paid, or with a signed debt.
       // Nothing to charge for (the customer refused the repair, a free look): the car just leaves.
@@ -131,6 +133,14 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
     default:
       return { ok: false, reason: 'stageErr.notAllowed' };
   }
+}
+
+/**
+ * A job in the workshop (or gone with a debt) can be closed without payment and without a debt when
+ * money is due on it: the car leaves, nothing is owed.
+ */
+export function canCloseUnpaid(stage: Stage, dueFils: number): boolean {
+  return dueFils > 0 && !['booked', 'closed', 'cancelled'].includes(stage);
 }
 
 /**

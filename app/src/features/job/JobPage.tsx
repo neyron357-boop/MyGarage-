@@ -4,6 +4,7 @@ import {
   IconCamera,
   IconCar,
   IconCash,
+  IconCashOff,
   IconCheck,
   IconChecks,
   IconCircle,
@@ -41,19 +42,19 @@ import { db } from '../../db/db';
 import { hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
-import { activeInvoice } from '../../domain/invoice';
+import { activeInvoice, paidNet } from '../../domain/invoice';
 import { isAwaitingClient, itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
-import { canReopen } from '../../domain/stages';
+import { canCloseUnpaid, canReopen } from '../../domain/stages';
 import { sumAmounts } from '../../domain/vat';
 import type { OrderItem, Payment } from '../../domain/types';
 import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, withdrawItems } from '../../services/estimate';
-import { answerLines, approveAll, dropLine, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from '../../services/flow';
+import { answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from '../../services/flow';
 import { linesText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -288,6 +289,7 @@ export function JobPage() {
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [confirmPicked, setConfirmPicked] = useState(false);
   const [refuse, setRefuse] = useState(false);
+  const [unpaid, setUnpaid] = useState(false);
   const [remove, setRemove] = useState(false);
   const [pay, setPay] = useState<Payment['kind'] | null>(null);
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -442,6 +444,11 @@ export function JobPage() {
     <ListRow key="discount" left={state ? <LineMark item={state} /> : undefined} title={title} right={<Money fils={gross} c="green.7" />} onClick={onClick} />
   );
   const invOff = inv ? inv.lines.filter((l) => l.kind === 'discount') : [];
+  const paid = paidNet(b.payments);
+  // Closed without payment: the amount let go, under the total.
+  const waivedRow = b.order.waived ? (
+    <ListRow left={<IconCashOff size={20} stroke={1.8} color="var(--mantine-color-orange-6)" aria-hidden />} title={<Text span c="orange.7" inherit>{t('job.unpaid')}</Text>} right={<Money fils={b.order.waived.fils} c="orange.7" />} />
+  ) : null;
 
   const tiles: Tile[] = [];
   if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
@@ -452,6 +459,8 @@ export function JobPage() {
   if (open && (lines.length > 0 || inv) && (!inv || due > 0)) tiles.push({ key: 'discount', icon: IconDiscount, onClick: () => setDiscountOpen(true) });
   // The car leaves now, the money comes later: a signed debt (on the payments tab of the details).
   if (inv && due > 0 && phase === 'pay') tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => navigate(`/orders/${oid}/details?tab=payments`) });
+  // The car leaves and nothing is owed: no payment, no debt (warranty, goodwill, the money will not come).
+  if (canCloseUnpaid(b.order.stage, due)) tiles.push({ key: 'unpaid', icon: IconCashOff, color: 'orange', onClick: () => setUnpaid(true) });
   tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
   tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
   tiles.push({ key: 'details', icon: IconListDetails, onClick: () => navigate(`/orders/${oid}/details`) });
@@ -685,8 +694,9 @@ export function JobPage() {
           <Box mt="lg">
             <List>
               <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display /></Text>} />
-              {inv.totalFils - due > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={inv.totalFils - due} c="green.7" />} />}
-              {due > 0 && inv.totalFils - due > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
+              {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
+              {due > 0 && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
+              {waivedRow}
             </List>
           </Box>
         </>
@@ -738,6 +748,7 @@ export function JobPage() {
                   subtitle={sum.vat ? t('job.vatIn', { vat: formatAed(sum.vat, lang, false) }) : undefined}
                   right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display /></Text>}
                 />
+                {waivedRow}
               </List>
             </Box>
           )}
@@ -803,6 +814,26 @@ export function JobPage() {
         }
       >
         <Text size="sm">{t('job.refuseText')}</Text>
+      </ConfirmModal>
+      <ConfirmModal
+        opened={unpaid}
+        onClose={() => setUnpaid(false)}
+        title={t('job.unpaidTitle')}
+        confirmLabel={t('job.unpaidClose')}
+        color="orange"
+        onConfirm={() =>
+          run(async () => {
+            await closeUnpaid(oid);
+            haptic('success');
+            scrollToTop();
+            return true;
+          })
+        }
+      >
+        <Text size="sm">{t('job.unpaidText')}</Text>
+        <Text mt="sm" fw={700} fz={20}>
+          <Money fils={due} display />
+        </Text>
       </ConfirmModal>
       <DeleteJobModal
         order={b.order}

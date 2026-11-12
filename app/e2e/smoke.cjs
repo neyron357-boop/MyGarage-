@@ -59,6 +59,7 @@ async function launchBrowser() {
   const front = (sel) => page.locator(`.screen[data-role="top"] ${sel}, .page-shell ${sel}`);
   // Screens slide in (View Transitions): wait for that and any other animation before the picture.
   const settled = () => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
+  let unpaidJob = '';
   const shot = async (n, full = false) => {
     await settled();
     await page.screenshot({ path: `${SP}/shots/${n}.png`, fullPage: full });
@@ -540,6 +541,44 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
     await shot('33c-job-reopened');
   });
+  await step('closed without payment and without a debt', async () => {
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('57721');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    const dlg = page.getByRole('dialog');
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Warranty rework');
+    await dlg.getByLabel('Цена', { exact: true }).fill('200');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByRole('button', { name: 'Оплата · 210,00 AED' }).waitFor();
+    // “…” → No payment: the car leaves, nothing owed — no payment, no debt.
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'Без оплаты' }).waitFor();
+    await page.waitForTimeout(600);
+    await shot('33c2-more-unpaid');
+    await dlg.getByRole('button', { name: 'Без оплаты' }).click();
+    const ask = page.getByRole('dialog', { name: 'Закрыть без оплаты?' });
+    await ask.getByText('210,00').waitFor();
+    await shot('33d-close-unpaid');
+    await ask.getByRole('button', { name: 'Закрыть' }).click();
+    await page.getByText('Закрыт').first().waitFor();
+    await page.locator('.list-row').filter({ hasText: 'Без оплаты' }).filter({ hasText: '210,00' }).first().waitFor();
+    if (await page.getByRole('button', { name: /^Оплата/ }).count()) throw new Error('a job closed without payment still asks for it');
+    await shot('33e-job-unpaid', true);
+    unpaidJob = page.url();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(400);
+    await shot('33f-job-unpaid-desktop');
+    await page.setViewportSize({ width: 390, height: 844 });
+    // Nothing owed: not among the debts.
+    await page.goto(BASE + '#/money?tab=debts');
+    const top = page.locator('.screen[data-role="top"]');
+    await top.getByText('Всего долгов').waitFor();
+    if (await top.getByText('57721').count()) throw new Error('a job closed without payment shows as a debt');
+  });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);
     await page.getByText('Было / стало').waitFor();
@@ -640,6 +679,11 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     await page.waitForTimeout(400);
     await shot('29-board-dark');
+    if (unpaidJob) {
+      await page.goto(unpaidJob);
+      await page.waitForTimeout(400);
+      await shot('33g-job-unpaid-dark');
+    }
     await page.goto(BASE + '#/more');
     await page.getByText(/^(Светлая|Light)$/).click();
   });
