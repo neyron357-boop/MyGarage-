@@ -1203,6 +1203,50 @@ html.kb .tab-bar-wrap {
   background: var(--app-soft);
   color: var(--mantine-color-dimmed);
 }
+/* The foot of the job's card: the mechanics' chips, the VIN photo tile on the right. */
+.job-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.job-foot > .chip-row {
+  flex: 1;
+  min-width: 0;
+}
+.job-foot > span:first-child {
+  flex: 1;
+}
+.vin-tile {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  min-height: 56px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  color: var(--mantine-color-cobalt-6);
+  font-size: 11px;
+  font-weight: 700;
+  gap: 1px;
+}
+.vin-tile > .mantine-Image-root,
+.vin-tile > .surface-soft {
+  position: absolute;
+  inset: 0;
+}
+/* On the photo, the word sits on a dark band at the bottom. */
+.vin-tile:not([data-empty]) > span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 0 2px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
 /* A car's photo on its board row, the step it is on as a small badge in the corner. */
 .job-thumb {
   position: relative;

@@ -3,7 +3,7 @@ import { IconCamera, IconCameraPlus, IconCar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { coverOf, setCover } from '../../services/cover';
+import { coverOf, setCover, setVinPhoto, vinPhotoOf } from '../../services/cover';
 import { MediaImage } from '../../ui/components';
 import { useAction } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
@@ -69,5 +69,58 @@ export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: n
     <span className="car-thumb" style={{ width: size, height: size }}>
       {cover?.id ? <MediaImage id={cover.id} h={size} w={size} radius="0" /> : <IconCar size={Math.round(size * 0.46)} stroke={1.6} aria-hidden />}
     </span>
+  );
+}
+
+/**
+ * The car's VIN photo as a small tile in the job's card: without one, a tap opens the camera; with one,
+ * the thumbnail — a tap shows it full screen (the VIN typed on the car as its title), to retake or share.
+ */
+export function VinTile({ vehicleId, vin }: { vehicleId: string; vin?: string }) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  const photo = useLiveQuery(async () => ({ id: await vinPhotoOf(vehicleId) }), [vehicleId]);
+  const [viewing, setViewing] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const take = () => input.current?.click();
+  return (
+    <>
+      <button
+        type="button"
+        className="action-tile vin-tile"
+        data-empty={!photo?.id || undefined}
+        aria-label={photo?.id ? t('job.vinPhoto') : t('job.vinTake')}
+        onClick={photo?.id ? () => setViewing(true) : take}
+      >
+        {photo?.id ? <MediaImage id={photo.id} h="100%" w="100%" radius="0" /> : <IconCameraPlus size={20} stroke={1.8} aria-hidden />}
+        <span>VIN</span>
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        data-vin-input
+        onChange={(e) => {
+          const file = e.currentTarget.files?.[0];
+          e.currentTarget.value = '';
+          if (file) void run(() => setVinPhoto(vehicleId, file));
+        }}
+      />
+      {viewing && photo?.id && (
+        <PhotoViewer
+          items={[{ id: photo.id, title: vin ? `VIN ${vin}` : 'VIN' }]}
+          index={0}
+          onIndex={() => undefined}
+          onClose={() => setViewing(false)}
+          actions={() => (
+            <Button radius="xl" size="md" variant="white" color="dark" leftSection={<IconCamera size={18} />} onClick={take}>
+              {t('job.retakePhoto')}
+            </Button>
+          )}
+        />
+      )}
+    </>
   );
 }

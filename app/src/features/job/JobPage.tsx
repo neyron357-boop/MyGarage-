@@ -67,7 +67,7 @@ import { useSendVersion } from '../estimate/EstimatePage';
 import { DiscountSheet } from '../money/DiscountSheet';
 import { PaymentModal } from '../money/PaymentPanel';
 import { DeleteJobModal } from '../orders/DeleteJob';
-import { CarCover } from './CarCover';
+import { CarCover, VinTile } from './CarCover';
 import { ObdLine, useObdImport } from './ObdScan';
 import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
 import { PhasePill } from './phase';
@@ -610,15 +610,21 @@ export function JobPage() {
           </Text>
         </UnstyledButton>
         {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
-        {open && mechanics.length > 0 && (
-          <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('order.mechanic')}>
-            {mechanics.map((m) => (
-              <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
-                {m.name}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* The mechanics (who does the job) and, on the right, the car's VIN photo. */}
+        <div className="job-foot">
+          {open && mechanics.length > 0 ? (
+            <div className="chip-row" aria-label={t('order.mechanic')}>
+              {mechanics.map((m) => (
+                <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span />
+          )}
+          <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} />
+        </div>
       </Box>
 
       {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (

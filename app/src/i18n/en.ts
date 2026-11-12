@@ -985,6 +985,8 @@ export const en: typeof ru = {
     complaint: 'Complaint',
     client: 'Customer',
     carPhoto: 'Car photo',
+    vinPhoto: 'VIN photo',
+    vinTake: 'Take the VIN',
     retakePhoto: 'Retake',
     refuseTitle: 'The customer refused?',
     refuseText: 'Lines waiting for an answer become refused, unsent ones are deleted. With nothing to pay for, the job is closed.',

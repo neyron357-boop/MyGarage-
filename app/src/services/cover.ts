@@ -46,10 +46,21 @@ export async function coverOf(vehicleId: string): Promise<string | undefined> {
   return (await coverIndex([vehicleId])).get(vehicleId);
 }
 
-/** A new main photo for the car: the one taken for it before goes, the check-in photos stay. */
-export async function setCover(vehicleId: string, file: Blob): Promise<Media> {
-  const before = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === 'cover');
-  const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot: 'cover', file });
+/** One photo the car keeps (its main photo, its VIN plate): a new one replaces the one before. */
+async function setCarPhoto(vehicleId: string, slot: 'cover' | 'vin', file: Blob): Promise<Media> {
+  const before = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === slot);
+  const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot, file });
   for (const m of before) await deleteMedia(m.id);
   return media;
+}
+
+/** A new main photo for the car: the one taken for it before goes, the check-in photos stay. */
+export const setCover = (vehicleId: string, file: Blob) => setCarPhoto(vehicleId, 'cover', file);
+
+/** The photo of the car's VIN (the plate on the body or the windscreen), kept with the car for every visit. */
+export const setVinPhoto = (vehicleId: string, file: Blob) => setCarPhoto(vehicleId, 'vin', file);
+
+export async function vinPhotoOf(vehicleId: string): Promise<string | undefined> {
+  const list = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === 'vin' && m.kind === 'photo');
+  return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
 }

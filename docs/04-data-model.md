@@ -416,7 +416,7 @@ erDiagram
 | Поле | Описание |
 |---|---|
 | `owner_type`, `owner_id` | к чему относится (осмотр, заказ, позиция, расход, оплата, движение кассы, инцидент, претензия, клиент, машина, настройки) |
-| `slot` | роль файла: ракурс (`front`, `rear`, `left`, `right`, `front_left`, `front_right`, `rear_left`, `rear_right`, `dashboard`, `wheel_*`, `roof`, `windshield`), `obd`, `mulkiya`, `damage`, `police_report`, `receipt`, `proof` (пруф расхода, добавлен позже), `cover` (главное фото машины), `obd_report` (PDF отчёта сканера), `signature`, `document_pdf`, `extra` |
+| `slot` | роль файла: ракурс (`front`, `rear`, `left`, `right`, `front_left`, `front_right`, `rear_left`, `rear_right`, `dashboard`, `wheel_*`, `roof`, `windshield`), `obd`, `mulkiya`, `damage`, `police_report`, `receipt`, `proof` (пруф расхода, добавлен позже), `cover` (главное фото машины), `vin` (фото VIN машины), `obd_report` (PDF отчёта сканера), `signature`, `document_pdf`, `extra` |
 | `kind` | `photo` · `video` · `pdf` · `signature` |
 | `storage_path`, `mime`, `size_bytes`, `width`, `height` | |
 | `sha256` | хэш файла |

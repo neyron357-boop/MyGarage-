@@ -341,6 +341,15 @@ async function launchBrowser() {
     const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Фото машины' }).click()]);
     await chooser.setFiles({ name: 'car.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
+    // The VIN photo, beside the mechanics: a tap takes it, then its thumbnail opens it full screen.
+    await shot('30a2-vin-empty');
+    const [vinChooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Снять VIN' }).click()]);
+    await vinChooser.setFiles({ name: 'vin.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+    await page.getByRole('button', { name: 'Фото VIN' }).locator('img').waitFor();
+    await page.getByRole('button', { name: 'Фото VIN' }).click();
+    await page.locator('.viewer').getByText('VIN', { exact: true }).waitFor();
+    await page.locator('.viewer button').first().click();
+    await page.locator('.viewer').waitFor({ state: 'detached' });
     const dlg = page.getByRole('dialog');
     // What the mechanic found: a job and a part (the part first without a price: still to find).
     await page.getByRole('button', { name: 'Работа', exact: true }).click();
