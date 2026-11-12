@@ -103,6 +103,7 @@ export const en: typeof ru = {
     notReady: 'A car can only be handed over at the “Ready” stage',
   },
   err: {
+    copy: 'Could not copy',
     notBackup: 'This is not a MyGarage backup file',
     backupDamaged: 'The backup file is damaged or was not downloaded completely',
     notFound: 'Not found',
@@ -985,6 +986,8 @@ export const en: typeof ru = {
     complaint: 'Complaint',
     client: 'Customer',
     carPhoto: 'Car photo',
+    copyLines: 'Copy the lines',
+    copiedLines: 'Lines copied',
     vinPhoto: 'VIN photo',
     vinTake: 'Take the VIN',
     retakePhoto: 'Retake',

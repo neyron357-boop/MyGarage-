@@ -101,6 +101,7 @@ export const ru = {
     notReady: 'Машину можно выдать только на этапе «Готово»',
   },
   err: {
+    copy: 'Не удалось скопировать',
     notBackup: 'Это не файл резервной копии MyGarage',
     backupDamaged: 'Файл резервной копии повреждён или скачан не полностью',
     notFound: 'Не найдено',
@@ -983,6 +984,8 @@ export const ru = {
     complaint: 'Жалоба',
     client: 'Клиент',
     carPhoto: 'Фото машины',
+    copyLines: 'Скопировать позиции',
+    copiedLines: 'Позиции скопированы',
     vinPhoto: 'Фото VIN',
     vinTake: 'Снять VIN',
     retakePhoto: 'Переснять',

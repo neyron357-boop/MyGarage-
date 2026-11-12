@@ -3,7 +3,9 @@ import { formatDate, nowIso } from '../domain/dates';
 import { formatAed } from '../domain/money';
 import { normalizePhone, phoneDigits } from '../domain/phone';
 import { formatPlate } from '../domain/plates';
-import type { Channel, Customer, EstimateVersion, Lang, Order, Vehicle } from '../domain/types';
+import { itemAmounts, itemTitle } from '../domain/items';
+import type { Channel, Customer, EstimateVersion, Lang, Order, OrderItem, Vehicle } from '../domain/types';
+import { sumAmounts } from '../domain/vat';
 import { tFor } from '../i18n';
 
 export function whatsappUrl(phone: string, text: string): string {
@@ -56,6 +58,31 @@ export function simpleMessage(tpl: SimpleTemplate, ctx: MsgContext, lang: Lang, 
 }
 
 /** Itemized estimate / supplement text; the customer answers in the chat. */
+/**
+ * The job's lines as plain text, copied with one tap to paste anywhere (a supplier, the customer, a note):
+ * the car and its plate, the numbered lines with their amounts (VAT included, as on screen), the discount
+ * and the total — in the job's document language, as the lines themselves.
+ */
+export function linesText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'plate'>, items: OrderItem[], lang: Lang): string {
+  const t = tFor(lang);
+  const money = (f: number) => formatAed(f, lang);
+  const car = [vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ');
+  const out = [[car, formatPlate(vehicle.plate, lang)].filter(Boolean).join(' · '), ''];
+  items
+    .filter((i) => i.kind !== 'discount')
+    .forEach((i, n) => {
+      const each = i.kind === 'part' && i.qty !== 1 ? ` (${i.qty} × ${money(itemAmounts({ ...i, qty: 1 }).gross)})` : '';
+      const gross = itemAmounts(i).gross;
+      const price = i.customerSupplied ? t('msg.customerPart') : gross ? money(gross) : '?';
+      out.push(`${n + 1}. ${itemTitle(i, lang)}${each} — ${price}`);
+    });
+  const off = items.filter((i) => i.kind === 'discount');
+  if (off.length) out.push('', `${itemTitle(off[0], lang)}: ${money(off.reduce((a, i) => a + itemAmounts(i).gross, 0))}`);
+  const sum = sumAmounts(items.map(itemAmounts));
+  out.push('', `${t('job.total')}: ${money(sum.gross)}` + (sum.vat ? ` (VAT ${money(sum.vat)})` : ''));
+  return out.join('\n');
+}
+
 export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   const lang = v.language;
   const t = tFor(lang);

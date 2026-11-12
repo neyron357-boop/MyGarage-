@@ -9,6 +9,7 @@ import {
   IconCircle,
   IconCircleCheckFilled,
   IconCircleX,
+  IconCopy,
   IconDiscount,
   IconDots,
   IconEngine,
@@ -49,10 +50,12 @@ import { canReopen } from '../../domain/stages';
 import { sumAmounts } from '../../domain/vat';
 import type { OrderItem, Payment } from '../../domain/types';
 import { syncDiscount } from '../../services/discount';
+import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, withdrawItems } from '../../services/estimate';
 import { answerLines, approveAll, dropLine, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from '../../services/flow';
-import { simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { linesText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
@@ -373,6 +376,17 @@ export function JobPage() {
     });
   };
   // Where a part is — not on a done line (it is fitted), nor after the invoice.
+  // The whole list of lines as text, one tap: to paste to a supplier, the customer, anywhere.
+  const copyLines = () =>
+    run(async () => {
+      if (!(await copyText(linesText(b.vehicle, live, docLang)))) throw new AppError('err.copy');
+      haptic('light');
+    }, 'job.copiedLines');
+  const copyButton = (size: number) => (
+    <ActionIcon variant="light" color="gray" size={size} radius="xl" aria-label={t('job.copyLines')} onClick={() => void copyLines()} style={{ flexShrink: 0 }}>
+      <IconCopy size={size > 40 ? 20 : 18} />
+    </ActionIcon>
+  );
   const partNote = (i: OrderItem) => (i.kind === 'part' && !inv && !i.done ? t(`job.part.${partStateOf(i)}`) : '');
   const row = (i: OrderItem) => (
     <PickRow
@@ -646,6 +660,7 @@ export function JobPage() {
               title={inv.number}
               right={
                 <Group gap={6} wrap="nowrap">
+                  {copyButton(36)}
                   <ActionIcon variant="light" size={36} radius="xl" aria-label={t('common.sendClient')} onClick={sendInvoice}>
                     <IconSend size={18} />
                   </ActionIcon>
@@ -712,6 +727,7 @@ export function JobPage() {
                   <IconDiscount size={20} />
                 </ActionIcon>
               )}
+              {lines.length > 0 && copyButton(44)}
             </Group>
           )}
           {live.length > 0 && (

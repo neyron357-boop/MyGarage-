@@ -379,6 +379,10 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
     await page.locator('.list-row').filter({ hasText: 'Фильтр салона' }).locator('svg[aria-label="Фото"]').waitFor();
+    // The whole list of lines copied in one tap.
+    await page.getByRole('button', { name: 'Скопировать позиции' }).click();
+    await page.getByText('Позиции скопированы').first().waitFor();
+    await shot('31b-copy-lines');
     // A line without VAT (a fee paid for the customer): 100 AED stays 100 AED.
     await page.getByRole('button', { name: 'Работа', exact: true }).click();
     await dlg.getByLabel('Что сделали').fill('RTA test fee');
