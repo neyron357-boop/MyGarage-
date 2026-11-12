@@ -12,7 +12,7 @@ import { PhotoViewer } from '../../ui/PhotoViewer';
  * The car's main photo across the top of the job's card. Without one, a tile opens the camera
  * (one shot becomes the car's photo); with one, a tap shows it full screen, where it can be retaken.
  */
-export function CarCover({ vehicleId }: { vehicleId: string }) {
+export function CarCover({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpty?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
   const cover = useLiveQuery(async () => ({ id: await coverOf(vehicleId) }), [vehicleId]);
@@ -20,6 +20,8 @@ export function CarCover({ vehicleId }: { vehicleId: string }) {
   const input = useRef<HTMLInputElement>(null);
   if (!cover) return <div className="action-tile job-cover" data-empty="true" aria-hidden="true" />;
   const take = () => input.current?.click();
+  // A closed job shows the photo if the car has one — not a tile asking for it.
+  if (hideEmpty && !cover.id) return null;
   return (
     <>
       {cover.id ? (
@@ -87,14 +89,21 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
   if (hideEmpty && !photo?.id) return null;
   return (
     <>
+      {/* A chip among the card's chips: a camera while there is no photo, its round thumbnail once there is. */}
       <button
         type="button"
-        className="action-tile vin-tile"
+        className="chip vin-chip"
         data-empty={!photo?.id || undefined}
         aria-label={photo?.id ? t('job.vinPhoto') : t('job.vinTake')}
         onClick={photo?.id ? () => setViewing(true) : take}
       >
-        {photo?.id ? <MediaImage id={photo.id} h="100%" w="100%" radius="0" /> : <IconCameraPlus size={20} stroke={1.8} aria-hidden />}
+        {photo?.id ? (
+          <span className="vin-thumb">
+            <MediaImage id={photo.id} h={26} w={26} radius="0" />
+          </span>
+        ) : (
+          <IconCameraPlus size={17} stroke={1.9} aria-hidden />
+        )}
         <span>VIN</span>
       </button>
       <input

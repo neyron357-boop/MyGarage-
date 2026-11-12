@@ -362,7 +362,7 @@ export function LineSheet({
         )}
 
         {kind === 'part' && !own && offersOpen && (
-          <div>
+          <div className="rise-enter">
             <div className="group-title">{t('offer.title')}</div>
             <div className="ios-group">
               {offers.map((o) => (
@@ -447,7 +447,7 @@ export function LineSheet({
               {t('outsource.title')}
             </button>
             {out && outsource && (
-              <div className="ios-group" style={{ marginTop: 10 }}>
+              <div className="ios-group rise-enter" style={{ marginTop: 10 }}>
                 <div className="ios-row">
                   <SupplierChips service value={outsource.supplierId} onChange={(s) => setOutsource({ ...outsource, supplierId: s })} label={t('outsource.who')} />
                 </div>

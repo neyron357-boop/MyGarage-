@@ -695,6 +695,69 @@ async function launchBrowser() {
     await shot('35c-transfer');
     await page.locator('.mantine-Modal-close').first().click();
   });
+  await step('v0.8: swipes on lines, the way of the job, the mark of a moment', async () => {
+    // A finger's swipe on a row (touch events, as on a phone): dir −1 to the left, +1 to the right.
+    const swipe = (loc, dir, steps = 12) =>
+      loc.evaluate((el, { dir, steps }) => {
+        const r = el.getBoundingClientRect();
+        const y = r.top + r.height / 2;
+        const x0 = dir < 0 ? r.right - 20 : r.left + 20;
+        const touch = (x) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+        const fire = (type, x, list = true) => el.dispatchEvent(new TouchEvent(type, { touches: list ? [touch(x)] : [], changedTouches: [touch(x)], bubbles: true, cancelable: true }));
+        fire('touchstart', x0);
+        for (let i = 1; i <= steps; i++) fire('touchmove', x0 + dir * i * 28);
+        fire('touchend', x0 + dir * steps * 28, false);
+      }, { dir, steps });
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('80808');
+    await page.getByRole('button', { name: 'Принять', exact: true }).click();
+    const dlg = page.getByRole('dialog');
+    for (const [name, price] of [['Oil change', '100'], ['Wheel alignment', '120']]) {
+      await page.getByRole('button', { name: 'Работа', exact: true }).click();
+      await dlg.getByLabel('Что сделали').fill(name);
+      await dlg.getByLabel('Цена', { exact: true }).fill(price);
+      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await front('.list-row').filter({ hasText: name }).first().waitFor();
+    }
+    // The way of the job: six segments, the one it is on marked.
+    if ((await front('.phase-track > span').count()) !== 6) throw new Error('the phase track has six steps');
+    await front('.phase-track > span[data-now]').waitFor();
+    const line = (name) => front('.list-row:not([data-ghost])').filter({ hasText: name }).first();
+    // A draft swiped left all the way: gone at once, with Undo.
+    await swipe(line('Wheel alignment'), -1);
+    await line('Wheel alignment').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await line('Wheel alignment').waitFor();
+    // A short swipe only uncovers the button; a tap on the row closes it again.
+    await swipe(line('Wheel alignment'), -1, 3);
+    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).waitFor();
+    await shot('36a-line-swipe');
+    await line('Wheel alignment').locator('.body').click();
+    if (await dlg.count()) throw new Error('a tap on an open row only closes it');
+    // Agreed in person; a swipe right marks the work done, the line steps back.
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByText('В работе').first().waitFor();
+    await swipe(line('Oil change'), 1);
+    await front('.list-row[data-done]').filter({ hasText: 'Oil change' }).waitFor();
+    // An agreed line swiped left all the way is not dropped at once: the button waits for a tap.
+    await swipe(line('Wheel alignment'), -1);
+    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Убрать' }).waitFor();
+    await line('Wheel alignment').locator('.body').click();
+    await shot('36b-line-done');
+    // Paid in full and handed over: each moment gets its mark.
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await dlg.getByRole('button', { name: 'Провести' }).click();
+    await page.locator('.celebration').getByText('Оплачено').waitFor();
+    await page.getByRole('button', { name: 'Выдать' }).click();
+    await page.locator('.celebration').getByText('Выдана').waitFor();
+    // The mark is on screen for a second: its picture is taken while it is there (not after it has gone).
+    await page.waitForTimeout(450);
+    await page.screenshot({ path: `${SP}/shots/36c-celebration.png` });
+    await shot('36c-handed-over');
+    await page.getByText('Закрыт').first().waitFor();
+  });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);
     await page.getByText('Было / стало').waitFor();

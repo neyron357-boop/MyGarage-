@@ -233,7 +233,7 @@ export function LedgerTab() {
           <UnstyledButton key={p} className="surface tap amount-cell" p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
             <div className="eyebrow">{t(p === 'cash' ? 'ledger.cashBalance' : 'ledger.cardBalance')}</div>
             <Text fz={26} lh={1.15} mt={4}>
-              <Money fils={p === 'cash' ? book.cash : book.card} display />
+              <Money fils={p === 'cash' ? book.cash : book.card} display roll />
             </Text>
             <Group gap={4} mt={6} c="dimmed">
               <Text size="xs" c="dimmed">
@@ -268,13 +268,13 @@ export function LedgerTab() {
                 <Text size="xs" c="dimmed">
                   {t('ledger.in')}
                 </Text>
-                <Money fils={totals[p].inFils} c="green.7" size="sm" />
+                <Money fils={totals[p].inFils} c="green.7" size="sm" roll />
               </Group>
               <Group justify="space-between" wrap="nowrap">
                 <Text size="xs" c="dimmed">
                   {t('ledger.out')}
                 </Text>
-                <Money fils={totals[p].outFils} c="red.7" size="sm" />
+                <Money fils={totals[p].outFils} c="red.7" size="sm" roll />
               </Group>
             </Stack>
           ))}

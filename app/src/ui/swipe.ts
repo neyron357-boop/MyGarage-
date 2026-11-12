@@ -1,39 +1,61 @@
-import { useRef, useState, type CSSProperties, type TouchEvent } from 'react';
+import type { Icon } from '@tabler/icons-react';
+import { useEffect, useRef, useState, type CSSProperties, type TouchEvent } from 'react';
 import { haptic } from './haptics';
 
+/** What a swipe on a row does: the button it uncovers (icon, one word, colour) and its action. */
+export interface SwipeSpec {
+  label: string;
+  icon: Icon;
+  color: string;
+  onCommit: () => void;
+  /** A long swipe does it at once (default). `false` — the swipe only uncovers the button (no way back after it). */
+  full?: boolean;
+}
+
 /*
- * Swipe a row left, like the iPhone's lists: a short swipe opens its action button on the right, a long
- * one (past half the row) does the action at once. The direction is decided by the first few points of
- * the move, so scrolling the list is not disturbed. A tap on an open row only closes it.
+ * Swipe a row, like the iPhone's lists. To the left it uncovers the trailing action, to the right the
+ * leading one: a short swipe leaves the button open, a long one (past half the row) does the action at
+ * once — with a tick of the haptic engine as the finger crosses the line. The direction is decided by
+ * the first few points of the move, so scrolling the list is not disturbed. A tap on an open row only
+ * closes it.
  *
- * The row sets `style` (the offset as --swipe) and `data-swiping`; its children slide (CSS), the action
- * layer under them (`.swipe-action`) grows from the right.
+ * The row sets `style` (the offset as --swipe), `data-swiping` and `data-past`; its children slide
+ * (CSS, `.swipe-row`), the action layers under them (`.swipe-action`) grow from their edge.
  */
-export function useSwipeAction(onCommit: () => void, actionWidth = 92) {
+export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'full'>; leading?: Pick<SwipeSpec, 'onCommit' | 'full'> }, actionWidth = 88) {
   const [dx, setDxState] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [past, setPast] = useState(false);
   const off = useRef(0);
   const start = useRef<{ x: number; y: number; base: number; w: number; axis?: 'x' | 'y'; past?: boolean } | null>(null);
   const swiped = useRef(false);
+  const live = useRef(spec);
+  live.current = spec;
   const setDx = (v: number) => {
     off.current = v;
     setDxState(v);
   };
-  const commit = (w: number) => {
+  const sideOf = (v: number) => (v < 0 ? live.current.trailing : v > 0 ? live.current.leading : undefined);
+  const commit = (to: number) => {
+    const side = sideOf(to);
     setDragging(false);
-    setDx(-w);
+    setDx(to);
     haptic('light');
     window.setTimeout(() => {
-      onCommit();
+      side?.onCommit();
+      setPast(false);
       setDx(0);
-    }, 200);
+    }, 180);
   };
   const handlers = {
     onTouchStart: (e: TouchEvent<HTMLElement>) => {
+      swiped.current = false;
+      start.current = null;
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
+      // The strip along the left edge belongs to "Back" (ui/stack): a touch there never swipes a row.
+      if (t.clientX < 28) return;
       start.current = { x: t.clientX, y: t.clientY, base: off.current, w: e.currentTarget.offsetWidth };
-      swiped.current = false;
     },
     onTouchMove: (e: TouchEvent<HTMLElement>) => {
       const s = start.current;
@@ -46,14 +68,18 @@ export function useSwipeAction(onCommit: () => void, actionWidth = 92) {
         s.axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
       }
       if (s.axis !== 'x') return;
+      let v = s.base + mx;
+      // Only the sides that have an action move; the other way the row resists like a rubber band.
+      if (v < 0 && !live.current.trailing) v = v * 0.12;
+      if (v > 0 && !live.current.leading) v = v * 0.12;
+      if (Math.abs(v) > s.w) v = Math.sign(v) * (s.w + (Math.abs(v) - s.w) * 0.25);
       swiped.current = true;
       setDragging(true);
-      let v = Math.min(0, s.base + mx);
-      // Past the row's width it resists, as a rubber band.
-      if (v < -s.w) v = -s.w + (v + s.w) * 0.25;
-      const past = v < -s.w * 0.5;
-      if (past !== !!s.past) {
-        s.past = past;
+      const side = sideOf(v);
+      const isPast = !!side && side.full !== false && Math.abs(v) > s.w * 0.5;
+      if (isPast !== !!s.past) {
+        s.past = isPast;
+        setPast(isPast);
         haptic('selection');
       }
       setDx(v);
@@ -63,12 +89,19 @@ export function useSwipeAction(onCommit: () => void, actionWidth = 92) {
       start.current = null;
       if (!s || s.axis !== 'x') return;
       setDragging(false);
-      if (off.current < -s.w * 0.5) commit(s.w);
-      else setDx(off.current < -actionWidth / 2 ? -actionWidth : 0);
+      const v = off.current;
+      const side = sideOf(v);
+      if (!side) return setDx(0);
+      if (side.full !== false && Math.abs(v) > s.w * 0.5) commit(Math.sign(v) * s.w);
+      else {
+        setPast(false);
+        setDx(Math.abs(v) > actionWidth / 2 ? Math.sign(v) * actionWidth : 0);
+      }
     },
     onTouchCancel: () => {
       start.current = null;
       setDragging(false);
+      setPast(false);
       setDx(0);
     },
   };
@@ -76,7 +109,9 @@ export function useSwipeAction(onCommit: () => void, actionWidth = 92) {
     handlers,
     style: { '--swipe': `${dx}px` } as CSSProperties,
     dragging,
-    open: dx !== 0,
+    past,
+    /** Which side's button is uncovered. */
+    open: dx < 0 ? ('trailing' as const) : dx > 0 ? ('leading' as const) : undefined,
     close: () => setDx(0),
     /** The click that ends a swipe, or a tap on an open row, is not a tap on the row. */
     consumeClick: () => {
@@ -91,4 +126,45 @@ export function useSwipeAction(onCommit: () => void, actionWidth = 92) {
       return false;
     },
   };
+}
+
+const HINT_KEY = 'mygarage.swipeHint';
+
+/**
+ * Once on a device, the first row that can be swiped shows it: it slides a little to the left — the
+ * action peeks out — and comes back (the way iOS hints at a swipe, instead of a line of text). Only
+ * under a finger (a touch screen), never with reduced motion.
+ */
+export function useSwipeHint(ready: boolean) {
+  useEffect(() => {
+    if (!ready || typeof matchMedia !== 'function') return;
+    if (!matchMedia('(pointer: coarse)').matches || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    try {
+      if (localStorage.getItem(HINT_KEY)) return;
+    } catch {
+      return;
+    }
+    let back = 0;
+    const show = window.setTimeout(() => {
+      const row = document.querySelector<HTMLElement>('.screen[data-role="top"] .list-row.swipe-row');
+      if (!row) return;
+      row.style.setProperty('--swipe', '-60px');
+      back = window.setTimeout(() => row.style.setProperty('--swipe', '0px'), 640);
+      try {
+        localStorage.setItem(HINT_KEY, '1');
+      } catch {
+        // the hint simply shows again next time
+      }
+    }, 1100);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(back);
+    };
+  }, [ready]);
+}
+
+/** A row swiped to the left only (the board's "to the archive"). */
+export function useSwipeAction(onCommit: () => void, actionWidth = 92) {
+  const sw = useSwipeRow({ trailing: { onCommit } }, actionWidth);
+  return { ...sw, open: sw.open === 'trailing' };
 }

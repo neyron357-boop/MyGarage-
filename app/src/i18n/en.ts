@@ -914,6 +914,7 @@ export const en: typeof ru = {
     ask: 'Ask for prepayment',
   },
   payment: {
+    paidFull: 'Paid',
     title: 'Payment',
     accept: 'Take payment',
     saved: 'Payment saved, receipt created',
@@ -989,6 +990,7 @@ export const en: typeof ru = {
     reissued: 'Done: credit note {{credit}}, new invoice {{invoice}}',
   },
   job: {
+    handedOver: 'Handed over',
     due: 'Due',
     dueTitle: 'Ready by',
     dueAt: 'by {{time}}',

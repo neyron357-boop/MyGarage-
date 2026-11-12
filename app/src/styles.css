@@ -1230,15 +1230,17 @@ html.kb .tab-bar-wrap {
 .job-cover:active {
   transform: scale(0.985);
 }
-/* Swipe a board row left (ui/swipe.ts): the row's content slides, its action grows from the right. */
-.job-row {
+/* Swipe a row (ui/swipe.ts), like the iPhone's lists: the row's content slides with the finger, the
+   action under it grows from its edge — the trailing one from the right, the leading one from the left.
+   Past half the row the button's symbol swells: letting go there does the action. */
+.swipe-row {
   touch-action: pan-y;
 }
-.job-row > :not(.swipe-action) {
+.swipe-row > :not(.swipe-action) {
   transform: translateX(var(--swipe, 0px));
-  transition: transform 300ms var(--ease-ios);
+  transition: transform 340ms var(--ease-ios);
 }
-.job-row[data-swiping] > :not(.swipe-action) {
+.swipe-row[data-swiping] > :not(.swipe-action) {
   transition: none;
 }
 .swipe-action {
@@ -1246,18 +1248,24 @@ html.kb .tab-bar-wrap {
   top: 0;
   right: 0;
   bottom: 0;
-  width: calc(var(--swipe, 0px) * -1);
+  width: max(0px, calc(var(--swipe, 0px) * -1));
   display: flex;
   justify-content: flex-end;
   overflow: hidden;
-  transition: width 300ms var(--ease-ios);
+  transition: width 340ms var(--ease-ios);
 }
-.job-row[data-swiping] > .swipe-action {
+.swipe-action.lead {
+  right: auto;
+  left: 0;
+  width: max(0px, var(--swipe, 0px));
+  justify-content: flex-start;
+}
+.swipe-row[data-swiping] > .swipe-action {
   transition: none;
 }
 .swipe-btn {
   flex: 0 0 auto;
-  min-width: 92px;
+  min-width: 88px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1274,6 +1282,12 @@ html.kb .tab-bar-wrap {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+.swipe-btn > svg {
+  transition: transform 260ms var(--spring);
+}
+.swipe-row[data-past] .swipe-btn > svg {
+  transform: scale(1.28);
+}
 /* A known car's photo as a small square (CarThumb); a car symbol while it has none. */
 .car-thumb {
   flex-shrink: 0;
@@ -1284,49 +1298,30 @@ html.kb .tab-bar-wrap {
   background: var(--app-soft);
   color: var(--mantine-color-dimmed);
 }
-/* The foot of the job's card: the mechanics' chips, the VIN photo tile on the right. */
+/* The foot of the job's card: one flow of chips — the promised time, the mechanics, the VIN photo. */
 .job-foot {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
   margin-top: 12px;
 }
-.job-foot > .chip-row {
-  flex: 1;
-  min-width: 0;
+.job-foot:empty {
+  display: none;
 }
-.job-foot > span:first-child {
-  flex: 1;
-}
-.vin-tile {
-  flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
-  min-height: 56px;
-  padding: 0;
-  overflow: hidden;
-  border-radius: 14px;
+.chip.vin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--mantine-color-cobalt-6);
-  font-size: 13px;
-  font-weight: 700;
-  gap: 1px;
+  font-weight: 600;
 }
-.vin-tile > .mantine-Image-root,
-.vin-tile > .surface-soft {
-  position: absolute;
-  inset: 0;
+.chip.vin-chip:not([data-empty]) {
+  padding-left: 6px;
+  color: var(--mantine-color-text);
 }
-/* On the photo, the word sits on a dark band at the bottom. */
-.vin-tile:not([data-empty]) > span {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 1px 0 2px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 12px;
-  letter-spacing: 0.04em;
+.vin-thumb {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  overflow: hidden;
 }
 /* A car's photo on its board row, the step it is on as a small badge in the corner. */
 .job-thumb {
@@ -3595,4 +3590,186 @@ html.kb .screen-bottom > .sticky-bar {
   margin-inline: calc(-1 * var(--page-pad));
   padding-inline: var(--page-pad);
   scroll-padding-inline: var(--page-pad);
+}
+
+/* ---------- Motion of v0.8: the job's way, the bar, the mark of a moment ---------- */
+/* Where the job is on its way: six segments, filled up to its step, the current one wider; the fill
+   runs on when the job moves. */
+.phase-track {
+  display: flex;
+  gap: 4px;
+  margin-top: 14px;
+}
+.phase-track > span {
+  flex: 1 1 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--app-fill);
+  transition: background-color 420ms var(--ease-out), flex-grow 520ms var(--spring);
+}
+.phase-track > span[data-on] {
+  background: var(--phase);
+}
+.phase-track > span[data-now] {
+  flex-grow: 2.4;
+}
+/* The main button changes with the job's step: the new one settles in on a spring (a transform only —
+   the glass buttons in the bar keep blurring what is under them). */
+@keyframes mg-bar-swap {
+  from {
+    transform: translateY(12px) scale(0.94);
+  }
+  to {
+    transform: none;
+  }
+}
+.bar-swap {
+  animation: mg-bar-swap 420ms var(--spring);
+}
+/* A moment done (ui/components Celebration): a glass disc with a tick, in for a second. */
+.celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.celebration-disc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 156px;
+  padding: 28px 30px 20px;
+  border-radius: 36px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  background: var(--glass-bg-strong);
+  animation: mg-celebrate 1500ms var(--ease-out) both;
+}
+@keyframes mg-celebrate {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  10% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  18% {
+    transform: scale(1);
+  }
+  84% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.94);
+    opacity: 0;
+  }
+}
+/* Work done reads as done: its line steps back, what is left stands out. */
+.list-row[data-done] .title {
+  color: var(--app-label-2);
+}
+/* "Today" on the board: a strip of cards swiped sideways, running to the screen's edges. */
+.today-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  margin-inline: calc(-1 * var(--page-pad));
+  padding: 2px var(--page-pad) 4px;
+  scroll-padding-inline: var(--page-pad);
+}
+.today-strip::-webkit-scrollbar {
+  display: none;
+}
+.today-card {
+  flex: 0 0 auto;
+  width: min(62vw, 244px);
+  min-height: 98px;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border-radius: 22px;
+  background: var(--app-card);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 360ms var(--spring), background-color var(--dur-1) ease;
+}
+.today-card:active {
+  transform: scale(0.96);
+  transition-duration: 80ms;
+}
+.today-strip > .today-card:only-child {
+  width: 100%;
+  min-height: 0;
+}
+.today-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.today-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  color: var(--c);
+}
+.today-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding-top: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.today-card[data-late] .today-text {
+  color: var(--mantine-color-red-7);
+}
+[data-mantine-color-scheme='dark'] .today-card[data-late] .today-text {
+  color: var(--mantine-color-red-4);
+}
+.today-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+@media (min-width: 48em) {
+  .today-strip {
+    flex-wrap: wrap;
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+  .today-card,
+  .today-strip > .today-card:only-child {
+    width: 248px;
+  }
+}
+/* A line's state symbol (JobPage LineMark): its own box, so it can pop when the state changes. */
+.line-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.list-row .title {
+  transition: color 320ms ease;
 }

@@ -1,4 +1,4 @@
-import { ActionIcon, Text, ThemeIcon } from '@mantine/core';
+import { ActionIcon } from '@mantine/core';
 import {
   IconArrowBackUp,
   IconBuildingFactory2,
@@ -26,9 +26,10 @@ import type { Customer } from '../../domain/types';
 import { simpleMessage } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { loadPast, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
-import { List, ListRow, Money, PlateText } from '../../ui/components';
+import { Money, PlateText } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
+import { useAutoAnimate } from '../../ui/motion';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { useDueLabel } from '../job/Due';
 
@@ -47,12 +48,13 @@ const META: Record<TaskKind, { icon: Icon; color: string }> = {
 };
 
 /**
- * "Today" on top of the board: what needs the manager now across all the cars, one short line each —
- * promised for 18:00, no answer for 3 h, parts to order or collect, a part to return by Friday, work
- * outside due back, a car not collected, an overdue debt, and the customers to write to. A tap opens
- * the job (or the message, for a customer). Three show; the rest behind "More".
+ * "Today" on top of the board: what needs the manager now across all the cars — promised for 18:00,
+ * no answer for 3 h, parts to order or collect, a part to return by Friday, work outside due back, a
+ * car not collected, an overdue debt, and the customers to write to. A strip of cards swiped sideways
+ * (one row of the screen however much there is to do): what is late comes first, in red. A tap opens
+ * the job (or the message, for a customer).
  */
-export function TodayList({ bundles, limit = 3 }: { bundles: OrderBundle[]; limit?: number }) {
+export function TodayList({ bundles }: { bundles: OrderBundle[] }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
@@ -60,8 +62,8 @@ export function TodayList({ bundles, limit = 3 }: { bundles: OrderBundle[]; limi
   const dueLabel = useDueLabel();
   const past = useLiveQuery(() => loadPast(), [bundles.length]);
   const suppliers = useLiveQuery(() => db.suppliers.toArray(), []) ?? [];
-  const [all, setAll] = useState(false);
   const [send, setSend] = useState<{ request: SendRequest; customer: Customer; task: Task } | null>(null);
+  const strip = useAutoAnimate<HTMLDivElement>();
   const tasks = tasksFor(bundles, past);
   if (!tasks.length) return null;
 
@@ -116,57 +118,52 @@ export function TodayList({ bundles, limit = 3 }: { bundles: OrderBundle[]; limi
       else if (task.orderId) await markFollowedUp(task.orderId);
       haptic('light');
     });
+  const isCustomer = (task: Task) => task.kind === 'followUp' || task.kind === 'service';
+  const open = (task: Task) => {
+    if (isCustomer(task)) write(task);
+    else if (task.kind === 'pickup') navigate('/parts?tab=pickup');
+    else if (task.orderId) navigate(`/orders/${task.orderId}`);
+  };
 
-  const shown = all ? tasks : tasks.slice(0, limit);
   return (
     <div className="today" aria-label={t('today.title')}>
       <div className="group-title">
         {t('today.title')} · {tasks.length}
       </div>
-      <List>
-        {shown.map((task) => {
+      <div className="today-strip" ref={strip}>
+        {tasks.map((task) => {
           const m = META[task.kind];
           const v = vehicleOf(task);
-          const customer = task.kind === 'followUp' || task.kind === 'service';
           return (
-            <ListRow
+            <div
               key={task.key}
-              left={
-                <ThemeIcon variant="light" color={task.late ? 'red' : m.color} size={36} radius="xl" style={{ flexShrink: 0 }}>
-                  <m.icon size={19} stroke={1.9} />
-                </ThemeIcon>
-              }
-              title={
-                <Text span inherit c={task.late ? 'red.7' : undefined}>
-                  {text(task)}
-                </Text>
-              }
-              subtitle={v ? <PlateText plate={v.plate} size="xs" /> : undefined}
-              right={
-                task.kind === 'debt' && task.amountFils ? (
+              className="today-card"
+              data-late={task.late || undefined}
+              role="button"
+              tabIndex={0}
+              onClick={() => open(task)}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), open(task))}
+            >
+              <div className="today-head">
+                <span className="today-icon" style={{ '--c': `var(--mantine-color-${task.late ? 'red' : m.color}-6)` } as React.CSSProperties}>
+                  <m.icon size={18} stroke={2} aria-hidden />
+                </span>
+                <span className="today-text">{text(task)}</span>
+              </div>
+              <div className="today-foot">
+                {v ? <PlateText plate={v.plate} size="xs" /> : <span />}
+                {task.kind === 'debt' && task.amountFils ? (
                   <Money fils={task.amountFils} c="red.7" />
-                ) : customer ? (
-                  <ActionIcon variant="subtle" color="gray" size={36} radius="xl" aria-label={t('today.notNeeded')} onClick={(e) => (e.stopPropagation(), void dismiss(task))}>
-                    <IconX size={18} />
+                ) : isCustomer(task) ? (
+                  <ActionIcon variant="subtle" color="gray" size={28} radius="xl" aria-label={t('today.notNeeded')} onClick={(e) => (e.stopPropagation(), void dismiss(task))}>
+                    <IconX size={16} />
                   </ActionIcon>
-                ) : undefined
-              }
-              chevron={!customer && task.kind !== 'debt'}
-              onClick={() => (customer ? write(task) : task.kind === 'pickup' ? navigate('/parts?tab=pickup') : task.orderId && navigate(`/orders/${task.orderId}`))}
-            />
+                ) : null}
+              </div>
+            </div>
           );
         })}
-        {tasks.length > limit && (
-          <ListRow
-            title={
-              <Text span inherit c="cobalt.6">
-                {all ? t('today.less') : t('today.more', { n: tasks.length - limit })}
-              </Text>
-            }
-            onClick={() => setAll((a) => !a)}
-          />
-        )}
-      </List>
+      </div>
       {send && (
         <SendDialog
           customer={send.customer}

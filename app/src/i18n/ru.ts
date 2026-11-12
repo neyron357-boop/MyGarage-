@@ -912,6 +912,7 @@ export const ru = {
     ask: 'Попросить предоплату',
   },
   payment: {
+    paidFull: 'Оплачено',
     title: 'Оплата',
     accept: 'Принять оплату',
     saved: 'Оплата сохранена, квитанция создана',
@@ -987,6 +988,7 @@ export const ru = {
     reissued: 'Готово: кредит-нота {{credit}}, новый инвойс {{invoice}}',
   },
   job: {
+    handedOver: 'Выдана',
     due: 'Срок',
     dueTitle: 'Когда будет готова',
     dueAt: 'к {{time}}',

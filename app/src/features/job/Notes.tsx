@@ -116,6 +116,8 @@ export function NotesSection({ orderId, notes, editable }: { orderId: string; no
       }
       subtitle={ago(n.createdAt)}
       onClick={() => (n.kind === 'photo' && n.mediaId ? setViewing(n.id) : setOpened(n))}
+      // A swipe to the left takes the note off (with Undo), as in the iPhone's lists.
+      trailing={editable ? { label: t('common.delete'), icon: IconTrash, color: 'red', onCommit: () => void remove(n) } : undefined}
     />
   );
 
@@ -124,7 +126,7 @@ export function NotesSection({ orderId, notes, editable }: { orderId: string; no
     <div className="notes" aria-label={t('notes.title')}>
       <div className="group-title">{t('notes.title')}</div>
       {notes.length > 0 && (
-        <List>
+        <List animate>
           {notes.length > 3 && !all && (
             <ListRow
               title={

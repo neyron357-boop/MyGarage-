@@ -3,7 +3,7 @@ import { IconBuildingFactory2, IconCash, IconClock, IconExternalLink, IconPackag
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { hoursBetween, nowIso, shortDuration, whenParts } from '../../domain/dates';
+import { hoursBetween, nowIso, shortDuration, TZ, whenParts } from '../../domain/dates';
 import type { Phase } from '../../domain/flow';
 import { liveLines } from '../../domain/flow';
 import { activeInvoice } from '../../domain/invoice';
@@ -69,18 +69,22 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
   const outside = working && b.items.some((i) => i.outsource?.state === 'out' && i.approvalState !== 'declined' && i.approvalState !== 'cancelled');
   const due = working ? b.order.promisedReadyAt : undefined;
   const dueLate = !!due && due < nowIso();
+  // Short enough to stand beside the plate: the time today, the weekday and the time on another day.
   const dueText = due ? (() => {
     const w = whenParts(due, lang);
-    return w.day ? `${w.day} ${w.time}` : w.time;
+    if (w.today) return w.time;
+    const wd = new Intl.DateTimeFormat(lang === 'ru' ? 'ru-RU' : 'en-GB', { weekday: 'short', timeZone: TZ }).format(new Date(due)).replace('.', '');
+    return `${wd} ${w.time}`;
   })() : '';
   const open = () => navigate(`/orders/${b.order.id}`);
   return (
     <>
       <div
-        className="list-row clickable job-row"
+        className="list-row clickable job-row swipe-row"
         {...touch}
         style={swipe ? sw.style : undefined}
         data-swiping={sw.dragging || undefined}
+        data-past={sw.past || undefined}
         onClick={() => {
           if (press.consumeClick() || sw.consumeClick()) return;
           open();

@@ -67,10 +67,12 @@ import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBu
 import { setProcurement } from '../../services/parts';
 import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
+import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { scrollToTop, useStack } from '../../ui/stack';
+import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
 import { useSendVersion } from '../estimate/EstimatePage';
 import { DiscountSheet } from '../money/DiscountSheet';
@@ -85,16 +87,35 @@ import { OutsourceActions, ReceivedRow, ReturnTerms } from './LineExtras';
 import { RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { ObdLine, useObdImport } from './ObdScan';
 import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
-import { PhasePill } from './phase';
+import { PhasePill, PhaseTrack } from './phase';
 import { PrevVisit } from './PrevVisit';
 
 /** What a line is to the job right now, as one symbol. */
 function LineMark({ item }: { item: OrderItem }) {
-  if (item.approvalState === 'pending') return <IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />;
-  if (item.approvalState === 'approved') return item.done ? <IconChecks size={20} stroke={2.2} color="var(--mantine-color-green-6)" aria-hidden /> : <IconCheck size={20} stroke={2.2} color="var(--mantine-color-cobalt-6)" aria-hidden />;
-  if (item.approvalState === 'declined') return <IconCircleX size={20} stroke={1.9} color="var(--mantine-color-red-6)" aria-hidden />;
-  // Not told to the customer yet: a small dot (an empty circle would read as a box to tick).
-  return <IconPointFilled size={20} color="var(--app-label-3)" aria-hidden />;
+  // When the line's state changes (agreed, done) its symbol pops; not when the screen opens.
+  const shown = useRef(false);
+  useEffect(() => {
+    shown.current = true;
+  }, []);
+  const state = item.approvalState === 'approved' && item.done ? 'done' : item.approvalState;
+  const mark =
+    state === 'pending' ? (
+      <IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />
+    ) : state === 'done' ? (
+      <IconChecks size={20} stroke={2.2} color="var(--mantine-color-green-6)" aria-hidden />
+    ) : state === 'approved' ? (
+      <IconCheck size={20} stroke={2.2} color="var(--mantine-color-cobalt-6)" aria-hidden />
+    ) : state === 'declined' ? (
+      <IconCircleX size={20} stroke={1.9} color="var(--mantine-color-red-6)" aria-hidden />
+    ) : (
+      // Not told to the customer yet: a small dot (an empty circle would read as a box to tick).
+      <IconPointFilled size={20} color="var(--app-label-3)" aria-hidden />
+    );
+  return (
+    <span key={state} className={shown.current ? 'line-mark pop-in' : 'line-mark'}>
+      {mark}
+    </span>
+  );
 }
 
 interface Tile {
@@ -322,6 +343,8 @@ export function JobPage() {
   useEffect(() => {
     if (orderId && phase) syncStage(orderId).catch((e) => console.error(e));
   }, [orderId, phase]);
+  // Once on a device: the first line peeks to the left — lines can be swiped.
+  useSwipeHint(!!b && !activeInvoice(b.invoices) && !['closed', 'cancelled', 'booked'].includes(b.order.stage) && liveLines(b.items).some((i) => i.kind !== 'discount'));
 
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b || !phase) return <EmptyState title={t('err.notFound')} />;
@@ -426,11 +449,31 @@ export function JobPage() {
   // Work outside: where it stands; who does a line, when it is not the job's mechanic.
   const outNote = (i: OrderItem) => (i.outsource && !i.done ? t(`outsource.states.${i.outsource.state}`) : '');
   const whoNote = (i: OrderItem) => (i.employeeId && i.employeeId !== b.order.mechanicId ? mechanics.find((m) => m.id === i.employeeId)?.name ?? '' : '');
+  // Swipes on a line, as in the iPhone's lists. Left — off the job: a draft goes at once (with Undo), a
+  // line the customer has heard of only uncovers the button (it stays in the history as cancelled).
+  // Right — the next good thing: "agreed" on a line that waits, "done" on agreed work.
+  const swipeOff = (i: OrderItem): SwipeSpec | undefined =>
+    picking || !canPick(i)
+      ? undefined
+      : i.approvalState === 'draft'
+        ? { label: t('common.delete'), icon: IconTrash, color: 'red', onCommit: () => void removeLine(i) }
+        : { label: t('job.drop'), icon: IconTrash, color: 'red', full: false, onCommit: () => void run(async () => (await (isAwaitingClient(i) ? withdrawItems([i.id], { cancel: true }) : dropLine(i.id)), haptic('light'))) };
+  const swipeOn = (i: OrderItem): SwipeSpec | undefined =>
+    picking || !canPick(i)
+      ? undefined
+      : isAwaitingClient(i)
+        ? { label: t('job.agreed'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await answerLines([i.id], 'approve'), haptic('success'))) }
+        : i.approvalState === 'approved'
+          ? { label: i.done ? t('job.lineUndone') : t('job.lineDone'), icon: IconChecks, color: i.done ? 'gray' : 'green', onCommit: () => void run(async () => (await setDone(i.id, !i.done), haptic(i.done ? 'light' : 'success'))) }
+          : undefined;
   const row = (i: OrderItem) => (
     <PickRow
       key={i.id}
       selected={picking && picked.has(i.id)}
       onLong={!picking && canPick(i) ? () => setPicked(new Set([i.id])) : undefined}
+      trailing={swipeOff(i)}
+      leading={swipeOn(i)}
+      dim={i.done && !picking}
       left={
         picking && canPick(i) ? (
           picked.has(i.id) ? (
@@ -575,6 +618,7 @@ export function JobPage() {
           run(async () => {
             await changeStage(oid, 'closed');
             haptic('success');
+            celebrate(t('job.handedOver'));
           })
         }
       >
@@ -649,11 +693,15 @@ export function JobPage() {
       {/* On a computer the job keeps a readable width (like a sheet on an iPad), not the whole window. */}
       <div className="job-body">
       <Box className="surface" p="md" mb="lg">
-        <CarCover vehicleId={b.vehicle.id} />
+        <CarCover vehicleId={b.vehicle.id} hideEmpty={!open} />
         <Group gap="sm" wrap="nowrap" justify="space-between">
           <PlateText plate={b.vehicle.plate} size="card" />
-          <PhasePill phase={phase} />
+          {/* The step's name pops when the job moves on. */}
+          <span key={phase} className="pop-in" style={{ flexShrink: 0 }}>
+            <PhasePill phase={phase} />
+          </span>
         </Group>
+        <PhaseTrack phase={phase} />
         <Group justify="space-between" wrap="nowrap" mt="sm" gap="sm">
           {c.name || c.phone ? (
             <UnstyledButton className="job-line" onClick={() => setCustomerOpen(true)}>
@@ -694,21 +742,16 @@ export function JobPage() {
         )}
         <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
         {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
-        {/* When the car was promised, the mechanics (who does the job) and, on the right, the car's VIN photo. */}
-        <div className="job-foot">
-          {open ? (
-            // Wrapping, not scrolling: every mechanic stays in sight, one tap away.
-            <div className="chip-row wrap" aria-label={t('order.mechanic')}>
-              {phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
-              {mechanics.map((m) => (
-                <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
-                  {m.name}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <span />
-          )}
+        {/* One flow of chips: when the car was promised, who does the job, the car's VIN photo. Wrapping,
+            not scrolling — every chip stays in sight, one tap away. */}
+        <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>
+          {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
+          {open &&
+            mechanics.map((m) => (
+              <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
+                {m.name}
+              </button>
+            ))}
           <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} hideEmpty={!open} />
         </div>
       </Box>
@@ -745,7 +788,7 @@ export function JobPage() {
           </List>
           <Box mt="lg">
             <List>
-              <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display /></Text>} />
+              <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
               {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
               {due > 0 && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
               {waivedRow}
@@ -756,7 +799,7 @@ export function JobPage() {
       ) : (
         <>
           {(lines.length > 0 || refusedLines.length > 0) && (
-            <List>
+            <List animate>
               {lines.map(row)}
               {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
               {refusedLines.map(row)}
@@ -811,7 +854,7 @@ export function JobPage() {
                 <ListRow
                   title={<Text span fw={700} inherit>{t('job.total')}</Text>}
                   subtitle={sum.vat ? t('job.vatIn', { vat: formatAed(sum.vat, lang, false) }) : undefined}
-                  right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display /></Text>}
+                  right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display roll /></Text>}
                 />
                 {waivedRow}
                 {profitRow}
@@ -824,7 +867,14 @@ export function JobPage() {
       {(phase === 'pay' || phase === 'out') && <HandoverChecks order={b.order} />}
       <NotesSection orderId={oid} notes={b.notes} editable={open} />
 
-      {bar && <StickyBar>{bar}</StickyBar>}
+      {bar && (
+        <StickyBar>
+          {/* The button of the new step settles in on a spring. */}
+          <div key={picking ? 'pick' : phase} className="bar-swap">
+            {bar}
+          </div>
+        </StickyBar>
+      )}
       </div>
 
       <LineSheet

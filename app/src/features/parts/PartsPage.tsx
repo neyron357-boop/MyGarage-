@@ -21,8 +21,10 @@ import { itemTitle } from '../../domain/items';
 import { roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import type { OrderItem } from '../../domain/types';
-import { closeReturn } from '../../services/parts';
+import { syncStage } from '../../services/flow';
+import { closeReturn, setProcurement } from '../../services/parts';
 import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs } from '../../ui/components';
+import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 import { ProcurementModal } from './Procurement';
 import { SuppliersTab } from './Suppliers';
@@ -70,6 +72,12 @@ export function PartsPage() {
   const groups = new Map<string, OrderItem[]>();
   for (const i of pickup) groups.set(i.supplierId ?? '', [...(groups.get(i.supplierId ?? '') ?? []), i]);
 
+  const step = (i: OrderItem, status: 'ordered' | 'received') =>
+    run(async () => {
+      await setProcurement(i.id, { status });
+      await syncStage(i.orderId);
+      haptic(status === 'received' ? 'success' : 'light');
+    });
   const row = (i: OrderItem) => {
     const o = byId.get(i.orderId);
     const v = o ? vById.get(o.vehicleId) : undefined;
@@ -78,6 +86,14 @@ export function PartsPage() {
       <ListRow
         key={i.id}
         onClick={() => setProc(i)}
+        // A swipe to the right is the part's next step: to find → ordered → here.
+        leading={
+          (i.procurementStatus ?? 'needed') === 'needed'
+            ? { label: t('job.part.ordered'), icon: IconReceipt2, color: 'cobalt', onCommit: () => void step(i, 'ordered') }
+            : i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit'
+              ? { label: t('job.part.received'), icon: IconCheck, color: 'green', onCommit: () => void step(i, 'received') }
+              : undefined
+        }
         left={
           <ThemeIcon variant="light" color={m.color} size={40} radius="md">
             <m.icon size={20} />
@@ -128,8 +144,8 @@ export function PartsPage() {
         ]}
       />
       <div className="tab-panel">
-      {tab === 'needed' && (needed.length ? <List>{needed.map(row)}</List> : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
-      {tab === 'ordered' && (ordered.length ? <List>{ordered.map(row)}</List> : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
+      {tab === 'needed' && (needed.length ? <List animate>{needed.map(row)}</List> : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
+      {tab === 'ordered' && (ordered.length ? <List animate>{ordered.map(row)}</List> : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
       {tab === 'pickup' && (
         <Stack gap="md">
           {pickup.length === 0 && <EmptyState icon={IconTruck} title={t('parts.nothingPickup')} />}

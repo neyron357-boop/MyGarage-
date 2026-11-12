@@ -35,6 +35,8 @@ import { mediaUrl } from '../services/media';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
 import { useScreen, useScreenTitle, useStack } from './stack';
+import { useSwipeRow, type SwipeSpec } from './swipe';
+import { onCelebrate, useAutoAnimate, useRolling } from './motion';
 import { createPortal } from 'react-dom';
 import { PhotoViewer } from './PhotoViewer';
 
@@ -68,13 +70,15 @@ export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => v
 
 /* ---------------- Money ---------------- */
 
-export function Money({ fils, size, fw, c, display }: { fils: number; size?: string; fw?: number; c?: string; display?: boolean }) {
+export function Money({ fils, size, fw, c, display, roll }: { fils: number; size?: string; fw?: number; c?: string; display?: boolean; /** Runs to a new value instead of blinking to it (totals, balances). */ roll?: boolean }) {
   const lang = useLang();
+  const shown = useRolling(fils, !!roll);
+  // Sized by the final figure, so the cell does not twitch while the digits run.
   const s = formatAed(fils, lang, false);
   // How long the figure is: in a tile or a figure cell it is sized to fit (styles.css, "fit to cell").
   return (
     <Text span size={size} fz={size ? undefined : 'inherit'} fw={fw ?? (display ? undefined : 600)} c={c} className={display ? 'money display' : 'money'} style={{ '--chars': s.length } as React.CSSProperties}>
-      {s}
+      {roll ? formatAed(shown, lang, false) : s}
       <span className="cur">AED</span>
     </Text>
   );
@@ -424,8 +428,14 @@ export function FormRow({ label, children, onClick, align = 'right', chevron }: 
   );
 }
 
-export function List({ children }: { children: ReactNode }) {
-  return <div className="list">{children}</div>;
+/** An inset group of rows. With `animate` the rows come, go and change places with motion (ui/motion). */
+export function List({ children, animate }: { children: ReactNode; animate?: boolean }) {
+  const ref = useAutoAnimate<HTMLDivElement>(!!animate);
+  return (
+    <div className="list" ref={ref}>
+      {children}
+    </div>
+  );
 }
 
 export function ListRow({
@@ -437,6 +447,9 @@ export function ListRow({
   chevron,
   handlers,
   selected,
+  trailing,
+  leading,
+  dim,
 }: {
   left?: ReactNode;
   title: ReactNode;
@@ -448,18 +461,61 @@ export function ListRow({
   handlers?: HTMLAttributes<HTMLDivElement>;
   /** Picked in a selection (the row is tinted). */
   selected?: boolean;
+  /** What a swipe to the left uncovers (delete, take off), as in the iPhone's lists. */
+  trailing?: SwipeSpec;
+  /** What a swipe to the right uncovers (done, agreed). */
+  leading?: SwipeSpec;
+  /** Finished with (work done): the row steps back so what is left stands out. */
+  dim?: boolean;
 }) {
+  const sw = useSwipeRow({ trailing, leading });
+  const swipes = !!(trailing || leading);
+  // A long press and a swipe on the same row: both see the finger.
+  const h = handlers as Partial<Record<'onTouchStart' | 'onTouchMove' | 'onTouchEnd' | 'onTouchCancel', (e: React.TouchEvent<HTMLDivElement>) => void>> | undefined;
+  const touch = swipes
+    ? {
+        onTouchStart: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchStart?.(e), sw.handlers.onTouchStart(e)),
+        onTouchMove: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchMove?.(e), sw.handlers.onTouchMove(e)),
+        onTouchEnd: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchEnd?.(e), sw.handlers.onTouchEnd()),
+        onTouchCancel: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchCancel?.(e), sw.handlers.onTouchCancel()),
+      }
+    : undefined;
+  const action = (s: SwipeSpec, lead: boolean) => (
+    <span className={`swipe-action${lead ? ' lead' : ''}`} style={{ background: `var(--mantine-color-${s.color}-6)` }} aria-hidden={sw.open !== (lead ? 'leading' : 'trailing')}>
+      <button
+        type="button"
+        className="swipe-btn"
+        tabIndex={sw.open === (lead ? 'leading' : 'trailing') ? 0 : -1}
+        onClick={(e) => {
+          e.stopPropagation();
+          sw.close();
+          s.onCommit();
+        }}
+      >
+        <s.icon size={22} stroke={1.9} aria-hidden />
+        <span>{s.label}</span>
+      </button>
+    </span>
+  );
+  const click = onClick && (() => !(swipes && sw.consumeClick()) && onClick());
   return (
     <div
       {...handlers}
+      {...touch}
       data-selected={selected || undefined}
+      data-done={dim || undefined}
       aria-pressed={selected}
-      className={`list-row${onClick ? ' clickable' : ''}`}
-      onClick={onClick}
+      className={`list-row${onClick ? ' clickable' : ''}${swipes ? ' swipe-row' : ''}`}
+      style={swipes ? sw.style : undefined}
+      data-swiping={(swipes && sw.dragging) || undefined}
+      data-past={(swipes && sw.past) || undefined}
+      onClick={click || (swipes ? () => void sw.consumeClick() : undefined)}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onClick()) : undefined}
     >
+      {trailing && action(trailing, false)}
+      {leading && action(leading, true)}
       {left}
       <div className="body">
         <Text className="title" lineClamp={3} component="div">
@@ -651,6 +707,37 @@ export function SuccessMark({ size = 64 }: { size?: number }) {
         <path className="tick" d="M19 33.5l8.5 8.5L45.5 24" fill="none" stroke="#fff" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </span>
+  );
+}
+
+/**
+ * The mark of a moment done — the car handed over, the job paid (ui/motion `celebrate`): a green tick
+ * drawn on a glass disc in the middle of the screen, a word under it, gone in a second. It takes no
+ * taps and blocks nothing.
+ */
+export function Celebration() {
+  const [mark, setMark] = useState<{ label: string; n: number } | null>(null);
+  useEffect(() => {
+    let timer = 0;
+    const off = onCelebrate((label) => {
+      window.clearTimeout(timer);
+      setMark((m) => ({ label, n: (m?.n ?? 0) + 1 }));
+      timer = window.setTimeout(() => setMark(null), 1500);
+    });
+    return () => {
+      off();
+      window.clearTimeout(timer);
+    };
+  }, []);
+  if (!mark) return null;
+  return createPortal(
+    <div className="celebration" key={mark.n} role="status" aria-live="polite">
+      <div className="celebration-disc glass">
+        <SuccessMark size={72} />
+        <span>{mark.label}</span>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -24,6 +24,7 @@ import { simpleMessage } from '../../services/messages';
 import { addPayment, createDebt, issueCreditNote, issueInvoice } from '../../services/money';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
+import { celebrate } from '../../ui/motion';
 import { ConfirmModal, List, ListRow, Money, MoneyInput, Section, SelectCard } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { useAction } from '../../ui/hooks';
@@ -44,11 +45,20 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
     (initialKind ?? 'payment') === 'payment' ? (due > 0 ? due : undefined) : initialKind === 'prepayment' && partsGross > 0 && !b.payments.length ? partsGross : undefined,
   );
   const [reference, setReference] = useState('');
+  // Paid in full: the moment gets its mark (instead of a banner); a part payment — the usual banner.
+  const full = kind !== 'refund' && due > 0 && (amount ?? 0) >= due;
   const save = () =>
-    run(async () => {
-      await addPayment(b.order.id, { kind, method, amountFils: amount ?? 0, reference });
-      onClose();
-    }, 'payment.saved');
+    run(
+      async () => {
+        await addPayment(b.order.id, { kind, method, amountFils: amount ?? 0, reference });
+        if (full) {
+          haptic('success');
+          celebrate(t('payment.paidFull'));
+        }
+        onClose();
+      },
+      full ? undefined : 'payment.saved',
+    );
   return (
     <Modal opened={opened} onClose={onClose} title={t(`payment.kind.${kind}`)}>
       <Stack gap="md">

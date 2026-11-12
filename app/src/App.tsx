@@ -42,7 +42,7 @@ import { SettingsPage } from './features/settings/SettingsPage';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
 import { useResolvedScheme } from './ui/scheme';
-import { Logo, Money, Tip } from './ui/components';
+import { Celebration, Logo, Money, Tip } from './ui/components';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useLang, usePhone } from './ui/hooks';
 import { PwaUpdater } from './ui/pwa';
@@ -389,6 +389,7 @@ function Providers({ children }: { children: React.ReactNode }) {
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
       <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />
+      <Celebration />
       {children}
     </DatesProvider>
   );

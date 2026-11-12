@@ -17,9 +17,13 @@ import { JobRow, type RowSwipe } from './JobRow';
 import { TodayList } from './TodayList';
 import { coverIndex } from '../../services/cover';
 
+/** The board as it was read last: coming back to it shows the cars at once, the live read follows. */
+let lastBoard: OrderBundle[] | undefined;
+
 async function loadBoard() {
   const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
-  return (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
+  lastBoard = (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
+  return lastBoard;
 }
 
 /** The archive's second part: the latest closed jobs of the app (not the history carried over). */
@@ -89,7 +93,7 @@ function Kanban({ jobs, covers, swipe }: { jobs: Job[]; covers?: Map<string, str
                 {list.length}
               </Badge>
             </Group>
-            <List>
+            <List animate>
               {list.map((j) => (
                 <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} swipe={swipe(j.b)} />
               ))}
@@ -110,7 +114,7 @@ export function BoardPage() {
   const lang = useLang();
   const navigate = useNavigate();
   const { run } = useAction();
-  const bundles = useLiveQuery(loadBoard, []);
+  const bundles = useLiveQuery(loadBoard, []) ?? lastBoard;
   const mobile = usePhone();
   const [filter, setFilter] = useState<'all' | 'archive' | Phase>('all');
   const archive = filter === 'archive';
@@ -213,7 +217,7 @@ export function BoardPage() {
     <>
       {header}
       <InsecureWarning />
-      {!archive && (mobile ? <TodayList bundles={bundles} /> : <Box maw={720}><TodayList bundles={bundles} limit={5} /></Box>)}
+      {!archive && (mobile ? <TodayList bundles={bundles} /> : <TodayList bundles={bundles} />)}
       {mobile ? (
         <>
           <ScrollTabs
@@ -228,7 +232,7 @@ export function BoardPage() {
           {archive ? (
             archiveList
           ) : shown.length ? (
-            <List>
+            <List animate>
               {shown.map((j) => (
                 <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} swipe={toArchive(j.b)} />
               ))}

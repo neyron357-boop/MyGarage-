@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { ImmutableError } from '../db/db';
 import type { Lang } from '../domain/types';
 import { AppError } from '../services/errors';
-import { loadOrderBundle } from '../services/orders';
+import { loadOrderBundle, seenBundle } from '../services/orders';
 import { getSettings } from '../services/settings';
 import { haptic } from './haptics';
 
@@ -29,7 +29,10 @@ export function useSettings() {
 }
 
 export function useOrderBundle(orderId: string | undefined) {
-  return useLiveQuery(() => (orderId ? loadOrderBundle(orderId) : undefined), [orderId]);
+  const live = useLiveQuery(() => (orderId ? loadOrderBundle(orderId) : undefined), [orderId]);
+  // What was read a moment ago (by the board, by the last visit) shows at once; the live read follows.
+  if (live && live.order.id === orderId) return live;
+  return orderId ? seenBundle(orderId) : undefined;
 }
 
 /** Translate any thrown error into a user message. */

@@ -143,9 +143,27 @@ export interface OrderBundle {
   settings: Settings;
 }
 
+/**
+ * The jobs read last, kept in memory: a screen opening a job the board has just read shows it at once
+ * (no empty frame while the database answers); the live read follows and replaces it.
+ */
+const seen = new Map<string, OrderBundle>();
+export function seenBundle(orderId: string): OrderBundle | undefined {
+  return seen.get(orderId);
+}
+function remember(b: OrderBundle): OrderBundle {
+  seen.delete(b.order.id);
+  seen.set(b.order.id, b);
+  if (seen.size > 80) seen.delete(seen.keys().next().value as string);
+  return b;
+}
+
 export async function loadOrderBundle(orderId: string): Promise<OrderBundle | undefined> {
   const order = await db.orders.get(orderId);
-  if (!order) return undefined;
+  if (!order) {
+    seen.delete(orderId);
+    return undefined;
+  }
   const [customer, vehicle, items, versions, decisions, inspections, payments, invoices, debts, events, messages, incidents, claims, settings, notes] =
     await Promise.all([
       db.customers.get(order.customerId),
@@ -177,7 +195,7 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
     db.media.where('ownerId').anyOf(ownerIds).sortBy('createdAt'),
     order.mechanicId ? db.employees.get(order.mechanicId) : Promise.resolve(undefined),
   ]);
-  return {
+  return remember({
     order,
     customer,
     vehicle,
@@ -198,7 +216,7 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
     claims,
     notes,
     settings,
-  };
+  });
 }
 
 export function bundleAmountDue(b: OrderBundle): number {
