@@ -27,6 +27,7 @@ import { proofIndex } from '../../services/proofs';
 import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
+import { useTabSwipe } from '../../ui/tabSwipe';
 import { initials } from '../customers/CustomersPage';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet } from './MoneyEntry';
@@ -418,6 +419,7 @@ export function MoneyPage() {
   // An old or mistyped link opens the book, not an empty screen.
   const asked = params.get('tab') ?? 'book';
   const tab = MONEY_TABS.includes(asked) ? asked : 'book';
+  const sw = useTabSwipe(MONEY_TABS, tab, (v) => setParams({ tab: v }, { replace: true }));
   return (
     <>
       <PageHeader title={t('nav.money')} right={<MoneySheetActions />} />
@@ -432,7 +434,8 @@ export function MoneyPage() {
           { value: 'debts', label: t('money.debts') },
         ]}
       />
-      <div key={tab} className="fade-enter tab-panel">
+      {/* The tabs move like pages: a swipe sideways opens the next one, it slides in from its side. */}
+      <div key={tab} className={`${sw.enter} tab-panel`} {...sw.handlers}>
         {tab === 'book' && <LedgerTab />}
         {tab === 'cash' && <CashTab />}
         {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}

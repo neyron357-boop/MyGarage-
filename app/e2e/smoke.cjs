@@ -757,6 +757,24 @@ async function launchBrowser() {
     await page.screenshot({ path: `${SP}/shots/36c-celebration.png` });
     await shot('36c-handed-over');
     await page.getByText('Закрыт').first().waitFor();
+    // Tabs move like pages: a swipe to the left on Money opens the next tab, to the right — back.
+    await page.goto(BASE + '#/money');
+    const pageSwipe = (dir) =>
+      front('.tab-panel').first().evaluate((el, dir) => {
+        const y = 520;
+        const x0 = dir < 0 ? 330 : 60;
+        const touch = (x) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+        const fire = (type, x, list = true) => el.dispatchEvent(new TouchEvent(type, { touches: list ? [touch(x)] : [], changedTouches: [touch(x)], bubbles: true, cancelable: true }));
+        fire('touchstart', x0);
+        for (let i = 1; i <= 8; i++) fire('touchmove', x0 + dir * i * 25);
+        fire('touchend', x0 + dir * 200, false);
+      }, dir);
+    await front('.tab-panel').first().waitFor();
+    await pageSwipe(-1);
+    await page.waitForFunction(() => location.hash.includes('tab=cash'));
+    await page.getByRole('button', { name: 'Закрыть день' }).first().waitFor();
+    await pageSwipe(1);
+    await page.waitForFunction(() => location.hash.includes('tab=book'));
   });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);

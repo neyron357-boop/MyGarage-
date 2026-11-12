@@ -26,6 +26,7 @@ import { closeReturn, setProcurement } from '../../services/parts';
 import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
+import { useTabSwipe } from '../../ui/tabSwipe';
 import { ProcurementModal } from './Procurement';
 import { SuppliersTab } from './Suppliers';
 
@@ -51,6 +52,8 @@ async function loadParts() {
   return { items, byId, vById, suppliers, returns, returnItems };
 }
 
+const PARTS_TABS = ['needed', 'ordered', 'pickup', 'returns', 'suppliers'];
+
 export function PartsPage() {
   const { t } = useTranslation();
   const lang = useLang();
@@ -60,15 +63,17 @@ export function PartsPage() {
   const explicitTab = params.get('tab');
   const [proc, setProc] = useState<OrderItem | null>(null);
   const data = useLiveQuery(loadParts, []);
-  if (!data) return <PageSkeleton />;
-  const { items, byId, vById, suppliers, returns, returnItems } = data;
-  const sName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? t('parts.noSupplier');
   const today = dubaiDate();
-  const needed = items.filter((i) => (i.procurementStatus ?? 'needed') === 'needed');
-  const ordered = items.filter((i) => i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit');
+  const needed = (data?.items ?? []).filter((i) => (i.procurementStatus ?? 'needed') === 'needed');
+  const ordered = (data?.items ?? []).filter((i) => i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit');
   const pickup = ordered.filter((i) => !i.expectedAt || i.expectedAt <= today);
   // Without an explicit tab, open the first list that has something to do.
-  const tab = explicitTab ?? (needed.length ? 'needed' : pickup.length ? 'pickup' : ordered.length ? 'ordered' : returns.length ? 'returns' : 'needed');
+  const tab = explicitTab ?? (needed.length ? 'needed' : pickup.length ? 'pickup' : ordered.length ? 'ordered' : data?.returns.length ? 'returns' : 'needed');
+  // The tabs move like pages: a swipe sideways opens the next one.
+  const sw = useTabSwipe(PARTS_TABS, tab, (v) => setParams({ tab: v }, { replace: true }));
+  if (!data) return <PageSkeleton />;
+  const { byId, vById, suppliers, returns, returnItems } = data;
+  const sName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? t('parts.noSupplier');
   const groups = new Map<string, OrderItem[]>();
   for (const i of pickup) groups.set(i.supplierId ?? '', [...(groups.get(i.supplierId ?? '') ?? []), i]);
 
@@ -143,7 +148,7 @@ export function PartsPage() {
           { value: 'suppliers', label: t('nav.suppliers'), count: suppliers.filter((s) => !s.archivedAt).length },
         ]}
       />
-      <div className="tab-panel">
+      <div key={tab} className={`${sw.enter} tab-panel`} {...sw.handlers}>
       {tab === 'needed' && (needed.length ? <List animate>{needed.map(row)}</List> : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
       {tab === 'ordered' && (ordered.length ? <List animate>{ordered.map(row)}</List> : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
       {tab === 'pickup' && (
