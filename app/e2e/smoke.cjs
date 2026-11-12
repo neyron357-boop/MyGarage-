@@ -579,6 +579,112 @@ async function launchBrowser() {
     await top.getByText('Всего долгов').waitFor();
     if (await top.getByText('57721').count()) throw new Error('a job closed without payment shows as a debt');
   });
+  await step('v0.7: due time, notes, offers, return terms, work outside, mechanic, report', async () => {
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('61803');
+    await page.getByRole('button', { name: 'Nissan', exact: true }).click();
+    await page.getByRole('button', { name: 'Sunny', exact: true }).click();
+    await page.getByRole('button', { name: 'Принять' }).click();
+    const dlg = page.getByRole('dialog');
+    // When the car was promised: a chip on the card, a time from the sheet.
+    await page.getByRole('button', { name: 'Срок' }).click();
+    await page.getByRole('dialog', { name: 'Когда будет готова' }).locator('button.chip').first().waitFor();
+    await shot('34a-due-sheet');
+    await page.getByRole('dialog', { name: 'Когда будет готова' }).locator('button.chip').first().click();
+    await front('.due-chip[data-state="set"]').waitFor();
+    // A note at the bottom of the job, like a chat with oneself.
+    await page.getByLabel('Заметка').fill('Front pads at 2 mm, discs OK');
+    await front('[aria-label="Добавить"]').click();
+    await page.locator('.notes .list-row', { hasText: 'Front pads at 2 mm' }).waitFor();
+    // A part with its number and two offers: the first one goes on the line (cost + markup).
+    await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
+    await dlg.getByLabel('Запчасть').fill('Headlight LH');
+    await dlg.getByLabel('Номер').fill('81150-06B20');
+    await dlg.getByRole('button', { name: /^Варианты/ }).click();
+    await dlg.getByText('Вариант', { exact: true }).click();
+    await dlg.getByLabel('Закупка варианта').fill('300');
+    await dlg.getByRole('button', { name: 'Добавить', exact: true }).click();
+    await dlg.getByText('Вариант', { exact: true }).click();
+    await dlg.getByText('Б/у', { exact: true }).click();
+    await dlg.getByLabel('Закупка варианта').fill('120');
+    await dlg.getByRole('button', { name: 'Добавить', exact: true }).click();
+    if ((await dlg.locator('.offer-row').count()) !== 2) throw new Error('two offers expected');
+    await dlg.getByRole('button', { name: 'Варианты клиенту' }).waitFor();
+    await dlg.getByRole('button', { name: /^Запрос/ }).waitFor();
+    await shot('34b-part-offers');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByText('409,50').first().waitFor(); // 300 + 30 % markup + 5 % VAT
+    // Work outside: the paint shop, what we pay them.
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Bumper paint');
+    await dlg.getByLabel('Цена', { exact: true }).fill('500');
+    await dlg.getByRole('button', { name: 'На стороне' }).click();
+    await dlg.getByLabel('Платим').fill('300');
+    await shot('34c-outside');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.locator('.list-row', { hasText: 'Bumper paint' }).getByText(/Отдать/).waitFor();
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByText('В работе').first().waitFor();
+    // Bought: the seller takes it back within 7 days, the receipt photo kept with the line.
+    await page.locator('.list-row', { hasText: 'Headlight LH' }).first().click();
+    await dlg.getByRole('button', { name: 'Заказано' }).click();
+    await dlg.getByRole('button', { name: '7 дн.' }).click();
+    await dlg.locator('input[data-photo-input="deal"]').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+    await dlg.locator('.strip-tile img').first().waitFor();
+    await dlg.getByText(/^Возврат · до /).waitFor();
+    await shot('34d-return-terms');
+    await page.locator('.mantine-Modal-close').first().click();
+    // The paint shop has the bumper, then paid: an expense of the job.
+    await page.locator('.list-row', { hasText: 'Bumper paint' }).first().click();
+    await dlg.getByRole('button', { name: 'У них' }).click();
+    await dlg.getByRole('button', { name: /^Оплатить/ }).click();
+    await dlg.getByRole('button', { name: 'Наличные' }).click();
+    await dlg.getByText(/^Оплачено/).waitFor();
+    await shot('34e-outside-paid');
+    await page.locator('.mantine-Modal-close').first().click();
+    // The profit (blurred until tapped): 390 + 500 net − 300 − 300.
+    await page.locator('.list-row', { hasText: 'Прибыль' }).click();
+    await page.locator('.profit-amount[data-shown="true"]').getByText('290,00').waitFor();
+    // "…" → Mechanic: the task in English; → Report: what was done, for the customer.
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'Механику' }).click();
+    const task = page.getByRole('dialog', { name: /Механику|Задание механику/ });
+    if (!/To do:[\s\S]*Bumper paint/.test(await task.locator('textarea').inputValue())) throw new Error('the mechanic task lists the work');
+    await shot('34f-mechanic');
+    await task.locator('.mantine-Modal-close').click();
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'Отчёт' }).click();
+    await page.getByText('Открыть чат').waitFor();
+    if (!/Headlight LH[\s\S]*Bumper paint/.test(await page.getByRole('dialog').last().locator('textarea').inputValue())) throw new Error('the report lists what was done');
+    await shot('34g-report');
+    await page.locator('.mantine-Modal-close').last().click();
+    await page.waitForTimeout(300);
+    await shot('34h-job-v07', true);
+    // On the board: the promised time beside the plate, the paint shop's sign on the row.
+    await page.goto(BASE + '#/');
+    const row = page.locator('.job-row', { hasText: '61803' }).first();
+    await row.locator('.row-due').waitFor();
+    await row.locator('svg[aria-label="На стороне"]').waitFor();
+    await page.getByText(/^Сегодня · \d+/).waitFor();
+    await shot('34i-board-today');
+  });
+  await step('v0.7: suppliers from a list, their card; moving to another device', async () => {
+    await page.goto(BASE + '#/parts?tab=suppliers');
+    await front('input[data-suppliers-input]').setInputFiles({ name: 'suppliers.csv', mimeType: 'text/csv', buffer: Buffer.from('Название;Телефон;Марки;Новые/Б/у;Что продают\nGulf Lights;050 765 4321;Toyota, Nissan;б/у;Фары\nAl Shams Paint;04 333 2211;;;покраска\n', 'utf8') });
+    await page.getByText('Добавлено: 2, уже были: 0').first().waitFor();
+    await front('.list-row').filter({ hasText: 'Gulf Lights' }).waitFor();
+    await shot('35a-suppliers');
+    await front('.list-row').filter({ hasText: 'Gulf Lights' }).click();
+    await page.getByRole('dialog').getByText('Марки').waitFor();
+    await shot('35b-supplier-card');
+    await page.locator('.mantine-Modal-close').first().click();
+    await page.goto(BASE + '#/more');
+    await page.getByText('На другое устройство').click();
+    await page.getByRole('dialog').getByRole('button', { name: /^Отправить \d/ }).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Принять файл' }).waitFor();
+    await shot('35c-transfer');
+    await page.locator('.mantine-Modal-close').first().click();
+  });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);
     await page.getByText('Было / стало').waitFor();

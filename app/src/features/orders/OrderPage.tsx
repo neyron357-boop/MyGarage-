@@ -109,7 +109,7 @@ import { nextStep, type StepAction } from './nextStep';
 import { DeleteJobModal } from './DeleteJob';
 import { useStack } from '../../ui/stack';
 
-const ctxOf = (b: OrderBundle) => ({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name });
+const ctxOf = (b: OrderBundle) => ({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils });
 
 function initials(name: string) {
   return name

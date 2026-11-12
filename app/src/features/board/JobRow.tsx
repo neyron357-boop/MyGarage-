@@ -1,9 +1,9 @@
 import { Group, Modal, Text, ThemeIcon } from '@mantine/core';
-import { IconCash, IconExternalLink, IconPackage, IconRepeat, IconTrash, type Icon } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconCash, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { hoursBetween, shortDuration } from '../../domain/dates';
+import { hoursBetween, nowIso, shortDuration, whenParts } from '../../domain/dates';
 import type { Phase } from '../../domain/flow';
 import { liveLines } from '../../domain/flow';
 import { activeInvoice } from '../../domain/invoice';
@@ -58,10 +58,21 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
   const m = PHASE_META[phase];
   const { flags, waitingHours } = orderFlags(b);
   const hours = phase === 'wait' && waitingHours !== undefined ? waitingHours : hoursBetween(b.order.stageChangedAt);
-  const late = phase === 'wait' && hours >= (b.settings.boardWarnHours ?? 2);
+  // No answer, or no price told, for a couple of hours: the time turns red.
+  const late = (phase === 'wait' || phase === 'price') && hours >= (b.settings.boardWarnHours ?? 2);
   const amount = jobAmount(b);
   const car = [b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ');
-  const find = phase === 'price' || phase === 'work' || phase === 'wait' ? partsToFind(b.items).length : 0;
+  const working = phase === 'look' || phase === 'price' || phase === 'wait' || phase === 'work';
+  const find = working && phase !== 'look' ? partsToFind(b.items).length : 0;
+  // Parts on their way (ordered, not here yet), work handed outside, the time promised to the customer.
+  const coming = working && !find && b.items.some((i) => i.kind === 'part' && !i.customerSupplied && !i.done && i.approvalState === 'approved' && (i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit'));
+  const outside = working && b.items.some((i) => i.outsource?.state === 'out' && i.approvalState !== 'declined' && i.approvalState !== 'cancelled');
+  const due = working ? b.order.promisedReadyAt : undefined;
+  const dueLate = !!due && due < nowIso();
+  const dueText = due ? (() => {
+    const w = whenParts(due, lang);
+    return w.day ? `${w.day} ${w.time}` : w.time;
+  })() : '';
   const open = () => navigate(`/orders/${b.order.id}`);
   return (
     <>
@@ -115,7 +126,16 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
         )}
         <div className="body">
           <Group gap={8} wrap="nowrap" justify="space-between">
-            <PlateText plate={b.vehicle.plate} size="sm" />
+            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+              <PlateText plate={b.vehicle.plate} size="sm" />
+              {/* The time promised to the customer, beside the plate; red once it has passed. */}
+              {due && (
+                <Text size="sm" c={dueLate ? 'red.7' : 'orange.7'} fw={600} className="tnum row-due" aria-label={t('job.due')}>
+                  <IconClock size={14} stroke={2.2} aria-hidden />
+                  {dueText}
+                </Text>
+              )}
+            </Group>
             {amount > 0 && <Money fils={amount} c={phase === 'debt' ? 'red.7' : undefined} />}
           </Group>
           <Group gap={6} wrap="nowrap" mt={3} style={{ minWidth: 0 }}>
@@ -126,6 +146,8 @@ export function JobRow({ b, phase, cover, swipe }: { b: OrderBundle; phase: Phas
               · {t(`job.phase.${phase}`)} {shortDuration(hours, lang)}
             </Text>
             {find > 0 && <IconPackage size={15} stroke={2} color="var(--mantine-color-orange-6)" style={{ flexShrink: 0 }} aria-label={t('flags.waitingParts')} />}
+            {coming && <IconTruckDelivery size={15} stroke={2} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} aria-label={t('flags.partsComing')} />}
+            {outside && <IconBuildingFactory2 size={15} stroke={2} color="var(--mantine-color-teal-6)" style={{ flexShrink: 0 }} aria-label={t('flags.outside')} />}
             {flags.debt && phase !== 'debt' && <IconCash size={15} stroke={2} color="var(--mantine-color-red-6)" style={{ flexShrink: 0 }} aria-label={t('flags.debt')} />}
             {flags.warranty && <IconRepeat size={15} stroke={2} color="var(--mantine-color-grape-6)" style={{ flexShrink: 0 }} aria-label={t('flags.warranty')} />}
           </Group>

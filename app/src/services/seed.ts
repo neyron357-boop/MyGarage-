@@ -106,6 +106,7 @@ const CATEGORIES: Omit<ExpenseCategory, 'id' | 'active'>[] = [
   { code: 'tools', nameRu: 'Инструмент', nameEn: 'Tools', monthlyLimitFils: aed(1000) },
   { code: 'marketing', nameRu: 'Реклама', nameEn: 'Marketing', monthlyLimitFils: aed(500) },
   { code: 'incidents', nameRu: 'Инциденты', nameEn: 'Incidents', monthlyLimitFils: 0 },
+  { code: 'subcontract', nameRu: 'Подрядчики', nameEn: 'Subcontractors', monthlyLimitFils: 0 },
   { code: 'other', nameRu: 'Прочее', nameEn: 'Other', monthlyLimitFils: aed(500) },
 ];
 
@@ -133,6 +134,10 @@ export async function ensureSeed(lang: 'ru' | 'en' = 'ru'): Promise<void> {
       // Parts bought for a job are now expenses linked to it: the old name "(not for orders)" no longer fits.
       const parts = await db.expenseCategories.where('code').equals('parts').first();
       if (parts?.nameRu === 'Запчасти (не по заказам)') await db.expenseCategories.update(parts.id, { nameRu: 'Запчасти', nameEn: 'Parts' });
+      // Categories added later (contractors) come to older installs too.
+      const codes = new Set((await db.expenseCategories.toArray()).map((c) => c.code));
+      const missing = CATEGORIES.filter((c) => !codes.has(c.code));
+      if (missing.length) await db.expenseCategories.bulkAdd(missing.map((c) => ({ ...c, id: uid(), active: true })));
     }
     if ((await db.employees.count()) === 0) {
       await db.employees.bulkAdd([

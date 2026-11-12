@@ -88,6 +88,7 @@ export function lastChange(j: {
   items?: { createdAt: string; doneAt?: string; orderedAt?: string; receivedAt?: string }[];
   payments?: { receivedAt: string }[];
   media?: { createdAt: string }[];
+  notes?: { createdAt: string }[];
 }): string {
   let last = j.order.createdAt;
   const see = (at?: string) => {
@@ -99,5 +100,6 @@ export function lastChange(j: {
   j.items?.forEach((i) => [i.createdAt, i.doneAt, i.orderedAt, i.receivedAt].forEach(see));
   j.payments?.forEach((p) => see(p.receivedAt));
   j.media?.forEach((m) => see(m.createdAt));
+  j.notes?.forEach((n) => see(n.createdAt));
   return last;
 }

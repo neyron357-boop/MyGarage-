@@ -1,5 +1,6 @@
 import { Box, Text } from '@mantine/core';
-import { IconCash, IconChartBar, IconCloudDownload, IconPackage, IconSettings, IconShieldCheck, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import { IconCash, IconChartBar, IconCloudDownload, IconDevices, IconPackage, IconSettings, IconShieldCheck, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatDate, formatDateTime } from '../../domain/dates';
@@ -7,6 +8,7 @@ import { AppearanceRows } from '../../ui/Appearance';
 import { List, ListRow, PageHeader } from '../../ui/components';
 import { useBackupAge } from '../../ui/device';
 import { SetupChecklist } from '../board/BoardNotices';
+import { TransferSheet } from './Transfer';
 
 /** iOS Settings colours for the row icons. */
 const LINKS: { to: string; icon: Icon; label: string; hint: string; bg: string }[] = [
@@ -22,6 +24,7 @@ export function MorePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const backup = useBackupAge();
+  const [transfer, setTransfer] = useState(false);
   return (
     <>
       <PageHeader title={t('nav.more')} />
@@ -54,8 +57,19 @@ export function MorePage() {
             onClick={() => navigate('/settings?tab=data')}
             chevron
           />
+          <ListRow
+            left={
+              <span className="row-icon" style={{ background: '#5ac8fa' }}>
+                <IconDevices size={19} stroke={2} />
+              </span>
+            }
+            title={t('transfer.row')}
+            onClick={() => setTransfer(true)}
+            chevron
+          />
         </List>
       </Box>
+      <TransferSheet opened={transfer} onClose={() => setTransfer(false)} />
       <AppearanceRows />
       <Text size="xs" c="dimmed" ta="center" mt="xl" className="tnum selectable">
         MyGarage {__APP_VERSION__} · {formatDate(__BUILD_DATE__)}

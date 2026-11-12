@@ -1,21 +1,25 @@
 import { ActionIcon, Autocomplete, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
-import { IconMinus, IconPlus } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconCheck, IconListDetails, IconMinus, IconPlus, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
+import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
-import type { Lang, OrderItem } from '../../domain/types';
+import type { Lang, OrderItem, Outsource, PartOffer } from '../../domain/types';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
+import { offerWhen, optionsText } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
 import { FormRow, MoneyInput, RowGroup } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang } from '../../ui/hooks';
 import { PhotoStrip } from '../../ui/PhotoStrip';
+import { SendDialog, type SendRequest } from '../../ui/SendDialog';
+import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
 
 export type LineKind = 'labor' | 'part';
 /** A line typed before: its latest net price, VAT-inclusive price if typed with VAT, and VAT rate (0 — no VAT). */
@@ -91,6 +95,16 @@ export function LineSheet({
   const { run, busy } = useAction();
   const suppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []) ?? [];
   const [title, setTitle] = useState('');
+  const [partNumber, setPartNumber] = useState('');
+  // Offers found for the part (original, aftermarket, used), and the one being typed.
+  const [offers, setOffers] = useState<PartOffer[]>([]);
+  const [offersOpen, setOffersOpen] = useState(false);
+  const [draft, setDraft] = useState<{ kind: PartOffer['kind']; cost?: number; supplierId?: string; days?: number } | null>(null);
+  const [optionsSend, setOptionsSend] = useState<SendRequest | null>(null);
+  // Who does the line, and work handed outside (to whom, back when).
+  const [who, setWho] = useState<string>();
+  const [outsource, setOutsource] = useState<Outsource>();
+  const [outDays, setOutDays] = useState<number>();
   const [picked, setPicked] = useState<Suggestion>();
   const [qty, setQty] = useState<number>(1);
   // The price as typed; `mode` says how it is counted: VAT on top, VAT inside, or no VAT on this line.
@@ -115,6 +129,13 @@ export function LineSheet({
     setCost(item?.costPriceFils);
     setPart(item ? partStateOf(item) : 'needed');
     setSupplierId(item?.supplierId);
+    setPartNumber(item?.partNumber ?? '');
+    setOffers(item?.offers ?? []);
+    setOffersOpen(!!item?.offers?.length);
+    setDraft(null);
+    setWho(item?.employeeId);
+    setOutsource(item?.outsource);
+    setOutDays(undefined);
     setKept(item?.mediaIds ?? []);
     setFresh((prev) => {
       prev.forEach((p) => URL.revokeObjectURL(p.src));
@@ -157,6 +178,13 @@ export function LineSheet({
         patch.costPriceFils = own ? undefined : cost;
         patch.customerSupplied = own || undefined;
         patch.supplierId = own ? undefined : supplierId;
+        patch.partNumber = partNumber.trim() || undefined;
+        patch.offers = !own && offers.length ? offers : undefined;
+      } else {
+        patch.employeeId = who;
+        // Work outside: to whom, back when; what they charge is the line's cost.
+        patch.outsource = outsource ? { ...outsource, dueAt: outDays !== undefined ? shiftDay(dubaiDate(), outDays) : outsource.dueAt } : undefined;
+        patch.costPriceFils = outsource ? cost : undefined;
       }
       let itemId = item?.id;
       if (item) {
@@ -180,6 +208,31 @@ export function LineSheet({
         : t('item.vatTotal', { total: formatAed(lineTotal.gross, uiLang), vat: formatAed(lineTotal.vat, uiLang, false) })
       : undefined;
   const nameLabel = kind === 'labor' ? t('qi.workName') : t('qi.partName');
+  /** An offer taken: its seller and cost on the line, the price from the cost with the garage's markup. */
+  const takeOffer = (o: PartOffer) => {
+    setSupplierId(o.supplierId);
+    if (o.costFils !== undefined) {
+      setCost(o.costFils);
+      setPrice(fromCost(o.costFils));
+    }
+    haptic('selection');
+  };
+  const offerTaken = (o: PartOffer) => o.costFils === cost && (o.supplierId ?? undefined) === (supplierId ?? undefined);
+  const sName = (id?: string) => suppliers.find((s) => s.id === id)?.name;
+  /** What an offer costs the customer (the line's quantity, with VAT as the line counts it). */
+  const offerGross = (o: PartOffer) => {
+    const entered = fromCost(o.costFils) ?? 0;
+    return itemAmounts({ kind: 'part', qty: qty || 1, ...priceFromEntered(entered, taxRate, mode), vatRateBp: rateFor(mode, taxRate) } as OrderItem).gross;
+  };
+  const showOptions = () =>
+    setOptionsSend({
+      text: optionsText({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name }, lang, title.trim(), offers.filter((o) => o.costFils !== undefined).map((o) => ({ kind: o.kind, gross: offerGross(o), days: o.days }))),
+      template: 'options',
+      lang,
+      orderId: b.order.id,
+      photos: kept,
+    });
+  const out = kind === 'labor' && !!outsource;
   return (
     <Modal opened={opened} onClose={onClose} title={item ? t('item.edit') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
@@ -236,6 +289,15 @@ export function LineSheet({
             />
           </div>
           {kind === 'part' && (
+            // The catalogue number, for the request and for finding the part again (optional).
+            <div className="ios-row">
+              <span className="label">{t('qi.partNo')}</span>
+              <div className="value">
+                <TextInput aria-label={t('qi.partNo')} placeholder="—" value={partNumber} onChange={(e) => setPartNumber(e.currentTarget.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false} />
+              </div>
+            </div>
+          )}
+          {kind === 'part' && (
             <div className="ios-row">
               <SegmentedControl
                 fullWidth
@@ -257,11 +319,11 @@ export function LineSheet({
                 <QtyStepper value={qty} onChange={setQty} label={t('qi.qty')} />
               </FormRow>
             )}
-            {kind === 'part' && (
-              <FormRow label={t('qi.costShort')}>
+            {(kind === 'part' || out) && (
+              <FormRow label={out ? t('outsource.cost') : t('qi.costShort')}>
                 <MoneyInput
                   label={undefined}
-                  ariaLabel={t('qi.cost')}
+                  ariaLabel={out ? t('outsource.cost') : t('qi.cost')}
                   value={cost}
                   onChange={(c) => {
                     if (!price || price === fromCost(cost)) setPrice(fromCost(c));
@@ -284,16 +346,116 @@ export function LineSheet({
           </RowGroup>
         )}
 
-        {kind === 'part' && !own && suppliers.length > 0 && (
+        {kind === 'part' && !own && (
           <div>
             <div className="group-title">{t('job.supplier')}</div>
-            <div className="chip-row" aria-label={t('job.supplier')}>
-              {suppliers.map((s) => (
-                <button key={s.id} type="button" className="chip" data-active={supplierId === s.id} onClick={() => setSupplierId(supplierId === s.id ? undefined : s.id)}>
-                  {s.name}
-                </button>
+            <SupplierChips value={supplierId} onChange={setSupplierId} make={b.vehicle.make} />
+            {/* Ask the sellers (car, VIN, part, photos), and keep what each offered. */}
+            <Group grow gap={8} mt="sm" wrap="nowrap">
+              <RequestButton vehicle={b.vehicle} item={{ titleEn: picked?.titleEn || item?.titleEn || title.trim(), titleRu: undefined, partNumber: partNumber.trim() || undefined, qty: qty || 1 }} supplierId={supplierId} photoIds={kept} />
+              <Button variant={offersOpen ? 'filled' : 'light'} leftSection={<IconListDetails size={18} />} onClick={() => setOffersOpen((o) => !o)}>
+                {offers.length ? t('offer.titleN', { n: offers.length }) : t('offer.title')}
+              </Button>
+            </Group>
+          </div>
+        )}
+
+        {kind === 'part' && !own && offersOpen && (
+          <div>
+            <div className="group-title">{t('offer.title')}</div>
+            <div className="ios-group">
+              {offers.map((o) => (
+                <div key={o.id} className="ios-row clickable offer-row" role="button" tabIndex={0} aria-pressed={offerTaken(o)} onClick={() => takeOffer(o)}>
+                  <span className="offer-kind">{t(`offer.${o.kind}`)}</span>
+                  <Text size="sm" c="dimmed" className="offer-meta" lineClamp={1}>
+                    {[sName(o.supplierId), offerWhen(o.days, uiLang)].filter(Boolean).join(' · ')}
+                  </Text>
+                  <Text fw={600} className="tnum" style={{ flexShrink: 0 }}>
+                    {o.costFils !== undefined ? formatAed(o.costFils, uiLang, false) : '—'}
+                  </Text>
+                  {offerTaken(o) ? <IconCheck size={18} stroke={2.6} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} aria-hidden /> : <span style={{ width: 18 }} />}
+                  <ActionIcon
+                    size={30}
+                    radius="xl"
+                    variant="subtle"
+                    color="gray"
+                    aria-label={t('common.delete')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOffers((list) => list.filter((x) => x.id !== o.id));
+                    }}
+                  >
+                    <IconX size={16} />
+                  </ActionIcon>
+                </div>
               ))}
+              {draft ? (
+                <>
+                  <div className="ios-row">
+                    <KindSegment value={draft.kind} onChange={(k) => setDraft({ ...draft, kind: k })} />
+                  </div>
+                  <FormRow label={t('qi.costShort')}>
+                    <MoneyInput label={undefined} ariaLabel={t('offer.cost')} value={draft.cost} onChange={(c) => setDraft({ ...draft, cost: c })} autoFocus />
+                  </FormRow>
+                  <div className="ios-row">
+                    <SupplierChips value={draft.supplierId} onChange={(s) => setDraft({ ...draft, supplierId: s })} make={b.vehicle.make} />
+                  </div>
+                  <div className="ios-row">
+                    <DaysChips value={draft.days} onChange={(d) => setDraft({ ...draft, days: d })} label={t('offer.when')} />
+                  </div>
+                  <div className="ios-row">
+                    <Button
+                      fullWidth
+                      variant="light"
+                      disabled={draft.cost === undefined}
+                      onClick={() => {
+                        const o: PartOffer = { id: uid(), kind: draft.kind, costFils: draft.cost, supplierId: draft.supplierId, days: draft.days };
+                        setOffers((list) => [...list, o]);
+                        // The first offer is the line's until another is picked.
+                        if (!offers.length) takeOffer(o);
+                        setDraft(null);
+                      }}
+                    >
+                      {t('offer.add')}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="ios-row clickable" role="button" tabIndex={0} onClick={() => setDraft({ kind: offers.length ? 'aftermarket' : 'oem' })}>
+                  <Text c="cobalt.6" fw={500}>
+                    <IconPlus size={17} stroke={2.2} style={{ verticalAlign: -3, marginRight: 6 }} aria-hidden />
+                    {t('offer.new')}
+                  </Text>
+                </div>
+              )}
             </div>
+            {offers.filter((o) => o.costFils !== undefined).length >= 2 && (
+              <Button mt="sm" fullWidth variant="light" color="green" disabled={!title.trim()} onClick={showOptions}>
+                {t('offer.toClient')}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {kind === 'labor' && <WhoChips value={who} onChange={setWho} />}
+        {kind === 'labor' && (
+          // Work handed outside (paint, machining, alignment, a mobile electrician): who, what they charge, back when.
+          <div>
+            <button type="button" className="chip" data-active={out} aria-pressed={out} onClick={() => setOutsource(out ? undefined : { state: 'todo' })}>
+              <IconBuildingFactory2 size={16} stroke={2} style={{ verticalAlign: -3, marginRight: 6 }} aria-hidden />
+              {t('outsource.title')}
+            </button>
+            {out && outsource && (
+              <div className="ios-group" style={{ marginTop: 10 }}>
+                <div className="ios-row">
+                  <SupplierChips service value={outsource.supplierId} onChange={(s) => setOutsource({ ...outsource, supplierId: s })} label={t('outsource.who')} />
+                </div>
+                <div className="ios-row">
+                  <span className="label">{t('outsource.back')}</span>
+                  <DaysChips value={outDays ?? (outsource.dueAt ? Math.max(0, daysBetween(dubaiDate(), outsource.dueAt)) : undefined)} onChange={setOutDays} label={t('outsource.back')} />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -318,6 +480,7 @@ export function LineSheet({
           </Button>
         )}
       </Stack>
+      <SendDialog customer={b.customer} request={optionsSend} onClose={() => setOptionsSend(null)} />
     </Modal>
   );
 }

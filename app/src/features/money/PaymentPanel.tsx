@@ -14,8 +14,9 @@ import {
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, dubaiDate, formatDate, formatDateTime, nowIso } from '../../domain/dates';
+import { liveLines } from '../../domain/flow';
 import { activeInvoice, chooseInvoiceType, paidNet } from '../../domain/invoice';
-import { summarize } from '../../domain/items';
+import { itemAmounts, summarize } from '../../domain/items';
 import { formatAed } from '../../domain/money';
 import type { InvoiceType, PayMethod, Payment } from '../../domain/types';
 import { debtPdf, invoicePdf, openPdf, receiptPdf } from '../../services/documents';
@@ -37,7 +38,11 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
   const due = bundleAmountDue(b);
   const [kind, setKind] = useState<Payment['kind']>(initialKind ?? 'payment');
   const [method, setMethod] = useState<PayMethod>('cash');
-  const [amount, setAmount] = useState<number | undefined>(due > 0 && (initialKind ?? 'payment') === 'payment' ? due : undefined);
+  // An advance is usually for the parts: their price is suggested (the customer pays it before they are ordered).
+  const partsGross = liveLines(b.items).filter((i) => i.kind === 'part' && !i.customerSupplied).reduce((s, i) => s + itemAmounts(i).gross, 0);
+  const [amount, setAmount] = useState<number | undefined>(
+    (initialKind ?? 'payment') === 'payment' ? (due > 0 ? due : undefined) : initialKind === 'prepayment' && partsGross > 0 && !b.payments.length ? partsGross : undefined,
+  );
   const [reference, setReference] = useState('');
   const save = () =>
     run(async () => {

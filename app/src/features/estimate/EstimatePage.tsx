@@ -85,12 +85,12 @@ export function TemplateModal({ orderId, opened, onClose, defaultBlock = 'A' }: 
 export function useSendVersion(b: ReturnType<typeof useOrderBundle>) {
   const [send, setSend] = useState<SendRequest | null>(null);
   const [decide, setDecide] = useState<EstimateVersion | null>(null);
-  const ctx = b ? { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name } : undefined;
+  const ctx = b ? { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils } : undefined;
   const afterSend = (v: EstimateVersion, via: SendVia) => {
     if (!ctx) return;
     if (via === 'in_person' || via === 'phone') setDecide(v);
     else if (via === 'limit') setSend({ text: limitMessage(ctx, v), template: 'doneByLimit', lang: v.language, orderId: v.orderId, pdf: () => versionPdf(v.id) });
-    else setSend({ text: versionMessage(ctx, v), template: v.number === 1 ? 'estimate' : 'supplement', lang: v.language, orderId: v.orderId, pdf: () => versionPdf(v.id) });
+    else setSend({ text: versionMessage(ctx, v), template: v.number === 1 ? 'estimate' : 'supplement', lang: v.language, orderId: v.orderId, pdf: () => versionPdf(v.id), photos: v.mediaIds });
   };
   /**
    * WhatsApp / Telegram: the message is shown first; the estimate is frozen (items wait for the answer)
@@ -107,6 +107,8 @@ export function useSendVersion(b: ReturnType<typeof useOrderBundle>) {
       lang: preview.language,
       orderId,
       pdf: async () => versionPdf((await freeze()).id),
+      // The photos of the lines going now (what was found): shared with the text from the phone.
+      photos: b?.items.filter((i) => i.approvalState === 'draft').flatMap((i) => i.mediaIds ?? []),
       onConfirm: async () => {
         await freeze();
       },

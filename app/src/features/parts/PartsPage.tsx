@@ -1,11 +1,10 @@
-import { Alert, Box, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { Box, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack, Text, Textarea, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import {
   IconArrowBackUp,
   IconCheck,
   IconMapPin,
   IconPackage,
   IconPhone,
-  IconPlus,
   IconReceipt2,
   IconShoppingCart,
   IconTruck,
@@ -21,12 +20,13 @@ import { dubaiDate, formatDate } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
 import { roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
-import type { OrderItem, ProcurementStatus, Supplier, SupplierReturn } from '../../domain/types';
+import type { OrderItem, ProcurementStatus, SupplierReturn } from '../../domain/types';
 import { closeReturn, createReturn, saveSupplier, setProcurement } from '../../services/parts';
 import { CaptureButton } from '../../ui/CaptureButton';
 import { EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, Photo, PlateText, ScrollTabs, SelectCard } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { useAction, useLang } from '../../ui/hooks';
+import { SuppliersTab } from './Suppliers';
 
 const STATUS_META: Record<string, { icon: Icon; color: string }> = {
   needed: { icon: IconShoppingCart, color: 'orange' },
@@ -145,27 +145,6 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
   );
 }
 
-function SupplierModal({ supplier, onClose }: { supplier: Partial<Supplier> | null; onClose: () => void }) {
-  const { t } = useTranslation();
-  const { run, busy } = useAction();
-  const [v, setV] = useState<Partial<Supplier>>({});
-  useEffect(() => setV(supplier ?? {}), [supplier]);
-  if (!supplier) return null;
-  return (
-    <Modal opened onClose={onClose} title={supplier.id ? t('parts.editSupplier') : t('parts.addSupplier')}>
-      <Stack>
-        <TextInput label={t('customer.name')} required value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} data-autofocus />
-        <TextInput label={t('customer.phone')} type="tel" value={v.phone ?? ''} onChange={(e) => setV({ ...v, phone: e.currentTarget.value })} />
-        <TextInput label={t('parts.location')} placeholder="https://maps.google.com/…" value={v.locationUrl ?? ''} onChange={(e) => setV({ ...v, locationUrl: e.currentTarget.value })} />
-        <Textarea label={t('common.notes')} placeholder={t('parts.supplierNotesHint')} value={v.notes ?? ''} onChange={(e) => setV({ ...v, notes: e.currentTarget.value })} autosize />
-        <Button loading={busy} onClick={() => run(async () => { await saveSupplier({ ...v, name: v.name ?? '' }); onClose(); }, 'common.saved')}>
-          {t('common.save')}
-        </Button>
-      </Stack>
-    </Modal>
-  );
-}
-
 async function loadParts() {
   const orders = await db.orders.filter((o) => !['closed', 'cancelled'].includes(o.stage)).toArray();
   const byId = new Map(orders.map((o) => [o.id, o]));
@@ -186,7 +165,6 @@ export function PartsPage() {
   const [params, setParams] = useSearchParams();
   const explicitTab = params.get('tab');
   const [proc, setProc] = useState<OrderItem | null>(null);
-  const [supplierEdit, setSupplierEdit] = useState<Partial<Supplier> | null>(null);
   const data = useLiveQuery(loadParts, []);
   if (!data) return <PageSkeleton />;
   const { items, byId, vById, suppliers, returns, returnItems } = data;
@@ -337,38 +315,9 @@ export function PartsPage() {
             ))}
           </List>
         ))}
-      {tab === 'suppliers' && (
-        <Stack gap="md">
-          <Button leftSection={<IconPlus size={18} />} onClick={() => setSupplierEdit({})} w="fit-content">
-            {t('parts.addSupplier')}
-          </Button>
-          {suppliers.length === 0 ? (
-            <Alert>{t('parts.noSuppliers')}</Alert>
-          ) : (
-            <List>
-              {suppliers
-                .filter((s) => !s.archivedAt)
-                .map((s) => (
-                  <ListRow
-                    key={s.id}
-                    onClick={() => setSupplierEdit(s)}
-                    chevron
-                    left={
-                      <ThemeIcon variant="light" color="gray" size={40} radius="md">
-                        <IconTruck size={20} />
-                      </ThemeIcon>
-                    }
-                    title={s.name}
-                    subtitle={[s.phone && formatPhone(s.phone), s.notes].filter(Boolean).join(' · ') || undefined}
-                  />
-                ))}
-            </List>
-          )}
-        </Stack>
-      )}
+      {tab === 'suppliers' && <SuppliersTab />}
       </div>
       <ProcurementModal item={proc} onClose={() => setProc(null)} />
-      <SupplierModal supplier={supplierEdit} onClose={() => setSupplierEdit(null)} />
     </>
   );
 }

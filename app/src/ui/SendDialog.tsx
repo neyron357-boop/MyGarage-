@@ -1,5 +1,6 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, Textarea } from '@mantine/core';
-import { IconBrandTelegram, IconBrandWhatsapp, IconCheck, IconCopy, IconShare } from '@tabler/icons-react';
+import { IconBrandTelegram, IconBrandWhatsapp, IconCheck, IconCopy, IconPhoto, IconShare } from '@tabler/icons-react';
+import { mediaBlob } from '../services/media';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatPhone } from '../domain/phone';
@@ -21,6 +22,28 @@ export interface SendRequest {
   pdf?: () => Promise<{ blob: Blob; filename: string }>;
   /** Done once the message really went ("Yes, sent"): an estimate is frozen only then. */
   onConfirm?: () => Promise<unknown>;
+  /** Photos that go with the text (what was found, what was done): shared together from the phone. */
+  photos?: string[];
+}
+
+/** The photos as files, ready before the tap (iOS shares only straight from a tap). */
+function usePhotoFiles(ids: string[] | undefined) {
+  const [files, setFiles] = useState<File[]>([]);
+  const key = (ids ?? []).join(',');
+  useEffect(() => {
+    let alive = true;
+    setFiles([]);
+    if (!ids?.length) return;
+    void Promise.all(ids.map(async (id, n) => {
+      const blob = await mediaBlob(id);
+      return blob ? new File([blob], `photo-${n + 1}.${blob.type.includes('png') ? 'png' : 'jpg'}`, { type: blob.type || 'image/jpeg' }) : undefined;
+    })).then((list) => alive && setFiles(list.filter((f): f is File => !!f)));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return files;
 }
 
 export function SendDialog({ customer, request, onClose, onSent }: { customer: Customer; request: SendRequest | null; onClose: () => void; onSent?: () => void }) {
@@ -31,6 +54,8 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
   const [opened, setOpened] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const files = usePhotoFiles(request?.photos);
+  const canSharePhotos = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
 
   useEffect(() => {
     if (request) {
@@ -80,6 +105,14 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
     }
   };
 
+  /** The text with the photos, through the phone's share sheet (WhatsApp takes both). */
+  const sharePhotos = () => {
+    navigator
+      .share({ files, text })
+      .then(() => setOpened(true))
+      .catch(() => undefined);
+  };
+
   return (
     <Modal opened={!!request} onClose={onClose} title={t('send.title')} size="lg">
       <Stack gap="md">
@@ -121,6 +154,12 @@ export function SendDialog({ customer, request, onClose, onSent }: { customer: C
           >
             {t('send.open')}
           </Button>
+          {canSharePhotos && (
+            // The text and the photos together, through the phone's share sheet (WhatsApp takes both).
+            <Button fullWidth size="md" variant="default" leftSection={<IconPhoto size={20} />} onClick={sharePhotos}>
+              {t('send.withPhotos', { n: files.length })}
+            </Button>
+          )}
           <Group grow gap="xs">
             <Button
               variant="default"

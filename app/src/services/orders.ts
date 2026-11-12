@@ -15,6 +15,7 @@ import type {
   Inspection,
   Invoice,
   ItemDecision,
+  JobNote,
   Lang,
   Media,
   MessageLog,
@@ -137,13 +138,15 @@ export interface OrderBundle {
   messages: MessageLog[];
   incidents: Incident[];
   claims: Claim[];
+  /** The manager's notes on the job (text, photo, voice), oldest first. */
+  notes: JobNote[];
   settings: Settings;
 }
 
 export async function loadOrderBundle(orderId: string): Promise<OrderBundle | undefined> {
   const order = await db.orders.get(orderId);
   if (!order) return undefined;
-  const [customer, vehicle, items, versions, decisions, inspections, payments, invoices, debts, events, messages, incidents, claims, settings] =
+  const [customer, vehicle, items, versions, decisions, inspections, payments, invoices, debts, events, messages, incidents, claims, settings, notes] =
     await Promise.all([
       db.customers.get(order.customerId),
       db.vehicles.get(order.vehicleId),
@@ -159,6 +162,7 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
       db.incidents.where('orderId').equals(orderId).toArray(),
       db.claims.where('orderId').equals(orderId).toArray(),
       getSettings(),
+      db.notes.where('orderId').equals(orderId).sortBy('createdAt'),
     ]);
   if (!customer || !vehicle) return undefined;
   // Prefer the signed act if, for any reason, more than one exists.
@@ -192,6 +196,7 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
     messages,
     incidents,
     claims,
+    notes,
     settings,
   };
 }
@@ -305,6 +310,7 @@ export interface DeletedJob {
   blobs: { id: string; blob: Blob; thumb?: Blob }[];
   messages: MessageLog[];
   incidents: Incident[];
+  notes?: JobNote[];
   /** Money-book entries that were for this job: they stay in the book, only unlinked from it. */
   expenseIds: string[];
   incomeIds: string[];
@@ -320,6 +326,7 @@ const JOB_TABLES = () => [
   db.mediaBlobs,
   db.messages,
   db.incidents,
+  db.notes,
   db.claims,
   db.invoices,
   db.payments,
@@ -360,7 +367,7 @@ export async function deleteJob(orderId: string): Promise<DeletedJob> {
     if (!order) throw new AppError('err.notFound');
     const block = await jobDeleteBlock(orderId);
     if (block) throw new AppError(`order.deleteBlock.${block}`);
-    const [events, items, inspections, messages, incidents, expenses, incomes] = await Promise.all([
+    const [events, items, inspections, messages, incidents, expenses, incomes, notes] = await Promise.all([
       db.events.where('orderId').equals(orderId).toArray(),
       db.items.where('orderId').equals(orderId).toArray(),
       db.inspections.where('orderId').equals(orderId).toArray(),
@@ -368,9 +375,10 @@ export async function deleteJob(orderId: string): Promise<DeletedJob> {
       db.incidents.where('orderId').equals(orderId).toArray(),
       db.expenses.where('orderId').equals(orderId).toArray(),
       db.incomes.where('orderId').equals(orderId).toArray(),
+      db.notes.where('orderId').equals(orderId).toArray(),
     ]);
     const inspIds = inspections.map((i) => i.id);
-    const owners = [orderId, ...inspIds, ...items.map((i) => i.id), ...incidents.map((i) => i.id)];
+    const owners = [orderId, ...inspIds, ...items.map((i) => i.id), ...incidents.map((i) => i.id), ...notes.map((n) => n.id)];
     const media = await db.media.where('ownerId').anyOf(owners).toArray();
     const blobs = (await db.mediaBlobs.bulkGet(media.map((m) => m.id))).filter((b): b is NonNullable<typeof b> => !!b);
     const marks = inspIds.length ? await db.damageMarks.where('inspectionId').anyOf(inspIds).toArray() : [];
@@ -383,9 +391,10 @@ export async function deleteJob(orderId: string): Promise<DeletedJob> {
     await db.items.bulkDelete(items.map((i) => i.id));
     await db.messages.bulkDelete(messages.map((m) => m.id));
     await db.incidents.bulkDelete(incidents.map((i) => i.id));
+    await db.notes.bulkDelete(notes.map((n) => n.id));
     await purgeJournal(events.map((e) => e.id));
     await db.orders.delete(orderId);
-    return { order, events, items, inspections, marks, media, blobs, messages, incidents, expenseIds: expenses.map((e) => e.id), incomeIds: incomes.map((i) => i.id) };
+    return { order, events, items, inspections, marks, media, blobs, messages, incidents, notes, expenseIds: expenses.map((e) => e.id), incomeIds: incomes.map((i) => i.id) };
   });
 }
 
@@ -401,6 +410,7 @@ export async function restoreJob(d: DeletedJob): Promise<void> {
     await db.mediaBlobs.bulkPut(d.blobs);
     await db.messages.bulkPut(d.messages);
     await db.incidents.bulkPut(d.incidents);
+    if (d.notes) await db.notes.bulkPut(d.notes);
     for (const id of d.expenseIds) await db.expenses.update(id, { orderId: d.order.id });
     for (const id of d.incomeIds) await db.incomes.update(id, { orderId: d.order.id });
   });

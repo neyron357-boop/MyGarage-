@@ -14,6 +14,7 @@ import { useAction, useLang, usePhone } from '../../ui/hooks';
 import { PHASE_META } from '../job/phase';
 import { InsecureWarning } from './BoardNotices';
 import { JobRow, type RowSwipe } from './JobRow';
+import { TodayList } from './TodayList';
 import { coverIndex } from '../../services/cover';
 
 async function loadBoard() {
@@ -178,6 +179,7 @@ export function BoardPage() {
       <>
         {header}
         <InsecureWarning />
+        <TodayList bundles={bundles} />
         <Box mt="xl">
           <EmptyState
             icon={IconLayoutKanban}
@@ -211,6 +213,7 @@ export function BoardPage() {
     <>
       {header}
       <InsecureWarning />
+      {!archive && (mobile ? <TodayList bundles={bundles} /> : <Box maw={720}><TodayList bundles={bundles} limit={5} /></Box>)}
       {mobile ? (
         <>
           <ScrollTabs

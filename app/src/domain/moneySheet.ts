@@ -230,6 +230,27 @@ function readCells(xml: string, strings: string[]): Map<number, Cell[]> {
   return rows;
 }
 
+/** Any workbook's first sheet as rows of text (a list of suppliers, contacts…). */
+export async function readFirstSheet(bytes: Uint8Array): Promise<string[][]> {
+  const files = await unzip(bytes);
+  const dec = new TextDecoder();
+  const get = (name: string) => {
+    const f = files.get(name);
+    return f ? dec.decode(f) : undefined;
+  };
+  const wb = get('xl/workbook.xml') ?? '';
+  const rels = get('xl/_rels/workbook.xml.rels') ?? '';
+  const first = /<sheet\b[^>]*?r:id="([^"]+)"/.exec(wb)?.[1];
+  const rel = first ? [...rels.matchAll(/<Relationship\b([^>]*)\/?>/g)].map((m) => m[1]).find((a) => a.includes(`Id="${first}"`)) : undefined;
+  const target = rel ? /Target="([^"]+)"/.exec(rel)?.[1] : undefined;
+  const path = target ? (target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`) : 'xl/worksheets/sheet1.xml';
+  const xml = get(path) ?? get('xl/worksheets/sheet1.xml');
+  if (!xml) throw new Error('no sheet');
+  return [...readCells(xml, readStrings(get('xl/sharedStrings.xml')))]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, row]) => Array.from({ length: row.length }, (_, i) => text(row[i])));
+}
+
 const text = (c: Cell) => (c === undefined ? '' : String(c).trim());
 const money = (c: Cell): number | undefined => {
   if (typeof c === 'number') return Math.round(c * 100);

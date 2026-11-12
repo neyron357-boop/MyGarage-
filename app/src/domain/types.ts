@@ -86,6 +86,8 @@ export interface Vehicle {
   color?: string;
   customerId: string;
   notes?: string;
+  /** "Time for a service" sent (or dismissed) after its last job: it leaves the Today list until the next one. */
+  serviceRemindedAt?: string;
   createdAt: string;
   archivedAt?: string;
 }
@@ -184,9 +186,27 @@ export interface Order {
    * due then is let go — the job owes nothing. Reopening the job takes it back.
    */
   waived?: { at: string; fils: number };
+  /** "How is the car?" asked a few days after the car left (or the reminder dismissed): it leaves the Today list. */
+  followedUpAt?: string;
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * What happened on a job, in the manager's own words: what the mechanic found, what was checked, what
+ * the customer was promised — typed, a photo, or a voice message recorded in the app. Not printed anywhere.
+ */
+export interface JobNote {
+  id: string;
+  orderId: string;
+  kind: 'text' | 'photo' | 'voice';
+  text?: string;
+  /** The photo or the recording (media of the note). */
+  mediaId?: string;
+  /** Length of a voice note. */
+  seconds?: number;
+  createdAt: string;
 }
 
 export interface OrderEvent {
@@ -285,14 +305,18 @@ export type MediaOwner =
   | 'payment'
   | 'return'
   /** A cash movement of the money book (parts bought for cash, cash handed over…): its proofs. */
-  | 'movement';
+  | 'movement'
+  /** A supplier's business card (both sides). */
+  | 'supplier'
+  /** A job note's photo or voice message. */
+  | 'note';
 
 export interface Media {
   id: string;
   ownerType: MediaOwner;
   ownerId: string;
   slot: string;
-  kind: 'photo' | 'video' | 'pdf' | 'signature';
+  kind: 'photo' | 'video' | 'pdf' | 'signature' | 'audio';
   mime: string;
   size: number;
   sha256: string;
@@ -365,7 +389,42 @@ export interface OrderItem {
   receivedAt?: string;
   receiptMediaId?: string;
   warrantyMonths?: number;
+  /** Offers found for this part (original, aftermarket, used — who, how much, how soon); the chosen one is on the line. */
+  offers?: PartOffer[];
+  /** Ordered several, some came: how many are here (the line waits until all are). */
+  receivedQty?: number;
+  /** The seller takes the part back until this day (YYYY-MM-DD) — a reminder before it passes. */
+  returnBy?: string;
+  /** The seller said: no returns. */
+  noReturn?: boolean;
+  /** Work done outside (paint shop, machining, alignment, a mobile electrician): who, when it comes back, paid or not. */
+  outsource?: Outsource;
+  /** Who does this line (one of the mechanics); otherwise the job's mechanic. */
+  employeeId?: string;
   createdAt: string;
+}
+
+/** One offer for a part: what kind, from whom, at what cost (net, per unit), how soon. */
+export interface PartOffer {
+  id: string;
+  kind: 'oem' | 'aftermarket' | 'used';
+  costFils?: number;
+  supplierId?: string;
+  /** Days until it is here: 0 — today. */
+  days?: number;
+}
+
+/** A line handed to someone outside the garage (a supplier marked as a contractor). The price to them is the line's cost. */
+export interface Outsource {
+  supplierId?: string;
+  /** todo — still here · out — with them · back — done and returned. */
+  state: 'todo' | 'out' | 'back';
+  /** When they promised it back (YYYY-MM-DD). */
+  dueAt?: string;
+  sentAt?: string;
+  backAt?: string;
+  /** Paid to them: the money book's expense. */
+  expenseId?: string;
 }
 
 export type VersionKind = 'initial' | 'supplement' | 'price_change';
@@ -432,6 +491,16 @@ export interface Supplier {
   address?: string;
   notes?: string;
   reliability?: number;
+  /** Car makes they work with ("Toyota", "Nissan"…); empty — any. */
+  makes?: string[];
+  /** New parts, used ones, or both. */
+  condition?: 'new' | 'used' | 'both';
+  /** What they sell or do, in a few words ("gearbox, electrics", "headlights"). */
+  parts?: string;
+  /** A contractor (paint, machining, alignment, mobile electrician) rather than a parts shop. */
+  service?: boolean;
+  /** Front and back of the business card (media). */
+  cardMediaIds?: string[];
   createdAt: string;
   archivedAt?: string;
 }

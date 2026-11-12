@@ -4,7 +4,7 @@ import { formatAed } from '../domain/money';
 import { normalizePhone, phoneDigits } from '../domain/phone';
 import { formatPlate } from '../domain/plates';
 import { itemAmounts, itemTitle } from '../domain/items';
-import type { Channel, Customer, EstimateVersion, Lang, Order, OrderItem, Vehicle } from '../domain/types';
+import type { Channel, Customer, EstimateVersion, Lang, Order, OrderItem, PartOffer, Vehicle } from '../domain/types';
 import { sumAmounts } from '../domain/vat';
 import { tFor } from '../i18n';
 
@@ -29,6 +29,20 @@ export interface MsgContext {
   vehicle: Vehicle;
   order: Order;
   garageName: string;
+  /** Parts costing this much or more are ordered after an advance (the estimate says so). */
+  partsAdvanceFrom?: number;
+}
+
+/**
+ * A customer without a name ('' is allowed): "Здравствуйте, !" becomes "Здравствуйте!", ", ваш Camry…"
+ * becomes "Ваш Camry…".
+ */
+export function tidy(text: string): string {
+  return text
+    .replace(/,?[ \t]+!/g, '!')
+    .replace(/,!/g, '!')
+    .replace(/(^|\n),\s*/g, '$1')
+    .replace(/(^|\n)(\p{Ll})/gu, (_, a: string, c: string) => a + c.toUpperCase());
 }
 
 function base(ctx: MsgContext, lang: Lang) {
@@ -50,11 +64,13 @@ export type SimpleTemplate =
   | 'prepayment'
   | 'reviewRequest'
   | 'invoice'
-  | 'documents';
+  | 'documents'
+  | 'followUp'
+  | 'serviceDue';
 
 export function simpleMessage(tpl: SimpleTemplate, ctx: MsgContext, lang: Lang, vars: Record<string, string | number> = {}): string {
   const t = tFor(lang);
-  return t(`msg.${tpl}`, { ...base(ctx, lang), ...vars });
+  return tidy(t(`msg.${tpl}`, { ...base(ctx, lang), ...vars }));
 }
 
 /** Itemized estimate / supplement text; the customer answers in the chat. */
@@ -83,6 +99,88 @@ export function linesText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'pl
   return out.join('\n');
 }
 
+/**
+ * A request to a parts seller, in English (the trade's language here, whatever the customer speaks): the
+ * car with its VIN, the part with its number and how many — to paste to several sellers with the photos.
+ */
+export function partRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>, item: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>): string {
+  const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ');
+  const out = [car];
+  if (vehicle.vin) out.push(`VIN: ${vehicle.vin}`);
+  out.push('', `Part: ${item.titleEn || item.titleRu || ''}${item.qty > 1 ? ` × ${item.qty}` : ''}`);
+  if (item.partNumber) out.push(`Part No: ${item.partNumber}`);
+  out.push('', 'Price and availability, please: original / aftermarket / used?');
+  return out.join('\n');
+}
+
+/** When an offer is here, in words: today, tomorrow, in 3 days. */
+export function offerWhen(days: number | undefined, lang: Lang): string {
+  if (days === undefined) return '';
+  const t = tFor(lang);
+  return days <= 0 ? t('offer.today') : days === 1 ? t('offer.tomorrow') : t('offer.inDays', { n: days });
+}
+
+/** A part's offers for the customer to choose from (original, aftermarket, used): the price to them and how soon. */
+export function optionsText(ctx: MsgContext, lang: Lang, title: string, options: { kind: PartOffer['kind']; gross: number; days?: number }[]): string {
+  const t = tFor(lang);
+  const out = [tidy(t('msg.optionsHeader', { ...base(ctx, lang), part: title })), ''];
+  options.forEach((o, n) => {
+    const when = offerWhen(o.days, lang);
+    out.push(`${n + 1}) ${t(`offer.${o.kind}`)} — ${formatAed(o.gross, lang)}${when ? `, ${when}` : ''}`);
+  });
+  out.push('', t('msg.optionsAsk'));
+  return out.join('\n');
+}
+
+/**
+ * What was done, for the customer (or a company's group chat) when the car leaves: the car, the lines
+ * done, the checks before handover, the mileage and the warranty — in the customer's language.
+ */
+export function reportText(
+  ctx: MsgContext,
+  lang: Lang,
+  r: { done: string[]; checks: string[]; mileageKm?: number; warrantyMonths?: number; warrantyKm?: number },
+): string {
+  const t = tFor(lang);
+  const b = base(ctx, lang);
+  const car = [ctx.vehicle.make, ctx.vehicle.model, ctx.vehicle.year].filter(Boolean).join(' ');
+  const out = [`${car} · ${b.plate}`, t('msg.reportHeader', b), ''];
+  r.done.forEach((d) => out.push(`✓ ${d}`));
+  if (r.checks.length) out.push('', `${t('msg.reportChecked')}: ${r.checks.join(', ')}`);
+  if (r.mileageKm) out.push(`${t('msg.reportMileage')}: ${r.mileageKm.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US')} ${t('unit.km')}`);
+  if (r.warrantyMonths || r.warrantyKm) {
+    const plural = new Intl.PluralRules(lang === 'ru' ? 'ru' : 'en').select(r.warrantyMonths ?? 0);
+    const w = [r.warrantyMonths ? t(`msg.months_${plural}`, { count: r.warrantyMonths }) : '', r.warrantyKm ? `${r.warrantyKm.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US')} ${t('unit.km')}` : ''].filter(Boolean).join(' / ');
+    out.push(`${t('msg.reportWarranty')}: ${w}`);
+  }
+  out.push('', t('msg.reportThanks', b));
+  return out.join('\n');
+}
+
+/**
+ * The job for a mechanic, in English (the mechanics read English): the car, what the customer said,
+ * the agreed work to do (with who does it), and the manager's notes.
+ */
+export function mechanicText(
+  vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'plate'>,
+  order: Pick<Order, 'number' | 'complaint'>,
+  lines: { title: string; who?: string }[],
+  notes: string[],
+): string {
+  const car = [vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ');
+  const out = [`#${order.number} ${car} · ${formatPlate(vehicle.plate, 'en')}`];
+  if (order.complaint) out.push(`Complaint: ${order.complaint}`);
+  if (lines.length) {
+    out.push('', 'To do:');
+    lines.forEach((l, n) => out.push(`${n + 1}. ${l.title}${l.who ? ` — ${l.who}` : ''}`));
+  }
+  if (notes.length) {
+    out.push('', 'Notes:');
+    notes.forEach((x) => out.push(`- ${x}`));
+  }
+  return out.join('\n');
+}
+
 export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   const lang = v.language;
   const t = tFor(lang);
@@ -90,8 +188,8 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   const urg = { red: '🔴', yellow: '🟡', green: '🟢' } as const;
   const lines: string[] = [];
   const b = base(ctx, lang);
-  if (v.number === 1) lines.push(t('msg.estimateHeader', { ...b, version: v.number }));
-  else lines.push(t('msg.supplementHeader', { ...b, version: v.number, reason: v.reason ?? '' }));
+  if (v.number === 1) lines.push(tidy(t('msg.estimateHeader', { ...b, version: v.number })));
+  else lines.push(tidy(t('msg.supplementHeader', { ...b, version: v.number, reason: v.reason ?? '' })));
   for (const block of ['A', 'B', 'C'] as const) {
     const list = v.items.filter((i) => i.block === block && i.kind !== 'discount');
     if (!list.length) continue;
@@ -117,6 +215,9 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   if (v.recommendedGross > 0) lines.push(t('msg.recommendedTotal', { sum: money(v.recommendedGross) }));
   lines.push(t('msg.validUntil', { date: formatDate(v.validUntil) }));
   if (v.items.some((i) => i.block === 'B')) lines.push('', t('msg.bExplain'));
+  // Parts that cost something are ordered after an advance: said once, calmly, with the amount.
+  const parts = v.items.filter((i) => i.kind === 'part' && !i.customerSupplied).reduce((s, i) => s + i.gross, 0);
+  if (ctx.partsAdvanceFrom && parts >= ctx.partsAdvanceFrom) lines.push('', t('msg.partsAdvance', { amount: money(parts) }));
   lines.push('', t('msg.answerHint'));
   return lines.join('\n');
 }
@@ -125,12 +226,12 @@ export function limitMessage(ctx: MsgContext, v: EstimateVersion): string {
   const lang = v.language;
   const t = tFor(lang);
   const items = v.items.map((i) => `• ${i.title} — ${formatAed(i.gross, lang)}`).join('\n');
-  return t('msg.doneByLimit', { ...base(ctx, lang), items, sum: formatAed(v.fixedGross, lang), reason: v.reason ?? '' });
+  return tidy(t('msg.doneByLimit', { ...base(ctx, lang), items, sum: formatAed(v.fixedGross, lang), reason: v.reason ?? '' }));
 }
 
 export function verbalConfirmation(ctx: MsgContext, lang: Lang, approved: { title: string; gross: number }[], declined: { title: string }[]): string {
   const t = tFor(lang);
-  const lines = [t('msg.verbalHeader', base(ctx, lang))];
+  const lines = [tidy(t('msg.verbalHeader', base(ctx, lang)))];
   if (approved.length) {
     lines.push(t('msg.verbalApproved'));
     for (const a of approved) lines.push(`• ${a.title} — ${formatAed(a.gross, lang)}`);

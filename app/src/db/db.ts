@@ -17,6 +17,7 @@ import type {
   Inspection,
   Invoice,
   ItemDecision,
+  JobNote,
   JobTemplate,
   Media,
   MediaBlob,
@@ -75,6 +76,7 @@ export class GarageDB extends Dexie {
   claims!: Table<Claim, string>;
   incidents!: Table<Incident, string>;
   counters!: Table<Counter, string>;
+  notes!: Table<JobNote, string>;
 
   constructor(name = 'mygarage') {
     super(name);
@@ -115,6 +117,10 @@ export class GarageDB extends Dexie {
     this.version(2).stores({
       expenses: 'id, date, categoryId, orderId, vehicleId, customerId',
       incomes: 'id, date, orderId, vehicleId, customerId',
+    });
+    // v3: a job's notes (text, photo, voice).
+    this.version(3).stores({
+      notes: 'id, orderId, createdAt',
     });
     installGuards(this);
   }

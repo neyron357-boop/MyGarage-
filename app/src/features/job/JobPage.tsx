@@ -10,6 +10,8 @@ import {
   IconCircle,
   IconCircleCheckFilled,
   IconCircleX,
+  IconClipboardCheck,
+  IconClipboardList,
   IconCopy,
   IconDiscount,
   IconDots,
@@ -47,15 +49,17 @@ import { isAwaitingClient, itemAmounts, itemTitle } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
+import { jobProfit } from '../../domain/profit';
 import { canCloseUnpaid, canReopen } from '../../domain/stages';
 import { sumAmounts } from '../../domain/vat';
 import type { OrderItem, Payment } from '../../domain/types';
+import { tFor } from '../../i18n';
 import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
-import { addItem, removeItem, restoreItem, setDone, withdrawItems } from '../../services/estimate';
+import { addItem, removeItem, restoreItem, setDone, updateItem, withdrawItems } from '../../services/estimate';
 import { answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from '../../services/flow';
-import { linesText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
@@ -72,9 +76,16 @@ import { DiscountSheet } from '../money/DiscountSheet';
 import { PaymentModal } from '../money/PaymentPanel';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover, VinTile } from './CarCover';
+import { DueChip } from './Due';
+import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
+import { MechanicSheet } from './MechanicSheet';
+import { NotesSection } from './Notes';
+import { OutsourceActions, ReceivedRow, ReturnTerms } from './LineExtras';
+import { RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { ObdLine, useObdImport } from './ObdScan';
 import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
 import { PhasePill } from './phase';
+import { PrevVisit } from './PrevVisit';
 
 /** What a line is to the job right now, as one symbol. */
 function LineMark({ item }: { item: OrderItem }) {
@@ -164,11 +175,10 @@ function PickRow({ onLong, onClick, ...row }: Parameters<typeof ListRow>[0] & { 
 function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: OrderItem | null; onClose: () => void; onEdit: (i: OrderItem) => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
-  const suppliers = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []) ?? [];
-  // The sheet keeps showing the line while it slides away.
+  // The sheet keeps showing the line while it slides away — as it is now (a chip tapped here changes it).
   const last = useRef(item);
-  if (item) last.current = item;
-  const i = item ?? last.current;
+  if (item) last.current = b.items.find((x) => x.id === item.id) ?? item;
+  const i = last.current;
   if (!i) return null;
   const waiting = isAwaitingClient(i);
   const agreed = i.approvalState === 'approved';
@@ -218,21 +228,16 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
                 </button>
               ))}
             </div>
-            {suppliers.length > 0 && (
-              <div className="chip-row" aria-label={t('job.supplier')}>
-                {suppliers.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    className="chip"
-                    data-active={i.supplierId === s.id}
-                    onClick={() => run(() => setProcurement(i.id, { status: i.procurementStatus ?? 'needed', supplierId: i.supplierId === s.id ? '' : s.id }))}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            )}
+            <SupplierChips value={i.supplierId} make={b.vehicle.make} onChange={(s) => void run(() => setProcurement(i.id, { status: i.procurementStatus ?? 'needed', supplierId: s ?? '' }))} />
+            {state === 'needed' && <RequestButton vehicle={b.vehicle} item={i} supplierId={i.supplierId} photoIds={i.mediaIds ?? []} />}
+            {state === 'ordered' && i.qty > 1 && Number.isInteger(i.qty) && <ReceivedRow item={i} />}
+            {(state === 'ordered' || state === 'received') && !i.done && <ReturnTerms item={i} />}
+          </>
+        )}
+        {i.kind === 'labor' && !invoiced && !i.done && agreed && (
+          <>
+            <WhoChips value={i.employeeId} onChange={(e) => void run(() => updateItem(i.id, { employeeId: e }))} />
+            <OutsourceActions item={i} make={b.vehicle.make} />
           </>
         )}
         {waiting && (
@@ -296,8 +301,12 @@ export function JobPage() {
   const [customerOpen, setCustomerOpen] = useState(false);
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
+  const [mechanicOpen, setMechanicOpen] = useState(false);
+  // The profit is the manager's: hidden (blurred) until tapped, in case the customer sees the screen.
+  const [profitShown, setProfitShown] = useState(false);
   // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
   const obd = useObdImport(id ?? '');
+  const expenses = useLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
@@ -328,7 +337,7 @@ export function JobPage() {
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
   const open = phase !== 'closed' && phase !== 'cancelled';
   const editable = open && !inv;
-  const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
+  const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
   const sentAt = waiting.length ? b.versions.filter((v) => waiting.some((i) => i.lastVersionId === v.id)).map((v) => v.sentAt).sort()[0] : undefined;
 
   const removeLine = (i: OrderItem) =>
@@ -341,7 +350,23 @@ export function JobPage() {
   const toClient = () => run(() => sv.prepare(oid, { via: c.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp' }));
   const remind = () => {
     const v = b.versions.filter((x) => waiting.some((i) => i.lastVersionId === x.id)).pop();
-    if (v) setSend({ text: versionMessage(ctx, v), template: 'estimate', lang: v.language, orderId: oid, pdf: () => versionPdf(v.id) });
+    if (v) setSend({ text: versionMessage(ctx, v), template: 'estimate', lang: v.language, orderId: oid, pdf: () => versionPdf(v.id), photos: waiting.flatMap((i) => i.mediaIds ?? []) });
+  };
+  /** What was done, for the customer (or a company's group chat): the lines, the checks, mileage, warranty, photos. */
+  const report = () => {
+    const tt = tFor(docLang);
+    const done = inv ? inv.lines.filter((l) => l.kind !== 'discount').map((l) => l.description) : live.filter((i) => i.kind !== 'discount' && i.approvalState === 'approved').map((i) => itemTitle(i, docLang));
+    const checks = HANDOVER_CHECKS.filter((c) => b.order.qcChecks?.[c]).map((c) => tt(`qc.${c}`));
+    const scan = b.order.obdScans?.[b.order.obdScans.length - 1]?.odometer;
+    const mileageKm = b.handover?.mileageKm ?? b.intake?.mileageKm ?? (scan?.unit === 'km' ? scan.value : undefined);
+    setSend({
+      text: reportText(ctx, docLang, { done, checks, mileageKm, warrantyMonths: b.settings.warrantyLaborMonths, warrantyKm: b.settings.warrantyLaborKm }),
+      template: 'report',
+      lang: docLang,
+      orderId: oid,
+      pdf: inv ? () => invoicePdf(inv.id) : undefined,
+      photos: live.filter((i) => i.approvalState === 'approved').flatMap((i) => i.mediaIds ?? []),
+    });
   };
   const sendInvoice = () =>
     inv &&
@@ -389,7 +414,15 @@ export function JobPage() {
       <IconCopy size={size > 40 ? 20 : 18} />
     </ActionIcon>
   );
-  const partNote = (i: OrderItem) => (i.kind === 'part' && !inv && !i.done ? t(`job.part.${partStateOf(i)}`) : '');
+  const partNote = (i: OrderItem) =>
+    i.kind === 'part' && !inv && !i.done
+      ? partStateOf(i) === 'ordered' && i.receivedQty
+        ? t('parts.nOf', { n: i.receivedQty, of: i.qty })
+        : t(`job.part.${partStateOf(i)}`)
+      : '';
+  // Work outside: where it stands; who does a line, when it is not the job's mechanic.
+  const outNote = (i: OrderItem) => (i.outsource && !i.done ? t(`outsource.states.${i.outsource.state}`) : '');
+  const whoNote = (i: OrderItem) => (i.employeeId && i.employeeId !== b.order.mechanicId ? mechanics.find((m) => m.id === i.employeeId)?.name ?? '' : '');
   const row = (i: OrderItem) => (
     <PickRow
       key={i.id}
@@ -412,7 +445,7 @@ export function JobPage() {
           {!!i.mediaIds?.length && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
         </Text>
       }
-      subtitle={[i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '', partNote(i), i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
+      subtitle={[i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '', partNote(i), outNote(i), whoNote(i), i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
       right={
         unpriced.includes(i) ? (
           // No price yet (a part still to find): it cannot go to the customer like this.
@@ -449,12 +482,28 @@ export function JobPage() {
   const waivedRow = b.order.waived ? (
     <ListRow left={<IconCashOff size={20} stroke={1.8} color="var(--mantine-color-orange-6)" aria-hidden />} title={<Text span c="orange.7" inherit>{t('job.unpaid')}</Text>} right={<Money fils={b.order.waived.fils} c="orange.7" />} />
   ) : null;
+  // What the job earns (without VAT, less parts, work outside, expenses) — once some cost is known.
+  const profit = jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: expenses ?? [] });
+  const profitRow = profit.known ? (
+    <ListRow
+      title={<Text span c="dimmed" inherit>{t('job.profit')}</Text>}
+      right={
+        <span className="profit-amount" data-shown={profitShown}>
+          <Money fils={profit.profit} c={profit.profit < 0 ? 'red.7' : 'green.7'} />
+        </span>
+      }
+      onClick={() => setProfitShown((s) => !s)}
+    />
+  ) : null;
+  const hasAgreed = live.some((i) => i.kind !== 'discount' && i.approvalState === 'approved');
 
   const tiles: Tile[] = [];
   if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
+  if (open) tiles.push({ key: 'mechanic', icon: IconClipboardList, onClick: () => setMechanicOpen(true) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
+  if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
   if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
   if (open && (lines.length > 0 || inv) && (!inv || due > 0)) tiles.push({ key: 'discount', icon: IconDiscount, onClick: () => setDiscountOpen(true) });
   // The car leaves now, the money comes later: a signed debt (on the payments tab of the details).
@@ -632,11 +681,13 @@ export function JobPage() {
             {b.order.complaint || t('job.complaint')}
           </Text>
         </UnstyledButton>
+        <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
         {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
-        {/* The mechanics (who does the job) and, on the right, the car's VIN photo. */}
+        {/* When the car was promised, the mechanics (who does the job) and, on the right, the car's VIN photo. */}
         <div className="job-foot">
-          {open && mechanics.length > 0 ? (
+          {open ? (
             <div className="chip-row" aria-label={t('order.mechanic')}>
+              {phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
               {mechanics.map((m) => (
                 <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
                   {m.name}
@@ -697,6 +748,7 @@ export function JobPage() {
               {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
               {due > 0 && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
               {waivedRow}
+              {profitRow}
             </List>
           </Box>
         </>
@@ -749,11 +801,15 @@ export function JobPage() {
                   right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display /></Text>}
                 />
                 {waivedRow}
+                {profitRow}
               </List>
             </Box>
           )}
         </>
       )}
+
+      {(phase === 'pay' || phase === 'out') && <HandoverChecks order={b.order} />}
+      <NotesSection orderId={oid} notes={b.notes} editable={open} />
 
       {bar && <StickyBar>{bar}</StickyBar>}
 
@@ -768,6 +824,7 @@ export function JobPage() {
       />
       <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i })} />
       <MoreSheet opened={more} onClose={() => setMore(false)} tiles={tiles} />
+      <MechanicSheet b={b} opened={mechanicOpen} onClose={() => setMechanicOpen(false)} />
       {obd.input}
       <ComplaintSheet b={b} opened={complaintOpen} onClose={() => setComplaintOpen(false)} />
       <ConfirmModal

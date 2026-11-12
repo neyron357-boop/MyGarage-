@@ -50,7 +50,7 @@ export interface AddMediaInput {
 
 export async function addMedia(input: AddMediaInput): Promise<Media> {
   const kind: Media['kind'] =
-    input.kind ?? (input.file.type.startsWith('video/') ? 'video' : input.file.type === 'application/pdf' ? 'pdf' : 'photo');
+    input.kind ?? (input.file.type.startsWith('video/') ? 'video' : input.file.type.startsWith('audio/') ? 'audio' : input.file.type === 'application/pdf' ? 'pdf' : 'photo');
   let blob = input.file;
   let thumb: Blob | undefined = input.thumb;
   if (kind === 'video' && blob.size > MAX_VIDEO_BYTES) throw new Error('video_too_large');
