@@ -1,6 +1,6 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCreditCard, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -195,6 +195,8 @@ export function LedgerTab() {
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
   const [opening, setOpening] = useState(false);
   const [opened, setOpen] = useState<Pick<LedgerEntry, 'id' | 'source'> | null>(null);
+  const view = `${month}-${kind}-${purse}`;
+  const firstView = useRef(view);
   const data = useScreenLiveQuery(async () => {
     const [book, cats, vehicles, customers, orders] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.vehicles.toArray(), db.customers.toArray(), db.orders.toArray()]);
     const photos = await proofIndex(book.entries.map((e) => e.id));
@@ -307,8 +309,9 @@ export function LedgerTab() {
           {t('ledger.emptyHint')}
         </EmptyState>
       ) : (
-        // Another month or filter: the list comes in with a soft fade (the old one does not just blink away).
-        <Stack gap="lg" key={`${month}-${kind}-${purse}`} className="fade-enter">
+        // Another month or filter: the list comes in with a soft fade (the old one does not just blink away);
+        // not when the tab opens — the book is simply there.
+        <Stack gap="lg" key={view} className={view === firstView.current ? undefined : 'fade-enter'}>
         {[...days.entries()].map(([day, list]) => {
           const net = list.reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
           const head = dayHeading(day, lang);

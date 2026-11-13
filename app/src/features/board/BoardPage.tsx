@@ -10,7 +10,7 @@ import { archiveJob, phaseOf } from '../../services/flow';
 import { loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
-import { PHASE_META } from '../job/phase';
+import { PHASE_META, usePhaseGlow } from '../job/phase';
 import { InsecureWarning } from './BoardNotices';
 import { JobRow, type RowSwipe } from './JobRow';
 import { TodayList } from './TodayList';
@@ -139,6 +139,9 @@ export function BoardPage() {
   const covers = useScreenLiveQuery(() => coverIndex(vehicleIds ? vehicleIds.split(',') : []), [vehicleIds]);
   // Every five minutes the rows' "how long" moves on (a row is not rendered again otherwise).
   const tick = Math.floor(Date.now() / 300_000);
+  // A step picked: the screen glows in its colours, as a job on that step does.
+  const glowRef = useRef<HTMLSpanElement>(null);
+  usePhaseGlow(glowRef, filter !== 'all' && filter !== 'archive' ? filter : undefined);
   if (!bundles) return <PageSkeleton />;
   // The freshest first: the job something last happened on is on top.
   const fresh = (x: Job, y: Job) => lastChange(y.b).localeCompare(lastChange(x.b));
@@ -234,6 +237,7 @@ export function BoardPage() {
   const shown = phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs;
   return (
     <>
+      <span ref={glowRef} hidden />
       {header}
       <InsecureWarning />
       {!archive && (mobile ? <TodayList bundles={bundles} /> : <TodayList bundles={bundles} />)}

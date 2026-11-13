@@ -1321,7 +1321,7 @@ export const en: typeof ru = {
       data: 'Backup, demo data, deletion',
     },
     lists: {
-      intro: 'The words of these lists go into customer documents, so they are in English by default. Tap a line to fix it; “×” removes it; the order is as here.',
+      intro: 'These words go into customer documents — so they are in English.',
       complaints: 'Complaints',
       complaintsHint: 'Quick picks in “New job”',
       warningLights: 'Warning lights',

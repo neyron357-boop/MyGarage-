@@ -449,10 +449,24 @@ a {
 /* ---------- Glow (v0.10) ---------- */
 /* A soft glow at the top of every screen, under the large title: the accent from the left, a second hue
    from the right, gone by the first group. Painted once with the content — no blur, nothing per frame.
-   A job's screen glows in the colours of its step (usePhaseGlow sets --glow, --glow-2), so its state shows from afar. */
+   A job's screen glows in the colours of its step (usePhaseGlow sets --glow, --glow-2), so its state shows from afar;
+   so does the board while a step is picked. The two colours are registered properties: when the step changes the glow
+   shifts to the new colours over half a second — only the glow itself is painted again, nothing under it. */
+@property --glow {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+@property --glow-2 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
 .screen-body,
 .page-shell {
   isolation: isolate;
+  --glow: var(--mantine-color-cobalt-6);
+  --glow-2: var(--mantine-color-grape-6);
 }
 .screen-body {
   position: relative;
@@ -466,8 +480,9 @@ a {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(95% 72% at 4% 0%, color-mix(in srgb, var(--glow, var(--mantine-color-cobalt-6)) var(--glow-a), transparent) 0%, transparent 72%),
-    radial-gradient(75% 60% at 100% 0%, color-mix(in srgb, var(--glow-2, var(--mantine-color-grape-6)) var(--glow-b), transparent) 0%, transparent 70%);
+    radial-gradient(95% 72% at 4% 0%, color-mix(in srgb, var(--glow) var(--glow-a), transparent) 0%, transparent 72%),
+    radial-gradient(75% 60% at 100% 0%, color-mix(in srgb, var(--glow-2) var(--glow-b), transparent) 0%, transparent 70%);
+  transition: --glow 560ms var(--ease-out), --glow-2 560ms var(--ease-out);
 }
 :root {
   --glow-a: 17%;
