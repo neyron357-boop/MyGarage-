@@ -97,7 +97,8 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
           })}
         </SimpleGrid>
         {method !== 'cash' && <TextInput label={t('payment.reference')} value={reference} onChange={(e) => setReference(e.currentTarget.value)} />}
-        <Button size="lg" onClick={save} loading={busy} disabled={!amount} color={kind === 'refund' ? 'red' : undefined}>
+        {/* Money in is green (as the job's "Pay" that opened the sheet), money back to the customer red. */}
+        <Button size="lg" onClick={save} loading={busy} disabled={!amount} color={kind === 'refund' ? 'red' : 'green'}>
           {t('payment.save')}
           {!!amount && ` · ${formatAed(amount)}`}
         </Button>
