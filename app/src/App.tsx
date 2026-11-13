@@ -383,9 +383,41 @@ function Shell() {
   return mobile ? <PhoneShell /> : <DesktopShell />;
 }
 
+/**
+ * A banner goes away as on the iPhone: a tap on it, or a flick up (not a tap on its own button — "Undo").
+ * Only one is shown at a time, so putting it away clears them.
+ */
+function useBannerDismiss() {
+  useEffect(() => {
+    let startY: number | null = null;
+    const banner = (t: EventTarget | null) => (t instanceof Element ? t.closest('.mantine-Notification-root') : null);
+    const onClick = (e: MouseEvent) => {
+      if (banner(e.target) && !(e.target as Element).closest('button, a')) notifications.clean();
+    };
+    const onStart = (e: TouchEvent) => {
+      startY = banner(e.target) ? e.touches[0].clientY : null;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (startY !== null && e.touches[0].clientY - startY < -18) {
+        startY = null;
+        notifications.clean();
+      }
+    };
+    document.addEventListener('click', onClick);
+    document.addEventListener('touchstart', onStart, { passive: true });
+    document.addEventListener('touchmove', onMove, { passive: true });
+    return () => {
+      document.removeEventListener('click', onClick);
+      document.removeEventListener('touchstart', onStart);
+      document.removeEventListener('touchmove', onMove);
+    };
+  }, []);
+}
+
 function Providers({ children }: { children: React.ReactNode }) {
   const lang = useLang();
   const mobile = usePhone();
+  useBannerDismiss();
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
       <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />

@@ -91,8 +91,8 @@ export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEnt
     <Modal opened onClose={onClose} title={entry.vendor ? `${label} · ${entry.vendor}` : label}>
       <Stack gap="md">
         <Group justify="space-between" align="baseline">
-          <Text fz={28} c={entry.kind === 'in' ? 'green.7' : 'red.7'}>
-            <Money fils={entry.kind === 'in' ? entry.amountFils : -entry.amountFils} display />
+          <Text fz={28} c={entry.kind === 'in' ? 'green.7' : undefined}>
+            <Money fils={entry.kind === 'in' ? entry.amountFils : -entry.amountFils} display signed />
           </Text>
           <Text size="sm" c="dimmed">
             {formatDate(entry.date)} · {entry.method ? t(`payment.method.${entry.method}`) : t('payment.method.cash')}
@@ -307,7 +307,9 @@ export function LedgerTab() {
           {t('ledger.emptyHint')}
         </EmptyState>
       ) : (
-        [...days.entries()].map(([day, list]) => {
+        // Another month or filter: the list comes in with a soft fade (the old one does not just blink away).
+        <Stack gap="lg" key={`${month}-${kind}-${purse}`} className="fade-enter">
+        {[...days.entries()].map(([day, list]) => {
           const net = list.reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
           const head = dayHeading(day, lang);
           return (
@@ -316,7 +318,7 @@ export function LedgerTab() {
                 <Text size="sm" fw={650} c="dimmed" className="day-head">
                   {head.word ? t(`common.${head.word}`) : head.text}
                 </Text>
-                <Text size="xs" fw={600} c={net >= 0 ? 'green.7' : 'red.7'} className="tnum">
+                <Text size="xs" fw={600} c={net >= 0 ? 'green.7' : 'dimmed'} className="tnum">
                   {net >= 0 ? '+' : '−'}
                   {formatAed(Math.abs(net))}
                 </Text>
@@ -344,7 +346,8 @@ export function LedgerTab() {
                         )
                       }
                       title={
-                        <Text span size="sm" fw={600} lineClamp={1}>
+                        // What it was, read first — as a bank app sets the merchant's name.
+                        <Text span fz={16} fw={600} lineClamp={1}>
                           {label(e)}
                         </Text>
                       }
@@ -367,7 +370,8 @@ export function LedgerTab() {
                       }
                       right={
                         <Stack gap={0} align="flex-end">
-                          <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : 'red.7'} size="sm" />
+                          {/* As a bank shows it: money in green with a plus, money out in the text's colour with a minus. */}
+                          <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />
                           <Text size="10px" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
                             {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter)}` : `${t('ledger.cardShort')} ${formatAed(e.cardAfter)}`}
                           </Text>
@@ -379,7 +383,8 @@ export function LedgerTab() {
               </List>
             </Box>
           );
-        })
+        })}
+        </Stack>
       )}
 
       <EntrySheet opened={!!sheet} onClose={() => setSheet(null)} preset={sheet ?? undefined} />

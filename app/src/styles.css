@@ -2790,8 +2790,14 @@ html.kb .screen-bottom > .sticky-bar {
 .screen-bottom > .sticky-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])) {
   box-shadow: 0 8px 22px color-mix(in srgb, var(--button-bg, var(--mantine-primary-color-filled)) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
+/* Not yet ("Принять" before a number): clear glass, like the bar's other buttons — what is under it blurs
+   instead of showing through a thin grey. */
 .screen-bottom > .sticky-bar .mantine-Button-root:is([data-variant='filled'], :not([data-variant])):is([data-disabled], :disabled) {
-  box-shadow: none;
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
+  color: var(--app-label-3);
 }
 /* The other actions of the bar: clear glass with the tint (or the colour of the button). */
 .screen-bottom > .sticky-bar .mantine-Button-root:is([data-variant='light'], [data-variant='default'], [data-variant='outline']) {

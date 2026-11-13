@@ -297,6 +297,7 @@ const OUT = { kind: 'out' as const };
 
 function SalariesTab() {
   const { t } = useTranslation();
+  const lang = useLang();
   const { run, busy } = useAction();
   const [month, setMonth] = useState(monthKey());
   const data = useScreenLiveQuery(async () => ({ emps: await db.employees.filter((e) => e.active).toArray(), pays: await db.salaryPayments.where('month').equals(month).toArray() }), [month]);
@@ -320,10 +321,16 @@ function SalariesTab() {
               title={e.name}
               subtitle={
                 <Stack gap={4}>
-                  <span>
-                    {t(`role.${e.role}`)} · {t('salary.paid')} {formatAed(paid)} {t('problem.of')} {formatAed(e.monthlySalaryFils)}
+                  <span>{t(`role.${e.role}`)}</span>
+                  {/* Paid this month out of the salary: the figures and a bar that turns green when it is all paid. */}
+                  <span className="tnum" aria-label={`${t('salary.paid')} ${formatAed(paid)} ${t('problem.of')} ${formatAed(e.monthlySalaryFils)}`}>
+                    <Text span inherit fw={600} c={pct >= 100 ? 'green.7' : 'var(--mantine-color-text)'}>
+                      {formatAed(paid, lang, false)}
+                    </Text>
+                    {' / '}
+                    {formatAed(e.monthlySalaryFils)}
                   </span>
-                  {e.monthlySalaryFils > 0 && <Progress value={pct} size="xs" color={pct >= 100 ? 'green' : 'cobalt'} maw={220} />}
+                  {e.monthlySalaryFils > 0 && <Progress value={pct} size="sm" radius="xl" color={pct >= 100 ? 'green' : 'cobalt'} maw={220} />}
                 </Stack>
               }
               right={
@@ -345,9 +352,9 @@ function SalariesTab() {
       </Text>
       <Modal opened={!!pay} onClose={() => setPay(null)} title={pay ? t(`salary.kind.${pay.kind}`) : ''}>
         <Stack>
-          <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus />
+          <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
           <MethodPicker value={method} onChange={setMethod} />
-          <Button loading={busy} onClick={() => pay && run(async () => { await paySalary({ ...pay, month, amountFils: amount ?? 0, method }); setPay(null); }, 'common.saved')}>
+          <Button size="lg" disabled={!amount} loading={busy} onClick={() => pay && run(async () => { await paySalary({ ...pay, month, amountFils: amount ?? 0, method }); setPay(null); }, 'common.saved')}>
             {t('common.save')}
           </Button>
         </Stack>

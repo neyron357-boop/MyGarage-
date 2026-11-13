@@ -13,6 +13,7 @@ import {
   Menu,
   Modal,
   NavLink,
+  Notification,
   NumberInput,
   Paper,
   PasswordInput,
@@ -207,6 +208,8 @@ export const theme = createTheme({
       styles: { dropdown: { padding: 6 }, item: { fontSize: rem(17), padding: `${rem(11)} ${rem(14)}`, borderRadius: rem(16) }, divider: { marginBlock: 4 } },
     }),
     Tooltip: Tooltip.extend({ defaultProps: { radius: 'sm', withArrow: true } }),
+    // Banners as the iPhone shows them: no close cross — a tap or a flick up puts one away (useBannerDismiss).
+    Notification: Notification.extend({ defaultProps: { withCloseButton: false } }),
     Alert: Alert.extend({ defaultProps: { radius: 'lg', variant: 'light' }, styles: { title: { fontWeight: 600 } } }),
     Progress: Progress.extend({ defaultProps: { radius: 'xl', transitionDuration: 400 } }),
     NavLink: NavLink.extend({ styles: { label: { fontWeight: 500 } } }),

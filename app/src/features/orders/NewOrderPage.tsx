@@ -75,6 +75,9 @@ function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) =>
           onChange={(e) => onChange({ ...plate, code: e.currentTarget.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
           maxLength={3}
           autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="next"
           autoComplete="off"
           size="lg"
           style={{ flex: '0 0 96px' }}
@@ -86,6 +89,7 @@ function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) =>
           value={plate.number}
           onChange={(e) => onChange({ ...plate, number: e.currentTarget.value.replace(/\D/g, '') })}
           inputMode="numeric"
+          enterKeyHint="done"
           autoComplete="off"
           maxLength={6}
           size="lg"
@@ -399,7 +403,8 @@ export function NewOrderPage() {
             {t('newOrder.book')}
           </Button>
         ) : (
-          <Button fullWidth onClick={() => submit('job')} loading={busy} leftSection={<IconCheck size={20} />}>
+          // Lit once there is a number (or a known car): no tap that only says "type the number".
+          <Button fullWidth onClick={() => submit('job')} loading={busy} disabled={!plate.number && !known} leftSection={<IconCheck size={20} />}>
             {t('job.accept')}
           </Button>
         )}

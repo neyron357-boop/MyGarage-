@@ -72,7 +72,7 @@ export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => v
 
 /* ---------------- Money ---------------- */
 
-export function Money({ fils, size, fw, c, display, roll }: { fils: number; size?: string; fw?: number; c?: string; display?: boolean; /** Runs to a new value instead of blinking to it (totals, balances). */ roll?: boolean }) {
+export function Money({ fils, size, fw, c, display, roll, signed }: { fils: number; size?: string; fw?: number; c?: string; display?: boolean; /** Runs to a new value instead of blinking to it (totals, balances). */ roll?: boolean; /** Money in: "+" before it (a book of ins and outs). */ signed?: boolean }) {
   const lang = useLang();
   const shown = useRolling(fils, !!roll);
   // Sized by the final figure, so the cell does not twitch while the digits run.
@@ -80,6 +80,7 @@ export function Money({ fils, size, fw, c, display, roll }: { fils: number; size
   // How long the figure is: in a tile or a figure cell it is sized to fit (styles.css, "fit to cell").
   return (
     <Text span size={size} fz={size ? undefined : 'inherit'} fw={fw ?? (display ? undefined : 600)} c={c} className={display ? 'money display' : 'money'} style={{ '--chars': s.length } as React.CSSProperties}>
+      {signed && fils > 0 && '+'}
       <Figure text={roll ? formatAed(shown, lang, false) : s} />
       <span className="cur">AED</span>
     </Text>

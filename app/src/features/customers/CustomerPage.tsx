@@ -86,7 +86,8 @@ export function CustomerPage() {
       <SimpleGrid cols={3} spacing="sm" mt="md">
         <Kpi label={t('customer.visitsTitle')} value={orders.length} />
         <Kpi label={t('customer.spent')} value={<Money fils={spent} display />} />
-        <Kpi label={t('flags.debt')} value={<Money fils={debt} display />} color={debt ? 'red' : undefined} />
+        {/* No debt is no figure: a quiet dash, the red amount only when there is one. */}
+        <Kpi label={t('flags.debt')} value={debt ? <Money fils={debt} display /> : '—'} color={debt ? 'red' : undefined} />
       </SimpleGrid>
       <Section
         title={t('customer.vehicles')}

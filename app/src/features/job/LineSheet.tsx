@@ -287,7 +287,7 @@ export function LineSheet({
     });
   const out = kind === 'labor' && !!outsource;
   return (
-    <Modal opened={opened} onClose={onClose} title={item ? t('item.edit') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
+    <Modal opened={opened} onClose={onClose} title={item ? t(kind === 'labor' ? 'job.addWork' : 'job.addPart') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
         {!item && (suggestions?.top.length ?? 0) > 0 && (
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
