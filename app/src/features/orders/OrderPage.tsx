@@ -725,6 +725,7 @@ function JournalTab({ b }: { b: OrderBundle }) {
     if (type === 'payment') return `${t(`payment.kind.${p.kind}`)} · ${t(`payment.method.${p.method}`)} · ${formatAed(Number(p.amount))}`;
     if (type === 'message') return `${p.channel}`;
     if (type === 'closed_unpaid' || type === 'closed_owner') return formatAed(Number(p.fils ?? 0));
+    if (type === 'price_changed') return `${p.title ?? ''} · ${formatAed(Number(p.from ?? 0))} → ${formatAed(Number(p.to ?? 0))}`;
     if (type === 'invoice' || type === 'credit_note') return String(p.number ?? '');
     if (type === 'discount') return [formatAed(Number(p.amount ?? 0)), p.pct ? `${Number(p.pct) / 100} %` : '', p.invoice ? `${p.credit} → ${p.invoice}` : ''].filter(Boolean).join(' · ');
     if (type === 'item_added' || type === 'done' || type === 'undone') return String(p.title ?? '');

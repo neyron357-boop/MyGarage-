@@ -22,6 +22,7 @@ import type {
   SnapshotItem,
   VersionKind,
 } from '../domain/types';
+import type { LinePrice } from '../domain/vat';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
 import { addMedia, deleteMedia } from './media';
@@ -139,15 +140,15 @@ export interface SendOptions {
 }
 
 /**
- * The next estimate version from the draft items (not saved). Numbers run on through withdrawn versions
- * too: the customer may have seen one, so the next is never "v1" again.
+ * The next estimate version from the draft items (not saved), or from `lines` (a new price told in
+ * person). Numbers run on through withdrawn versions too: the customer may have seen one, so the next is
+ * never "v1" again.
  */
-async function buildVersion(orderId: string, opts: SendOptions): Promise<{ version: EstimateVersion; drafts: OrderItem[]; order: Order }> {
+async function buildVersion(orderId: string, opts: SendOptions, lines?: OrderItem[]): Promise<{ version: EstimateVersion; drafts: OrderItem[]; order: Order }> {
   const [order, settings] = await Promise.all([db.orders.get(orderId), getSettings()]);
   if (!order) throw new AppError('err.notFound');
   // In the order they were added: the quotation and the message list them as the job screen does.
-  const all = await db.items.where('orderId').equals(orderId).sortBy('createdAt');
-  const drafts = all.filter((i) => i.approvalState === 'draft');
+  const drafts = lines ?? (await db.items.where('orderId').equals(orderId).sortBy('createdAt')).filter((i) => i.approvalState === 'draft');
   if (drafts.length === 0) throw new AppError('err.nothingToSend');
   const prev = await db.versions.where('orderId').equals(orderId).count();
   const lang = order.docLanguage;
@@ -255,6 +256,23 @@ export async function recordDecisions(versionId: string, decisions: DecisionInpu
       declined: decisions.filter((d) => d.decision === 'decline').length,
     });
   });
+}
+
+/**
+ * A new price for a line the customer agreed to, told to them in person: the line at its new price goes
+ * in as a version of its own ("price change" — like a discount given at the counter), agreed at once.
+ * What was sent and agreed before stays as it was.
+ */
+export async function agreeNewPrice(item: OrderItem, price: LinePrice): Promise<EstimateVersion> {
+  if (item.approvalState !== 'approved') throw new AppError('err.itemSent');
+  const { version } = await buildVersion(item.orderId, { via: 'in_person', kind: 'price_change' }, [{ ...item, ...price }]);
+  const agreed: EstimateVersion = { ...version, status: 'answered', answeredAt: version.sentAt };
+  await db.transaction('rw', db.versions, db.items, db.decisions, async () => {
+    await db.versions.add(agreed);
+    await db.items.update(item.id, { ...price, lastVersionId: agreed.id });
+    await db.decisions.add({ id: uid(), versionId: agreed.id, itemId: item.id, orderId: item.orderId, decision: 'approve', via: 'in_person', decidedAt: agreed.sentAt });
+  });
+  return agreed;
 }
 
 export async function limitRemaining(orderId: string): Promise<{ limit: number; remaining: number }> {

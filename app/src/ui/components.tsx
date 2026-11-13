@@ -913,10 +913,13 @@ export function MoneyInput({
   autoFocus,
   size = 'md',
   ariaLabel,
+  leftSection,
 }: {
   label: ReactNode;
   /** In a row whose label is beside it: the field's name for screen readers (and tests). */
   ariaLabel?: string;
+  /** Before the amount (a quantity: "4 ×" — the price is per unit). */
+  leftSection?: ReactNode;
   value: number | undefined;
   onChange: (fils: number | undefined) => void;
   required?: boolean;
@@ -939,6 +942,14 @@ export function MoneyInput({
       required={required}
       inputMode="decimal"
       size={size}
+      leftSection={
+        leftSection && (
+          <Text size="sm" c="dimmed" fw={600} style={{ whiteSpace: 'nowrap' }}>
+            {leftSection}
+          </Text>
+        )
+      }
+      leftSectionWidth={leftSection ? 52 : undefined}
       rightSection={
         <Text size="xs" c="dimmed" fw={600}>
           AED

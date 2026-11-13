@@ -691,6 +691,17 @@ html.kb .tab-bar-wrap {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 2px;
 }
+/* A price that changes when tapped (a line's sheet): the amount and a pencil, a touch the width of the
+   sheet and 44 pt high. */
+.price-tap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-block: -8px;
+  border-radius: 12px;
+  color: inherit;
+}
 
 /* ---------- Typography helpers ---------- */
 .display {

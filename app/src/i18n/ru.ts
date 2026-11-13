@@ -1041,6 +1041,7 @@ export const ru = {
     unpaidText: 'Заказ закроется, в кассу ничего не попадёт.',
     paidOwner: 'Оплата у главного',
     noMoney: 'Денег не будет',
+    changePrice: 'Изменить цену',
     accept: 'Принять',
     more: { photos: 'Фото', quote: 'Смета', invoice: 'Инвойс', prepay: 'Предоплата', discount: 'Скидка', debt: 'В долг', unpaid: 'Без оплаты', refuse: 'Отказ', customer: 'Клиент', car: 'Машина', details: 'Подробно', claim: 'Гарантия', select: 'Выбрать', scanner: 'Сканер', remove: 'Удалить', mechanic: 'Механику', report: 'Отчёт' },
     pickAll: 'Все',
@@ -1411,6 +1412,7 @@ export const ru = {
   },
   event: {
     closed_owner: 'Оплата у главного',
+    price_changed: 'Цена изменена',
     return_terms: 'Условия возврата',
     outsource: 'Работа на стороне',
     created: 'Заказ создан',

@@ -619,6 +619,76 @@ async function launchBrowser() {
     await page.locator('.screen[data-role="top"]').getByText('Всего долгов').waitFor();
     if (await page.locator('.screen[data-role="top"]').getByText('24680').count()) throw new Error('paid to the owner is not a debt');
   });
+  await step('a new price: tapped on the line — agreed in person, or a waiting line back to the price', async () => {
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Номер').fill('14142');
+    await page.getByRole('button', { name: 'Принять', exact: true }).click();
+    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    const id = page.url().split('/orders/')[1].split(/[/?]/)[0];
+    const dlg = page.getByRole('dialog');
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Front brake pads replacement');
+    await dlg.getByLabel('Цена', { exact: true }).fill('120');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
+    await dlg.getByLabel('Запчасть').fill('Spark plug');
+    await dlg.getByLabel('Кол-во').fill('4');
+    await dlg.getByLabel('Цена за шт.').fill('30');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Клиенту · 252,00 AED' }).waitFor();
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByRole('button', { name: 'Готово · 252,00 AED' }).waitFor();
+    // Agreed: the price on the line's sheet is a button; the new one is agreed in person.
+    await front('.list-row').filter({ hasText: 'Front brake pads replacement' }).click();
+    await dlg.getByRole('button', { name: 'Изменить цену' }).click();
+    const price = dlg.getByLabel('Изменить цену');
+    if ((await price.inputValue()) !== '126') throw new Error(`the field starts from the price shown, not ${await price.inputValue()}`);
+    await price.fill('100');
+    await shot('35-price-edit');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.getByRole('button', { name: 'Изменить цену' }).filter({ hasText: '100,00' }).waitFor();
+    await shot('35a-price-changed');
+    await page.locator('.mantine-Modal-close').first().click();
+    await page.getByRole('button', { name: 'Готово · 226,00 AED' }).waitFor();
+    // Several of a part: the price of one, the line's total under it; Enter saves.
+    await front('.list-row').filter({ hasText: 'Spark plug' }).click();
+    await dlg.getByRole('button', { name: 'Изменить цену' }).click();
+    if ((await price.inputValue()) !== '31.5') throw new Error(`the price of one part, not ${await price.inputValue()}`);
+    await price.fill('25');
+    await dlg.getByText(/= 100,00/).waitFor();
+    await shot('35b-price-per-unit');
+    await price.press('Enter');
+    await dlg.getByRole('button', { name: 'Изменить цену' }).filter({ hasText: '100,00' }).waitFor();
+    await page.locator('.mantine-Modal-close').first().click();
+    await page.getByRole('button', { name: 'Готово · 200,00 AED' }).waitFor();
+    // What was agreed before stays: two versions told in person, the journal keeps both prices.
+    const kept = await page.evaluate(async (orderId) => {
+      const { db } = await import('/src/db/db.ts');
+      const versions = await db.versions.where('orderId').equals(orderId).sortBy('number');
+      const events = (await db.events.where('orderId').equals(orderId).toArray()).filter((e) => e.type === 'price_changed');
+      return { kinds: versions.map((v) => v.kind), first: versions[0].items.map((s) => s.gross), changed: events.map((e) => [e.payload.from, e.payload.to]) };
+    }, id);
+    if (JSON.stringify(kept) !== JSON.stringify({ kinds: ['initial', 'price_change', 'price_change'], first: [12600, 12600], changed: [[12600, 10000], [12600, 10000]] })) throw new Error('the price change must keep what was agreed: ' + JSON.stringify(kept));
+    // Waiting for the answer: a new price takes the line back — the job asks to send the price again.
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Brake fluid flush');
+    await dlg.getByLabel('Цена', { exact: true }).fill('80');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByRole('button', { name: 'Клиенту · 284,00 AED' }).waitFor();
+    await page.evaluate(async (orderId) => {
+      const { sendVersion } = await import('/src/services/estimate.ts');
+      await sendVersion(orderId, { via: 'whatsapp' });
+    }, id);
+    await page.getByRole('button', { name: 'Отказ' }).waitFor();
+    await front('.list-row').filter({ hasText: 'Brake fluid flush' }).click();
+    await dlg.getByRole('button', { name: 'Согласен' }).waitFor();
+    await dlg.getByRole('button', { name: 'Изменить цену' }).click();
+    await price.fill('70');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: 'Клиенту · 270,00 AED' }).waitFor();
+    await shot('35c-price-back-to-send', true);
+  });
   await step('v0.7: due time, notes, offers, return terms, work outside, mechanic, report', async () => {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('61803');

@@ -262,7 +262,7 @@ erDiagram
 | Поле | Описание |
 |---|---|
 | `order_id`, `number` | 1, 2, 3… |
-| `kind` | `initial` · `supplement` · `price_change` |
+| `kind` | `initial` · `supplement` · `price_change` (скидка после инвойса; новая цена согласованной строки — только эта строка, `sent_via = in_person`, сразу `answered` с решением «согласен лично», v0.9.1) |
 | `reason_ru`, `reason_en` | что случилось («найден порванный пыльник») |
 | `snapshot` | JSON: позиции (с `vat_rate_bp` — с v0.5.1), цены, итоги, фото — **ровно то, что видел клиент** |
 | `fixed_total_fils`, `max_total_fils`, `recommended_total_fils`, `delta_fils` | итоги |

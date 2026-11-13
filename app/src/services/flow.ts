@@ -1,13 +1,14 @@
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
+import { discountBase, discountLines, grossOf } from '../domain/discount';
 import { activeInvoice } from '../domain/invoice';
-import { isAwaitingClient } from '../domain/items';
+import { canReprice, isAwaitingClient, itemAmounts, unitGrossPrice } from '../domain/items';
 import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } from '../domain/stages';
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
-import { recordDecisions, removeItem, restoreItem, sendVersion, withdrawItems } from './estimate';
+import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, updateItem, withdrawItems } from './estimate';
 import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, stageContext, type OrderBundle } from './orders';
 
 /**
@@ -123,6 +124,40 @@ export async function closeUnpaid(orderId: string, via?: 'owner'): Promise<void>
     await logEvent(orderId, via === 'owner' ? 'closed_owner' : 'closed_unpaid', { fils: due });
   });
   await changeStage(orderId, 'closed');
+}
+
+/**
+ * A new price for a line the customer has seen: per unit, with VAT — as the job shows it (kept to the
+ * fils, "VAT in the price"). Waiting for the answer: the quote that went out no longer holds, so the line
+ * is taken back — a draft at the new price, to send again. Agreed: the customer was told in person, and
+ * the price goes in as a version of its own (`agreeNewPrice`). The journal keeps the old and the new
+ * price. Returns what the line is now; null — the same price, nothing changed.
+ */
+export async function repriceLine(itemId: string, unitGrossFils: number): Promise<'draft' | 'agreed' | null> {
+  const item = await db.items.get(itemId);
+  if (!item) throw new AppError('err.notFound');
+  if (!canReprice(item)) throw new AppError('err.itemSent');
+  if (!(unitGrossFils > 0)) throw new AppError('err.amountRequired');
+  const [items, invoices] = await Promise.all([db.items.where('orderId').equals(item.orderId).toArray(), db.invoices.where('orderId').equals(item.orderId).toArray()]);
+  if (activeInvoice(invoices)) throw new AppError('err.invoiceExists');
+  const price = unitGrossPrice(item, unitGrossFils);
+  const from = itemAmounts(item).gross;
+  const to = itemAmounts({ ...item, ...price }).gross;
+  if (to === from) return null;
+  const waiting = item.approvalState === 'pending';
+  // A discount given as an amount stays as it is: the lines must still be worth more than it.
+  const next = items.map((i): OrderItem => (i.id === itemId ? { ...i, ...price, approvalState: waiting ? 'draft' : i.approvalState } : i));
+  if (grossOf(discountBase(next)) + grossOf(discountLines(next)) < 0) throw new AppError('err.discountTooBig');
+  if (waiting) {
+    await withdrawItems([itemId]);
+    await updateItem(itemId, price);
+  } else {
+    await agreeNewPrice(item, price);
+  }
+  await logEvent(item.orderId, 'price_changed', { itemId, title: item.titleRu || item.titleEn, from, to });
+  await syncDiscount(item.orderId);
+  await syncStage(item.orderId);
+  return waiting ? 'draft' : 'agreed';
 }
 
 /** An agreed line that will not be done after all (the customer changed their mind, no part): off the job. */

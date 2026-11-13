@@ -1043,6 +1043,7 @@ export const en: typeof ru = {
     unpaidText: 'The job closes; nothing goes into the cash.',
     paidOwner: 'Paid to the owner',
     noMoney: 'No money coming',
+    changePrice: 'Change the price',
     accept: 'Accept',
     more: { photos: 'Photos', quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', discount: 'Discount', debt: 'On credit', unpaid: 'No payment', refuse: 'Refused', customer: 'Customer', car: 'Car', details: 'Details', claim: 'Warranty', select: 'Select', scanner: 'Scanner', remove: 'Delete', mechanic: 'Mechanic', report: 'Report' },
     pickAll: 'All',
@@ -1413,6 +1414,7 @@ export const en: typeof ru = {
   },
   event: {
     closed_owner: 'Paid to the owner',
+    price_changed: 'Price changed',
     return_terms: 'Return terms',
     outsource: 'Work outside',
     created: 'Job created',

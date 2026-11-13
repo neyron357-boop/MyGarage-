@@ -1,5 +1,5 @@
 import { roundFils } from './money';
-import { fromGross, fromNet, type Amounts } from './vat';
+import { fromGross, fromNet, priceFromEntered, type Amounts, type LinePrice } from './vat';
 import type { DecisionKind, ItemDecision, Lang, OrderItem } from './types';
 
 export function itemTitle(item: Pick<OrderItem, 'titleRu' | 'titleEn'>, lang: Lang): string {
@@ -47,6 +47,22 @@ export function isAwaitingClient(item: OrderItem): boolean {
 /** Only approved work may be marked as done. */
 export function canMarkDone(item: OrderItem): boolean {
   return item.approvalState === 'approved';
+}
+
+/**
+ * A line whose price can be changed on its sheet: one the customer has seen — waiting for the answer or
+ * agreed (a draft is edited whole) — with a price of its own: not a discount, not the customer's own part,
+ * not a block B range still open.
+ */
+export function canReprice(item: OrderItem): boolean {
+  if (item.kind === 'discount' || item.customerSupplied) return false;
+  if (item.approvalState === 'approved') return true;
+  return isAwaitingClient(item) && item.block !== 'B';
+}
+
+/** The price to store for a new price per unit with VAT, as the job shows it (kept to the fils: "VAT in the price"). */
+export function unitGrossPrice(item: Pick<OrderItem, 'vatRateBp'>, unitGrossFils: number): LinePrice {
+  return priceFromEntered(unitGrossFils, item.vatRateBp, item.vatRateBp > 0 ? 'incl' : 'none');
 }
 
 export function isActive(item: OrderItem): boolean {

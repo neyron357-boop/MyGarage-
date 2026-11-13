@@ -23,6 +23,7 @@ import {
   IconListDetails,
   IconMessage2,
   IconPackage,
+  IconPencil,
   IconPhone,
   IconPhoto,
   IconPointFilled,
@@ -46,7 +47,7 @@ import { hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
 import { activeInvoice, paidNet } from '../../domain/invoice';
-import { isAwaitingClient, itemAmounts, itemTitle } from '../../domain/items';
+import { canReprice, isAwaitingClient, itemAmounts, itemTitle, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
@@ -59,13 +60,13 @@ import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, updateItem, withdrawItems } from '../../services/estimate';
-import { answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from '../../services/flow';
+import { answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, repriceLine, restoreLines, syncStage } from '../../services/flow';
 import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
-import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, StickyBar, undoToast } from '../../ui/components';
+import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
@@ -195,6 +196,41 @@ function PickRow({ onLong, onClick, ...row }: Parameters<typeof ListRow>[0] & { 
   return <ListRow {...row} handlers={onLong ? press.handlers : undefined} onClick={onClick && (() => !press.consumeClick() && onClick())} />;
 }
 
+/**
+ * A new price for a line the customer has seen, per unit with VAT — as the job shows it: saved with the
+ * check (or Enter). Several of it: the price of one, and the line's total under it.
+ */
+function PriceField({ item, onDone }: { item: OrderItem; onDone: (now: 'draft' | 'agreed' | null) => void }) {
+  const { t } = useTranslation();
+  const { run, busy } = useAction();
+  const [value, setValue] = useState<number | undefined>(() => itemAmounts({ ...item, qty: 1 }).gross);
+  const several = item.qty !== 1;
+  const save = () =>
+    run(async () => {
+      if (!value) return;
+      const now = await repriceLine(item.id, value);
+      if (now) haptic('light');
+      onDone(now);
+    });
+  return (
+    <div className="rise-enter">
+      <Group gap="sm" wrap="nowrap" onKeyDown={(e) => e.key === 'Enter' && void save()}>
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          <MoneyInput label={undefined} ariaLabel={t('job.changePrice')} value={value} onChange={setValue} autoFocus leftSection={several ? `${item.qty} ×` : undefined} />
+        </Box>
+        <ActionIcon size={44} radius="xl" variant="filled" loading={busy} disabled={!value} aria-label={t('common.save')} onClick={() => void save()}>
+          <IconCheck size={22} />
+        </ActionIcon>
+      </Group>
+      {several && !!value && (
+        <Text c="dimmed" fz={15} mt={6}>
+          = <Money fils={itemAmounts({ ...item, ...unitGrossPrice(item, value) }).gross} />
+        </Text>
+      )}
+    </div>
+  );
+}
+
 /** A line already told to the customer: the answer, done or not, where its part is — or take it off. */
 function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: OrderItem | null; onClose: () => void; onEdit: (i: OrderItem) => void }) {
   const { t } = useTranslation();
@@ -202,11 +238,19 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
   // The sheet keeps showing the line while it slides away — as it is now (a chip tapped here changes it).
   const last = useRef(item);
   if (item) last.current = b.items.find((x) => x.id === item.id) ?? item;
+  // Typing a new price: closed again each time the sheet opens (kept while it slides away).
+  const [pricing, setPricing] = useState(false);
+  const [openFor, setOpenFor] = useState(item);
+  if (item !== openFor) {
+    setOpenFor(item);
+    if (item) setPricing(false);
+  }
   const i = last.current;
   if (!i) return null;
   const waiting = isAwaitingClient(i);
   const agreed = i.approvalState === 'approved';
   const invoiced = !!activeInvoice(b.invoices);
+  const repriceable = canReprice(i) && !invoiced;
   const part = i.kind === 'part' && !i.customerSupplied;
   const state = partStateOf(i);
   const act = (fn: () => Promise<unknown>) =>
@@ -225,9 +269,27 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
   return (
     <Modal opened={!!item} onClose={onClose} title={itemTitle(i, b.order.docLanguage)}>
       <Stack gap="md">
-        <Text fz={22} fw={700} lh={1.1}>
-          <Money fils={itemAmounts(i).gross} display />
-        </Text>
+        {pricing && repriceable ? (
+          <PriceField
+            item={i}
+            onDone={(now) => {
+              setPricing(false);
+              // Back to a draft (it waited for the answer): the new price goes to the customer from the job.
+              if (now === 'draft') onClose();
+            }}
+          />
+        ) : repriceable ? (
+          <UnstyledButton className="tap price-tap" aria-label={t('job.changePrice')} onClick={() => setPricing(true)}>
+            <Text span fz={22} fw={700} lh={1.1}>
+              <Money fils={itemAmounts(i).gross} display roll />
+            </Text>
+            <IconPencil size={18} stroke={1.8} color="var(--app-label-3)" aria-hidden />
+          </UnstyledButton>
+        ) : (
+          <Text fz={22} fw={700} lh={1.1}>
+            <Money fils={itemAmounts(i).gross} display />
+          </Text>
+        )}
         {waiting && (
           <Group grow gap="sm">
             <Button color="red" variant="light" loading={busy} onClick={() => act(() => answerLines([i.id], 'decline'))}>
