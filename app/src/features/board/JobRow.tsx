@@ -138,17 +138,22 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
         )}
         <div className="body">
           <Group gap={8} wrap="nowrap" justify="space-between">
-            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+            <Group gap={8} wrap="nowrap" style={{ minWidth: 0, overflow: 'hidden' }}>
               <PlateText plate={b.vehicle.plate} size="sm" />
               {/* The time promised to the customer, beside the plate; red once it has passed. */}
               {due && (
                 <Text size="sm" c={dueLate ? 'red.7' : 'orange.7'} fw={600} className="tnum row-due" aria-label={t('job.due')}>
                   <IconClock size={14} stroke={2.2} aria-hidden />
-                  {dueText}
+                  <span className="row-due-text">{dueText}</span>
                 </Text>
               )}
             </Group>
-            {amount > 0 && <Money fils={amount} fw={700} c={phase === 'debt' ? 'red.7' : undefined} />}
+            {/* The amount is always whole; in a narrow column (the computer's board) the promised time gives way. */}
+            {amount > 0 && (
+              <span style={{ flexShrink: 0 }}>
+                <Money fils={amount} fw={700} c={phase === 'debt' ? 'red.7' : undefined} />
+              </span>
+            )}
           </Group>
           <Group gap={6} wrap="nowrap" mt={5} style={{ minWidth: 0 }}>
             {/* The step first, in its colour, with how long the car has been on it (red when too long). */}

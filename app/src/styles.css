@@ -3939,7 +3939,18 @@ html.kb .screen-bottom > .sticky-bar {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row-due > svg {
   flex-shrink: 0;
+}
+.row-due-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The job's profit stays blurred until tapped (the customer may see the screen). */
 .profit-amount {

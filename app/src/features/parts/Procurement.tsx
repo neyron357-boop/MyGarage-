@@ -78,6 +78,8 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
               aria-label={t('job.partState')}
               value={status}
               onChange={(v) => setStatus(v as ProcurementStatus)}
+              // In the colour of where the part is, as on its line and on the board: to find orange, on its way blue, here green.
+              color={status === 'needed' ? 'orange' : status === 'ordered' || status === 'in_transit' ? 'blue' : 'green'}
               data={STEPS.map((s) => ({ value: s, label: s === 'in_transit' ? t('proc.in_transit') : t(`job.part.${s === 'needed' ? 'needed' : s === 'ordered' ? 'ordered' : 'received'}`) }))}
             />
           </div>

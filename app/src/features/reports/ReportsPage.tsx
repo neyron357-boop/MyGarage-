@@ -56,7 +56,7 @@ function SegmentedBar({ parts }: { parts: { key: string; label: string; value: n
             </Group>
             <Group gap="md" wrap="nowrap">
               <Text size="xs" c="dimmed" className="tnum" w={40} ta="right">
-                {pct(p.value, total)}%
+                {String(pct(p.value, total)).replace('-', '−')}%
               </Text>
               <Money fils={p.value} size="sm" />
             </Group>
