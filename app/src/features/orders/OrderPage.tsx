@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Alert,
-  Avatar,
   Badge,
   Box,
   Button,
@@ -93,6 +92,7 @@ import {
   StageBadge,
   StageTrack,
   StickyBar,
+  PersonAvatar,
 } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
@@ -110,15 +110,6 @@ import { DeleteJobModal } from './DeleteJob';
 import { useStackBack } from '../../ui/stack';
 
 const ctxOf = (b: OrderBundle) => ({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils });
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join('');
-}
 
 /* ---------------- Modals ---------------- */
 
@@ -957,9 +948,7 @@ export function OrderPage() {
               {b.customer.name || b.customer.phone ? (
                 // The customer: a row that opens the card, the ways to reach them as tiles under it.
                 <UnstyledButton className="customer-line" onClick={() => navigate(`/customers/${b.customer.id}`)}>
-                  <Avatar color="cobalt" radius="xl" size={44}>
-                    {b.customer.name ? initials(b.customer.name) : <IconUser size={20} />}
-                  </Avatar>
+                  <PersonAvatar name={b.customer.companyName || b.customer.name} company={b.customer.type === 'company'} size={44} />
                   <Box style={{ flex: 1, minWidth: 0 }}>
                     <Text fw={600} fz={17} lineClamp={1} lh={1.3}>
                       {(b.customer.type === 'company' && b.customer.companyName ? b.customer.companyName : b.customer.name) || t('customer.noName')}

@@ -2,7 +2,7 @@
 # iOS shows a plain white screen while a web app starts unless it finds a startup image for the exact
 # screen size; these are the canvas colour with the app icon, one per iPhone size, light and dark.
 # Run from app/: powershell -ExecutionPolicy Bypass -File scripts/ios-splash.ps1
-# Output: public/splash/*.png and public/apple-touch-icon.png, plus the <link> lines for index.html.
+# Output: public/splash/*.png, plus the <link> lines for index.html. Run after scripts/app-icon.cjs.
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -54,16 +54,8 @@ foreach ($s in $sizes) {
   }
 }
 
-# Home-screen icon: iOS masks its own corners, so the square is filled edge to edge (no transparent corners).
-$ai = New-Object System.Drawing.Bitmap 180, 180
-$g = [System.Drawing.Graphics]::FromImage($ai)
-$g.Clear([System.Drawing.Color]::FromArgb(255, 63, 91, 233))
-$g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-$g.DrawImage($icon, -6, -6, 192, 192)
-$g.Dispose()
-$ai.Save((Join-Path $root 'public\apple-touch-icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
-$ai.Dispose()
+# The home-screen icon (public/apple-touch-icon.png, edge to edge) comes from scripts/app-icon.cjs.
 $icon.Dispose()
 
 $links | Set-Content -Encoding UTF8 (Join-Path $PSScriptRoot 'splash-links.html')
-Write-Output "wrote $($links.Count) startup images to $out and public\apple-touch-icon.png; <link> lines in scripts\splash-links.html"
+Write-Output "wrote $($links.Count) startup images to $out; <link> lines in scripts\splash-links.html"

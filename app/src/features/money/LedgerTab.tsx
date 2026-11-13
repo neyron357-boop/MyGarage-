@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
-import { formatDate, monthKey, monthRange } from '../../domain/dates';
+import { dayHeading, formatDate, monthKey, monthRange } from '../../domain/dates';
 import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory, IncomeCategory } from '../../domain/types';
@@ -187,6 +187,7 @@ export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEnt
  */
 export function LedgerTab() {
   const { t } = useTranslation();
+  const lang = useLang();
   const [month, setMonth] = useState(monthKey());
   const [kind, setKind] = useState<KindFilter>('all');
   const [purse, setPurse] = useState<'all' | Purse>('all');
@@ -256,9 +257,9 @@ export function LedgerTab() {
       </Group>
 
       <Box className="surface" p="md">
-        <Group justify="space-between" mb="sm" wrap="nowrap">
+        <Box mb="sm">
           <MonthField value={month} onChange={setMonth} />
-        </Group>
+        </Box>
         <SimpleGrid cols={2} spacing="md" verticalSpacing="sm">
           {(['cash', 'card'] as const).map((p) => (
             <Stack key={p} gap={4}>
@@ -284,14 +285,16 @@ export function LedgerTab() {
 
       {/* One row of filters — income or expenses, cash or card (a second tap takes one off) — and the search. */}
       <Stack gap="xs" maw={560}>
-        <div className="chip-row wrap">
+        <div className="chip-row bleed">
           {(['in', 'out'] as const).map((k) => (
-            <button key={k} type="button" className="chip" data-active={kind === k} aria-pressed={kind === k} onClick={() => setKind(kind === k ? 'all' : k)}>
+            <button key={k} type="button" className="chip" data-active={kind === k} aria-pressed={kind === k} onClick={() => setKind(kind === k ? 'all' : k)} style={{ '--chip-on': `var(--mantine-color-${k === 'in' ? 'green' : 'red'}-filled)`, '--chip-ink': `var(--mantine-color-${k === 'in' ? 'green' : 'red'}-6)` } as React.CSSProperties}>
+              {k === 'in' ? <IconArrowDownLeft size={17} stroke={2.2} aria-hidden /> : <IconArrowUpRight size={17} stroke={2.2} aria-hidden />}
               {k === 'in' ? t('ledger.ins') : t('ledger.outs')}
             </button>
           ))}
           {(['cash', 'card'] as const).map((p) => (
             <button key={p} type="button" className="chip" data-active={purse === p} aria-pressed={purse === p} onClick={() => setPurse(purse === p ? 'all' : p)}>
+              {p === 'cash' ? <IconCash size={17} stroke={2} aria-hidden /> : <IconCreditCard size={17} stroke={2} aria-hidden />}
               {t(`payment.method.${p}`)}
             </button>
           ))}
@@ -306,11 +309,12 @@ export function LedgerTab() {
       ) : (
         [...days.entries()].map(([day, list]) => {
           const net = list.reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
+          const head = dayHeading(day, lang);
           return (
             <Box key={day}>
-              <Group justify="space-between" px={4} mb={6}>
-                <Text size="sm" fw={600} c="dimmed" className="tnum">
-                  {formatDate(day)}
+              <Group justify="space-between" px={4} mb={6} wrap="nowrap">
+                <Text size="sm" fw={650} c="dimmed" className="day-head">
+                  {head.word ? t(`common.${head.word}`) : head.text}
                 </Text>
                 <Text size="xs" fw={600} c={net >= 0 ? 'green.7' : 'red.7'} className="tnum">
                   {net >= 0 ? '+' : '−'}

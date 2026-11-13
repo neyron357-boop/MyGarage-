@@ -159,6 +159,20 @@ export function dayLong(iso: string | Date, lang: Lang): string {
   return fmt(lang, 'long', { weekday: 'long', day: 'numeric', month: 'long' }).format(typeof iso === 'string' ? new Date(iso) : iso);
 }
 
+/**
+ * A day as a list heads it (money book): today and yesterday by word ('' — the screen says them in its
+ * language), the days of this week by name, older days by date — "понедельник, 9 ноября".
+ */
+export function dayHeading(day: string, lang: Lang, now: string = nowIso()): { word?: 'today' | 'yesterday'; text: string } {
+  const diff = daysBetween(day, dubaiDate(now));
+  if (diff === 0) return { word: 'today', text: '' };
+  if (diff === 1) return { word: 'yesterday', text: '' };
+  const at = new Date(`${day}T12:00:00+04:00`);
+  if (diff > 1 && diff < 7) return { text: fmt(lang, 'wdl', { weekday: 'long', day: 'numeric', month: 'long' }).format(at) };
+  if (day.slice(0, 4) === dubaiDate(now).slice(0, 4)) return { text: fmt(lang, 'dm', { day: 'numeric', month: 'long' }).format(at) };
+  return { text: formatDate(day) };
+}
+
 /** On a board row: the time today, the weekday and the time on another day. */
 export function dueShort(iso: string, lang: Lang, now: string = nowIso()): string {
   const w = whenParts(iso, lang, now);

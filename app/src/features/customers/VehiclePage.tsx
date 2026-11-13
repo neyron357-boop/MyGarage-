@@ -7,9 +7,10 @@ import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
 import { changeVehicleOwner } from '../../services/customers';
-import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
+import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section } from '../../ui/components';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { VehicleModal } from './forms';
+import { OrderStatus } from '../job/phase';
 import { LinkedMoney } from '../money/MoneyEntry';
 
 export function VehiclePage() {
@@ -105,7 +106,7 @@ export function VehiclePage() {
         ) : (
           <List>
             {orders.map((o) => (
-              <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.createdAt)}`} subtitle={o.complaint || undefined} right={<StageBadge stage={o.stage} size="sm" />} />
+              <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.createdAt)}`} subtitle={o.complaint || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
             ))}
           </List>
         )}

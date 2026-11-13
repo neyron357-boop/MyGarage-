@@ -1,4 +1,4 @@
-import { ActionIcon, Avatar, Box, Button, Group, Stack, Text } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Stack, Text } from '@mantine/core';
 import { IconBrandWhatsapp, IconHistory, IconPhone, IconPlus, IconUserSearch } from '@tabler/icons-react';
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,8 @@ import type { Customer, Order, Stage } from '../../domain/types';
 import { search, type SearchHit } from '../../services/customers';
 import { whatsappUrl } from '../../services/messages';
 import { loadJobIndex, type JobHitData } from '../../services/search';
-import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, StageBadge } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, PlateLine, SearchField, Section, PersonAvatar } from '../../ui/components';
+import { OrderStatus } from '../job/phase';
 import { useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 
 export type Hit = SearchHit & { activeOrder?: { id: string; number: number; stage: Stage }; history?: Order[]; historyCount?: number };
@@ -34,15 +35,6 @@ export function useSearch(q: string) {
   }, [q]);
 }
 
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join('');
-}
-
 function useCustomerName() {
   const { t } = useTranslation();
   return (c: Customer | undefined) => (c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) || t('customer.noName') : '');
@@ -59,16 +51,14 @@ export function HitRow({ hit, onClick, right }: { hit: Hit; onClick?: () => void
       chevron={!right}
       left={
         hit.vehicle ? undefined : (
-          <Avatar color="cobalt" radius="xl">
-            {initials(hit.customer.name)}
-          </Avatar>
+          <PersonAvatar name={hit.customer.companyName || hit.customer.name} company={hit.customer.type === 'company'} />
         )
       }
       title={hit.vehicle ? `${hit.vehicle.make} ${hit.vehicle.model}${hit.vehicle.year ? ` ${hit.vehicle.year}` : ''}` : name}
       subtitle={
         <Stack gap={4} align="flex-start">
           <PlateLine plate={hit.vehicle?.plate}>{[hit.vehicle ? name : '', phone].filter(Boolean).join(' · ')}</PlateLine>
-          {hit.activeOrder && <StageBadge stage={hit.activeOrder.stage} size="sm" />}
+          {hit.activeOrder && <OrderStatus orderId={hit.activeOrder.id} stage={hit.activeOrder.stage} />}
         </Stack>
       }
       right={right}
@@ -125,7 +115,7 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
             <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
               {[`№${o.number}`, formatDate(o.createdAt), car ? nameOf(c) : ''].filter(Boolean).join(' · ')}
             </Text>
-            <StageBadge stage={o.stage} size="sm" />
+            <OrderStatus orderId={o.id} stage={o.stage} />
           </Group>
         </Stack>
       }
@@ -227,7 +217,7 @@ export function SearchPage() {
                             {o.complaint}
                           </Text>
                         )}
-                        <StageBadge stage={o.stage} size="sm" />
+                        <OrderStatus orderId={o.id} stage={o.stage} />
                       </Group>
                     }
                   />
@@ -281,11 +271,14 @@ export function SearchPage() {
       )}
       {!q && (
         <Stack gap={0}>
-          <Text size="sm" c="dimmed">
-            {t('search.hint')}
-          </Text>
+          {/* What can be searched for is said only while there is nothing to show yet (a new device). */}
+          {recent && !recent.length && (
+            <Text size="sm" c="dimmed">
+              {t('search.hint')}
+            </Text>
+          )}
           {!!recent?.length && (
-            <Section title={t('search.recent')}>
+            <Section title={t('search.recent')} mt={0}>
               <List>
                 {recent.map(({ o, v, c }) => (
                   <ListRow
@@ -296,7 +289,7 @@ export function SearchPage() {
                     subtitle={
                       <Stack gap={4} align="flex-start">
                         <PlateLine plate={v?.plate}>{[`№${o.number}`, nameOf(c), formatDate(o.createdAt)].join(' · ')}</PlateLine>
-                        <StageBadge stage={o.stage} size="sm" />
+                        <OrderStatus orderId={o.id} stage={o.stage} />
                       </Stack>
                     }
                   />

@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Alert,
-  Avatar,
   Box,
   Button,
   FileButton,
@@ -53,12 +52,11 @@ import { importBackup, saveBackupFile, wipeAll } from '../../services/backup';
 import { loadDemoData } from '../../services/demo';
 import { blobToDataUrl } from '../../services/media';
 import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
-import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar, Tip } from '../../ui/components';
+import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar, Tip, PersonAvatar } from '../../ui/components';
 import { formatBytes, insecureContext, requestPersistence, useBackupAge, useStorageInfo } from '../../ui/device';
 import { useAction, useLang, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
 import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
-import { initials } from '../customers/CustomersPage';
 import { ListsTab } from './ListsTab';
 import { EaglecartImportCard } from './EaglecartImport';
 
@@ -233,9 +231,7 @@ function StaffTab() {
             onClick={() => setEdit(e)}
             chevron
             left={
-              <Avatar color={e.active ? 'cobalt' : 'gray'} radius="xl">
-                {initials(e.name)}
-              </Avatar>
+              <PersonAvatar name={e.name} muted={!e.active} />
             }
             title={e.name}
             subtitle={`${t(`role.${e.role}`)} · ${t('salary.salary')} ${formatAed(e.monthlySalaryFils)}${e.active ? '' : ` · ${t('settings.inactive')}`}`}

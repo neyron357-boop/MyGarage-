@@ -1,4 +1,4 @@
-import { Alert, Avatar, Badge, Box, Button, Group, Modal, Progress, Select, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import { Alert, Badge, Box, Button, Group, Modal, Progress, Select, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
 import {
   IconArrowDownLeft,
   IconArrowUpRight,
@@ -23,11 +23,10 @@ import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { proofIndex } from '../../services/proofs';
-import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard } from '../../ui/components';
+import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { useTabSwipe } from '../../ui/tabSwipe';
-import { initials } from '../customers/CustomersPage';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet } from './MoneyEntry';
 import { MoneySheetActions } from './MoneySheetActions';
@@ -214,12 +213,10 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const cats = data.cats.filter((c) => c.active && (byCat(c.id) > 0 || c.monthlyLimitFils > 0)).sort((a, b) => byCat(b.id) - byCat(a.id));
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-end">
-        <MonthField value={month} onChange={setMonth} />
-        <Button leftSection={<IconPlus size={18} />} onClick={() => setOpen(true)}>
-          {t('expense.add')}
-        </Button>
-      </Group>
+      <MonthField value={month} onChange={setMonth} />
+      <Button size="md" color="red" variant="light" leftSection={<IconPlus size={20} />} onClick={() => setOpen(true)}>
+        {t('expense.add')}
+      </Button>
       <Box className="surface" p="md">
         <Group justify="space-between" mb="md">
           <div>
@@ -318,9 +315,7 @@ function SalariesTab() {
             <ListRow
               key={e.id}
               left={
-                <Avatar color="cobalt" radius="xl">
-                  {initials(e.name)}
-                </Avatar>
+                <PersonAvatar name={e.name} />
               }
               title={e.name}
               subtitle={

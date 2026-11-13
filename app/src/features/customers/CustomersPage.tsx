@@ -1,12 +1,12 @@
 import { useScreenLiveQuery } from '../../ui/hooks';
-import { Avatar, Box, Button, Text } from '@mantine/core';
+import { ActionIcon, Box, Text } from '@mantine/core';
 import { IconPlus, IconUsers } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatPhone } from '../../domain/phone';
-import { EmptyState, List, ListRow, PageHeader, SearchField } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, PersonAvatar, SearchField } from '../../ui/components';
 import { CustomerModal } from './forms';
 
 export function initials(name: string) {
@@ -37,9 +37,9 @@ export function CustomersPage() {
         title={t('nav.customers')}
         subtitle={list ? t('customer.count', { n: list.length }) : undefined}
         right={
-          <Button leftSection={<IconPlus size={18} />} onClick={() => setOpen(true)}>
-            {t('customer.newShort')}
-          </Button>
+          <ActionIcon variant="default" size={40} radius="xl" aria-label={t('customer.newShort')} onClick={() => setOpen(true)}>
+            <IconPlus size={22} stroke={2.2} />
+          </ActionIcon>
         }
       />
       <Box mb="md">
@@ -55,9 +55,7 @@ export function CustomersPage() {
               onClick={() => navigate(`/customers/${c.id}`)}
               chevron
               left={
-                <Avatar color={c.type === 'company' ? 'grape' : 'cobalt'} radius="xl">
-                  {initials(c.companyName || c.name)}
-                </Avatar>
+                <PersonAvatar name={c.companyName || c.name} company={c.type === 'company'} size={44} />
               }
               title={c.type === 'company' && c.companyName ? c.companyName : c.name}
               subtitle={

@@ -69,7 +69,9 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
   const { flags, waitingHours } = orderFlags(b);
   const hours = phase === 'wait' && waitingHours !== undefined ? waitingHours : hoursBetween(b.order.stageChangedAt);
   // No answer, or no price told, for a couple of hours: the time turns red.
-  const late = (phase === 'wait' || phase === 'price') && hours >= (b.settings.boardWarnHours ?? 2);
+  // An appointment says when the car is due in (red once that time has passed), not how long it was booked.
+  const booked = phase === 'booked' ? b.order.bookedFor : undefined;
+  const late = ((phase === 'wait' || phase === 'price') && hours >= (b.settings.boardWarnHours ?? 2)) || (!!booked && booked < nowIso());
   const amount = jobAmount(b);
   const car = [b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ');
   const working = phase === 'look' || phase === 'price' || phase === 'wait' || phase === 'work';
@@ -155,7 +157,7 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
               style={{ background: `var(--mantine-color-${late ? 'red' : m.color}-light)`, color: `var(--mantine-color-${late ? 'red' : m.color}-light-color)` }}
             >
               <m.icon size={13} stroke={2.4} aria-hidden />
-              {t(`job.phase.${phase}`)} · {shortDuration(hours, lang)}
+              {t(`job.phase.${phase}`)} · {booked ? dueShort(booked, lang) : shortDuration(hours, lang)}
             </span>
             <Text size="sm" c="dimmed" lineClamp={1} style={{ minWidth: 0 }}>
               {car || `№${b.order.number}`}

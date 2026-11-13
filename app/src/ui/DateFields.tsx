@@ -1,7 +1,10 @@
+import { ActionIcon } from '@mantine/core';
 import { DatePickerInput, DateTimePicker, MonthPickerInput } from '@mantine/dates';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconCalendar, IconCalendarTime } from '@tabler/icons-react';
+import { IconCalendar, IconCalendarTime, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { monthKey } from '../domain/dates';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const toDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -54,18 +57,38 @@ export function DateField({ label, value, onChange, description, required }: { l
   );
 }
 
-/** Month; stores YYYY-MM. */
+/**
+ * Month; stores YYYY-MM. The month in the middle (a tap picks any), the one before and after one tap
+ * away on each side — the way a banking app pages through its statements. No month after this one.
+ */
 export function MonthField({ value, onChange, label }: { value: string; onChange: (month: string) => void; label?: ReactNode }) {
+  const { t } = useTranslation();
+  const dropdownType = useDropdown();
+  const step = (n: number) => {
+    const [y, m] = value.split('-').map(Number);
+    const d = new Date(y, m - 1 + n, 1);
+    onChange(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`);
+  };
+  const last = value >= monthKey();
   return (
-    <MonthPickerInput
-      label={label}
-      value={fromDay(`${value}-01`)}
-      onChange={(d) => d && onChange(toDay(d).slice(0, 7))}
-      valueFormat="MMMM YYYY"
-      dropdownType={useDropdown()}
-      leftSection={<IconCalendar size={18} />}
-      size="md"
-      w={220}
-    />
+    <div className="month-field">
+      <ActionIcon variant="subtle" size={40} radius="xl" aria-label={t('common.prevMonth')} onClick={() => step(-1)}>
+        <IconChevronLeft size={22} stroke={2.2} />
+      </ActionIcon>
+      <MonthPickerInput
+        label={label}
+        value={fromDay(`${value}-01`)}
+        onChange={(d) => d && onChange(toDay(d).slice(0, 7))}
+        valueFormat="MMMM YYYY"
+        maxDate={new Date()}
+        dropdownType={dropdownType}
+        size="md"
+        variant="unstyled"
+        classNames={{ input: 'month-field-input' }}
+      />
+      <ActionIcon variant="subtle" size={40} radius="xl" aria-label={t('common.nextMonth')} onClick={() => step(1)} disabled={last}>
+        <IconChevronRight size={22} stroke={2.2} />
+      </ActionIcon>
+    </div>
   );
 }

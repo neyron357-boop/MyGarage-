@@ -1,5 +1,5 @@
 import { useScreenLiveQuery } from '../../ui/hooks';
-import { Alert, Avatar, Badge, Box, Button, Group, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Alert, Badge, Box, Button, Group, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconCar, IconNote, IconPencil, IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,9 +9,9 @@ import { formatDate } from '../../domain/dates';
 import { activeInvoice } from '../../domain/invoice';
 import { formatPhone } from '../../domain/phone';
 import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
-import { ContactTiles, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, StageBadge } from '../../ui/components';
+import { ContactTiles, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, PersonAvatar } from '../../ui/components';
 import { LinkedMoney } from '../money/MoneyEntry';
-import { initials } from './CustomersPage';
+import { OrderStatus } from '../job/phase';
 import { CustomerModal, VehicleModal } from './forms';
 
 export function CustomerPage() {
@@ -53,9 +53,7 @@ export function CustomerPage() {
       <Box className="surface" p="md">
         {/* The name is the large title above: the card starts with how to reach the customer. */}
         <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-          <Avatar color={c.type === 'company' ? 'grape' : 'cobalt'} radius="xl" size={52}>
-            {initials(displayName)}
-          </Avatar>
+          <PersonAvatar name={displayName} company={c.type === 'company'} size={52} />
           <Box style={{ minWidth: 0 }}>
             <Text fz={17} fw={600} className="tnum selectable" c={c.phone ? undefined : 'dimmed'}>
               {c.phone ? formatPhone(c.phone) : t('customer.noPhone')}
@@ -153,7 +151,7 @@ export function CustomerPage() {
                         {o.complaint ? ` · ${o.complaint}` : ''}
                       </span>
                       <Group gap={6}>
-                        <StageBadge stage={o.stage} size="sm" />
+                        <OrderStatus orderId={o.id} stage={o.stage} />
                         {o.warrantyOfOrderId && <Badge color="grape" size="sm">{t('flags.warranty')}</Badge>}
                       </Group>
                     </Stack>

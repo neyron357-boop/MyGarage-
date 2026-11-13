@@ -3,6 +3,10 @@ import { IconArchive, IconCalendarTime, IconCash, IconEye, IconHourglassHigh, Ic
 import { useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Phase } from '../../domain/flow';
+import type { Stage } from '../../domain/types';
+import { phaseOf } from '../../services/flow';
+import { loadOrderBundle } from '../../services/orders';
+import { useScreenLiveQuery } from '../../ui/hooks';
 
 /**
  * How each step of a job looks: one colour of the iOS palette and one symbol — the board's filters and rows,
@@ -68,5 +72,34 @@ export function PhasePill({ phase, size = 'lg', filled }: { phase: Phase; size?:
     <Badge color={m.color} variant={filled ? 'filled' : 'light'} size={size} className={filled ? 'phase-pill-filled' : undefined} leftSection={<m.icon size={size === 'sm' ? 12 : 15} stroke={2} />} style={{ flexShrink: 0 }}>
       {t(`job.phase.${phase}`)}
     </Badge>
+  );
+}
+
+/**
+ * Where a job stands, in the board's words wherever it is listed (search, a customer's or a car's
+ * visits): its step, colour and symbol, while it is open; closed or cancelled as such.
+ */
+export function OrderStatus({ orderId, stage }: { orderId: string; stage: Stage }) {
+  const ended = stage === 'closed' || stage === 'cancelled';
+  const phase = useScreenLiveQuery(async () => {
+    if (ended) return stage as Phase;
+    const b = await loadOrderBundle(orderId);
+    return b ? phaseOf(b) : null;
+  }, [orderId, stage]);
+  // The pill's room is kept while the step is read (no jump of the row).
+  if (!phase) return <span className="phase-pill-space" aria-hidden />;
+  return <PhaseTag phase={phase} />;
+}
+
+/** A job's step as a board row shows it: a small capsule of its colour with its symbol (lists, search). */
+export function PhaseTag({ phase, children }: { phase: Phase; /** After the name ("· 3 ч"). */ children?: React.ReactNode }) {
+  const { t } = useTranslation();
+  const m = PHASE_META[phase];
+  return (
+    <span className="row-phase tnum" style={{ background: `var(--mantine-color-${m.color}-light)`, color: `var(--mantine-color-${m.color}-light-color)` }}>
+      <m.icon size={13} stroke={2.4} aria-hidden />
+      {t(`job.phase.${phase}`)}
+      {children}
+    </span>
   );
 }

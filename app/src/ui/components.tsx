@@ -21,6 +21,7 @@ import {
   IconSearch,
   IconStethoscope,
   IconTool,
+  IconUser,
   IconX,
   type Icon,
 } from '@tabler/icons-react';
@@ -79,9 +80,61 @@ export function Money({ fils, size, fw, c, display, roll }: { fils: number; size
   // How long the figure is: in a tile or a figure cell it is sized to fit (styles.css, "fit to cell").
   return (
     <Text span size={size} fz={size ? undefined : 'inherit'} fw={fw ?? (display ? undefined : 600)} c={c} className={display ? 'money display' : 'money'} style={{ '--chars': s.length } as React.CSSProperties}>
-      {roll ? formatAed(shown, lang, false) : s}
+      <Figure text={roll ? formatAed(shown, lang, false) : s} />
       <span className="cur">AED</span>
     </Text>
+  );
+}
+
+/**
+ * A figure the way a bank app sets it: a real minus (−, not a hyphen), the dirhams in full and the fils
+ * a step quieter — the eye reads the whole number first.
+ */
+function Figure({ text }: { text: string }) {
+  const m = /^(-?)(.*?)([.,]\d+)?$/.exec(text);
+  if (!m) return <>{text}</>;
+  return (
+    <>
+      {m[1] && '−'}
+      {m[2]}
+      {m[3] && <span className="frac">{m[3]}</span>}
+    </>
+  );
+}
+
+/* ---------------- Person ---------------- */
+
+const AVATAR_HUES = ['blue', 'indigo', 'grape', 'pink', 'orange', 'green', 'teal', 'cyan', 'red'] as const;
+
+/** Two letters of a name ("Ahmed Al Mansoori" → "AA"). */
+export function initialsOf(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('');
+}
+
+/**
+ * A person (or a company) as the phone's contacts show one: the initials, white on a gradient of a colour
+ * of their own — the same name always gets the same colour, so a regular is known by it before the name
+ * is read. A company is a rounded square; without a name, a figure.
+ */
+export function PersonAvatar({ name, company, size = 40, muted }: { name: string; company?: boolean; size?: number; /** Off the team (a past employee): grey. */ muted?: boolean }) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = muted ? 'gray' : AVATAR_HUES[h % AVATAR_HUES.length];
+  const text = initialsOf(name);
+  return (
+    <span
+      className="person-avatar"
+      data-company={company || undefined}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.4), '--c': `var(--mantine-color-${hue}-5)`, '--c2': `var(--mantine-color-${hue}-7)` } as React.CSSProperties}
+      aria-hidden
+    >
+      {text || <IconUser size={Math.round(size * 0.5)} stroke={2} />}
+    </span>
   );
 }
 
@@ -924,6 +977,7 @@ export function MoneyInput({
   size = 'md',
   ariaLabel,
   leftSection,
+  big,
 }: {
   label: ReactNode;
   /** In a row whose label is beside it: the field's name for screen readers (and tests). */
@@ -937,6 +991,8 @@ export function MoneyInput({
   error?: ReactNode;
   autoFocus?: boolean;
   size?: 'xs' | 'sm' | 'md';
+  /** The sum is what the sheet is about (money in or out): large rounded figures, the name only for screen readers. */
+  big?: boolean;
 }) {
   const [text, setText] = useState(value !== undefined ? String(value / 100) : '');
   useEffect(() => {
@@ -946,11 +1002,13 @@ export function MoneyInput({
   }, [value]);
   return (
     <TextInput
-      label={label}
-      aria-label={ariaLabel}
+      label={big ? undefined : label}
+      aria-label={big && typeof label === 'string' ? label : ariaLabel}
+      className={big ? 'money-big' : undefined}
       description={description}
       required={required}
       inputMode="decimal"
+      enterKeyHint="done"
       size={size}
       leftSection={
         leftSection && (
@@ -968,7 +1026,7 @@ export function MoneyInput({
       rightSectionWidth={48}
       value={text}
       // In a form row (no label above) an empty amount still reads as a field: "0" in grey.
-      placeholder={label === undefined ? '0' : undefined}
+      placeholder={label === undefined || big ? '0' : undefined}
       error={error}
       autoFocus={autoFocus}
       // Tapping a filled amount selects it, so typing replaces the old price instead of appending.
@@ -1105,14 +1163,15 @@ function ConfirmSheet({
     <Modal opened={opened} onClose={onClose} title={title}>
       <Stack gap="md">
         <Box>{children}</Box>
-        <Group grow gap="xs">
-          <Button variant="default" onClick={onClose} disabled={!!busy}>
-            {t('common.cancel')}
-          </Button>
-          <Button color={color} leftSection={icon} loading={busy === 'main'} data-autofocus onClick={() => void go('main', onConfirm)}>
+        {/* As an iPhone asks: the action across the sheet, in reach of the thumb; cancel quietly under it. */}
+        <Stack gap={6}>
+          <Button size="lg" color={color} leftSection={icon} loading={busy === 'main'} data-autofocus onClick={() => void go('main', onConfirm)}>
             {confirmLabel}
           </Button>
-        </Group>
+          <Button size="lg" variant="subtle" color="gray" className="confirm-cancel" onClick={onClose} disabled={!!busy}>
+            {t('common.cancel')}
+          </Button>
+        </Stack>
       </Stack>
     </Modal>
   );

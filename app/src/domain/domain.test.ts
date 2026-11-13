@@ -3,7 +3,7 @@ import { formatAed, parseAed, roundFils } from './money';
 import { enteredFromNet, enteredPrice, fromGross, fromNet, lineAmounts, netFromEntered, netFromGross, priceFromEntered, rateFor, switchVatMode, vatModeOf, vatOf } from './vat';
 import { formatPlate, plateMatches, plateSearchKey } from './plates';
 import { formatPhone, normalizePhone, phoneDigits } from './phone';
-import { dubaiDate, formatDate, formatDateTime } from './dates';
+import { dayHeading, dubaiDate, formatDate, formatDateTime } from './dates';
 import {
   canMarkDone,
   decisionPatch,
@@ -159,6 +159,15 @@ describe('dates (Dubai time)', () => {
     expect(formatDate('2026-11-06T21:30:00.000Z')).toBe('07/11/2026');
     expect(formatDate('2026-03-12')).toBe('12/03/2026');
     expect(formatDateTime('2026-11-06T10:32:00.000Z')).toBe('06/11/2026 14:32');
+  });
+  it('heads a day of a list in words (money book)', () => {
+    const now = '2026-11-14T08:00:00.000Z'; // Saturday in Dubai
+    expect(dayHeading('2026-11-14', 'ru', now)).toEqual({ word: 'today', text: '' });
+    expect(dayHeading('2026-11-13', 'en', now)).toEqual({ word: 'yesterday', text: '' });
+    expect(dayHeading('2026-11-09', 'ru', now).text).toBe('понедельник, 9 ноября');
+    expect(dayHeading('2026-11-09', 'en', now).text).toBe('Monday 9 November');
+    expect(dayHeading('2026-10-02', 'ru', now).text).toBe('2 октября');
+    expect(dayHeading('2025-12-30', 'ru', now).text).toBe('30/12/2025');
   });
 });
 

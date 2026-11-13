@@ -312,7 +312,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
             { value: 'out', label: t('ledger.out') },
           ]}
         />
-        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus />
+        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
         <PursePicker value={method} onChange={setMethod} kind={kind} />
         <div>
           <Text size="sm" fw={500} mb={6}>
