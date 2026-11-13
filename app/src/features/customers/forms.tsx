@@ -68,7 +68,7 @@ export function CustomerFields({ value, onChange, compact }: { value: CustomerIn
       </div>
       {value.type === 'company' && (
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          <TextInput label={t('customer.companyName')} value={value.companyName ?? ''} onChange={(e) => set('companyName', e.currentTarget.value)} />
+          <TextInput label={t('customer.companyName')} value={value.companyName ?? ''} onChange={(e) => set('companyName', e.currentTarget.value)} autoCapitalize="words" />
           <TextInput label="TRN" description={t('customer.trnHint')} value={value.trn ?? ''} onChange={(e) => set('trn', e.currentTarget.value)} />
           <TextInput label={t('customer.address')} value={value.address ?? ''} onChange={(e) => set('address', e.currentTarget.value)} />
           <TextInput label="Email" type="email" value={value.email ?? ''} onChange={(e) => set('email', e.currentTarget.value)} />
@@ -88,7 +88,7 @@ export function CustomerFields({ value, onChange, compact }: { value: CustomerIn
   return (
     <Stack gap="md">
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
-        <TextInput label={t('customer.name')} required value={value.name} onChange={(e) => set('name', e.currentTarget.value)} data-autofocus />
+        <TextInput label={t('customer.name')} required value={value.name} onChange={(e) => set('name', e.currentTarget.value)} data-autofocus autoCapitalize="words" autoComplete="off" />
         <TextInput label={t('customer.phone')} required type="tel" inputMode="tel" placeholder="050 123 4567" value={value.phone} onChange={(e) => set('phone', e.currentTarget.value)} />
       </SimpleGrid>
       <SimpleGrid cols={{ base: 1, sm: 2 }}>

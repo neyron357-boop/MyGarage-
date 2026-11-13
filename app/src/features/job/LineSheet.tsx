@@ -29,6 +29,8 @@ export type Suggestions = { list: Map<string, Suggestion>; top: string[] };
 /** Where a part of the job stands: to find, ordered, here — or the customer's own. */
 export type PartState = 'needed' | 'ordered' | 'received' | 'customer';
 export const PART_STATES: PartState[] = ['needed', 'ordered', 'received', 'customer'];
+/** Each state in its colour, as on the board: to find — orange (the box), on its way — blue (the truck), here — green. */
+export const PART_COLOR: Record<PartState, string> = { needed: 'orange', ordered: 'blue', received: 'green', customer: 'gray' };
 export const partStateOf = (i: Pick<OrderItem, 'customerSupplied' | 'procurementStatus'>): PartState =>
   i.customerSupplied ? 'customer' : i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit' ? 'ordered' : i.procurementStatus === 'received' || i.procurementStatus === 'installed' ? 'received' : 'needed';
 
@@ -355,6 +357,7 @@ export function LineSheet({
                 fullWidth
                 value={part}
                 onChange={(v) => setPart(v as PartState)}
+                color={PART_COLOR[part]}
                 aria-label={t('job.partState')}
                 data={PART_STATES.map((s) => ({ value: s, label: t(`job.part.${s}`) }))}
                 style={{ flex: 1 }}

@@ -1060,7 +1060,7 @@ export const en: typeof ru = {
   },
   invoice: {
     confirmTitle: 'Issue the invoice?',
-    confirmText: 'The invoice gets its number right away. Once issued it cannot be changed or deleted — corrections only by a credit note.',
+    confirmText: 'It gets its number at once. Corrections later — only by a credit note.',
     title: 'Invoice',
     hint: 'A tax document: issued once, corrected only by a credit note',
     nothingYet: 'An invoice can be issued once the customer approves work',

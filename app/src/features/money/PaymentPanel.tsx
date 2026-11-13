@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Badge, Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Box, Button, Group, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
 import {
   IconArrowBackUp,
   IconBuildingBank,
@@ -62,13 +62,25 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
   return (
     <Modal opened={opened} onClose={onClose} title={t(`payment.kind.${kind}`)}>
       <Stack gap="md">
-        <Group gap={6}>
-          {(['payment', 'prepayment', 'refund'] as const).map((k) => (
-            <Button key={k} size="compact-md" variant={kind === k ? 'filled' : 'default'} color={k === 'refund' ? 'red' : 'cobalt'} onClick={() => setKind(k)}>
-              {t(`payment.kind.${k}`)}
+        <SegmentedControl
+          fullWidth
+          value={kind}
+          onChange={(v) => setKind(v as Payment['kind'])}
+          color={kind === 'refund' ? 'red' : undefined}
+          data={(['payment', 'prepayment', 'refund'] as const).map((k) => ({ value: k, label: t(`payment.kind.${k}`) }))}
+        />
+        {/* The sum first and large, as a bank app asks it; the amount due is already in (no keyboard over the
+            button unless there is nothing to suggest), the whole of it one tap away when another was typed. */}
+        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus={!amount} required big />
+        {due > 0 && kind !== 'refund' && amount !== due && (
+          <Group justify="center" mt={-8}>
+            <Button size="compact-md" variant="light" radius="xl" onClick={() => setAmount(due)}>
+              <span>{t('payment.fullDue')}</span>
+              <span style={{ margin: '0 6px', opacity: 0.6 }}>·</span>
+              <Money fils={due} />
             </Button>
-          ))}
-        </Group>
+          </Group>
+        )}
         <SimpleGrid cols={3} spacing="xs">
           {(['cash', 'card', 'transfer'] as const).map((m) => {
             const I = METHOD_ICON[m];
@@ -84,17 +96,6 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
             );
           })}
         </SimpleGrid>
-        {/* The amount due is already filled in: no keyboard over the button unless there is nothing to suggest. */}
-        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus={!amount} required />
-        {due > 0 && kind !== 'refund' && (
-          <Group gap={6} mt={-8}>
-            <Button size="compact-sm" variant="light" onClick={() => setAmount(due)}>
-              <span>{t('payment.fullDue')}</span>
-              <span style={{ margin: '0 6px', opacity: 0.6 }}>·</span>
-              <Money fils={due} />
-            </Button>
-          </Group>
-        )}
         {method !== 'cash' && <TextInput label={t('payment.reference')} value={reference} onChange={(e) => setReference(e.currentTarget.value)} />}
         <Button size="lg" onClick={save} loading={busy} disabled={!amount} color={kind === 'refund' ? 'red' : undefined}>
           {t('payment.save')}

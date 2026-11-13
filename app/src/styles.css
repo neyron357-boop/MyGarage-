@@ -856,6 +856,14 @@ html.kb .tab-bar-wrap {
 [data-mantine-color-scheme='dark'] .page-eyebrow {
   color: var(--mantine-color-cobalt-4);
 }
+/* "Суббота, 14 ноября": a capital first, as the iPhone heads its days. */
+.page-eyebrow::first-letter {
+  text-transform: uppercase;
+}
+/* Where a part is, on its line: the word in the state's colour. */
+.part-note {
+  font-weight: 600;
+}
 /* Headings above a group: short and bold, in the label colour — read at a glance, not deciphered. */
 .group-title {
   font-size: 17px;

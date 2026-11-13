@@ -994,10 +994,13 @@ export function MoneyInput({
   /** The sum is what the sheet is about (money in or out): large rounded figures, the name only for screen readers. */
   big?: boolean;
 }) {
-  const [text, setText] = useState(value !== undefined ? String(value / 100) : '');
+  // A filled-in amount reads as the app writes amounts: "31,5" in Russian, "31.5" in English.
+  const lang = useLang();
+  const asText = (fils: number | undefined) => (fils === undefined ? '' : lang === 'ru' ? String(fils / 100).replace('.', ',') : String(fils / 100));
+  const [text, setText] = useState(() => asText(value));
   useEffect(() => {
     const parsed = parseAed(text);
-    if ((parsed ?? undefined) !== value) setText(value !== undefined ? String(value / 100) : '');
+    if ((parsed ?? undefined) !== value) setText(asText(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
   return (

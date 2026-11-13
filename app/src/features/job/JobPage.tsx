@@ -39,7 +39,7 @@ import {
   IconUserX,
   type Icon,
 } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -88,7 +88,7 @@ import { NotesSection } from './Notes';
 import { OutsourceActions, ReceivedRow, ReturnTerms } from './LineExtras';
 import { RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { ObdLine, useObdImport } from './ObdScan';
-import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
+import { LineSheet, PART_COLOR, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
 
@@ -207,6 +207,18 @@ function ComplaintSheet({ b, opened, onClose }: { b: OrderBundle; opened: boolea
 }
 
 /** A line row that a long press starts picking from (like the iPhone's lists): the press is not also a tap. */
+/** Short notes in one line, a dot between them ("4 × 30,00 AED · Ordered"); nothing when there are none. */
+function dots(parts: ReactNode[]): ReactNode {
+  const list = parts.filter(Boolean);
+  if (!list.length) return undefined;
+  return list.map((p, n) => (
+    <Fragment key={n}>
+      {n > 0 && ' · '}
+      {p}
+    </Fragment>
+  ));
+}
+
 function PickRow({ onLong, onClick, ...row }: Parameters<typeof ListRow>[0] & { onLong?: () => void }) {
   const press = useLongPress(() => onLong?.());
   return <ListRow {...row} handlers={onLong ? press.handlers : undefined} onClick={onClick && (() => !press.consumeClick() && onClick())} />;
@@ -329,6 +341,7 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
               aria-label={t('job.partState')}
               value={state === 'customer' ? 'received' : state}
               onChange={(v) => void setPart(v as PartState)}
+              color={PART_COLOR[state === 'customer' ? 'received' : state]}
               data={PART_STATES.filter((s) => s !== 'customer').map((s) => ({ value: s, label: t(`job.part.${s}`) }))}
             />
             <SupplierChips value={i.supplierId} make={b.vehicle.make} onChange={(s) => void run(() => setProcurement(i.id, { status: i.procurementStatus ?? 'needed', supplierId: s ?? '' }))} />
@@ -574,7 +587,18 @@ export function JobPage() {
           {!!i.mediaIds?.length && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
         </Text>
       }
-      subtitle={[i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '', partNote(i), outNote(i), whoNote(i), i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
+      subtitle={dots([
+        i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '',
+        // Where the part is, in its colour (to find — orange, ordered — blue, here — green), as on the board.
+        partNote(i) && (
+          <span key="part" className="part-note" style={{ color: `var(--mantine-color-${PART_COLOR[partStateOf(i)]}-light-color)` }}>
+            {partNote(i)}
+          </span>
+        ),
+        outNote(i),
+        whoNote(i),
+        i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : '',
+      ])}
       right={
         unpriced.includes(i) ? (
           // No price yet (a part still to find): it cannot go to the customer like this.

@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Collapse, Group, Modal, SegmentedControl, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconCar, IconChevronDown, IconReceipt2, IconSearch, IconUser, IconX } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBuildingBank, IconCar, IconCash, IconChevronDown, IconCreditCard, IconReceipt2, IconSearch, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -22,16 +22,22 @@ export const INCOME_CATEGORIES: IncomeCategory[] = ['service', 'sales', 'other']
 const OPEN_STAGES = new Set(['booked', 'intake', 'diagnostics', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check', 'ready']);
 
 /** Cash / Card (a bank transfer counts with the card). */
+const PURSE_ICON = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
+
 export function PursePicker({ value, onChange, kind }: { value: PayMethod; onChange: (m: PayMethod) => void; kind: 'in' | 'out' }) {
   const { t } = useTranslation();
   return (
     <Stack gap={4}>
       <div className="chip-row">
-        {(['cash', 'card', 'transfer'] as const).map((m) => (
-          <button key={m} type="button" className="chip" data-active={value === m} onClick={() => onChange(m)}>
-            {t(`payment.method.${m}`)}
-          </button>
-        ))}
+        {(['cash', 'card', 'transfer'] as const).map((m) => {
+          const I = PURSE_ICON[m];
+          return (
+            <button key={m} type="button" className="chip" data-active={value === m} onClick={() => onChange(m)}>
+              <I size={17} stroke={2} aria-hidden />
+              {t(`payment.method.${m}`)}
+            </button>
+          );
+        })}
       </div>
       {kind === 'out' && value !== 'cash' && (
         <Text size="xs" c="dimmed">

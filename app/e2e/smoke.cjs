@@ -653,7 +653,7 @@ async function launchBrowser() {
     // Several of a part: the price of one, the line's total under it; Enter saves.
     await front('.list-row').filter({ hasText: 'Spark plug' }).click();
     await dlg.getByRole('button', { name: 'Изменить цену' }).click();
-    if ((await price.inputValue()) !== '31.5') throw new Error(`the price of one part, not ${await price.inputValue()}`);
+    if ((await price.inputValue()) !== '31,5') throw new Error(`the price of one part, not ${await price.inputValue()}`);
     await price.fill('25');
     await dlg.getByText(/= 100,00/).waitFor();
     await shot('35b-price-per-unit');

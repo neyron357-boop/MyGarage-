@@ -358,7 +358,7 @@ export function NewOrderPage() {
                 <TextInput aria-label={t('customer.phone')} type="tel" inputMode="tel" placeholder="050 123 4567" value={phone} onChange={(e) => setPhone(e.currentTarget.value)} autoComplete="off" w="100%" />
               </FormRow>
               <FormRow label={t('customer.name')}>
-                <TextInput aria-label={t('customer.name')} placeholder={t('newOrder.namePlaceholder')} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="off" w="100%" />
+                <TextInput aria-label={t('customer.name')} placeholder={t('newOrder.namePlaceholder')} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="off" autoCapitalize="words" w="100%" />
               </FormRow>
             </RowGroup>
             {suggestions.length > 0 && (
