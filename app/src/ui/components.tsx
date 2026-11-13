@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Button, Group, Image, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, Image, Modal, SimpleGrid, Stack, Text, TextInput, Title, Tooltip, UnstyledButton } from '@mantine/core';
 import {
   IconAlertTriangle,
   IconArchive,
@@ -372,9 +372,7 @@ export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: R
       {screen ? createPortal(bar, screen.nav) : bar}
       <header className="page-head" ref={headRef}>
         {eyebrow && (
-          <div className="eyebrow" style={{ marginBottom: 2 }}>
-            {eyebrow}
-          </div>
+          <div className="page-eyebrow">{eyebrow}</div>
         )}
         <h1 ref={titleRef} className="large-title">
           {title}
@@ -654,11 +652,15 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
   return (
     <Stack align="center" gap={8} py="xl" px="md" ta="center" className="surface">
       {I && (
-        <ThemeIcon size={52} radius="xl" variant="light" color="gray">
-          <I size={26} stroke={1.6} />
-        </ThemeIcon>
+        <span className="empty-icon" aria-hidden>
+          <I size={30} stroke={1.8} />
+        </span>
       )}
-      {title && <Text fw={700}>{title}</Text>}
+      {title && (
+        <Text fw={750} fz={19} lh={1.25} style={{ letterSpacing: '-0.02em' }}>
+          {title}
+        </Text>
+      )}
       {children && (
         <Text size="sm" c="dimmed" maw={360}>
           {children}
@@ -768,11 +770,15 @@ export interface TabItem {
   value: string;
   label: ReactNode;
   count?: number;
+  /** A colour of the theme (a job's step): its symbol is tinted, and the pill takes the colour once chosen. */
+  color?: string;
+  icon?: Icon;
 }
 
 /**
  * Horizontal pill tabs that scroll instead of wrapping. The dark pill slides from the old tab to the
- * new one (like the thumb of a segmented control); the active tab is always scrolled into view.
+ * new one (like the thumb of a segmented control), in the tab's own colour when it has one; the active
+ * tab is always scrolled into view.
  */
 export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: string; onChange: (v: string) => void; items: TabItem[]; mb?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -790,6 +796,7 @@ export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: strin
         return;
       }
       p.style.opacity = '1';
+      p.style.setProperty('--pill', active.dataset.tint ? `var(--mantine-color-${active.dataset.tint}-filled)` : 'var(--app-pill)');
       p.style.transform = `translateX(${active.offsetLeft}px)`;
       p.style.width = `${active.offsetWidth}px`;
       p.style.height = `${active.offsetHeight}px`;
@@ -818,9 +825,12 @@ export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: strin
           type="button"
           role="tab"
           data-active={it.value === value}
+          data-tint={it.color}
           aria-selected={it.value === value}
           onClick={() => onChange(it.value)}
+          style={it.color ? ({ '--c': `var(--mantine-color-${it.color}-light-color)`, '--cf': `var(--mantine-color-${it.color}-filled)` } as React.CSSProperties) : undefined}
         >
+          {it.icon && <it.icon size={16} stroke={2.3} className="tab-icon" aria-hidden />}
           {it.label}
           {it.count !== undefined && <span className="count">{it.count}</span>}
         </button>

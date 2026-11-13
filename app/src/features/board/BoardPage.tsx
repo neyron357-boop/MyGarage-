@@ -244,7 +244,7 @@ export function BoardPage() {
             onChange={(v) => setFilter(v as 'all' | 'archive' | Phase)}
             items={[
               { value: 'all', label: t('board.all'), count: jobs.length },
-              ...STEPS.filter((p) => count(p) > 0).map((p) => ({ value: p, label: t(`job.phase.${p}`), count: count(p) })),
+              ...STEPS.filter((p) => count(p) > 0).map((p) => ({ value: p, label: t(`job.phase.${p}`), count: count(p), color: PHASE_META[p].color, icon: PHASE_META[p].icon })),
               { value: 'archive', label: t('board.archive'), count: archived.length || undefined },
             ]}
           />

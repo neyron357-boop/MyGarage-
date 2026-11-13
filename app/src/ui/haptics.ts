@@ -145,6 +145,8 @@ const TAPPABLE = [
   'button.mantine-UnstyledButton-root.choice-card',
   'button.chip',
   'button.price-tap',
+  'button.accent-swatch',
+  'button.garage-card',
   'button.action-tile',
   '.scroll-tabs > button',
   '.wizard-steps > button',

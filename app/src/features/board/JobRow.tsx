@@ -123,15 +123,15 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
         )}
         {cover ? (
           <span className="job-thumb">
-            <MediaImage id={cover} h={48} w={48} radius="0" />
+            <MediaImage id={cover} h={52} w={52} radius="0" />
             <span className="job-thumb-phase" style={{ background: `var(--mantine-color-${m.color}-6)` }} aria-label={t(`job.phase.${phase}`)}>
               <m.icon size={13} stroke={2.4} />
             </span>
           </span>
         ) : (
-          // The same 48 pt square as a photo: the plates of all the rows line up.
-          <ThemeIcon variant="light" color={m.color} size={48} radius={12} style={{ flexShrink: 0 }}>
-            <m.icon size={23} stroke={1.8} />
+          // The same 52 pt square as a photo: the plates of all the rows line up.
+          <ThemeIcon variant="light" color={m.color} size={52} radius={15} style={{ flexShrink: 0 }}>
+            <m.icon size={24} stroke={1.8} />
           </ThemeIcon>
         )}
         <div className="body">
@@ -146,14 +146,19 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
                 </Text>
               )}
             </Group>
-            {amount > 0 && <Money fils={amount} c={phase === 'debt' ? 'red.7' : undefined} />}
+            {amount > 0 && <Money fils={amount} fw={700} c={phase === 'debt' ? 'red.7' : undefined} />}
           </Group>
-          <Group gap={6} wrap="nowrap" mt={3} style={{ minWidth: 0 }}>
-            <Text size="sm" lineClamp={1} style={{ minWidth: 0 }}>
+          <Group gap={6} wrap="nowrap" mt={5} style={{ minWidth: 0 }}>
+            {/* The step first, in its colour, with how long the car has been on it (red when too long). */}
+            <span
+              className="row-phase tnum"
+              style={{ background: `var(--mantine-color-${late ? 'red' : m.color}-light)`, color: `var(--mantine-color-${late ? 'red' : m.color}-light-color)` }}
+            >
+              <m.icon size={13} stroke={2.4} aria-hidden />
+              {t(`job.phase.${phase}`)} · {shortDuration(hours, lang)}
+            </span>
+            <Text size="sm" c="dimmed" lineClamp={1} style={{ minWidth: 0 }}>
               {car || `№${b.order.number}`}
-            </Text>
-            <Text size="sm" c={late ? 'red.7' : 'dimmed'} fw={late ? 600 : undefined} style={{ flexShrink: 0 }} className="tnum">
-              · {t(`job.phase.${phase}`)} {shortDuration(hours, lang)}
             </Text>
             {find > 0 && <IconPackage size={15} stroke={2} color="var(--mantine-color-orange-6)" style={{ flexShrink: 0 }} aria-label={t('flags.waitingParts')} />}
             {coming && <IconTruckDelivery size={15} stroke={2} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} aria-label={t('flags.partsComing')} />}

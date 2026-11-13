@@ -89,7 +89,7 @@ import { OutsourceActions, ReceivedRow, ReturnTerms } from './LineExtras';
 import { RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { ObdLine, useObdImport } from './ObdScan';
 import { LineSheet, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
-import { PhasePill, PhaseTrack } from './phase';
+import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
 
 /** What a line is to the job right now, as one symbol. */
@@ -127,6 +127,20 @@ interface Tile {
   onClick: () => void;
 }
 
+/** Each tile of "…" in its own colour (like app icons): found by colour, not read. Red and orange stay with the tiles that warn. */
+const TILE_COLOR: Record<string, string> = {
+  customer: 'blue',
+  car: 'indigo',
+  mechanic: 'orange',
+  photos: 'pink',
+  scanner: 'cyan',
+  invoice: 'grape',
+  quote: 'grape',
+  discount: 'pink',
+  select: 'teal',
+  details: 'gray',
+};
+
 /** Everything else that can happen to a job, as a grid of tiles: one tap, one word each. */
 function MoreSheet({ opened, onClose, tiles }: { opened: boolean; onClose: () => void; tiles: Tile[] }) {
   const { t } = useTranslation();
@@ -143,7 +157,9 @@ function MoreSheet({ opened, onClose, tiles }: { opened: boolean; onClose: () =>
               x.onClick();
             }}
           >
-            <x.icon size={26} stroke={1.7} style={{ color: `var(--mantine-color-${x.color ?? 'cobalt'}-6)` }} aria-hidden />
+            <span className="tile-icon" style={{ '--c': `var(--mantine-color-${x.color ?? TILE_COLOR[x.key] ?? 'cobalt'}-6)` } as React.CSSProperties}>
+              <x.icon size={23} stroke={1.9} aria-hidden />
+            </span>
             <span>{t(`job.more.${x.key}`)}</span>
           </button>
         ))}
@@ -409,6 +425,9 @@ export function JobPage() {
   }, [orderId, phase]);
   // Once on a device: the first line peeks to the left — lines can be swiped.
   useSwipeHint(!!b && !activeInvoice(b.invoices) && !['closed', 'cancelled', 'booked'].includes(b.order.stage) && liveLines(b.items).some((i) => i.kind !== 'discount'));
+  // The screen glows in the colour of the job's step.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  usePhaseGlow(bodyRef, phase);
 
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b || !phase) return <EmptyState title={t('err.notFound')} />;
@@ -763,14 +782,14 @@ export function JobPage() {
       />
 
       {/* On a computer the job keeps a readable width (like a sheet on an iPad), not the whole window. */}
-      <div className="job-body">
+      <div className="job-body" ref={bodyRef}>
       <Box className="surface" p="md" mb="lg">
         <CarCover vehicleId={b.vehicle.id} hideEmpty={!open} />
         <Group gap="sm" wrap="nowrap" justify="space-between">
           <PlateText plate={b.vehicle.plate} size="card" />
           {/* The step's name pops when the job moves on. */}
           <span key={phase} className="pop-in" style={{ flexShrink: 0 }}>
-            <PhasePill phase={phase} />
+            <PhasePill phase={phase} filled />
           </span>
         </Group>
         <PhaseTrack phase={phase} />

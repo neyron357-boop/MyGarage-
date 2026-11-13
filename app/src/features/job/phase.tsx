@@ -1,21 +1,44 @@
 import { Badge } from '@mantine/core';
 import { IconArchive, IconCalendarTime, IconCash, IconEye, IconHourglassHigh, IconKey, IconTag, IconTool, IconX, type Icon } from '@tabler/icons-react';
+import { useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Phase } from '../../domain/flow';
 
-/** How each step of a job looks: one colour and one symbol, on the board and on the job. */
-export const PHASE_META: Record<Phase, { color: string; icon: Icon }> = {
-  booked: { color: 'gray', icon: IconCalendarTime },
-  look: { color: 'cobalt', icon: IconEye },
-  price: { color: 'grape', icon: IconTag },
-  wait: { color: 'orange', icon: IconHourglassHigh },
-  work: { color: 'teal', icon: IconTool },
-  pay: { color: 'green', icon: IconCash },
-  out: { color: 'green', icon: IconKey },
-  debt: { color: 'red', icon: IconCash },
-  closed: { color: 'gray', icon: IconArchive },
-  cancelled: { color: 'gray', icon: IconX },
+/**
+ * How each step of a job looks: one colour of the iOS palette and one symbol — the board's filters and rows,
+ * the job's pill, track and the glow over its screen (with a second, neighbouring hue `glow`). The colour
+ * says where the car is before any word.
+ */
+export const PHASE_META: Record<Phase, { color: string; glow: string; icon: Icon }> = {
+  booked: { color: 'gray', glow: 'gray', icon: IconCalendarTime },
+  look: { color: 'indigo', glow: 'cyan', icon: IconEye },
+  price: { color: 'grape', glow: 'pink', icon: IconTag },
+  wait: { color: 'orange', glow: 'yellow', icon: IconHourglassHigh },
+  work: { color: 'blue', glow: 'cyan', icon: IconTool },
+  pay: { color: 'green', glow: 'teal', icon: IconCash },
+  out: { color: 'teal', glow: 'green', icon: IconKey },
+  debt: { color: 'red', glow: 'orange', icon: IconCash },
+  closed: { color: 'gray', glow: 'gray', icon: IconArchive },
+  cancelled: { color: 'gray', glow: 'gray', icon: IconX },
 };
+
+/**
+ * The screen of a job glows in the colour of its step: the two hues go on the screen's own body (phone) or
+ * the page (PC) as the variables its glow is painted with — a style write, no selector watching the page.
+ */
+export function usePhaseGlow(ref: React.RefObject<HTMLElement | null>, phase: Phase | undefined) {
+  useLayoutEffect(() => {
+    const host = ref.current?.closest<HTMLElement>('.screen-body, .page-shell');
+    if (!host || !phase) return;
+    const m = PHASE_META[phase];
+    host.style.setProperty('--glow', `var(--mantine-color-${m.color}-6)`);
+    host.style.setProperty('--glow-2', `var(--mantine-color-${m.glow}-6)`);
+    return () => {
+      host.style.removeProperty('--glow');
+      host.style.removeProperty('--glow-2');
+    };
+  }, [ref, phase]);
+}
 
 /** The steps a car in the workshop goes through, in order (board filters, columns). */
 export const BOARD_PHASES: Phase[] = ['look', 'price', 'wait', 'work', 'pay', 'out'];
@@ -38,11 +61,11 @@ export function PhaseTrack({ phase }: { phase: Phase }) {
   );
 }
 
-export function PhasePill({ phase, size = 'lg' }: { phase: Phase; size?: 'sm' | 'md' | 'lg' }) {
+export function PhasePill({ phase, size = 'lg', filled }: { phase: Phase; size?: 'sm' | 'md' | 'lg'; /** Solid colour, white words (the job's own head). */ filled?: boolean }) {
   const { t } = useTranslation();
   const m = PHASE_META[phase];
   return (
-    <Badge color={m.color} variant="light" size={size} leftSection={<m.icon size={size === 'sm' ? 12 : 15} stroke={2} />} style={{ flexShrink: 0 }}>
+    <Badge color={m.color} variant={filled ? 'filled' : 'light'} size={size} className={filled ? 'phase-pill-filled' : undefined} leftSection={<m.icon size={size === 'sm' ? 12 : 15} stroke={2} />} style={{ flexShrink: 0 }}>
       {t(`job.phase.${phase}`)}
     </Badge>
   );

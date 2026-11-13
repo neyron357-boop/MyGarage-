@@ -5,6 +5,7 @@ import { setLang } from '../i18n';
 import { FormRow, RowGroup } from './components';
 import { hapticsAvailable, iosVersion, isApple, useHaptics } from './haptics';
 import { useLang } from './hooks';
+import { ACCENTS, ACCENT_COLOR, setAccent, useAccent } from './accent';
 import { setSchemePref, useSchemePref } from './scheme';
 
 function useAppearance() {
@@ -29,6 +30,29 @@ function useAppearance() {
   };
 }
 
+/** The accent colour: a row of round swatches, the chosen one ringed (like the iPhone's own colour pickers). */
+export function AccentPicker() {
+  const { t } = useTranslation();
+  const accent = useAccent();
+  return (
+    <div className="accent-swatches" role="radiogroup" aria-label={t('app.accent')}>
+      {ACCENTS.map((a) => (
+        <button
+          key={a}
+          type="button"
+          role="radio"
+          className="accent-swatch"
+          aria-checked={a === accent}
+          aria-label={t(`app.accents.${a}`)}
+          data-active={a === accent || undefined}
+          style={{ '--c': `var(--mantine-color-${ACCENT_COLOR[a]}-6)` } as React.CSSProperties}
+          onClick={() => setAccent(a)}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** Language and appearance switches, stacked (the PC sidebar). */
 export function AppearanceControls() {
   const { t } = useTranslation();
@@ -37,6 +61,7 @@ export function AppearanceControls() {
     <Stack gap={8}>
       <SegmentedControl fullWidth value={a.lang} onChange={a.setLang} aria-label={t('app.language')} data={a.langData} />
       <SegmentedControl fullWidth value={a.scheme} onChange={a.setScheme} aria-label={t('app.theme')} data={a.schemeData} />
+      <AccentPicker />
     </Stack>
   );
 }
@@ -57,6 +82,9 @@ export function AppearanceRows() {
       </FormRow>
       <FormRow label={t('app.theme')}>
         <SegmentedControl value={a.scheme} onChange={a.setScheme} aria-label={t('app.theme')} data={a.schemeData} />
+      </FormRow>
+      <FormRow label={t('app.accent')}>
+        <AccentPicker />
       </FormRow>
       {hapticsAvailable() && (
         <FormRow label={t('app.haptics')}>

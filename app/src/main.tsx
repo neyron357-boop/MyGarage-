@@ -10,6 +10,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { ensureSeed } from './services/seed';
+import { applyAccent } from './ui/accent';
 import { installHaptics, isApple } from './ui/haptics';
 
 /** An app, not a web page: iPhone Safari ignores `user-scalable=no`, so pinch-zoom is blocked here. */
@@ -26,6 +27,8 @@ async function start() {
   html.classList.toggle('ios', isApple());
   html.classList.toggle('standalone', window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
   blockPinchZoom();
+  // The accent chosen on this device, before the first paint (no blue flash).
+  applyAccent();
   // iPhone shows the pressed state (:active) of buttons and rows only when the page listens to touches.
   document.addEventListener('touchstart', () => undefined, { passive: true });
   installHaptics();

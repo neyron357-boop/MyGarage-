@@ -8,6 +8,8 @@ export const en: typeof ru = {
     themeDark: 'Dark',
     themeAuto: 'Auto',
     appearance: 'Appearance',
+    accent: 'Colour',
+    accents: { blue: 'Blue', indigo: 'Indigo', purple: 'Purple', pink: 'Pink', orange: 'Orange', green: 'Green' },
     haptics: 'Haptics',
     hapticsHint: 'Light taps on controls, like the iPhone’s own apps. “Auto” follows the system theme.',
     hapticsNeedsIos: 'Tap feedback for iPhone web apps needs iOS 18 (this one runs iOS {{version}}). “Auto” follows the system theme.',

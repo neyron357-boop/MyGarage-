@@ -780,7 +780,7 @@ async function launchBrowser() {
     const row = page.locator('.job-row', { hasText: '61803' }).first();
     await row.locator('.row-due').waitFor();
     await row.locator('svg[aria-label="На стороне"]').waitFor();
-    await page.getByText(/^Сегодня · \d+/).waitFor();
+    await page.getByText(/^Сегодня\s*\d+$/).waitFor();
     await shot('34i-board-today');
   });
   await step('v0.7: suppliers from a list, their card; moving to another device', async () => {

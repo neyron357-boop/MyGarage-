@@ -33,13 +33,14 @@ import {
 import { DatePickerInput, DateTimePicker, MonthPickerInput } from '@mantine/dates';
 
 /*
- * MyGarage design tokens — a native iPhone app of iOS 26/27 (Liquid Glass), built with the web.
- * The iOS system palette: grouped grey canvas, white inset groups with 24 px corners and no borders
- * or shadows, hairline separators, one blue tint, semantic colours for status only. Controls are
- * capsules; the bars float over the content as glass (the tab bar, round bar buttons). Type is the
- * phone's own system face (SF Pro on iPhone, Roboto on Android, Segoe UI on Windows) at the iOS
- * sizes: 34 large title, 17 body, 15 secondary, 13 footnote.
- * The palette keeps the key "cobalt" for the tint so existing code keeps working.
+ * MyGarage design tokens — a native iPhone app of iOS 26/27 (Liquid Glass), built with the web, made
+ * vivid (v0.10): colour carries meaning, words are few. The iOS system palette: grouped grey canvas, white
+ * inset groups with 24 px corners and no borders, hairline separators, a soft glow under the large title.
+ * One accent — the key "cobalt", iOS blue by default, chosen on the device (ui/accent.ts); every step of
+ * a job has its own iOS colour (PHASE_META) — on the board, its pill and the glow of its screen. Controls
+ * are capsules; filled buttons glow in their colour; the bars float over the content as glass. Type is
+ * the phone's own system face (SF Pro on iPhone, Roboto on Android, Segoe UI on Windows): a heavy 34 large
+ * title, bold 17 headings, 17 body, 15 secondary, 13 footnote; big figures rounded.
  */
 
 // Tint: iOS system blue (#007AFF light, #0A84FF dark).
@@ -88,6 +89,16 @@ const dark: MantineColorsTuple = [
 const green: MantineColorsTuple = ['#e9f9ee', '#d2f3dc', '#a6e7b9', '#77da95', '#4fce77', '#3ccb6a', '#34c759', '#28a745', '#1f8a39', '#166c2c'];
 const red: MantineColorsTuple = ['#ffeceb', '#ffd9d7', '#ffb1ad', '#ff8780', '#ff645b', '#ff4f45', '#ff3b30', '#e0281e', '#bd1d14', '#9a130b'];
 const orange: MantineColorsTuple = ['#fff4e5', '#ffe9cc', '#ffd399', '#ffbd66', '#ffaa3d', '#ff9f24', '#ff9500', '#e08200', '#bd6d00', '#9a5800'];
+// The rest of the iOS system palette (shade 6 — the light appearance, 5 — the dark one): the steps of a job
+// (PHASE_META), icon tiles and today's cards each take one, so a state reads by its colour.
+const blue: MantineColorsTuple = ['#e6f2ff', '#cce4ff', '#99caff', '#66afff', '#3395ff', '#0a84ff', '#007aff', '#006be0', '#005dc2', '#004ea3'];
+const indigo: MantineColorsTuple = ['#eeeefb', '#deddf7', '#bcbbef', '#9b9ae6', '#7978de', '#5e5ce6', '#5856d6', '#4d4cbc', '#4341a3', '#383789'];
+const grape: MantineColorsTuple = ['#f7eefc', '#efdcf8', '#dfbaf2', '#cf97eb', '#bf75e5', '#bf5af2', '#af52de', '#9a48c3', '#853ea9', '#70348e'];
+const pink: MantineColorsTuple = ['#ffeaee', '#ffd5dd', '#ffabbb', '#ff8199', '#ff5777', '#ff375f', '#ff2d55', '#e0284b', '#c22241', '#a31d36'];
+const yellow: MantineColorsTuple = ['#fffae6', '#fff5cc', '#ffeb99', '#ffe066', '#ffd633', '#ffd60a', '#ffcc00', '#e0b400', '#c29b00', '#a38300'];
+// iOS mint: "ready — hand it over".
+const teal: MantineColorsTuple = ['#e6f9f9', '#ccf4f2', '#99e9e5', '#66ddd8', '#33d2cb', '#63e6e2', '#00c7be', '#00afa7', '#009790', '#007f7a'];
+const cyan: MantineColorsTuple = ['#ebf7fd', '#d6effa', '#addef5', '#84cef0', '#5bbdeb', '#64d2ff', '#32ade6', '#2c98ca', '#2683af', '#206f93'];
 
 export const FONT_UI = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 /** Headings and large numbers: the same system face (SF Pro Display on iPhone). */
@@ -108,7 +119,7 @@ const inputDefaults = { size: 'md', variant: 'filled' } as const;
 export const theme = createTheme({
   primaryColor: 'cobalt',
   primaryShade: { light: 6, dark: 5 },
-  colors: { cobalt, gray, dark, green, red, orange },
+  colors: { cobalt, gray, dark, green, red, orange, blue, indigo, grape, pink, yellow, teal, cyan },
   black: '#1c1c1e',
   fontFamily: FONT_UI,
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
@@ -185,7 +196,7 @@ export const theme = createTheme({
         transitionProps: { transition: 'pop', duration: 200, timingFunction: EASE_IOS },
       },
       classNames: { root: 'mg-sheet' },
-      styles: { title: { fontWeight: 600, fontSize: rem(17), lineHeight: 1.3 }, header: { paddingBottom: rem(8) } },
+      styles: { title: { fontWeight: 700, fontSize: rem(17), lineHeight: 1.3, letterSpacing: '-0.015em' }, header: { paddingBottom: rem(8) } },
     }),
     Drawer: Drawer.extend({
       defaultProps: { overlayProps: { backgroundOpacity: 0.4, blur: 0 }, transitionProps: { duration: 320, timingFunction: EASE_IOS } },
@@ -264,6 +275,11 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--mantine-color-orange-filled': 'var(--mantine-color-orange-8)',
     '--mantine-color-orange-filled-hover': 'var(--mantine-color-orange-9)',
     '--mantine-color-orange-light-color': 'var(--mantine-color-orange-8)',
+    // Mint and yellow are too pale for words on white: their words and filled buttons take deep shades.
+    '--mantine-color-teal-filled': 'var(--mantine-color-teal-8)',
+    '--mantine-color-teal-light-color': 'var(--mantine-color-teal-8)',
+    '--mantine-color-yellow-light-color': 'var(--mantine-color-yellow-9)',
+    '--mantine-color-cyan-light-color': 'var(--mantine-color-cyan-8)',
   },
   dark: {
     '--app-canvas': '#000000',
@@ -285,6 +301,13 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--mantine-color-green-light-color': 'var(--mantine-color-green-5)',
     '--mantine-color-red-light-color': 'var(--mantine-color-red-4)',
     '--mantine-color-orange-light-color': 'var(--mantine-color-orange-5)',
+    '--mantine-color-blue-light-color': 'var(--mantine-color-blue-5)',
+    '--mantine-color-indigo-light-color': 'var(--mantine-color-indigo-4)',
+    '--mantine-color-grape-light-color': 'var(--mantine-color-grape-5)',
+    '--mantine-color-pink-light-color': 'var(--mantine-color-pink-5)',
+    '--mantine-color-yellow-light-color': 'var(--mantine-color-yellow-5)',
+    '--mantine-color-teal-light-color': 'var(--mantine-color-teal-5)',
+    '--mantine-color-cyan-light-color': 'var(--mantine-color-cyan-5)',
     '--glass-bg': 'rgba(48, 48, 52, 0.6)',
     '--glass-bg-strong': 'rgba(40, 40, 44, 0.86)',
     '--glass-rim': 'rgba(255, 255, 255, 0.16)',

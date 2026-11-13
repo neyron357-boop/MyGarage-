@@ -1,5 +1,5 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCreditCard, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -229,17 +229,19 @@ export function LedgerTab() {
     <Stack gap="lg">
       <SimpleGrid cols={2} spacing="sm">
         {(['cash', 'card'] as const).map((p) => (
-          <UnstyledButton key={p} className="surface tap amount-cell" p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
-            <div className="eyebrow">{t(p === 'cash' ? 'ledger.cashBalance' : 'ledger.cardBalance')}</div>
-            <Text fz={26} lh={1.15} mt={4}>
+          // The two purses as cards, like a bank's: cash in green, the card in the accent.
+          <UnstyledButton key={p} className="money-card tap amount-cell" data-purse={p} p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
+            <div className="money-card-label">
+              {p === 'cash' ? <IconCash size={18} stroke={2} aria-hidden /> : <IconCreditCard size={18} stroke={2} aria-hidden />}
+              {t(p === 'cash' ? 'ledger.cashBalance' : 'ledger.cardBalance')}
+            </div>
+            <Text fz={28} lh={1.1} mt={8}>
               <Money fils={p === 'cash' ? book.cash : book.card} display roll />
             </Text>
-            <Group gap={4} mt={6} c="dimmed">
-              <Text size="xs" c="dimmed">
-                {t('ledger.start')} {formatAed(p === 'cash' ? book.cashStartFils : book.cardStartFils)}
-              </Text>
-              <IconPencil size={12} />
-            </Group>
+            <div className="money-card-foot">
+              {t('ledger.start')} {formatAed(p === 'cash' ? book.cashStartFils : book.cardStartFils)}
+              <IconPencil size={12} aria-hidden />
+            </div>
           </UnstyledButton>
         ))}
       </SimpleGrid>

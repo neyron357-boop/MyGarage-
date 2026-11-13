@@ -130,7 +130,8 @@ export const TodayList = memo(function TodayList({ bundles }: { bundles: OrderBu
   return (
     <div className="today" aria-label={t('today.title')}>
       <div className="group-title">
-        {t('today.title')} · {tasks.length}
+        {t('today.title')}
+        <span className="count">{tasks.length}</span>
       </div>
       <div className="today-strip" ref={strip}>
         {tasks.map((task) => {
@@ -145,10 +146,12 @@ export const TodayList = memo(function TodayList({ bundles }: { bundles: OrderBu
               tabIndex={0}
               onClick={() => open(task)}
               onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), open(task))}
+              // Each kind of task has its colour: the card is washed with it, the symbol sits on it.
+              style={{ '--c': `var(--mantine-color-${task.late ? 'red' : m.color}-6)` } as React.CSSProperties}
             >
               <div className="today-head">
-                <span className="today-icon" style={{ '--c': `var(--mantine-color-${task.late ? 'red' : m.color}-6)` } as React.CSSProperties}>
-                  <m.icon size={18} stroke={2} aria-hidden />
+                <span className="today-icon">
+                  <m.icon size={18} stroke={2.2} aria-hidden />
                 </span>
                 <span className="today-text">{text(task)}</span>
               </div>

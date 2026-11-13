@@ -50,6 +50,80 @@
     --page-pad: 28px;
   }
 }
+/* The accent ("cobalt" in the theme) is the user's choice on this device (ui/accent.ts → data-accent):
+   blue by default, or one of these iOS colours. Mantine's tints of it are counted from its shades here,
+   so every button, chip, tab and link follows. (Orange and green take deeper shades in the light:
+   white words on them stay readable in the sun.) */
+:root:root[data-mantine-color-scheme='light'] {
+  --mantine-color-cobalt-light: color-mix(in srgb, var(--mantine-color-cobalt-6) 11%, transparent);
+  --mantine-color-cobalt-light-hover: color-mix(in srgb, var(--mantine-color-cobalt-6) 14%, transparent);
+  --mantine-color-cobalt-outline-hover: color-mix(in srgb, var(--mantine-color-cobalt-6) 5%, transparent);
+}
+:root:root[data-mantine-color-scheme='dark'] {
+  --mantine-color-cobalt-light: color-mix(in srgb, var(--mantine-color-cobalt-4) 18%, transparent);
+  --mantine-color-cobalt-light-hover: color-mix(in srgb, var(--mantine-color-cobalt-4) 24%, transparent);
+  --mantine-color-cobalt-outline-hover: color-mix(in srgb, var(--mantine-color-cobalt-1) 5%, transparent);
+}
+:root[data-accent='indigo'] {
+  --mantine-color-cobalt-0: #eeeefb;
+  --mantine-color-cobalt-1: #deddf7;
+  --mantine-color-cobalt-2: #bcbbef;
+  --mantine-color-cobalt-3: #9b9ae6;
+  --mantine-color-cobalt-4: #7978de;
+  --mantine-color-cobalt-5: #5e5ce6;
+  --mantine-color-cobalt-6: #5856d6;
+  --mantine-color-cobalt-7: #4d4cbc;
+  --mantine-color-cobalt-8: #4341a3;
+  --mantine-color-cobalt-9: #383789;
+}
+:root[data-accent='purple'] {
+  --mantine-color-cobalt-0: #f7eefc;
+  --mantine-color-cobalt-1: #efdcf8;
+  --mantine-color-cobalt-2: #dfbaf2;
+  --mantine-color-cobalt-3: #cf97eb;
+  --mantine-color-cobalt-4: #bf75e5;
+  --mantine-color-cobalt-5: #bf5af2;
+  --mantine-color-cobalt-6: #af52de;
+  --mantine-color-cobalt-7: #9a48c3;
+  --mantine-color-cobalt-8: #853ea9;
+  --mantine-color-cobalt-9: #70348e;
+}
+:root[data-accent='pink'] {
+  --mantine-color-cobalt-0: #ffeaee;
+  --mantine-color-cobalt-1: #ffd5dd;
+  --mantine-color-cobalt-2: #ffabbb;
+  --mantine-color-cobalt-3: #ff8199;
+  --mantine-color-cobalt-4: #ff5777;
+  --mantine-color-cobalt-5: #ff375f;
+  --mantine-color-cobalt-6: #ff2d55;
+  --mantine-color-cobalt-7: #e0284b;
+  --mantine-color-cobalt-8: #c22241;
+  --mantine-color-cobalt-9: #a31d36;
+}
+:root[data-accent='orange'] {
+  --mantine-color-cobalt-0: #fff4e5;
+  --mantine-color-cobalt-1: #ffe9cc;
+  --mantine-color-cobalt-2: #ffd399;
+  --mantine-color-cobalt-3: #ffbd66;
+  --mantine-color-cobalt-4: #ffaa3d;
+  --mantine-color-cobalt-5: #ff9f0a;
+  --mantine-color-cobalt-6: #e07c00;
+  --mantine-color-cobalt-7: #c26b00;
+  --mantine-color-cobalt-8: #a35a00;
+  --mantine-color-cobalt-9: #854900;
+}
+:root[data-accent='green'] {
+  --mantine-color-cobalt-0: #e9f9ee;
+  --mantine-color-cobalt-1: #d2f3dc;
+  --mantine-color-cobalt-2: #a6e7b9;
+  --mantine-color-cobalt-3: #77da95;
+  --mantine-color-cobalt-4: #4fce77;
+  --mantine-color-cobalt-5: #30d158;
+  --mantine-color-cobalt-6: #28a745;
+  --mantine-color-cobalt-7: #1f8a39;
+  --mantine-color-cobalt-8: #166c2c;
+  --mantine-color-cobalt-9: #0f5220;
+}
 html,
 body {
   background: var(--app-canvas);
@@ -163,6 +237,15 @@ a {
 .mantine-Button-root:is([data-variant='filled'], :not([data-variant])):is([data-disabled], :disabled) {
   background: var(--app-fill);
   color: var(--app-label-3);
+}
+/* A filled button glows in its own colour and has a lit top edge (iOS 26 "prominent"): the thing to tap
+   is the brightest thing on the screen. */
+.mantine-Button-root[data-variant='filled']:not([data-size^='compact']):not([data-disabled]):not(:disabled) {
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--button-bg, var(--mantine-primary-color-filled)) 80%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+.mantine-Button-root[data-variant='filled'] {
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 /* Segmented control: a grey capsule track, a white capsule sliding on a spring (iOS 26). */
 .mantine-SegmentedControl-root {
@@ -361,6 +444,42 @@ a {
   background: var(--app-canvas);
   padding: var(--page-pad);
   min-height: 100dvh;
+}
+
+/* ---------- Glow (v0.10) ---------- */
+/* A soft glow at the top of every screen, under the large title: the accent from the left, a second hue
+   from the right, gone by the first group. Painted once with the content — no blur, nothing per frame.
+   A job's screen glows in the colours of its step (usePhaseGlow sets --glow, --glow-2), so its state shows from afar. */
+.screen-body,
+.page-shell {
+  isolation: isolate;
+}
+.screen-body {
+  position: relative;
+}
+.screen-body::before,
+.page-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 440px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(95% 72% at 4% 0%, color-mix(in srgb, var(--glow, var(--mantine-color-cobalt-6)) var(--glow-a), transparent) 0%, transparent 72%),
+    radial-gradient(75% 60% at 100% 0%, color-mix(in srgb, var(--glow-2, var(--mantine-color-grape-6)) var(--glow-b), transparent) 0%, transparent 70%);
+}
+:root {
+  --glow-a: 17%;
+  --glow-b: 11%;
+}
+:root[data-mantine-color-scheme='dark'] {
+  --glow-a: 30%;
+  --glow-b: 20%;
+}
+/* In the dark the white groups become raised panels: a hairline of light around them. */
+[data-mantine-color-scheme='dark'] :is(.list, .ios-group, .surface, .today-card, .kpi, .garage-card) {
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
 }
 
 /* ---------- Phone: the app as a native one (ui/stack.tsx) ---------- */
@@ -725,13 +844,43 @@ html.kb .tab-bar-wrap {
   line-height: 1.35;
   color: var(--app-label-2);
 }
-/* Captions above and under an inset group (iOS section header and footer). */
+/* Above the large title: the day on the board, the job's number — small, bold, in the accent. */
+.page-eyebrow {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--mantine-color-cobalt-6);
+  margin-bottom: 2px;
+}
+[data-mantine-color-scheme='dark'] .page-eyebrow {
+  color: var(--mantine-color-cobalt-4);
+}
+/* Headings above a group: short and bold, in the label colour — read at a glance, not deciphered. */
 .group-title {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--mantine-color-text);
+  margin: 0 4px 8px;
+}
+/* A count beside a heading ("Today 4"): a small capsule. */
+.group-title .count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  vertical-align: 1px;
   font-size: 13px;
-  font-weight: 500;
-  line-height: 1.35;
-  color: var(--app-label-2);
-  margin: 0 16px 7px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  background: var(--mantine-color-cobalt-light);
+  color: var(--mantine-color-cobalt-light-color);
 }
 .group-note {
   font-size: 13px;
@@ -990,6 +1139,174 @@ html.kb .tab-bar-wrap {
   margin-right: -4px;
   color: var(--app-label-3);
 }
+/* "More": the garage on top — its logo on a white squircle (or a tool on the accent) and its name, like the
+   account card of the iPhone's Settings. */
+.garage-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--radius-group);
+  background: var(--app-card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.garage-logo {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  padding: 4px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--mantine-color-white);
+  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
+}
+.garage-logo:not(:has(img)) {
+  color: #fff;
+  background: linear-gradient(145deg, var(--mantine-color-cobalt-4), var(--mantine-color-cobalt-7));
+  box-shadow: 0 10px 20px -12px var(--mantine-color-cobalt-6), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.garage-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 19px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.garage-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.garage-sub {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--app-label-2);
+}
+.garage-chevron {
+  flex-shrink: 0;
+  color: var(--app-label-3);
+}
+/* The two purses (Money): cards like a bank's — cash in green, the card in the accent turning purple, a
+   shine in the corner. White words on deep shades: readable in the sun. */
+.money-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 118px;
+  border-radius: var(--radius-group);
+  color: #fff;
+  background: linear-gradient(140deg, var(--mc-a) 0%, var(--mc-b) 100%);
+  box-shadow: 0 16px 30px -20px var(--mc-b), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.money-card[data-purse='cash'] {
+  --mc-a: var(--mantine-color-green-7);
+  --mc-b: var(--mantine-color-green-9);
+}
+.money-card[data-purse='card'] {
+  --mc-a: var(--mantine-color-cobalt-6);
+  --mc-b: var(--mantine-color-grape-8);
+}
+.money-card::after {
+  content: '';
+  position: absolute;
+  top: -70px;
+  right: -60px;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0) 70%);
+  pointer-events: none;
+}
+.money-card .money .cur {
+  color: rgba(255, 255, 255, 0.78);
+}
+.money-card-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 650;
+  opacity: 0.95;
+}
+.money-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+/* The accent's swatches (Appearance): round, the chosen one ringed with a gap, like the iPhone's pickers. */
+.accent-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 6px 0;
+}
+.accent-swatch {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c);
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform 340ms var(--spring), box-shadow var(--dur-2) ease;
+}
+.accent-swatch[data-active] {
+  box-shadow: 0 0 0 3px var(--app-card), 0 0 0 5px var(--c);
+}
+.accent-swatch:active {
+  transform: scale(0.88);
+  transition-duration: 80ms;
+}
+.accent-swatch:focus-visible {
+  outline: 2px solid var(--c);
+  outline-offset: 4px;
+}
+/* A touch of 44 pt around each swatch. */
+.accent-swatch::after {
+  content: '';
+  position: absolute;
+  inset: -8px -5px;
+}
+.app-nav .accent-swatches {
+  justify-content: space-between;
+  padding: 4px 6px;
+}
+.app-nav .accent-swatch[data-active] {
+  box-shadow: 0 0 0 3px var(--app-canvas), 0 0 0 5px var(--c);
+}
+/* An empty screen's symbol: a squircle glowing in the accent, like an app icon waiting for its first job. */
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 6px;
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(145deg, var(--mantine-color-cobalt-4), var(--mantine-color-cobalt-7));
+  box-shadow: 0 12px 24px -12px var(--mantine-color-cobalt-6), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
 /* Coloured square behind a row icon (iOS Settings). */
 .row-icon {
   width: 30px;
@@ -1072,10 +1389,10 @@ html.kb .tab-bar-wrap {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 74px;
-  padding: 10px 6px;
+  min-height: 92px;
+  padding: 12px 6px 10px;
   border: 0;
-  border-radius: 18px;
+  border-radius: 20px;
   background: var(--app-soft);
   color: inherit;
   font: inherit;
@@ -1091,6 +1408,18 @@ html.kb .tab-bar-wrap {
 .action-tile > span {
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+/* The tile's symbol on a squircle of its colour, white — like an app icon. */
+.action-tile > .tile-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 2px;
+  border-radius: 14px;
+  background: var(--c);
+  color: #fff;
+  box-shadow: 0 6px 14px -8px var(--c), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .action-tile:active {
   transform: scale(0.95);
@@ -1337,12 +1666,29 @@ html.kb .tab-bar-wrap {
 .job-thumb {
   position: relative;
   flex-shrink: 0;
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
 }
 .job-thumb > .mantine-Image-root,
 .job-thumb > .surface-soft {
-  border-radius: 12px;
+  border-radius: 15px;
+}
+.job-row {
+  min-height: 72px;
+}
+/* The step of a job on its board row: a capsule in the step's colour, with how long it has been there. */
+.row-phase {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px 0 7px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 .job-thumb-phase {
   position: absolute;
@@ -1590,12 +1936,31 @@ html.kb .tab-bar-wrap {
   width: 0;
   height: 36px;
   border-radius: 999px;
-  background: var(--app-pill);
+  background: var(--pill, var(--app-pill));
   pointer-events: none;
   opacity: 0;
 }
 .scroll-tabs[data-ready='true'] .scroll-tabs-pill {
-  transition: transform 320ms var(--ease-ios), width 320ms var(--ease-ios), opacity var(--dur-2) ease;
+  transition: transform 320ms var(--ease-ios), width 320ms var(--ease-ios), opacity var(--dur-2) ease, background-color 320ms var(--ease-ios);
+}
+/* A tab with a colour (a job's step): its symbol in that colour; chosen, white on the colour. */
+.scroll-tabs button .tab-icon {
+  flex-shrink: 0;
+  margin-left: -3px;
+  color: var(--c);
+  transition: color var(--dur-2) var(--ease-out);
+}
+.scroll-tabs button[data-tint][data-active='true'] {
+  color: #fff;
+}
+.scroll-tabs button[data-tint][data-active='true'] .tab-icon {
+  color: inherit;
+}
+.scroll-tabs:not([data-ready='true']) button[data-tint][data-active='true'] {
+  background: var(--cf);
+}
+.scroll-tabs button[data-tint][data-active='true'] .count {
+  background: rgba(255, 255, 255, 0.24);
 }
 .scroll-tabs button {
   position: relative;
@@ -1867,13 +2232,14 @@ html.kb .tab-bar-wrap {
 .page-head {
   margin: 2px 0 16px;
 }
-/* iOS large title: 34 pt bold; it fades as it goes under the bar, where the small title takes over. */
+/* The large title: 34 pt heavy and tight, a poster more than a label; it fades as it goes under the
+   bar, where the small title takes over. */
 .large-title {
   font-family: var(--font-display);
   font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.18;
+  font-weight: 800;
+  letter-spacing: -0.032em;
+  line-height: 1.12;
   margin: 0;
   text-wrap: balance;
   opacity: var(--title-o, 1);
@@ -2182,7 +2548,8 @@ html.kb .tab-bar-wrap {
   left: 2px;
   width: calc((100% - 4px) / var(--n, 4));
   border-radius: 999px;
-  background: var(--glass-lens);
+  /* The tab you are in sits on a lens tinted with the accent. */
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 15%, var(--glass-lens));
   transform: translate3d(calc(var(--i, 0) * 100%), 0, 0);
   transition: transform 560ms var(--spring), opacity var(--dur-2) ease;
   pointer-events: none;
@@ -3622,6 +3989,11 @@ html.kb .screen-bottom > .sticky-bar {
 }
 .phase-track > span[data-now] {
   flex-grow: 2.4;
+  box-shadow: 0 0 10px -1px var(--phase);
+}
+/* The job's step in its own head: a solid capsule that glows a little. */
+.phase-pill-filled {
+  box-shadow: 0 6px 14px -8px var(--badge-bg), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 /* The main button changes with the job's step: the new one settles in on a spring (a transform only —
    the glass buttons in the bar keep blurring what is under them). */
@@ -3711,11 +4083,15 @@ html.kb .screen-bottom > .sticky-bar {
   gap: 10px;
   padding: 14px 14px 12px;
   border-radius: 22px;
-  background: var(--app-card);
+  /* Washed with the task's colour from its corner. */
+  background: linear-gradient(150deg, color-mix(in srgb, var(--c, var(--app-card)) var(--wash, 13%), var(--app-card)) 0%, var(--app-card) 68%);
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
   transition: transform 360ms var(--spring), background-color var(--dur-1) ease;
+}
+[data-mantine-color-scheme='dark'] .today-card {
+  --wash: 24%;
 }
 .today-card:active {
   transform: scale(0.96);
@@ -3734,11 +4110,12 @@ html.kb .screen-bottom > .sticky-bar {
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--c) 14%, transparent);
-  color: var(--c);
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--c);
+  color: #fff;
+  box-shadow: 0 4px 10px -4px var(--c), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .today-text {
   display: -webkit-box;

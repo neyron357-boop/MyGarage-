@@ -6,6 +6,8 @@ export const ru = {
     themeDark: 'Тёмная',
     themeAuto: 'Авто',
     appearance: 'Оформление',
+    accent: 'Цвет',
+    accents: { blue: 'Синий', indigo: 'Индиго', purple: 'Фиолетовый', pink: 'Розовый', orange: 'Оранжевый', green: 'Зелёный' },
     haptics: 'Виброотклик',
     hapticsHint: 'Лёгкие отклики на нажатия, как в системных приложениях iPhone. «Авто» — тема как в системе.',
     hapticsNeedsIos: 'Отклик на нажатия в веб-приложениях iPhone работает с iOS 18 (у вас iOS {{version}}). «Авто» — тема как в системе.',
