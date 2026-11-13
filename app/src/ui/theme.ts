@@ -311,6 +311,9 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--mantine-color-yellow-light-color': 'var(--mantine-color-yellow-5)',
     '--mantine-color-teal-light-color': 'var(--mantine-color-teal-5)',
     '--mantine-color-cyan-light-color': 'var(--mantine-color-cyan-5)',
+    // Mint is nearly white in the dark: white words on it ("Hand over", its pill) take a deep mint.
+    '--mantine-color-teal-filled': 'var(--mantine-color-teal-8)',
+    '--mantine-color-teal-filled-hover': 'var(--mantine-color-teal-9)',
     '--glass-bg': 'rgba(48, 48, 52, 0.6)',
     '--glass-bg-strong': 'rgba(40, 40, 44, 0.86)',
     '--glass-rim': 'rgba(255, 255, 255, 0.16)',

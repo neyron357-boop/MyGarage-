@@ -19,6 +19,7 @@ import {
   IconFileInvoice,
   IconFileTypePdf,
   IconHourglassHigh,
+  IconKey,
   IconListCheck,
   IconListDetails,
   IconMessage2,
@@ -718,17 +719,19 @@ export function JobPage() {
     );
   else if (phase === 'pay' || phase === 'debt')
     bar = (
-      <Button fullWidth onClick={() => setPay('payment')}>
+      // Money coming in: green with cash, as the book shows money in and the step "pay" is coloured.
+      <Button fullWidth color="green" leftSection={<IconCash size={20} />} onClick={() => setPay('payment')}>
         {t('job.pay')} · {formatAed(due)}
       </Button>
     );
   else if (phase === 'out')
     bar = (
+      // The keys go back: the step's own mint and its key, as its pill on the board.
       <Button
         fullWidth
-        color="green"
+        color="teal"
         loading={busy}
-        leftSection={<IconCheck size={20} />}
+        leftSection={<IconKey size={20} />}
         onClick={() =>
           run(async () => {
             await changeStage(oid, 'closed');
