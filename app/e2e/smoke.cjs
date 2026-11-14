@@ -859,7 +859,7 @@ async function launchBrowser() {
     // On the board: the promised time beside the plate, the paint shop's sign on the row.
     await page.goto(BASE + '#/');
     const row = page.locator('.job-row', { hasText: '61803' }).first();
-    await row.locator('.row-due').waitFor();
+    await row.locator('.job-card-due').waitFor();
     await row.locator('svg[aria-label="На стороне"]').waitFor();
     await page.getByText(/^Сегодня\s*\d+$/).waitFor();
     await shot('34i-board-today');

@@ -114,6 +114,59 @@ export async function mediaUrl(id: string, thumb = false): Promise<string | unde
   return url;
 }
 
+/** The address of a photo at card size made before (`cardUrl`). */
+export function cachedCardUrl(id: string): string | undefined {
+  return urlCache.get(`${id}:c`);
+}
+
+let cardQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * A photo at the size a card across the phone shows it (long side 1080 px — sharp on an iPhone, a
+ * quarter of the stored photo's pixels): made once a session from the stored one, one photo at a time
+ * (a board of cars does not decode twenty full photos at once). The thumbnail (400 px) is too soft there.
+ */
+export function cardUrl(id: string): Promise<string | undefined> {
+  const key = `${id}:c`;
+  const cached = urlCache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const job = cardQueue.then(async () => {
+    const again = urlCache.get(key);
+    if (again) return again;
+    const rec = await db.mediaBlobs.get(id);
+    if (!rec) return undefined;
+    const url = URL.createObjectURL((await shrinkPhoto(rec.blob, 1080)) ?? rec.blob);
+    urlCache.set(key, url);
+    return url;
+  });
+  cardQueue = job.catch(() => undefined);
+  return job;
+}
+
+/** The photo with its long side at `side` px (decoded off the main thread); none when it is that small already. */
+async function shrinkPhoto(blob: Blob, side: number): Promise<Blob | undefined> {
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined' || !blob.type.startsWith('image/')) return undefined;
+  try {
+    const bmp = await createImageBitmap(blob);
+    const scale = side / Math.max(bmp.width, bmp.height);
+    if (scale >= 0.85) {
+      bmp.close();
+      return undefined;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return undefined;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close();
+    return (await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.82))) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();

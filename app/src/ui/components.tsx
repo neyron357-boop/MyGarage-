@@ -32,7 +32,7 @@ import { useNavigate } from 'react-router-dom';
 import { formatAed, parseAed } from '../domain/money';
 import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
-import { cachedMediaUrl, mediaUrl } from '../services/media';
+import { cachedCardUrl, cachedMediaUrl, cardUrl, mediaUrl } from '../services/media';
 import { LazySheet } from './lazy';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
@@ -1049,36 +1049,27 @@ export function MoneyInput({
   );
 }
 
-export function MediaImage({ id, thumb = true, h = 90, w, radius = 'md', onClick, loading }: { id: string; thumb?: boolean; h?: number | string; w?: number | string; radius?: string; onClick?: () => void; loading?: 'eager' | 'lazy' }) {
-  // A photo shown before is drawn at once (a list coming back, a row rendered again); a new one waits in
-  // a quiet grey square (no spinner per photo), then is decoded off the main thread.
-  const key = `${id}:${thumb}`;
-  const placeholder = useRef<HTMLDivElement>(null);
+/**
+ * A stored photo: the thumbnail (400 px, lists), the card size (`card`, 1080 px — a card across the
+ * phone) or the photo itself. One shown before is drawn at once (a list coming back, a row rendered
+ * again); a new one waits in a quiet square (no spinner per photo), then is decoded off the main thread.
+ */
+export function MediaImage({ id, thumb = true, card, h = 90, w, radius = 'md', onClick }: { id: string; thumb?: boolean; card?: boolean; h?: number | string; w?: number | string; radius?: string; onClick?: () => void }) {
+  const key = `${id}:${card ? 'c' : thumb}`;
+  const cached = () => (card ? cachedCardUrl(id) : cachedMediaUrl(id, thumb));
   const [loaded, setLoaded] = useState<{ key: string; url?: string }>();
-  const url = cachedMediaUrl(id, thumb) ?? (loaded?.key === key ? loaded.url : undefined);
+  const url = cached() ?? (loaded?.key === key ? loaded.url : undefined);
   useEffect(() => {
-    if (cachedMediaUrl(id, thumb)) return;
+    if (cached()) return;
     let alive = true;
-    const load = () => void mediaUrl(id, thumb).then((u) => alive && setLoaded({ key, url: u }));
-    let observer: IntersectionObserver | undefined;
-    const target = placeholder.current;
-    if (loading === 'lazy' && target && typeof IntersectionObserver !== 'undefined') {
-      observer = new IntersectionObserver(([entry]) => {
-        if (!entry.isIntersecting) return;
-        observer?.disconnect();
-        load();
-      }, { rootMargin: '360px' });
-      observer.observe(target);
-    } else {
-      load();
-    }
+    void (card ? cardUrl(id) : mediaUrl(id, thumb)).then((u) => alive && setLoaded({ key, url: u }));
     return () => {
       alive = false;
-      observer?.disconnect();
     };
-  }, [id, thumb, key, loading]);
-  if (!url) return <Box ref={placeholder} h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
-  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" loading={loading} />;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  if (!url) return <Box h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
+  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" />;
 }
 
 /** Thumbnail that opens the full photo. */

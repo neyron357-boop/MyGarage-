@@ -170,7 +170,6 @@ export const en: typeof ru = {
   board: {
     kanbanHint: 'Empty stages are folded — hover to see the name',
     title: 'Workshop',
-    refreshing: 'Refreshing board',
     inShop: 'In the workshop',
     inShopHint: 'booked for today: {{n}}',
     emptyTitle: 'No jobs yet',

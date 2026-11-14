@@ -544,6 +544,11 @@ html.vv .app-root {
   z-index: 1;
   visibility: hidden;
 }
+/* Back in front, a screen's lists are visible by a rule of their own, not only by inheritance: Chromium could
+   keep a list hidden from the time its screen was (the board came back empty after a swipe back). */
+.screen[data-role='top'] .list {
+  visibility: visible;
+}
 .stack[data-out='above'] > .screen[data-role='out'] {
   z-index: 3;
 }
@@ -562,7 +567,8 @@ html.vv .app-root {
   inset: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior-y: none;
+  /* The list keeps the iPhone's rubber band at its ends; the pull at the top is ui/pullRefresh (board). */
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
 /* Room for the navigation bar above, the floating tab bar (or the home indicator) below: the content
@@ -1764,136 +1770,322 @@ html.kb .tab-bar-wrap {
   border-radius: 50%;
   overflow: hidden;
 }
-/* Board cards stand on their own. Jobs without photos use the same details in less space. */
-.list.board-cards {
-  display: grid;
-  gap: 14px;
+/* ---------- Pull to refresh (ui/pullRefresh.tsx): the iPhone's spinner ---------- */
+/* Twelve spokes round a point under the navigation bar: they appear one by one as the page comes down,
+   then turn (each fading after the one before) while the refresh runs. */
+/* How far the page is pulled down: the glow under the large title is held at the top meanwhile. */
+@property --pull {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+.screen-body::before {
+  translate: 0 calc(-1 * var(--pull, 0px));
+}
+.pull-spinner {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h));
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  opacity: 0;
+  pointer-events: none;
+}
+.pull-spinner > i {
+  position: absolute;
+  top: 0;
+  left: 12.5px;
+  width: 3px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--app-label-2);
+  transform-origin: 1.5px 14px;
+  transform: rotate(calc(var(--i) * 30deg));
+  opacity: clamp(0, calc(var(--p, 0) * 12 - var(--i)), 1);
+}
+.pull-spinner[data-spinning] > i {
+  animation: pull-spoke 960ms linear infinite;
+  animation-delay: calc(var(--i) * 80ms - 960ms);
+}
+@keyframes pull-spoke {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pull-spinner[data-spinning] > i {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ---------- Board cards (features/board/JobRow.tsx) ---------- */
+/* Every car its own card. With a photo the photo is the card (2 : 1 — three cars to a phone screen):
+   the step in its colour on it, top left; the car, its plate, the promised time and the money at its
+   foot over a soft shade. Without a photo, a compact card: the step's symbol on a square of its colour,
+   then the same facts. `--c` / `--c-deep` — the step's colour (red when it is late). */
+.list.board-cards,
+[data-mantine-color-scheme='dark'] .list.board-cards {
+  /* A column, not a grid: a grid sizes its rows before the cards know their width, and the 2 : 1 photo
+     cards would overflow them. */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   background: transparent;
   border-radius: 0;
   box-shadow: none;
+  overflow: visible;
 }
-.job-row {
+.job-card {
   position: relative;
+  flex-shrink: 0;
   overflow: clip;
   border-radius: var(--radius-group);
   background: var(--app-card);
 }
+/* The dark theme's hairline of light round each card, over the photo too. */
+[data-mantine-color-scheme='dark'] .job-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
+  pointer-events: none;
+}
 .job-card-open {
+  position: relative;
   display: block;
   width: 100%;
+  margin: 0;
   padding: 0;
   border: 0;
-  text-align: start;
-  font: inherit;
+  background: transparent;
   color: inherit;
-  background: var(--app-card);
+  font: inherit;
+  text-align: start;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .job-card-open:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: -3px;
+  border-radius: var(--radius-group);
 }
-.job-card-photo {
-  display: block;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  background: var(--app-fill);
-}
-.job-card-photo img {
-  display: block;
-}
-.job-card-info {
-  display: grid;
-  gap: 9px;
-  padding: 13px 15px 14px;
-  transition: background-color var(--dur-1) ease;
-}
-[data-mantine-color-scheme='dark'] .job-card-info {
-  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
-}
-.job-card-open:active .job-card-info {
+/* Pressed: the card darkens under the finger at once and lets go softly, as the iPhone's cells do. */
+.job-card-open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   background: var(--app-press);
+  opacity: 0;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+}
+.job-card-open:active::after {
+  opacity: 1;
   transition: none;
 }
 @media (hover: hover) {
-  .job-card-open:hover .job-card-info {
-    background: var(--app-press);
+  .job-card-open:hover::after {
+    opacity: 0.5;
   }
 }
-.job-card-title {
+
+/* With a photo. Before the photo comes, the card waits in a soft tint of the step's colour. */
+.job-card[data-photo] .job-card-open {
+  /* 2 : 1 by its width (a padding in % of the width — known before the list is laid out). */
+  height: 0;
+  padding-bottom: 50%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--c) 16%, var(--app-fill));
+}
+.job-card[data-photo] .job-card-open > .mantine-Image-root,
+.job-card[data-photo] .job-card-open > .surface-soft {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  background: transparent;
+}
+.job-card-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgb(0 0 0 / 0.26) 0%, rgb(0 0 0 / 0) 30%),
+    linear-gradient(0deg, rgb(0 0 0 / 0.8) 0%, rgb(0 0 0 / 0.55) 36%, rgb(0 0 0 / 0.18) 58%, rgb(0 0 0 / 0) 74%);
+}
+.job-card-top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.job-card-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  background: var(--c-deep);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--c-deep) 70%, #000);
+}
+.job-card-marks {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.job-card-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
+}
+.job-card-foot {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
+  display: grid;
+  gap: 7px;
+  color: #fff;
+}
+.job-card[data-photo] .job-card-name {
+  font-size: 20px;
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.35);
+}
+.job-card-meta {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  font-size: 17px;
-  font-weight: 750;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
 }
-.job-card-title > span:not(.job-card-car-icon) {
-  overflow-wrap: anywhere;
+.job-card-meta .job-card-amount {
+  margin-inline-start: auto;
+  font-size: 18px;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.35);
 }
-.job-card-car-icon {
+.job-card[data-photo] .job-card-amount .money .frac {
+  color: rgb(255 255 255 / 0.72);
+}
+.job-card[data-photo] .job-card-due {
+  background: rgb(0 0 0 / 0.42);
+  color: #fff;
+}
+.job-card[data-photo] .job-card-due[data-late] {
+  background: var(--mantine-color-red-filled);
+}
+
+/* Without a photo: one compact card. */
+.job-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 12px 14px;
+}
+.job-card-icon {
   display: grid;
   place-items: center;
-  flex: 0 0 30px;
-  height: 30px;
-  border-radius: 10px;
-  background: var(--app-fill);
-  color: var(--app-label-2);
-}
-.job-card-chevron {
   flex-shrink: 0;
-  margin-inline-start: auto;
-  color: var(--app-label-3);
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--c);
+  color: #fff;
+  box-shadow: 0 6px 16px -8px var(--c);
 }
-.job-card-line,
-.job-card-meta {
+.job-card-body {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.job-card-line {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px 9px;
+  gap: 6px 8px;
+  min-width: 0;
 }
-.job-card-line {
-  justify-content: space-between;
+.job-card-line:first-child {
+  flex-wrap: nowrap;
 }
-.job-card-flags {
+.job-card-row .job-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+.job-card-row .job-card-amount {
+  flex-shrink: 0;
+  font-size: 17px;
+}
+.job-card-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-inline-start: auto;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  color: var(--c);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
 }
-.job-card-meta .row-phase {
-  height: 25px;
+.job-card-row .job-card-mark {
+  width: 24px;
+  height: 24px;
+  background: var(--app-fill);
+  box-shadow: none;
 }
-.board-refresh {
-  pointer-events: none;
-  position: absolute;
-  z-index: 5;
-  top: calc(env(safe-area-inset-top, 0px) + 8px);
-  left: 50%;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  margin-inline-start: -16px;
-  border-radius: 50%;
-  background: var(--app-card);
-  color: var(--mantine-color-cobalt-light-color);
-  box-shadow: inset 0 0 0 0.5px var(--app-hairline), var(--glass-shadow);
-  opacity: var(--pull-opacity, 0);
-  transform: translateY(var(--pull-y, -8px));
-  transition: opacity var(--dur-2) ease, transform var(--dur-2) var(--ease-ios);
+/* Names of two lines at most; a long one ends with "…" rather than pushing the facts away. */
+.job-card-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
-.board-refresh[data-pulling] {
-  transition: none;
+.job-card-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mantine-color-orange-6) 14%, transparent);
+  color: var(--mantine-color-orange-light-color);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.board-refresh[data-busy] {
-  opacity: 1;
-  transform: translateY(4px);
-}
-.board-refresh .board-refresh-arrow {
-  transform: rotate(var(--pull-rotation, 0deg));
+.job-card-due[data-late] {
+  background: color-mix(in srgb, var(--mantine-color-red-6) 14%, transparent);
+  color: var(--mantine-color-red-light-color);
 }
 /* The step of a job on its board row: a capsule in the step's colour, with how long it has been there. */
 .row-phase {

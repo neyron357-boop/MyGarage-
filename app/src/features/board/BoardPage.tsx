@@ -1,6 +1,6 @@
 import { Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
 import { IconArchive, IconArrowBackUp, IconLayoutKanban, IconPlus } from '@tabler/icons-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -11,9 +11,10 @@ import { archiveJob, phaseOf } from '../../services/flow';
 import { loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { checkForUpdate } from '../../ui/pwa';
+import { usePullRefresh } from '../../ui/pullRefresh';
 import { PHASE_META, usePhaseGlow } from '../job/phase';
 import { InsecureWarning } from './BoardNotices';
-import { BoardRefresh } from './BoardRefresh';
 import { JobRow, type RowSwipe } from './JobRow';
 import { TodayList } from './TodayList';
 
@@ -139,12 +140,16 @@ export function BoardPage() {
   const { run } = useAction();
   const mobile = usePhone();
   const [filter, setFilter] = useState<'all' | 'archive' | Phase>('all');
+  // Pull to refresh (the phone): the board read again, and a new version of the app looked for — it shows
+  // its "Update" bar when there is one.
   const [refresh, setRefresh] = useState(0);
-  const refreshBoard = useCallback(() => setRefresh((n) => n + 1), []);
+  const pull = usePullRefresh(() => {
+    setRefresh((n) => n + 1);
+    return checkForUpdate();
+  });
   const archive = filter === 'archive';
-  const live = useScreenLiveQuery(async () => ({ ...(await loadBoard(archive)), refresh }), [archive, refresh]);
+  const live = useScreenLiveQuery(() => loadBoard(archive), [archive, refresh]);
   const data = live ?? lastBoard;
-  const busy = refresh > 0 && live?.refresh !== refresh;
   // Every five minutes the rows' "how long" moves on (a row is not rendered again otherwise).
   const tick = Math.floor(Date.now() / 300_000);
   // A step picked: the screen glows in its colours, as a job on that step does.
@@ -181,7 +186,7 @@ export function BoardPage() {
   const dateLabel = dayLong(new Date(), lang);
   const header = (
     <>
-      <BoardRefresh busy={busy} onRefresh={refreshBoard} />
+      {pull}
       <PageHeader
         eyebrow={dateLabel}
         title={t('board.title')}

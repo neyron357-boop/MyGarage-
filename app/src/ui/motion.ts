@@ -36,7 +36,10 @@ export function useAutoAnimate<T extends HTMLElement>(enabled = true): (el: T | 
       height = parent.offsetHeight;
     };
     remember();
-    const shown = () => parent.getClientRects().length > 0 && !document.hidden;
+    // On screen for real: laid out, the page in front, and not on a screen hidden under another one (`visibility`
+    // keeps its boxes). An animation started on a hidden screen left the list hidden when it came back (Chromium
+    // kept the animated element's style from then): such changes are only remembered.
+    const shown = () => parent.getClientRects().length > 0 && !document.hidden && getComputedStyle(parent).visibility === 'visible';
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => remember()) : undefined;
     ro?.observe(parent);
     const mo = new MutationObserver((records) => {

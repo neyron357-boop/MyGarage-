@@ -67,6 +67,19 @@ export function useInstall() {
 const OFFLINE_SHOWN_KEY = 'mygarage.offlineReadyShown';
 
 /**
+ * Look for a new version of the app now (pull to refresh): when there is one, it downloads and the
+ * "Update" bar shows (`PwaUpdater`). Quietly nothing without a service worker (dev, plain http).
+ */
+export async function checkForUpdate(): Promise<void> {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.update();
+  } catch {
+    // offline, or no service worker: nothing to look for
+  }
+}
+
+/**
  * Service worker updates: a new version downloads in the background and is applied only when the
  * user taps "Update", so nobody loses a signature in progress. Also catches the case when an old
  * open tab cannot load a part of the app that a newer version replaced.
