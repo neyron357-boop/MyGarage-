@@ -540,6 +540,29 @@ async function launchBrowser() {
     await dlg.locator('.suggest').filter({ hasText: 'Сергей Иванов' }).click();
     await page.locator('.screen[data-role="top"] .job-line').filter({ hasText: 'Сергей Иванов' }).waitFor();
   });
+  await step('v0.13: a job from an invoice PDF in one go', async () => {
+    // The garage's tax invoice (as Eaglecart prints it): a new car and customer, the lines at the printed prices.
+    const pdf = makePdf([
+      [38, 800, 'RUKN ZAMZAM GARAGE LLC'], [245, 760, 'TAX INVOICE'],
+      [38, 730, 'SELLER'], [470, 730, 'BILL TO'], [38, 712, 'RUKN ZAMZAM GARAGE LLC'],
+      [400, 712, 'SAND DUNE TRADING LLC'], [420, 696, '+971 50 765 4321'], [420, 680, 'Kia Sportage (White)'], [420, 664, 'PLATE : K 40404'],
+      [38, 664, 'Invoice Number : 512'], [38, 648, 'Date : 12 Nov 2026, 10:00:00 AM'],
+      [38, 610, '#'], [55, 610, 'Description'], [250, 610, 'Price'], [360, 610, 'VAT'], [440, 610, 'Qty'], [500, 610, 'Total'],
+      [38, 590, '1.'], [55, 590, 'BRAKE PADS FRONT'], [250, 590, 'AED'], [285, 590, '200.00'], [360, 590, 'AED'], [395, 590, '10.00'], [450, 590, '1'], [495, 590, 'AED'], [525, 590, '210.00'],
+      [38, 570, '2.'], [55, 570, 'WHEEL ALIGNMENT'], [250, 570, 'AED'], [285, 570, '100.00'], [360, 570, 'AED'], [395, 570, '5.00'], [450, 570, '1'], [495, 570, 'AED'], [525, 570, '105.00'],
+      [38, 530, 'Total Qty 2'], [334, 530, 'Subtotal'], [495, 530, 'AED'], [525, 530, '315.00'],
+      [334, 500, 'Total'], [495, 500, 'AED'], [525, 500, '315.00'],
+    ]);
+    await page.goto(BASE + '#/orders/new');
+    await page.getByRole('button', { name: 'Из инвойса или сметы (PDF)' }).waitFor();
+    await page.locator('.screen[data-role="top"] input[data-doc-input]').setInputFiles({ name: 'invoice-512.pdf', mimeType: 'application/pdf', buffer: pdf });
+    const seen = async (what, loc, state = 'visible') => loc.waitFor({ state, timeout: 20000 }).catch(() => { throw new Error('not shown: ' + what); });
+    await seen('the toast', page.getByText('Инвойс 512').first());
+    await seen('the button', page.getByRole('button', { name: 'Готово · 315,00 AED' }));
+    await seen('the line', page.locator('.screen[data-role="top"] .list-row').filter({ hasText: 'BRAKE PADS FRONT' }));
+    await seen('the customer', page.locator('.screen[data-role="top"] .job-line').filter({ hasText: 'SAND DUNE TRADING LLC' }));
+    await shot('30g-job-from-pdf');
+  });
   await step('archive: a swipe left takes a job off the board, a swipe in the archive brings it back', async () => {
     // A finger's swipe from the right edge of a row to the left (touch events, as on a phone).
     const swipeLeft = (loc) =>

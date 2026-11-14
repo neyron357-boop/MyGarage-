@@ -12,6 +12,7 @@ import { quickList } from '../../domain/quickLists';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
 import { findVehicleForCheckIn, popularMakes, popularModels, suggestCustomers } from '../../services/customers';
 import { checkIn } from '../../services/orders';
+import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { CarThumb } from '../job/CarCover';
 import { DateTimeField } from '../../ui/DateFields';
@@ -239,7 +240,7 @@ export function NewOrderPage() {
   const noName = t('customer.noName');
   return (
     <>
-      <PageHeader back title={t('newOrder.title')} />
+      <PageHeader back title={t('newOrder.title')} right={<DocImportButton />} />
       <Stack gap={0}>
         <div className="group-title">{t('newOrder.vehicle')}</div>
         {picked ? (
