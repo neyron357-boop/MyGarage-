@@ -1208,6 +1208,16 @@ export const en: typeof ru = {
     diff: 'Difference',
     commentHint: 'A comment is required for “Handed over” and “Other”',
   },
+  docImport: {
+    button: 'From an invoice or quotation (PDF)',
+    invoice: 'Invoice {{number}}',
+    quotation: 'Quotation {{number}}',
+    lines: 'Lines: {{n}}',
+    skipped: 'already there: {{n}}',
+    intoJob: 'into the car’s job',
+    badFile: 'Could not read an invoice or quotation in this PDF',
+    noPlate: 'The document has no plate number',
+  },
   obd: {
     title: 'Scanner',
     import: 'From a scanner report (PDF)',

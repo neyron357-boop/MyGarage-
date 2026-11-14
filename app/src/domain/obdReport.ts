@@ -12,6 +12,8 @@ export interface TextItem {
   x: number;
   y: number;
   str: string;
+  /** How wide the piece is (where it ends): a word split in two pieces is glued back by it. */
+  w?: number;
 }
 
 export interface ObdCode {

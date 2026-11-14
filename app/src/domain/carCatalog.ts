@@ -101,6 +101,7 @@ export const CAR_CATALOG: Record<string, string[]> = {
   Skoda: ['Octavia', 'Superb', 'Kodiaq', 'Karoq', 'Kamiq', 'Rapid', 'Fabia'],
   Fuso: ['Canter', 'Rosa'],
   Hino: ['300', '500'],
+  'Ashok Leyland': ['Falcon', 'Oyster', 'Partner', 'Dost', 'AVTR'],
 };
 
 /** Most common makes in UAE garages: the one-tap chips before anything is typed. */
