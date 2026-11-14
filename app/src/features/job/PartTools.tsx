@@ -35,7 +35,9 @@ export function SupplierChips({ value, onChange, make, service, label }: { value
   const { t } = useTranslation();
   const list = useSuppliers(make, service);
   const [picker, setPicker] = useState(false);
-  const shown = list.slice(0, CHIPS);
+  // Work done outside, a service: the chips are those who do such work (a wash, a paint shop), not the parts
+  // sellers — anyone is still in "All"; none yet — "+" adds one.
+  const shown = (service ? list.filter((s) => !!s.service) : list).slice(0, CHIPS);
   const picked = value ? list.find((s) => s.id === value) : undefined;
   if (picked && !shown.includes(picked)) shown.unshift(picked);
   return (

@@ -21,7 +21,8 @@ import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
 
-export type LineKind = 'labor' | 'part';
+/** What is added: work, a part, or a service — work done by others (a wash, a tow, paint) that the garage pays for. */
+export type LineKind = 'labor' | 'part' | 'service';
 /** A line typed before: its latest net price, VAT-inclusive price if typed with VAT, and VAT rate (0 — no VAT). */
 export type Suggestion = { titleRu: string; titleEn: string; price: number; gross?: number; rate?: number; uses: number };
 export type Suggestions = { list: Map<string, Suggestion>; top: string[] };
@@ -68,7 +69,7 @@ export function useSuggestions(lang: Lang, complaint = '', enabled = true) {
   return enabled ? value : undefined;
 }
 
-type SuggestionSet = { labor: Suggestions; part: Suggestions };
+type SuggestionSet = Record<LineKind, Suggestions>;
 const suggestionCache = new Map<string, { at: number; v: SuggestionSet }>();
 function cachedSuggestions(key: string): SuggestionSet | undefined {
   const hit = suggestionCache.get(key);
@@ -96,7 +97,7 @@ async function suggestionSources(): Promise<Sources> {
 
 async function loadSuggestions(lang: Lang, complaint: string): Promise<SuggestionSet> {
   const { templates, items, orders } = await suggestionSources();
-  const maps: Record<LineKind, Map<string, Suggestion>> = { labor: new Map(), part: new Map() };
+  const maps: Record<LineKind, Map<string, Suggestion>> = { labor: new Map(), part: new Map(), service: new Map() };
   const mine = new Set(words(complaint));
   const alike = new Set(mine.size ? orders.filter((o) => words(o.complaint ?? '').some((w) => mine.has(w))).map((o) => o.id) : []);
   const put = (kind: LineKind, s: Omit<Suggestion, 'uses'>, uses: number) => {
@@ -109,9 +110,18 @@ async function loadSuggestions(lang: Lang, complaint: string): Promise<Suggestio
   };
   // Newest first, so a title keeps its latest price.
   for (const it of items)
-    if (it.kind === 'labor' || it.kind === 'part')
-      put(it.kind, { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, gross: it.unitGrossFils, rate: it.vatRateBp }, alike.has(it.orderId) ? 50 : 1);
-  for (const tpl of templates) for (const ti of tpl.items) if (ti.kind === 'labor' || ti.kind === 'part') put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, 0);
+    if (it.kind === 'labor' || it.kind === 'part') {
+      const s = { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, gross: it.unitGrossFils, rate: it.vatRateBp };
+      const uses = alike.has(it.orderId) ? 50 : 1;
+      put(it.kind, s, uses);
+      // A service offers what was done outside before (a wash, a tow) — not the garage's own work.
+      if (it.kind === 'labor' && it.outsource) put('service', s, uses);
+    }
+  for (const tpl of templates)
+    for (const ti of tpl.items)
+      if (ti.kind === 'labor' || ti.kind === 'part') {
+        put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, 0);
+      }
   const pack = (m: Map<string, Suggestion>): Suggestions => ({
     list: m,
     top: [...m.entries()]
@@ -120,7 +130,7 @@ async function loadSuggestions(lang: Lang, complaint: string): Promise<Suggestio
       .slice(0, 12)
       .map(([k]) => k),
   });
-  return { labor: pack(maps.labor), part: pack(maps.part) };
+  return { labor: pack(maps.labor), part: pack(maps.part), service: pack(maps.service) };
 }
 
 /** Add or edit one line: what was done (or which part), quantity and price; for a part — where it stands. */
@@ -142,6 +152,10 @@ export function LineSheet({
   suggestions?: Suggestions;
 }) {
   const { t } = useTranslation();
+  // A service is a line of work on the customer's bill, handed outside: what we pay them is its cost, and
+  // "Pay" on the line records it in the book as the job's expense.
+  const service = kind === 'service';
+  const lineKind: 'labor' | 'part' = kind === 'part' ? 'part' : 'labor';
   // The lines go on the customer's documents: names in the job's document language (English by default).
   const lang = b.order.docLanguage;
   const uiLang = useLang();
@@ -187,7 +201,7 @@ export function LineSheet({
     setOffersOpen(!!item?.offers?.length);
     setDraft(null);
     setWho(item?.employeeId);
-    setOutsource(item?.outsource);
+    setOutsource(item?.outsource ?? (service ? { state: 'todo' } : undefined));
     setOutDays(undefined);
     setKept(item?.mediaIds ?? []);
     setFresh((prev) => {
@@ -195,7 +209,7 @@ export function LineSheet({
       return [];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened, item, lang, incl]);
+  }, [opened, item, lang, incl, service]);
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
   /** A suggestion's price as it is typed: with VAT if it was typed with VAT last time. */
   const suggested = (s: Suggestion) => {
@@ -219,7 +233,7 @@ export function LineSheet({
   const fromCost = (c: number | undefined) => (c === undefined ? undefined : enteredPrice({ unitPriceFils: roundFils(c * (1 + b.settings.defaultMarkupBp / 10000)) }, taxRate, mode));
   const own = kind === 'part' && part === 'customer';
   const priced = { ...priceFromEntered(own ? 0 : price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
-  const lineTotal = price && !own ? itemAmounts({ kind, qty: kind === 'part' ? qty || 1 : 1, ...priced } as OrderItem) : undefined;
+  const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: kind === 'part' ? qty || 1 : 1, ...priced } as OrderItem) : undefined;
   const save = () =>
     run(async () => {
       const typed = lineName(title.trim());
@@ -244,7 +258,7 @@ export function LineSheet({
         await updateItem(item.id, patch);
         if (status && status !== partStateOf(item)) await setProcurement(item.id, { status });
       } else {
-        itemId = (await addItem(b.order.id, { kind, block: 'A', ...patch, procurementStatus: status })).id;
+        itemId = (await addItem(b.order.id, { kind: lineKind, block: 'A', ...patch, procurementStatus: status })).id;
       }
       const before = item?.mediaIds ?? [];
       if (itemId && (fresh.length || kept.length !== before.length)) await setLinePhotos(itemId, kept, fresh.map((p) => p.file));
@@ -261,7 +275,7 @@ export function LineSheet({
         ? t('item.vatTotalNone', { total: formatAed(lineTotal.gross, uiLang) })
         : t('item.vatTotal', { total: formatAed(lineTotal.gross, uiLang), vat: formatAed(lineTotal.vat, uiLang, false) })
       : undefined;
-  const nameLabel = kind === 'labor' ? t('qi.workName') : t('qi.partName');
+  const nameLabel = service ? t('qi.serviceName') : kind === 'labor' ? t('qi.workName') : t('qi.partName');
   /** An offer taken: its seller and cost on the line, the price from the cost with the garage's markup. */
   const takeOffer = (o: PartOffer) => {
     setSupplierId(o.supplierId);
@@ -286,9 +300,9 @@ export function LineSheet({
       orderId: b.order.id,
       photos: kept,
     });
-  const out = kind === 'labor' && !!outsource;
+  const out = lineKind === 'labor' && !!outsource;
   return (
-    <Modal opened={opened} onClose={onClose} title={item ? t(kind === 'labor' ? 'job.addWork' : 'job.addPart') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
+    <Modal opened={opened} onClose={onClose} title={item ? t(service ? 'job.addService' : kind === 'labor' ? 'job.addWork' : 'job.addPart') : service ? t('qi.addService') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
         {!item && (suggestions?.top.length ?? 0) > 0 && (
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
@@ -307,7 +321,7 @@ export function LineSheet({
           <div className="ios-row left line-name">
             <Autocomplete
               aria-label={nameLabel}
-              placeholder={kind === 'labor' ? t('qi.workPlaceholder') : t('qi.partPlaceholder')}
+              placeholder={service ? t('qi.servicePlaceholder') : kind === 'labor' ? t('qi.workPlaceholder') : t('qi.partPlaceholder')}
               data={names}
               filter={typedOnly}
               limit={8}
@@ -496,6 +510,15 @@ export function LineSheet({
         )}
 
         {kind === 'labor' && <WhoChips value={who} onChange={setWho} />}
+        {service && outsource && (
+          // A service: who does it (a wash, a tow, a paint shop — a supplier that serves).
+          <div className="ios-group">
+            <div className="ios-row">
+              <span className="label">{t('outsource.who')}</span>
+              <SupplierChips service value={outsource.supplierId} onChange={(s) => setOutsource({ ...outsource, supplierId: s })} label={t('outsource.who')} />
+            </div>
+          </div>
+        )}
         {kind === 'labor' && (
           // Work handed outside (paint, machining, alignment, a mobile electrician): who, what they charge, back when.
           <div>

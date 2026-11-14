@@ -1,6 +1,7 @@
 import { ActionIcon, Box, Button, Group, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import {
   IconBrandWhatsapp,
+  IconBuildingStore,
   IconCamera,
   IconCar,
   IconCash,
@@ -418,6 +419,8 @@ export function JobPage() {
   const sv = useSendVersion(b);
   const mechanics = useScreenLiveQuery(() => db.employees.filter((e) => e.active).toArray(), []) ?? [];
   const [sheet, setSheet] = useState<{ kind: LineKind; item?: OrderItem } | null>(null);
+  // A line handed outside opens as a service (work done by others); a part as a part.
+  const sheetKind = (i: OrderItem): LineKind => (i.kind === 'part' ? 'part' : i.outsource ? 'service' : 'labor');
   // While the sheet slides away it keeps showing what it showed (not "Add labour" for a part).
   const lastSheet = useRef(sheet);
   if (sheet) lastSheet.current = sheet;
@@ -657,7 +660,7 @@ export function JobPage() {
           : i.kind === 'discount'
             ? () => setDiscountOpen(true)
             : i.approvalState === 'draft'
-              ? () => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i })
+              ? () => setSheet({ kind: sheetKind(i), item: i })
               : () => setAct(i)
       }
     />
@@ -980,12 +983,15 @@ export function JobPage() {
           </List>
           {amendable && (
             // Something forgotten or to change after the invoice: the same buttons, the invoice is redone.
-            <Group gap={8} mt="sm" wrap="nowrap">
-              <Button variant="light" leftSection={<IconTool size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'labor' }) })} style={{ flex: 1 }}>
+            <Group gap={6} mt="sm" wrap="nowrap" className="add-row">
+              <Button variant="light" className="add-btn" leftSection={<IconTool size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'labor' }) })}>
                 {t('job.addWork')}
               </Button>
-              <Button variant="light" leftSection={<IconPackage size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'part' }) })} style={{ flex: 1 }}>
+              <Button variant="light" className="add-btn" leftSection={<IconPackage size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'part' }) })}>
                 {t('job.addPart')}
+              </Button>
+              <Button variant="light" className="add-btn" leftSection={<IconBuildingStore size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'service' }) })}>
+                {t('job.addService')}
               </Button>
               <ActionIcon variant="light" size={44} radius="xl" aria-label={t('job.amend')} onClick={() => setAmend({})} style={{ flexShrink: 0 }}>
                 <IconPencil size={20} />
@@ -1027,12 +1033,16 @@ export function JobPage() {
             </List>
           )}
           {editable && phase !== 'booked' && (
-            <Group gap={8} mt={lines.length ? 'sm' : 0} wrap="nowrap">
-              <Button variant="light" leftSection={<IconTool size={18} />} onClick={() => setSheet({ kind: 'labor' })} style={{ flex: 1 }}>
+            // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
+            <Group gap={6} mt={lines.length ? 'sm' : 0} wrap="nowrap" className="add-row">
+              <Button variant="light" className="add-btn" leftSection={<IconTool size={18} />} onClick={() => setSheet({ kind: 'labor' })}>
                 {t('job.addWork')}
               </Button>
-              <Button variant="light" leftSection={<IconPackage size={18} />} onClick={() => setSheet({ kind: 'part' })} style={{ flex: 1 }}>
+              <Button variant="light" className="add-btn" leftSection={<IconPackage size={18} />} onClick={() => setSheet({ kind: 'part' })}>
                 {t('job.addPart')}
+              </Button>
+              <Button variant="light" className="add-btn" leftSection={<IconBuildingStore size={18} />} onClick={() => setSheet({ kind: 'service' })}>
+                {t('job.addService')}
               </Button>
               {lines.length > 0 && (
                 <ActionIcon variant="light" size={44} radius="xl" aria-label={t('discount.title')} onClick={() => setDiscountOpen(true)} style={{ flexShrink: 0 }}>
@@ -1097,7 +1107,7 @@ export function JobPage() {
           />
         )}
       </LazySheet>
-      <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: i.kind === 'part' ? 'part' : 'labor', item: i })} />
+      <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: sheetKind(i), item: i })} />
       <LazySheet opened={more}>
         {(o) => (
           <MoreSheet opened={o} onClose={() => setMore(false)} tiles={tiles} />

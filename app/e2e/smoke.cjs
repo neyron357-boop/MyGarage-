@@ -552,6 +552,35 @@ async function launchBrowser() {
     await seen('the customer', page.locator('.screen[data-role="top"] .job-line').filter({ hasText: 'SAND DUNE TRADING LLC' }));
     await shot('30g-job-from-pdf');
   });
+  await step('v0.16: a service — done by others: on the bill, and what we pay them is the job expense', async () => {
+    const id = await page.evaluate(async () => {
+      const { checkIn } = await import('/src/services/orders.ts');
+      return (await checkIn({ plate: { emirate: 'DXB', code: 'W', number: '35001' }, make: 'Nissan', model: 'Patrol', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true })).id;
+    });
+    await page.goto(BASE + '#/orders/' + id);
+    const dlg = page.getByRole('dialog');
+    await front('.add-btn').filter({ hasText: 'Услуга' }).click();
+    await dlg.getByText('Добавить услугу').waitFor();
+    await dlg.getByLabel('Услуга').fill('Car wash');
+    await dlg.getByLabel('Цена', { exact: true }).fill('35');
+    await dlg.getByLabel('Платим').fill('25');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await front('.list-row').filter({ hasText: 'CAR WASH' }).waitFor();
+    await page.getByRole('button', { name: 'Согласен' }).first().click();
+    await page.waitForTimeout(600);
+    await front('.list-row').filter({ hasText: 'CAR WASH' }).first().click();
+    await dlg.getByRole('button', { name: /^Оплатить/ }).click();
+    await dlg.getByRole('button', { name: 'Наличные' }).click();
+    await page.getByText('Записано в расходы заказа').first().waitFor();
+    const e = await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      const list = await db.expenses.where('orderId').equals(id).toArray();
+      const cats = await db.expenseCategories.toArray();
+      return list.map((x) => [x.amountFils, cats.find((c) => c.id === x.categoryId)?.code].join(':'));
+    }, id);
+    if (e.join() !== '2500:subcontract') throw new Error('service expense: ' + JSON.stringify(e));
+    await page.keyboard.press('Escape');
+  });
   await step('archive: a swipe left takes a job off the board, a swipe in the archive brings it back', async () => {
     // A finger's swipe from the right edge of a row to the left (touch events, as on a phone).
     const swipeLeft = (loc) =>

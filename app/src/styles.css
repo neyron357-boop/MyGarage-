@@ -4342,6 +4342,43 @@ html.kb .screen-bottom > .sticky-bar {
 .handover-checks {
   margin-top: 22px;
 }
+/* Under the job's lines: work, a part, a service — three labelled buttons — then the discount and the copy. On a
+   phone the label goes under its symbol (13 pt, as the tab bar's) so all five fit one row without cutting a word. */
+.add-row .add-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 52px;
+  padding: 0 4px;
+}
+.add-row .add-btn .mantine-Button-inner {
+  flex-direction: column;
+  gap: 3px;
+}
+.add-row .add-btn .mantine-Button-section[data-position='left'] {
+  margin: 0;
+}
+.add-row .add-btn .mantine-Button-label {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: visible;
+}
+@media (min-width: 600px) {
+  .add-row .add-btn {
+    height: 44px;
+    padding: 0 14px;
+  }
+  .add-row .add-btn .mantine-Button-inner {
+    flex-direction: row;
+    gap: 0;
+  }
+  .add-row .add-btn .mantine-Button-section[data-position='left'] {
+    margin-right: 8px;
+  }
+  .add-row .add-btn .mantine-Button-label {
+    font-size: 16px;
+  }
+}
+
 /* The job's two tabs (the job, its notes) stay in reach under the navigation bar while either scrolls; their
    backing — the screen's own colour and a hairline — shows only once they stick (ui/sticky.ts): at rest they
    sit on the glow like the rest of the header. */
