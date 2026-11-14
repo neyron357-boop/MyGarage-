@@ -47,7 +47,7 @@ export async function coverOf(vehicleId: string): Promise<string | undefined> {
 }
 
 /** One photo the car keeps (its main photo, its VIN plate): a new one replaces the one before. */
-async function setCarPhoto(vehicleId: string, slot: 'cover' | 'vin', file: Blob): Promise<Media> {
+async function setCarPhoto(vehicleId: string, slot: 'cover' | 'vin' | MulkiyaSide, file: Blob): Promise<Media> {
   const before = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === slot);
   const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot, file });
   for (const m of before) await deleteMedia(m.id);
@@ -64,3 +64,35 @@ export async function vinPhotoOf(vehicleId: string): Promise<string | undefined>
   const list = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === 'vin' && m.kind === 'photo');
   return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.id;
 }
+
+/** The two sides of the Mulkiya (the registration card): the front with the owner, the back with the car's data. */
+export type MulkiyaSide = 'mulkiya' | 'mulkiya_back';
+export const MULKIYA_SIDES: MulkiyaSide[] = ['mulkiya', 'mulkiya_back'];
+
+/**
+ * The car's Mulkiya, both sides: taken for the car (kept for every visit), else the photos of it in its
+ * check-in acts (the latest visit first) — where the Mulkiya was photographed before.
+ */
+export async function mulkiyaOf(vehicleId: string): Promise<Partial<Record<MulkiyaSide, string>>> {
+  const isSide = (slot: string): slot is MulkiyaSide => (MULKIYA_SIDES as string[]).includes(slot);
+  const out: Partial<Record<MulkiyaSide, string>> = {};
+  const own = (await db.media.where('ownerId').equals(vehicleId).toArray())
+    .filter((m) => m.kind === 'photo' && isSide(m.slot))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  for (const m of own) if (isSide(m.slot) && !out[m.slot]) out[m.slot] = m.id;
+  if (MULKIYA_SIDES.every((s) => out[s])) return out;
+  const orders = await db.orders.where('vehicleId').equals(vehicleId).toArray();
+  if (!orders.length) return out;
+  const visit = new Map(orders.map((o) => [o.id, o.createdAt]));
+  const acts = (await db.inspections.where('orderId').anyOf(orders.map((o) => o.id)).toArray()).filter((i) => i.kind === 'intake');
+  if (!acts.length) return out;
+  const when = new Map(acts.map((i) => [i.id, visit.get(i.orderId) ?? '']));
+  const shots = (await db.media.where('ownerId').anyOf(acts.map((i) => i.id)).toArray())
+    .filter((m) => m.kind === 'photo' && isSide(m.slot))
+    .sort((a, b) => (when.get(b.ownerId) ?? '').localeCompare(when.get(a.ownerId) ?? '') || b.createdAt.localeCompare(a.createdAt));
+  for (const m of shots) if (isSide(m.slot) && !out[m.slot]) out[m.slot] = m.id;
+  return out;
+}
+
+/** One side of the Mulkiya, kept with the car: a new one replaces the one taken for it before. */
+export const setMulkiya = (vehicleId: string, side: MulkiyaSide, file: Blob) => setCarPhoto(vehicleId, side, file);

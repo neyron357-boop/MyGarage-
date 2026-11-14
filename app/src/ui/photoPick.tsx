@@ -10,7 +10,7 @@ import { haptic } from './haptics';
 
 const HOLD_MS = 450;
 
-export function usePhotoPick(onFile: (file: File) => void): {
+export function usePhotoPick(onFiles: (files: File[]) => void, opts: { /** Several at once from the photos (both sides of a card). */ multiple?: boolean } = {}): {
   /** Handlers for the tile: the hold and the right click. */
   handlers: {
     onTouchStart: (e: React.TouchEvent<HTMLElement>) => void;
@@ -33,8 +33,8 @@ export function usePhotoPick(onFile: (file: File) => void): {
   const held = useRef(false);
   const used = useRef(false);
   const touching = useRef(false);
-  const pick = useRef(onFile);
-  pick.current = onFile;
+  const pick = useRef(onFiles);
+  pick.current = onFiles;
   const stop = (el?: HTMLElement) => {
     window.clearTimeout(timer.current);
     timer.current = undefined;
@@ -42,9 +42,9 @@ export function usePhotoPick(onFile: (file: File) => void): {
   };
   const gallery = () => galleryRef.current?.click();
   const take = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.currentTarget.files?.[0];
+    const files = [...(e.currentTarget.files ?? [])];
     e.currentTarget.value = '';
-    if (file) pick.current(file);
+    if (files.length) pick.current(files);
   };
   return {
     handlers: {
@@ -107,7 +107,7 @@ export function usePhotoPick(onFile: (file: File) => void): {
     inputs: (
       <>
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden data-camera-input onChange={take} />
-        <input ref={galleryRef} type="file" accept="image/*" hidden data-gallery-input onChange={take} />
+        <input ref={galleryRef} type="file" accept="image/*" multiple={opts.multiple} hidden data-gallery-input onChange={take} />
       </>
     ),
   };

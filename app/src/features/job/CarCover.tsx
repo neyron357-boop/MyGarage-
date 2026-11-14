@@ -2,7 +2,7 @@ import { Button, Group } from '@mantine/core';
 import { IconCamera, IconCameraPlus, IconCar, IconPhoto } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { coverOf, setCover, setVinPhoto, vinPhotoOf } from '../../services/cover';
+import { coverOf, MULKIYA_SIDES, mulkiyaOf, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type MulkiyaSide } from '../../services/cover';
 import { MediaImage } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
@@ -33,7 +33,7 @@ export function CarCover({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpt
   const { run } = useAction();
   const cover = useScreenLiveQuery(async () => ({ id: await coverOf(vehicleId) }), [vehicleId]);
   const [viewing, setViewing] = useState(false);
-  const pick = usePhotoPick((file) => void run(() => setCover(vehicleId, file)));
+  const pick = usePhotoPick(([file]) => void run(() => setCover(vehicleId, file)));
   if (!cover) return <div className="action-tile job-cover" data-empty="true" aria-hidden="true" />;
   // A closed job shows the photo if the car has one — not a tile asking for it.
   if (hideEmpty && !cover.id) return null;
@@ -83,7 +83,7 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
   const { run } = useAction();
   const photo = useScreenLiveQuery(async () => ({ id: await vinPhotoOf(vehicleId) }), [vehicleId]);
   const [viewing, setViewing] = useState(false);
-  const pick = usePhotoPick((file) => void run(() => setVinPhoto(vehicleId, file)));
+  const pick = usePhotoPick(([file]) => void run(() => setVinPhoto(vehicleId, file)));
   // A closed job shows the VIN photo if there is one — not an empty tile asking for it.
   if (hideEmpty && !photo?.id) return null;
   return (
@@ -118,6 +118,93 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
           onIndex={() => undefined}
           onClose={() => setViewing(false)}
           actions={() => <ReplaceButtons camera={pick.camera} gallery={pick.gallery} />}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The car's Mulkiya (the registration card), both sides, as a chip beside VIN: a tap takes the side still
+ * missing with the camera (the front first; "1/2" while one is there), a long press picks from the phone's
+ * photos — two at once go in as front and back. With both, a tap shows them full screen (swipe between the
+ * sides: retake or choose another for the one shown), a long press chooses them again from the photos.
+ */
+export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpty?: boolean }) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  const photos = useScreenLiveQuery(() => mulkiyaOf(vehicleId), [vehicleId]);
+  const [viewing, setViewing] = useState<number | null>(null);
+  // The side a picker fills when it is not "the next missing one" (the side shown full screen).
+  const [target, setTarget] = useState<MulkiyaSide | null>(null);
+  const present = MULKIYA_SIDES.filter((s) => photos?.[s]);
+  const missing = MULKIYA_SIDES.filter((s) => !photos?.[s]);
+  const pick = usePhotoPick(
+    (files) =>
+      void run(async () => {
+        // The side shown, or the missing ones first (front, back), then the rest in order.
+        const order = target ? [target] : [...missing, ...present];
+        setTarget(null);
+        for (let i = 0; i < files.length && i < order.length; i++) await setMulkiya(vehicleId, order[i], files[i]);
+      }),
+    { multiple: true },
+  );
+  if (hideEmpty && !present.length) return null;
+  const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s }));
+  return (
+    <>
+      <button
+        type="button"
+        className="chip vin-chip"
+        data-empty={!present.length || undefined}
+        aria-label={present.length ? t('intake.mulkiya') : t('job.mulkiyaTake')}
+        {...pick.handlers}
+        onClick={() => {
+          if (pick.consumeClick()) return;
+          setTarget(null);
+          if (missing.length) pick.camera();
+          else setViewing(0);
+        }}
+      >
+        {present.length ? (
+          <span className="mulkiya-thumbs">
+            {items.map((x) => (
+              <span key={x.side} className="vin-thumb">
+                <MediaImage id={x.id} h={26} w={26} radius="0" />
+              </span>
+            ))}
+          </span>
+        ) : (
+          <IconCameraPlus size={17} stroke={1.9} aria-hidden />
+        )}
+        <span>{t('intake.mulkiya')}</span>
+        {present.length === 1 && <span className="chip-note tnum">1/2</span>}
+      </button>
+      {pick.inputs}
+      {viewing !== null && items.length > 0 && (
+        <PhotoViewer
+          items={items}
+          index={Math.min(viewing, items.length - 1)}
+          onIndex={setViewing}
+          onClose={() => {
+            setViewing(null);
+            setTarget(null);
+          }}
+          actions={(item) => {
+            const side = items.find((x) => x.id === item.id)?.side ?? 'mulkiya';
+            return (
+              <ReplaceButtons
+                camera={() => {
+                  setTarget(side);
+                  pick.camera();
+                }}
+                gallery={() => {
+                  setTarget(side);
+                  pick.gallery();
+                }}
+              />
+            );
+          }}
         />
       )}
     </>

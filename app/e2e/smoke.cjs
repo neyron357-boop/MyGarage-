@@ -357,6 +357,11 @@ async function launchBrowser() {
     await page.locator('.viewer').getByRole('button', { name: 'Из фото' }).waitFor();
     await page.locator('.viewer button').first().click();
     await page.locator('.viewer').waitFor({ state: 'detached' });
+    // The Mulkiya beside VIN: a tap takes the front with the camera, "1/2" until the back is taken too.
+    const [mulkiya] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Снять Mulkiya' }).click()]);
+    if (!(await mulkiya.element().getAttribute('capture'))) throw new Error('a tap on Mulkiya must open the camera');
+    await mulkiya.setFiles({ name: 'mulkiya.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+    await page.getByRole('button', { name: 'Mulkiya', exact: true }).getByText('1/2').waitFor();
     const dlg = page.getByRole('dialog');
     // What the mechanic found: a job and a part (the part first without a price: still to find).
     await page.getByRole('button', { name: 'Работа', exact: true }).click();

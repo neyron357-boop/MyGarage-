@@ -114,7 +114,7 @@ PWA для менеджера небольшой автомастерской в
   Главное фото машины — `services/cover.ts` (`CarCover` в карточке заказа; на доске фото — сама карточка `JobRow`, размер
   карточки — `MediaImage card` / `cardUrl`). Потянуть, чтобы обновить — `usePullRefresh` (`ui/pullRefresh.tsx`, доска:
   перечитать + `checkForUpdate`); у списков остаётся резиновый край iPhone (`.screen-scroll` — `contain`).
-  Фото одного места (машина, VIN) — `usePhotoPick` (`ui/photoPick.tsx`): касание — камера, удержание (на ПК — правый
+  Фото одного места (машина, VIN, Mulkiya — `mulkiyaOf`/`setMulkiya`) — `usePhotoPick` (`ui/photoPick.tsx`): касание — камера, удержание (на ПК — правый
   клик) — фото из телефона, открывается при отпускании пальца (iPhone открывает выбор только прямо в касании).
   Ряд фото с плиткой «Фото» — `ui/PhotoStrip` (пруфы, фото строк); фото на весь экран — только `PhotoViewer`
   (в нём «Поделиться» / «Сохранить»). Доска — свежие сверху (`lastChange` в `domain/flow.ts`). Свайп строки — `ui/swipe.ts`; архив —

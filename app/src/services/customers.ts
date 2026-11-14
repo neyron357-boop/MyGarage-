@@ -1,6 +1,7 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { normalizePhone } from '../domain/phone';
+import { canonicalMake, canonicalModel } from '../domain/carCatalog';
 import { normalizePlate, plateMatches, plateSearchKey } from '../domain/plates';
 import type { Customer, Order, Vehicle } from '../domain/types';
 import { AppError } from './errors';
@@ -112,6 +113,43 @@ export async function findVehicleForCheckIn(plate: Vehicle['plate']): Promise<{ 
   return { ...found, activeOrder };
 }
 
+export interface CheckInCar {
+  vehicle: Vehicle;
+  owner?: Customer;
+  activeOrder?: Order;
+}
+
+/**
+ * Cars with this plate number when the plate as typed is not in the base — the code left out (or typed
+ * where the car has none), another emirate picked: the same number and a code that fits (the same, or one
+ * of the two empty); this emirate first, then the car seen last. The number alone finds the car and its
+ * owner at check-in — offered, not taken: the same number with another code is another car.
+ */
+export async function findVehiclesByNumber(plate: Vehicle['plate'], limit = 4): Promise<CheckInCar[]> {
+  const n = normalizePlate(plate);
+  if (!n.number) return [];
+  const cars = (await db.vehicles.toArray()).filter((v) => {
+    if (v.archivedAt) return false;
+    const p = normalizePlate(v.plate);
+    if (p.number !== n.number) return false;
+    if (p.code === n.code && p.emirate === n.emirate) return false; // that one is the exact match
+    return !n.code || !p.code || p.code === n.code;
+  });
+  if (!cars.length) return [];
+  const orders = await db.orders.where('vehicleId').anyOf(cars.map((v) => v.id)).toArray();
+  const last = (id: string) => orders.filter((o) => o.vehicleId === id).reduce((a, o) => (o.createdAt > a ? o.createdAt : a), '');
+  const found = await Promise.all(
+    cars.map(async (vehicle) => ({
+      vehicle,
+      owner: await db.customers.get(vehicle.customerId),
+      activeOrder: orders.find((o) => o.vehicleId === vehicle.id && !['delivered', 'closed', 'cancelled'].includes(o.stage)),
+    })),
+  );
+  return found
+    .sort((a, b) => Number(b.vehicle.plate.emirate === n.emirate) - Number(a.vehicle.plate.emirate === n.emirate) || last(b.vehicle.id).localeCompare(last(a.vehicle.id)))
+    .slice(0, limit);
+}
+
 /**
  * Existing customers matching what is being typed (3+ phone digits or 2+ letters of the name or the
  * company), but `except` (the customer being edited). Names starting with what is typed come first.
@@ -131,22 +169,37 @@ export async function suggestCustomers(phone: string, name: string, limit = 3, e
     .slice(0, limit);
 }
 
-/** Makes this garage sees most often first, then the usual UAE list (one-tap chips at check-in). */
-export async function popularMakes(defaults: string[], limit = 12): Promise<string[]> {
-  const counts = new Map<string, number>();
-  for (const v of await db.vehicles.toArray()) if (v.make) counts.set(v.make, (counts.get(v.make) ?? 0) + 1);
-  const own = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m);
-  return [...new Set([...own, ...defaults])].slice(0, limit);
+/**
+ * Names as one chip each, however they were typed ("HiAce", "HIACE", "Hiace" are one model): counted under
+ * the catalogue's spelling (or the first typed one), the most frequent first, then the list's own order.
+ */
+function chipNames(seen: string[], spell: (s: string) => string, rest: string[], limit: number): string[] {
+  const key = (s: string) => s.toLowerCase().replace(/[\s\-_.]/g, '');
+  const counts = new Map<string, { name: string; n: number }>();
+  for (const s of seen) {
+    const name = spell(s.trim());
+    if (!name) continue;
+    const k = key(name);
+    const had = counts.get(k);
+    if (had) had.n++;
+    else counts.set(k, { name, n: 1 });
+  }
+  const out = [...counts.values()].sort((a, b) => b.n - a.n).map((x) => x.name);
+  for (const r of rest) if (!out.some((o) => key(o) === key(r))) out.push(r);
+  return out.slice(0, limit);
 }
 
-/** Models of this make seen in the garage first, then the catalogue order. */
+/** Makes this garage sees most often first, then the usual UAE list (one-tap chips at check-in). */
+export async function popularMakes(defaults: string[], limit = 12): Promise<string[]> {
+  return chipNames((await db.vehicles.toArray()).map((v) => v.make), canonicalMake, defaults, limit);
+}
+
+/** Models of this make seen in the garage first, then the catalogue order — one chip per model. */
 export async function popularModels(make: string, catalogue: string[], limit = 10): Promise<string[]> {
-  if (!make.trim()) return [];
-  const m = make.trim().toLowerCase();
-  const counts = new Map<string, number>();
-  for (const v of await db.vehicles.toArray()) if (v.make.toLowerCase() === m && v.model) counts.set(v.model, (counts.get(v.model) ?? 0) + 1);
-  const own = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([x]) => x);
-  return [...new Set([...own, ...catalogue])].slice(0, limit);
+  const mk = canonicalMake(make);
+  if (!mk) return [];
+  const own = (await db.vehicles.toArray()).filter((v) => canonicalMake(v.make) === mk && v.model).map((v) => v.model);
+  return chipNames(own, (s) => canonicalModel(mk, s), catalogue, limit);
 }
 
 export interface SearchHit {

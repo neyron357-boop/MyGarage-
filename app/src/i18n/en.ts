@@ -1044,6 +1044,7 @@ export const en: typeof ru = {
     vinTake: 'Take the VIN',
     retakePhoto: 'Retake',
     fromPhotos: 'From photos',
+    mulkiyaTake: 'Take the Mulkiya',
     refuseTitle: 'The customer refused?',
     refuseText: 'Lines waiting for an answer become refused, unsent ones are deleted. With nothing to pay for, the job is closed.',
     unpaid: 'No payment',

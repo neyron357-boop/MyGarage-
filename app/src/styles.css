@@ -1770,6 +1770,14 @@ html.kb .tab-bar-wrap {
   border-radius: 50%;
   overflow: hidden;
 }
+/* Both sides of the Mulkiya on its chip: two round thumbnails, the back tucked under the front. */
+.mulkiya-thumbs {
+  display: inline-flex;
+}
+.mulkiya-thumbs > .vin-thumb + .vin-thumb {
+  margin-left: -11px;
+  box-shadow: 0 0 0 2px var(--app-card);
+}
 /* A photo tile (ui/photoPick.tsx): a tap — the camera, a hold — the phone's photos. Held long enough, it
    swells a little ("let go to choose"); the iPhone's own long-press menu and selection stay away. */
 .chip.vin-chip,

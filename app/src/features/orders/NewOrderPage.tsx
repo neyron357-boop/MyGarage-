@@ -10,7 +10,7 @@ import { formatPhone } from '../../domain/phone';
 import { EMIRATES } from '../../domain/plates';
 import { quickList } from '../../domain/quickLists';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
-import { findVehicleForCheckIn, popularMakes, popularModels, suggestCustomers } from '../../services/customers';
+import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
 import { checkIn } from '../../services/orders';
 import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
@@ -111,6 +111,9 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
   const canon = canonicalMake(make);
   const catalogue = useMemo(() => modelsFor(make), [make]);
   const models = useLiveQuery(() => popularModels(canon, catalogue), [canon, catalogue]) ?? catalogue.slice(0, 10);
+  // One model however it is typed ("HiAce" is the chip "Hiace"): the chip of the model picked is lit.
+  const same = (a: string, b: string) => a.toLowerCase().replace(/[\s\-_.]/g, '') === b.toLowerCase().replace(/[\s\-_.]/g, '');
+  const picked = canonicalModel(make, model);
   return (
     <Box className="surface" p="md">
       <div className="chip-row" aria-label={t('vehicle.make')}>
@@ -149,7 +152,7 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
           {models.length > 0 && (
             <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('vehicle.model')}>
               {models.map((m) => (
-                <button key={m} type="button" className="chip" data-active={canonicalModel(make, model) === m} onClick={() => onModel(m)}>
+                <button key={m} type="button" className="chip" data-active={!!picked && same(picked, m)} onClick={() => onModel(m)}>
                   {m}
                 </button>
               ))}
@@ -163,7 +166,7 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
             filter={typedOnly}
             limit={8}
             // Likewise the model: a chip shows it, the field takes any other.
-            value={models.includes(canonicalModel(make, model)) ? '' : model}
+            value={picked && models.some((m) => same(m, picked)) ? '' : model}
             onChange={onModel}
             autoComplete="off"
           />
@@ -203,8 +206,15 @@ export function NewOrderPage() {
     if (preVehicle) setPicked(preVehicle);
   }, [preVehicle]);
 
-  // The plate is already in the base: offer that car (and its open job, if any).
-  const match = useLiveQuery(() => (picked ? undefined : findVehicleForCheckIn(plate)), [picked, plate.emirate, plate.code, plate.number]);
+  // The plate is already in the base: offer that car (and its open job, if any). Not as typed — the code
+  // left out, another emirate: the cars with that number are offered to pick (`findVehiclesByNumber`).
+  const found = useLiveQuery(async () => {
+    if (picked) return { match: undefined, byNumber: [] as CheckInCar[] };
+    const m = await findVehicleForCheckIn(plate);
+    return { match: m, byNumber: m ? [] : await findVehiclesByNumber(plate) };
+  }, [picked, plate.emirate, plate.code, plate.number]);
+  const match = found?.match;
+  const byNumber = found?.byNumber ?? [];
   const suggestions = useLiveQuery(() => (picked || pickedCustomer ? [] : suggestCustomers(phone, name)), [picked, pickedCustomer, phone, name]) ?? [];
   // A plate already in the base (no job open on it) is that car: taken by itself, with its photo and owner.
   const auto = !picked && match && !match.activeOrder ? match : undefined;
@@ -311,6 +321,35 @@ export function NewOrderPage() {
                   {t('newOrder.openOrder')}
                 </Text>
               </button>
+            )}
+            {byNumber.length > 0 && (
+              // The number is in the base with another code (or none): one tap — that car and its customer.
+              <Stack gap={8} mt={10}>
+                {byNumber.map((c) => (
+                  <button
+                    key={c.vehicle.id}
+                    type="button"
+                    className="suggest rise-enter"
+                    onClick={() => (c.activeOrder ? navigate(`/orders/${c.activeOrder.id}`) : setPicked(c))}
+                  >
+                    <CarThumb vehicleId={c.vehicle.id} size={44} />
+                    <Box style={{ flex: 1, minWidth: 0 }}>
+                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                        <PlateText plate={c.vehicle.plate} size="sm" />
+                        <Text size="sm" fw={600} lineClamp={1}>
+                          {[c.vehicle.make, c.vehicle.model].filter(Boolean).join(' ')}
+                        </Text>
+                      </Group>
+                      <Text size="xs" c="dimmed" lineClamp={1} mt={2}>
+                        {[who(c.owner, noName), c.activeOrder ? t('newOrder.inWork', { n: c.activeOrder.number }) : ''].filter(Boolean).join(' · ')}
+                      </Text>
+                    </Box>
+                    <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                      {c.activeOrder ? t('newOrder.openOrder') : t('newOrder.useThis')}
+                    </Text>
+                  </button>
+                ))}
+              </Stack>
             )}
             {!auto && (
               <>

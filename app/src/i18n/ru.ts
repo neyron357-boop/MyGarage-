@@ -1042,6 +1042,7 @@ export const ru = {
     vinTake: 'Снять VIN',
     retakePhoto: 'Переснять',
     fromPhotos: 'Из фото',
+    mulkiyaTake: 'Снять Mulkiya',
     refuseTitle: 'Клиент отказался?',
     refuseText: 'Что ждёт ответа — станет отказом, неотправленное удалится. Если платить не за что, заказ закроется.',
     unpaid: 'Без оплаты',

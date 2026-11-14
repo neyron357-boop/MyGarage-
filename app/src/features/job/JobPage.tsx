@@ -83,7 +83,7 @@ import { useSendVersion } from '../estimate/EstimatePage';
 import { DiscountSheet } from '../money/DiscountSheet';
 import { PaymentModal } from '../money/PaymentPanel';
 import { DeleteJobModal } from '../orders/DeleteJob';
-import { CarCover, VinTile } from './CarCover';
+import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { DueChip } from './Due';
 import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
 import { MechanicSheet } from './MechanicSheet';
@@ -900,6 +900,7 @@ export function JobPage() {
               </button>
             ))}
           <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} hideEmpty={!open} />
+          <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
         </div>
       </Box>
 
