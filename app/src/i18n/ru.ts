@@ -1041,6 +1041,7 @@ export const ru = {
     vinPhoto: 'Фото VIN',
     vinTake: 'Снять VIN',
     retakePhoto: 'Переснять',
+    fromPhotos: 'Из фото',
     refuseTitle: 'Клиент отказался?',
     refuseText: 'Что ждёт ответа — станет отказом, неотправленное удалится. Если платить не за что, заказ закроется.',
     unpaid: 'Без оплаты',

@@ -347,8 +347,14 @@ async function launchBrowser() {
     const [vinChooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Снять VIN' }).click()]);
     await vinChooser.setFiles({ name: 'vin.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Фото VIN' }).locator('img').waitFor();
+    // A tap took it with the camera; a long press (a right click here) chooses one from the phone's photos.
+    if (!(await vinChooser.element().getAttribute('capture'))) throw new Error('a tap on VIN must open the camera');
+    const [fromPhotos] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Фото VIN' }).click({ button: 'right' })]);
+    if (await fromPhotos.element().getAttribute('capture')) throw new Error('a long press on VIN must open the photos, not the camera');
+    await fromPhotos.setFiles([]);
     await page.getByRole('button', { name: 'Фото VIN' }).click();
     await page.locator('.viewer').getByText('VIN', { exact: true }).waitFor();
+    await page.locator('.viewer').getByRole('button', { name: 'Из фото' }).waitFor();
     await page.locator('.viewer button').first().click();
     await page.locator('.viewer').waitFor({ state: 'detached' });
     const dlg = page.getByRole('dialog');

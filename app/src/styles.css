@@ -1770,6 +1770,27 @@ html.kb .tab-bar-wrap {
   border-radius: 50%;
   overflow: hidden;
 }
+/* A photo tile (ui/photoPick.tsx): a tap — the camera, a hold — the phone's photos. Held long enough, it
+   swells a little ("let go to choose"); the iPhone's own long-press menu and selection stay away. */
+.chip.vin-chip,
+.job-cover {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.chip.vin-chip[data-held] {
+  --held: 1.08;
+  animation: photo-held 260ms var(--spring) forwards;
+}
+.job-cover[data-held] {
+  --held: 1.02;
+  animation: photo-held 260ms var(--spring) forwards;
+}
+@keyframes photo-held {
+  to {
+    scale: var(--held);
+  }
+}
 /* ---------- Pull to refresh (ui/pullRefresh.tsx): the iPhone's spinner ---------- */
 /* Twelve spokes round a point under the navigation bar: they appear one by one as the page comes down,
    then turn (each fading after the one before) while the refresh runs. */
