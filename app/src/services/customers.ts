@@ -112,14 +112,22 @@ export async function findVehicleForCheckIn(plate: Vehicle['plate']): Promise<{ 
   return { ...found, activeOrder };
 }
 
-/** Existing customers matching what is being typed (3+ phone digits or 2+ letters of the name). */
-export async function suggestCustomers(phone: string, name: string, limit = 3): Promise<Customer[]> {
+/**
+ * Existing customers matching what is being typed (3+ phone digits or 2+ letters of the name or the
+ * company), but `except` (the customer being edited). Names starting with what is typed come first.
+ */
+export async function suggestCustomers(phone: string, name: string, limit = 3, except?: string): Promise<Customer[]> {
   const digits = phone.replace(/\D/g, '').replace(/^00/, '').replace(/^0/, '');
   const n = name.trim().toLowerCase();
   if (digits.length < 3 && n.length < 2) return [];
   const all = await db.customers.toArray();
+  const named = (c: Customer) => [c.name, c.companyName ?? ''].map((x) => x.toLowerCase());
+  const byName = (c: Customer) => n.length >= 2 && named(c).some((x) => x.includes(n));
+  const byPhone = (c: Customer) => digits.length >= 3 && !!c.phone && c.phone.replace(/\D/g, '').includes(digits);
+  const starts = (c: Customer) => (n && named(c).some((x) => x.startsWith(n)) ? 0 : 1);
   return all
-    .filter((c) => !c.archivedAt && ((digits.length >= 3 && c.phone.replace(/\D/g, '').includes(digits)) || (n.length >= 2 && c.name.toLowerCase().includes(n))))
+    .filter((c) => c.id !== except && !c.archivedAt && (byPhone(c) || byName(c)))
+    .sort((a, b) => starts(a) - starts(b))
     .slice(0, limit);
 }
 

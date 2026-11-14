@@ -2,7 +2,7 @@ import { db, nextNumber, purgeJournal, uid } from '../db/db';
 import { hoursBetween, nowIso } from '../domain/dates';
 import { whyJobStays, type DeleteBlock } from '../domain/deletion';
 import { amountDue } from '../domain/invoice';
-import { summarize } from '../domain/items';
+import { byPosition, summarize } from '../domain/items';
 import { checkTransition, isBackward, type StageContext } from '../domain/stages';
 import type {
   Claim,
@@ -119,6 +119,50 @@ export async function checkIn(input: CheckInInput): Promise<Order> {
   });
 }
 
+/**
+ * The job's customer is someone already in the base (picked while typing a name or a phone on the job):
+ * the job, its car, its messages and claims go to them, and the documents follow their language. The
+ * customer the job had is deleted when it was an empty one made at check-in (no name, no phone) and
+ * nothing else is theirs. Payments and debts keep whom they were taken from (they never change); an
+ * invoice already issued keeps its buyer.
+ */
+export async function setJobCustomer(orderId: string, customerId: string): Promise<void> {
+  await db.transaction('rw', [db.orders, db.vehicles, db.ownerships, db.customers, db.messages, db.claims, db.payments, db.debts, db.expenses, db.incomes, db.events], async () => {
+    const [order, next] = await Promise.all([db.orders.get(orderId), db.customers.get(customerId)]);
+    if (!order || !next || next.archivedAt) throw new AppError('err.notFound');
+    const prevId = order.customerId;
+    if (prevId === customerId) return;
+    const now = nowIso();
+    await db.orders.update(orderId, { customerId, docLanguage: next.docLanguage, updatedAt: now });
+    const vehicle = await db.vehicles.get(order.vehicleId);
+    if (vehicle && vehicle.customerId === prevId) {
+      for (const o of await db.ownerships.where('vehicleId').equals(vehicle.id).filter((o) => !o.to).toArray()) await db.ownerships.update(o.id, { to: now });
+      await db.ownerships.add({ id: uid(), vehicleId: vehicle.id, customerId, from: now });
+      await db.vehicles.update(vehicle.id, { customerId });
+    }
+    await db.messages.where('orderId').equals(orderId).modify({ customerId });
+    await db.claims.where('orderId').equals(orderId).modify({ customerId });
+    const prev = await db.customers.get(prevId);
+    if (prev && !prev.name.trim() && !prev.phone && !prev.companyName) {
+      const still = await Promise.all([
+        db.orders.where('customerId').equals(prevId).count(),
+        db.vehicles.where('customerId').equals(prevId).count(),
+        db.messages.where('customerId').equals(prevId).count(),
+        db.expenses.where('customerId').equals(prevId).count(),
+        db.incomes.where('customerId').equals(prevId).count(),
+        db.payments.filter((p) => p.customerId === prevId).count(),
+        db.debts.filter((d) => d.customerId === prevId).count(),
+        db.claims.filter((c) => c.customerId === prevId).count(),
+      ]);
+      if (still.every((n) => n === 0)) {
+        await db.ownerships.where('customerId').equals(prevId).delete();
+        await db.customers.delete(prevId);
+      }
+    }
+    await logEvent(orderId, 'customer_changed', { from: prevId, to: customerId });
+  });
+}
+
 export interface OrderBundle {
   order: Order;
   customer: Customer;
@@ -168,7 +212,7 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
     await Promise.all([
       db.customers.get(order.customerId),
       db.vehicles.get(order.vehicleId),
-      db.items.where('orderId').equals(orderId).sortBy('createdAt'),
+      db.items.where('orderId').equals(orderId).sortBy('createdAt').then((list) => list.sort(byPosition)),
       db.versions.where('orderId').equals(orderId).sortBy('number'),
       db.decisions.where('orderId').equals(orderId).sortBy('decidedAt'),
       db.inspections.where('orderId').equals(orderId).toArray(),

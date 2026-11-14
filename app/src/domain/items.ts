@@ -2,8 +2,25 @@ import { roundFils } from './money';
 import { fromGross, fromNet, priceFromEntered, type Amounts, type LinePrice } from './vat';
 import type { DecisionKind, ItemDecision, Lang, OrderItem } from './types';
 
-export function itemTitle(item: Pick<OrderItem, 'titleRu' | 'titleEn'>, lang: Lang): string {
-  return (lang === 'ru' ? item.titleRu || item.titleEn : item.titleEn || item.titleRu) || '';
+/** A line's name in the documents' language — work and parts in capitals, as on the garage's invoices. */
+export function itemTitle(item: Pick<OrderItem, 'titleRu' | 'titleEn'> & { kind?: OrderItem['kind'] }, lang: Lang): string {
+  return lineName((lang === 'ru' ? item.titleRu || item.titleEn : item.titleEn || item.titleRu) || '', item.kind);
+}
+
+/** Names of work and parts are in capitals everywhere (also those typed before); a discount keeps its words. */
+export function lineName(name: string, kind?: OrderItem['kind']): string {
+  return kind === 'discount' ? name : name.toLocaleUpperCase('en');
+}
+
+/**
+ * The order of a job's lines: those moved by hand by their place, then the rest as they were added — a
+ * line added after a move goes to the end. The invoice and the documents list them the same way.
+ */
+export function byPosition(a: Pick<OrderItem, 'position' | 'createdAt'>, b: Pick<OrderItem, 'position' | 'createdAt'>): number {
+  const pa = a.position ?? Number.POSITIVE_INFINITY;
+  const pb = b.position ?? Number.POSITIVE_INFINITY;
+  if (pa !== pb) return pa < pb ? -1 : 1;
+  return (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
 }
 
 /**

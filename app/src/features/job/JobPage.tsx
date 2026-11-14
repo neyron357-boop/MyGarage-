@@ -22,6 +22,7 @@ import {
   IconKey,
   IconListCheck,
   IconListDetails,
+  IconMenu2,
   IconMessage2,
   IconPackage,
   IconPencil,
@@ -47,8 +48,8 @@ import { db } from '../../db/db';
 import { hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
-import { activeInvoice, paidNet } from '../../domain/invoice';
-import { canReprice, isAwaitingClient, itemAmounts, itemTitle, unitGrossPrice } from '../../domain/items';
+import { activeInvoice, canAmendInvoice, paidNet } from '../../domain/invoice';
+import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
@@ -61,7 +62,7 @@ import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, removeItem, restoreItem, setDone, updateItem, withdrawItems } from '../../services/estimate';
-import { answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, repriceLine, restoreLines, syncStage } from '../../services/flow';
+import { amendInvoice, answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage } from '../../services/flow';
 import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -71,6 +72,7 @@ import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader,
 import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
+import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, useScreenLiveQuery } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet } from '../../ui/lazy';
@@ -139,6 +141,7 @@ const TILE_COLOR: Record<string, string> = {
   quote: 'grape',
   discount: 'pink',
   select: 'teal',
+  amend: 'grape',
   details: 'gray',
 };
 
@@ -357,15 +360,18 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
             <OutsourceActions item={i} make={b.vehicle.make} />
           </>
         )}
-        {waiting && (
+        {/* The whole line again (name, how many, price): back to a draft — told again, as a new line is. */}
+        {(waiting || (agreed && !invoiced && i.kind !== 'discount')) && (
           <Button
             variant="subtle"
             loading={busy}
+            leftSection={<IconPencil size={18} />}
             onClick={() =>
               run(async () => {
-                await withdrawItems([i.id]);
+                if (waiting) await withdrawItems([i.id]);
+                else await reviseLine(i.id);
                 onClose();
-                onEdit({ ...i, approvalState: 'draft' });
+                onEdit({ ...i, approvalState: 'draft', done: false });
               })
             }
           >
@@ -417,6 +423,8 @@ export function JobPage() {
   const [pay, setPay] = useState<Payment['kind'] | null>(null);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
+  // Changing the lines once the invoice is out: confirmed first (a credit note), then what was tapped.
+  const [amend, setAmend] = useState<{ then?: () => void } | null>(null);
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
   const [mechanicOpen, setMechanicOpen] = useState(false);
@@ -443,6 +451,12 @@ export function JobPage() {
   const bodyRef = useRef<HTMLDivElement>(null);
   usePhaseGlow(bodyRef, phase);
 
+  // Lines moved by hand in edit mode (≡ at the row's end): the quote and the invoice list them so.
+  const sortIds = b ? liveLines(b.items).filter((i) => i.kind !== 'discount').map((i) => i.id) : [];
+  const sortGrip = useSortable(sortIds, (ids) => {
+    if (orderId) void run(async () => (await reorderLines(orderId, ids), haptic('light')));
+  });
+
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b || !phase) return <EmptyState title={t('err.notFound')} />;
 
@@ -460,6 +474,8 @@ export function JobPage() {
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
   const open = phase !== 'closed' && phase !== 'cancelled';
   const editable = open && !inv;
+  // The invoice is out, the car still here: its lines can be changed (credit note, then a new invoice).
+  const amendable = canAmendInvoice(b.order.stage, b.invoices, b.debts);
   const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
   const sentAt = waiting.length ? b.versions.filter((v) => waiting.some((i) => i.lastVersionId === v.id)).map((v) => v.sentAt).sort()[0] : undefined;
 
@@ -478,7 +494,7 @@ export function JobPage() {
   /** What was done, for the customer (or a company's group chat): the lines, the checks, mileage, warranty, photos. */
   const report = () => {
     const tt = tFor(docLang);
-    const done = inv ? inv.lines.filter((l) => l.kind !== 'discount').map((l) => l.description) : live.filter((i) => i.kind !== 'discount' && i.approvalState === 'approved').map((i) => itemTitle(i, docLang));
+    const done = inv ? inv.lines.filter((l) => l.kind !== 'discount').map((l) => lineName(l.description, l.kind)) : live.filter((i) => i.kind !== 'discount' && i.approvalState === 'approved').map((i) => itemTitle(i, docLang));
     const checks = HANDOVER_CHECKS.filter((c) => b.order.qcChecks?.[c]).map((c) => tt(`qc.${c}`));
     const scan = b.order.obdScans?.[b.order.obdScans.length - 1]?.odometer;
     const mileageKm = b.handover?.mileageKm ?? b.intake?.mileageKm ?? (scan?.unit === 'km' ? scan.value : undefined);
@@ -610,6 +626,13 @@ export function JobPage() {
           <Money fils={itemAmounts(i).gross} c={i.kind === 'discount' ? 'green.7' : i.approvalState === 'declined' ? 'dimmed' : undefined} />
         )
       }
+      grip={
+        picking && canPick(i) && lines.length > 1 ? (
+          <span className="sort-grip" aria-label={t('job.move')} {...sortGrip(i.id)}>
+            <IconMenu2 size={20} stroke={2} aria-hidden />
+          </span>
+        ) : undefined
+      }
       onClick={
         picking
           ? canPick(i)
@@ -678,6 +701,7 @@ export function JobPage() {
   if (canCloseUnpaid(b.order.stage, due)) tiles.push({ key: 'unpaid', icon: IconCashOff, color: 'orange', onClick: () => setUnpaid(true) });
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
+  if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
   tiles.push({ key: 'details', icon: IconListDetails, onClick: () => navigate(`/orders/${oid}/details`) });
   if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
@@ -897,13 +921,28 @@ export function JobPage() {
               .map((l, k) => (
                 <ListRow
                   key={k}
-                  title={l.description}
+                  title={lineName(l.description, l.kind)}
+                  onClick={amendable ? () => setAmend({}) : undefined}
                   subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
                   right={<Money fils={l.gross} />}
                 />
               ))}
             {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0))}
           </List>
+          {amendable && (
+            // Something forgotten or to change after the invoice: the same buttons, the invoice is redone.
+            <Group gap={8} mt="sm" wrap="nowrap">
+              <Button variant="light" leftSection={<IconTool size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'labor' }) })} style={{ flex: 1 }}>
+                {t('job.addWork')}
+              </Button>
+              <Button variant="light" leftSection={<IconPackage size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'part' }) })} style={{ flex: 1 }}>
+                {t('job.addPart')}
+              </Button>
+              <ActionIcon variant="light" size={44} radius="xl" aria-label={t('job.amend')} onClick={() => setAmend({})} style={{ flexShrink: 0 }}>
+                <IconPencil size={20} />
+              </ActionIcon>
+            </Group>
+          )}
           <Box mt="lg">
             <List>
               <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
@@ -917,7 +956,7 @@ export function JobPage() {
       ) : (
         <>
           {(lines.length > 0 || refusedLines.length > 0) && (
-            <List animate>
+            <List animate={!picking}>
               {lines.map(row)}
               {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
               {refusedLines.map(row)}
@@ -1045,6 +1084,23 @@ export function JobPage() {
         </Text>
       </ConfirmModal>
       <ConfirmModal
+        opened={!!amend}
+        onClose={() => setAmend(null)}
+        title={t('job.amendTitle')}
+        confirmLabel={t('job.amend')}
+        onConfirm={() =>
+          run(async () => {
+            const then = amend?.then;
+            await amendInvoice(oid);
+            haptic('light');
+            then?.();
+            return true;
+          })
+        }
+      >
+        <Text size="sm">{t('job.amendText', { number: inv?.number ?? '' })}</Text>
+      </ConfirmModal>
+      <ConfirmModal
         opened={confirmPicked}
         onClose={() => setConfirmPicked(false)}
         title={t('job.removeTitle')}
@@ -1118,7 +1174,7 @@ export function JobPage() {
       </LazySheet>
       {pay && <PaymentModal b={b} opened onClose={() => setPay(null)} kind={pay} />}
       <LazySheet opened={discountOpen}>{(o) => <DiscountSheet b={b} opened={o} onClose={() => setDiscountOpen(false)} />}</LazySheet>
-      <LazySheet opened={customerOpen}>{(o) => <CustomerModal opened={o} onClose={() => setCustomerOpen(false)} customer={c} />}</LazySheet>
+      <LazySheet opened={customerOpen}>{(o) => <CustomerModal opened={o} onClose={() => setCustomerOpen(false)} customer={c} orderId={oid} />}</LazySheet>
       <SendDialog customer={c} request={sv.send} onClose={() => sv.setSend(null)} onSent={() => void syncStage(oid)} />
       <SendDialog customer={c} request={send} onClose={() => setSend(null)} />
     </>

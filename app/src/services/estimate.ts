@@ -1,12 +1,14 @@
 import { db, uid } from '../db/db';
 import { addDays, nowIso } from '../domain/dates';
 import {
+  byPosition,
   canMarkDone,
   decisionPatch,
   isAwaitingDisassembly,
   itemAmounts,
   itemRangeGross,
   itemTitle,
+  lineName,
   noCallLimitRemaining,
   resolveBlockB,
   summarize,
@@ -50,6 +52,7 @@ export async function addItem(orderId: string, input: NewItem): Promise<OrderIte
     createdAt: now,
   };
   if (!item.titleRu?.trim() && !item.titleEn?.trim()) throw new AppError('err.titleRequired');
+  Object.assign(item, capitals(item, item));
   await db.transaction('rw', db.items, db.events, async () => {
     await db.items.add(item);
     await logEvent(orderId, 'item_added', { itemId: item.id, title: item.titleRu || item.titleEn, block: item.block });
@@ -73,7 +76,16 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
   if (item.approvalState !== 'draft' && LOCKED_FIELDS.some((f) => f in patch && patch[f] !== item[f])) {
     throw new AppError('err.itemSent');
   }
-  await db.items.update(id, patch);
+  await db.items.update(id, item.approvalState === 'draft' ? { ...patch, ...capitals(patch, item) } : patch);
+}
+
+/** Work and parts are named in capitals (a discount keeps its words): the titles of `patch`, as they will be stored. */
+function capitals(patch: Partial<OrderItem>, item: Pick<OrderItem, 'kind'>): Partial<OrderItem> {
+  if ((patch.kind ?? item.kind) === 'discount') return {};
+  const out: Partial<OrderItem> = {};
+  if (patch.titleRu) out.titleRu = lineName(patch.titleRu.trim(), 'labor');
+  if (patch.titleEn) out.titleEn = lineName(patch.titleEn.trim(), 'labor');
+  return out;
 }
 
 /**
@@ -147,8 +159,8 @@ export interface SendOptions {
 async function buildVersion(orderId: string, opts: SendOptions, lines?: OrderItem[]): Promise<{ version: EstimateVersion; drafts: OrderItem[]; order: Order }> {
   const [order, settings] = await Promise.all([db.orders.get(orderId), getSettings()]);
   if (!order) throw new AppError('err.notFound');
-  // In the order they were added: the quotation and the message list them as the job screen does.
-  const drafts = lines ?? (await db.items.where('orderId').equals(orderId).sortBy('createdAt')).filter((i) => i.approvalState === 'draft');
+  // In the job's order (moved by hand, then as added): the quotation and the message list them as the job screen does.
+  const drafts = lines ?? (await db.items.where('orderId').equals(orderId).sortBy('createdAt')).sort(byPosition).filter((i) => i.approvalState === 'draft');
   if (drafts.length === 0) throw new AppError('err.nothingToSend');
   const prev = await db.versions.where('orderId').equals(orderId).count();
   const lang = order.docLanguage;

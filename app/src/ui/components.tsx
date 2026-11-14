@@ -514,6 +514,7 @@ export function ListRow({
   trailing,
   leading,
   dim,
+  grip,
 }: {
   left?: ReactNode;
   title: ReactNode;
@@ -531,6 +532,8 @@ export function ListRow({
   leading?: SwipeSpec;
   /** Finished with (work done): the row steps back so what is left stands out. */
   dim?: boolean;
+  /** The handle that moves the row in edit mode (≡, `ui/sortable.ts`), at its very end. */
+  grip?: ReactNode;
 }) {
   const sw = useSwipeRow({ trailing, leading });
   const swipes = !!(trailing || leading);
@@ -593,6 +596,7 @@ export function ListRow({
       </div>
       {right}
       {chevron && <IconChevronRight size={18} stroke={2.4} className="chevron" aria-hidden />}
+      {grip}
     </div>
   );
 }

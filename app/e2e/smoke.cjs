@@ -428,6 +428,22 @@ async function launchBrowser() {
     await page.getByRole('dialog').last().getByRole('button', { name: 'Оформить скидку' }).click();
     await page.getByRole('button', { name: 'Оплата · 288,45 AED' }).waitFor();
     await shot('32-job-invoiced', true);
+    // Something forgotten after the invoice (v0.12): the invoice is changed — a credit note, the line added and
+    // agreed, “Done” issues a new invoice; the name is in capitals.
+    await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Изменить', exact: true }).click();
+    await page.getByRole('dialog').getByText('Изменить инвойс?').waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Изменить', exact: true }).click();
+    await page.getByRole('button', { name: /^Готово/ }).waitFor();
+    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await dlg.getByLabel('Что сделали').fill('Air filter clean');
+    await dlg.getByLabel('Цена', { exact: true }).fill('20');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await page.getByText('AIR FILTER CLEAN', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByRole('button', { name: 'Оплата · 309,45 AED' }).waitFor(); // 288.45 + 20 + 5 % VAT
+    await shot('32b-job-amended', true);
     await page.getByRole('button', { name: /^Оплата/ }).click();
     await dlg.getByRole('button', { name: 'Провести' }).click();
     await page.getByRole('button', { name: 'Выдать' }).click();
@@ -458,7 +474,7 @@ async function launchBrowser() {
       await page.locator('.list-row').filter({ hasText: name }).first().waitFor();
     }
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Выбрать' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Править' }).click();
     await page.locator('.list-row').filter({ hasText: 'Wash' }).first().click();
     await page.locator('.list-row').filter({ hasText: 'Polish' }).first().click();
     await shot('30d-pick-lines');
@@ -467,6 +483,27 @@ async function launchBrowser() {
     if (await page.locator('.list-row').filter({ hasText: 'Polish' }).count()) throw new Error('the picked lines are still there');
     await page.getByRole('button', { name: 'Отменить' }).last().click();
     await page.locator('.list-row').filter({ hasText: 'Polish' }).first().waitFor();
+    // Lines moved by hand (v0.12): “…” → Edit, the grip of Polish dragged above Wash; the order stays.
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Править' }).click();
+    const grip = (name) => page.locator('.screen[data-role="top"] .list-row').filter({ hasText: name }).locator('.sort-grip');
+    await grip('Polish').waitFor();
+    // The sheet has gone (its shade would take the press).
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await settled();
+    const from = await grip('Polish').boundingBox();
+    const to = await grip('Wash').boundingBox();
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2, to.y + 6, { steps: 10 });
+    await shot('30e-moving-line');
+    await page.mouse.up();
+    await page.waitForFunction(() => {
+      const t = [...document.querySelectorAll('.screen[data-role="top"] .list .list-row .title')].map((e) => e.textContent);
+      return t.includes('POLISH') && t.indexOf('POLISH') < t.indexOf('WASH');
+    });
+    await page.getByRole('button', { name: 'Отмена', exact: true }).first().click();
+    await page.locator('.sort-grip').first().waitFor({ state: 'detached' });
   });
   await step("scanner report: codes and the car's data from its PDF", async () => {
     const pdf = makePdf([
@@ -492,6 +529,16 @@ async function launchBrowser() {
       return v && [v.vin, v.year, v.engine];
     });
     if (!car || car[0] !== '1GKFLTE30BX000001' || car[1] !== 2011) throw new Error('the car card did not get the report data: ' + JSON.stringify(car));
+  });
+  await step('v0.12: a customer already in the base, picked on the job', async () => {
+    // The car came without a name: typing one that is in the base offers that customer; a tap — the job is theirs.
+    await page.getByRole('button', { name: 'Клиент', exact: true }).click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByRole('textbox', { name: /^Имя/ }).fill('Серг');
+    await dlg.locator('.suggest').filter({ hasText: 'Сергей Иванов' }).waitFor();
+    await shot('30f-customer-from-base');
+    await dlg.locator('.suggest').filter({ hasText: 'Сергей Иванов' }).click();
+    await page.locator('.screen[data-role="top"] .job-line').filter({ hasText: 'Сергей Иванов' }).waitFor();
   });
   await step('archive: a swipe left takes a job off the board, a swipe in the archive brings it back', async () => {
     // A finger's swipe from the right edge of a row to the left (touch events, as on a phone).
@@ -759,13 +806,13 @@ async function launchBrowser() {
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await dlg.getByRole('button', { name: 'Механику' }).click();
     const task = page.getByRole('dialog', { name: /Механику|Задание механику/ });
-    if (!/To do:[\s\S]*Bumper paint/.test(await task.locator('textarea').inputValue())) throw new Error('the mechanic task lists the work');
+    if (!/To do:[\s\S]*BUMPER PAINT/.test(await task.locator('textarea').inputValue())) throw new Error('the mechanic task lists the work');
     await shot('34f-mechanic');
     await task.locator('.mantine-Modal-close').click();
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await dlg.getByRole('button', { name: 'Отчёт' }).click();
     await page.getByText('Открыть чат').waitFor();
-    if (!/Headlight LH[\s\S]*Bumper paint/.test(await page.getByRole('dialog').last().locator('textarea').inputValue())) throw new Error('the report lists what was done');
+    if (!/HEADLIGHT LH[\s\S]*BUMPER PAINT/.test(await page.getByRole('dialog').last().locator('textarea').inputValue())) throw new Error('the report lists what was done');
     await shot('34g-report');
     await page.locator('.mantine-Modal-close').last().click();
     await page.waitForTimeout(300);

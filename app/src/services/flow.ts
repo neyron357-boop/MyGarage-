@@ -2,13 +2,14 @@ import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { discountBase, discountLines, grossOf } from '../domain/discount';
-import { activeInvoice } from '../domain/invoice';
-import { canReprice, isAwaitingClient, itemAmounts, unitGrossPrice } from '../domain/items';
+import { activeInvoice, canAmendInvoice } from '../domain/invoice';
+import { byPosition, canReprice, isAwaitingClient, itemAmounts, unitGrossPrice } from '../domain/items';
 import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } from '../domain/stages';
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
 import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, updateItem, withdrawItems } from './estimate';
+import { issueCreditNote } from './money';
 import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, stageContext, type OrderBundle } from './orders';
 
 /**
@@ -240,6 +241,57 @@ export async function reopenJob(orderId: string): Promise<void> {
     });
     await logEvent(orderId, 'reopened', { from: order.stage, to });
   });
+  await syncStage(orderId);
+}
+
+/**
+ * The job's lines in a new order (moved by hand): `ids` — the lines as they now stand. The listed lines take
+ * the places they had among all the job's lines (refused, cancelled and discount lines keep theirs), and
+ * every line gets its place, so a line added later goes to the end. The quote and the invoice list them so.
+ * Not once the invoice is out (`amendInvoice` first): it lists them as they were.
+ */
+export async function reorderLines(orderId: string, ids: string[]): Promise<void> {
+  await db.transaction('rw', db.items, db.invoices, async () => {
+    if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
+    const all = (await db.items.where('orderId').equals(orderId).toArray()).sort(byPosition);
+    const listed = new Set(ids);
+    const queue = ids.filter((id) => all.some((i) => i.id === id));
+    const next = all.map((i) => (listed.has(i.id) ? queue.shift()! : i.id));
+    for (let k = 0; k < next.length; k++) if (all.find((i) => i.id === next[k])?.position !== k) await db.items.update(next[k], { position: k });
+  });
+}
+
+/**
+ * An agreed line to change whole (its name, how many, the price): it goes back to a draft and is agreed
+ * again like a new line — the answers given before stay in the history. Not once the invoice is out.
+ */
+export async function reviseLine(itemId: string): Promise<void> {
+  const item = await db.items.get(itemId);
+  if (!item) throw new AppError('err.notFound');
+  if (item.approvalState !== 'approved' || item.kind === 'discount') throw new AppError('err.itemSent');
+  if (activeInvoice(await db.invoices.where('orderId').equals(item.orderId).toArray())) throw new AppError('err.invoiceExists');
+  await db.transaction('rw', db.items, db.events, async () => {
+    await db.items.update(itemId, { approvalState: 'draft', done: false, doneAt: undefined });
+    await logEvent(item.orderId, 'item_revised', { itemId, title: item.titleRu || item.titleEn });
+  });
+  await syncStage(item.orderId);
+}
+
+/**
+ * Lines to change once the invoice is out (a line forgotten, a price, a name, the order): an issued invoice
+ * never changes, so it is cancelled by a credit note and the job is back at work — its lines can be changed,
+ * added, moved, and "Done" issues the new invoice. Payments made count towards it. While the car is in the
+ * garage and no debt is signed for the invoice (`canAmendInvoice`).
+ */
+export async function amendInvoice(orderId: string): Promise<void> {
+  const b = await loadOrderBundle(orderId);
+  if (!b) throw new AppError('err.notFound');
+  const inv = activeInvoice(b.invoices);
+  if (!inv) throw new AppError('err.notFound');
+  if (b.debts.some((d) => d.status === 'open')) throw new AppError('err.amendDebt');
+  if (!canAmendInvoice(b.order.stage, b.invoices, b.debts)) throw new AppError('stageErr.notAllowed');
+  await issueCreditNote(inv.id, 'Invoice corrected');
+  if (b.order.stage === 'quality_check' || b.order.stage === 'ready') await changeStage(orderId, 'in_progress', 'Invoice corrected');
   await syncStage(orderId);
 }
 

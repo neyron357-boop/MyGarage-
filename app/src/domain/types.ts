@@ -410,6 +410,8 @@ export interface OrderItem {
   outsource?: Outsource;
   /** Who does this line (one of the mechanics); otherwise the job's mechanic. */
   employeeId?: string;
+  /** Where the line stands among the job's lines once they were moved by hand (0 — first); the invoice keeps it. */
+  position?: number;
   createdAt: string;
 }
 

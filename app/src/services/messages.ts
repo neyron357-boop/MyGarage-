@@ -3,7 +3,7 @@ import { formatDate, nowIso } from '../domain/dates';
 import { formatAed } from '../domain/money';
 import { normalizePhone, phoneDigits } from '../domain/phone';
 import { formatPlate } from '../domain/plates';
-import { itemAmounts, itemTitle } from '../domain/items';
+import { itemAmounts, itemTitle, lineName } from '../domain/items';
 import type { Channel, Customer, EstimateVersion, Lang, Order, OrderItem, PartOffer, Vehicle } from '../domain/types';
 import { sumAmounts } from '../domain/vat';
 import { tFor } from '../i18n';
@@ -199,7 +199,7 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
         i.minGross !== undefined && i.maxGross !== undefined && i.minGross !== i.maxGross
           ? `${money(i.minGross)} – ${money(i.maxGross)}`
           : money(i.gross);
-      let line = `• ${i.title} — ${price}`;
+      let line = `• ${lineName(i.title, i.kind)} — ${price}`;
       if (i.urgency) line = `${urg[i.urgency]} ${line}`;
       if (i.customerSupplied) line += ` (${t('msg.customerPart')})`;
       lines.push(line);
@@ -225,7 +225,7 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
 export function limitMessage(ctx: MsgContext, v: EstimateVersion): string {
   const lang = v.language;
   const t = tFor(lang);
-  const items = v.items.map((i) => `• ${i.title} — ${formatAed(i.gross, lang)}`).join('\n');
+  const items = v.items.map((i) => `• ${lineName(i.title, i.kind)} — ${formatAed(i.gross, lang)}`).join('\n');
   return tidy(t('msg.doneByLimit', { ...base(ctx, lang), items, sum: formatAed(v.fixedGross, lang), reason: v.reason ?? '' }));
 }
 

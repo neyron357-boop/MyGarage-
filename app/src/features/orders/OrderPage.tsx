@@ -1077,7 +1077,7 @@ export function OrderPage() {
               <StickyBar>{primaryBtn}</StickyBar>
             </Box>
           )}
-      <CustomerModal opened={customerOpen} onClose={() => setCustomerOpen(false)} customer={b.customer} />
+      <CustomerModal opened={customerOpen} onClose={() => setCustomerOpen(false)} customer={b.customer} orderId={b.order.id} />
 
       <StageModal b={b} opened={stageOpen} onClose={() => setStageOpen(false)} />
       <QcModal b={b} opened={qc} onClose={() => setQc(false)} />

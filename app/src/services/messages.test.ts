@@ -16,7 +16,7 @@ describe('quotation message', () => {
     } as EstimateVersion;
     const ctx = { customer: { name: 'Musa Khan' } as Customer, vehicle: { make: 'Nissan', model: 'Sunny', plate: { emirate: 'DXB', code: 'A', number: '12345' } } as Vehicle, order: { number: 7 } as Order, garageName: 'G' };
     const text = versionMessage(ctx, v);
-    expect(text).toContain('• Oil change — 210.00 AED\n• Brake pads — 63.00 AED\n\nDiscount 10%: -32.30 AED\nTotal: 240.70 AED');
+    expect(text).toContain('• OIL CHANGE — 210.00 AED\n• BRAKE PADS — 63.00 AED\n\nDiscount 10%: -32.30 AED\nTotal: 240.70 AED');
   });
 });
 
@@ -28,7 +28,7 @@ describe('the lines as text (copy)', () => {
       item({ kind: 'part', titleEn: 'Front brake pads (set)', qty: 2, unitPriceFils: 3000 }),
       item({ kind: 'part', titleEn: 'Oil filter' }),
     ], 'en');
-    expect(text).toBe('Honda Accord 2017 · Dubai R 7720\n\n1. Front brake pads replacement — 105.00 AED\n2. Front brake pads (set) (2 × 31.50 AED) — 63.00 AED\n3. Oil filter — ?\n\nTotal: 168.00 AED (VAT 8.00 AED)');
+    expect(text).toBe('Honda Accord 2017 · Dubai R 7720\n\n1. FRONT BRAKE PADS REPLACEMENT — 105.00 AED\n2. FRONT BRAKE PADS (SET) (2 × 31.50 AED) — 63.00 AED\n3. OIL FILTER — ?\n\nTotal: 168.00 AED (VAT 8.00 AED)');
   });
 });
 

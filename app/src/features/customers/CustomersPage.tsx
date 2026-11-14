@@ -78,7 +78,7 @@ export function CustomersPage() {
           ))}
         </List>
       )}
-      <CustomerModal opened={open} onClose={() => setOpen(false)} onSaved={(c) => navigate(`/customers/${c.id}`)} />
+      <CustomerModal opened={open} onClose={() => setOpen(false)} onSaved={(c) => navigate(`/customers/${c.id}`)} onPick={(c) => navigate(`/customers/${c.id}`)} />
     </>
   );
 }

@@ -1,9 +1,10 @@
-import { itemAmounts, itemTitle } from './items';
-import type { Customer, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, Payment } from './types';
+import { byPosition, itemAmounts, itemTitle } from './items';
+import type { Customer, Debt, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, Payment, Stage } from './types';
 
-/** Lines for an invoice: every approved item (including zero-priced customer-supplied parts). */
+/** Lines for an invoice: every approved item (including zero-priced customer-supplied parts), in the job's order. */
 export function invoiceLines(items: OrderItem[], lang: Lang): InvoiceLine[] {
-  return items
+  return [...items]
+    .sort(byPosition)
     .filter((i) => i.approvalState === 'approved')
     .map((i) => {
       const a = itemAmounts(i);
@@ -49,6 +50,14 @@ export function activeInvoice(invoices: Invoice[]): Invoice | undefined {
   return invoices
     .filter((i) => i.type !== 'credit_note' && i.status === 'issued')
     .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))[0];
+}
+
+/**
+ * An issued invoice can still be changed — cancelled by a credit note, the lines changed, a new invoice
+ * issued — while the car is in the garage: not once it has left, nor with a debt signed for that invoice.
+ */
+export function canAmendInvoice(stage: Stage, invoices: Invoice[], debts: Pick<Debt, 'status'>[]): boolean {
+  return !!activeInvoice(invoices) && !['booked', 'delivered', 'closed', 'cancelled'].includes(stage) && !debts.some((d) => d.status === 'open');
 }
 
 /** Amount still due: active invoice total (or approved total before invoicing) minus what was paid. */

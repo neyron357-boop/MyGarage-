@@ -5,7 +5,7 @@ import { addDays, formatDate, formatDateTime, formatDocDate, nowIso } from '../d
 import { discountPctLabel, spreadDiscount } from '../domain/discount';
 import { REQUIRED_SLOTS } from '../domain/inspection';
 import { checkLabel, lightLabel } from '../domain/quickLists';
-import { itemAmounts, itemTitle } from '../domain/items';
+import { itemAmounts, itemTitle, lineName } from '../domain/items';
 import { formatAed } from '../domain/money';
 import { formatPhone } from '../domain/phone';
 import { formatPlate, normalizePlate } from '../domain/plates';
@@ -340,10 +340,10 @@ export async function renderVersion(versionId: string): Promise<Blob> {
   const rows: DocRow[] = [
     ...spread.lines.map(({ line: i, discount, vat, gross }) =>
       ranged(i)
-        ? { description: i.title, qty: i.qty, total: i.maxGross!, totalText: `${aed(i.minGross!)} – ${formatAed(i.maxGross!, 'en', false)}` }
-        : { description: i.title + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round(i.net / (i.qty || 1)), discount, vat, qty: i.qty, total: gross },
+        ? { description: lineName(i.title, i.kind), qty: i.qty, total: i.maxGross!, totalText: `${aed(i.minGross!)} – ${formatAed(i.maxGross!, 'en', false)}` }
+        : { description: lineName(i.title, i.kind) + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round(i.net / (i.qty || 1)), discount, vat, qty: i.qty, total: gross },
     ),
-    ...spread.rest.map((i) => ({ description: i.title, price: Math.round(i.net / (i.qty || 1)), vat: i.vat, qty: i.qty, total: i.gross })),
+    ...spread.rest.map((i) => ({ description: lineName(i.title, i.kind), price: Math.round(i.net / (i.qty || 1)), vat: i.vat, qty: i.qty, total: i.gross })),
   ];
   const vat = rows.reduce((a, r) => a + (r.vat ?? 0), 0);
   const discountLabel = discountPctLabel(v.items.filter((i) => i.kind === 'discount').map((i) => i.title));
@@ -415,14 +415,14 @@ export async function renderInvoice(invoiceId: string): Promise<Blob> {
   const spread = spreadDiscount(inv.lines);
   const rows: DocRow[] = [
     ...spread.lines.map(({ line: l, discount, vat, gross }) => ({
-      description: l.description + (l.customerSupplied ? ' (customer supplied part)' : ''),
+      description: lineName(l.description, l.kind) + (l.customerSupplied ? ' (customer supplied part)' : ''),
       price: l.unitPriceFils,
       discount,
       vat,
       qty: l.qty,
       total: gross,
     })),
-    ...spread.rest.map((l) => ({ description: l.description, price: l.unitPriceFils, vat: l.vat, qty: l.qty, total: l.gross })),
+    ...spread.rest.map((l) => ({ description: lineName(l.description, l.kind), price: l.unitPriceFils, vat: l.vat, qty: l.qty, total: l.gross })),
   ];
   const discountLabel = discountPctLabel(inv.lines.filter((l) => l.kind === 'discount').map((l) => l.description));
   const qty = inv.lines.filter((l) => l.kind !== 'discount').reduce((a, l) => a + l.qty, 0);

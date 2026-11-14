@@ -75,7 +75,7 @@ describe('items waiting for the customer', () => {
     await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Service', unitPriceFils: 10000 });
     await addItem(o.id, { kind: 'fee', block: 'A', titleEn: 'RTA test fee', unitPriceFils: 5000, vatRateBp: 0 });
     const v1 = await sendVersion(o.id, { via: 'in_person' });
-    expect(v1.items.find((s) => s.title === 'RTA test fee')).toMatchObject({ net: 5000, vat: 0, gross: 5000 });
+    expect(v1.items.find((s) => s.title === 'RTA TEST FEE')).toMatchObject({ net: 5000, vat: 0, gross: 5000 });
     expect(v1.fixedGross).toBe(10500 + 5000);
   });
 });

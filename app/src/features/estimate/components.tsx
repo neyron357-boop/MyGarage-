@@ -36,7 +36,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
-import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, itemRangeGross, itemTitle } from '../../domain/items';
+import { isAwaitingClient, isAwaitingDisassembly, itemAmounts, itemRangeGross, itemTitle, lineName } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredFromNet, enteredPrice, netFromEntered, priceFromEntered, rateFor, switchVatMode, vatModeOf, type Amounts, type VatMode } from '../../domain/vat';
 import type { Block, DecisionKind, DecisionVia, EstimateVersion, ItemKind, OrderItem, Urgency } from '../../domain/types';
@@ -451,8 +451,8 @@ export function DecisionModal({ b, version, opened, onClose, onVerbal }: { b: Or
         const approved = list
           .filter((d) => d.decision !== 'decline')
           .map((d) => version.items.find((s) => s.itemId === d.itemId)!)
-          .map((s) => ({ title: s.title, gross: s.maxGross ?? s.gross }));
-        const declined = list.filter((d) => d.decision === 'decline').map((d) => ({ title: version.items.find((s) => s.itemId === d.itemId)!.title }));
+          .map((s) => ({ title: lineName(s.title, s.kind), gross: s.maxGross ?? s.gross }));
+        const declined = list.filter((d) => d.decision === 'decline').map((d) => { const s = version.items.find((x) => x.itemId === d.itemId)!; return { title: lineName(s.title, s.kind) }; });
         onVerbal({
           text: verbalConfirmation({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name }, lang, approved, declined),
           template: 'verbalConfirmation',
@@ -502,7 +502,7 @@ export function DecisionModal({ b, version, opened, onClose, onVerbal }: { b: Or
                   <Group gap={8} wrap="nowrap">
                     <BlockChip block={s.block} />
                     <Text size="sm" fw={600}>
-                      {s.title}
+                      {lineName(s.title, s.kind)}
                     </Text>
                   </Group>
                   <Text size="sm" fw={700} className="tnum" style={{ whiteSpace: 'nowrap' }}>
@@ -617,7 +617,7 @@ export function VersionCard({ v, b, actions }: { v: EstimateVersion; b: OrderBun
               <Group gap={8} wrap="nowrap" align="flex-start" style={{ minWidth: 0 }}>
                 <m.icon size={18} color={`var(--mantine-color-${m.color}-6)`} style={{ flexShrink: 0, marginTop: 1 }} />
                 <div style={{ minWidth: 0 }}>
-                  <Text size="sm">{s.title}</Text>
+                  <Text size="sm">{lineName(s.title, s.kind)}</Text>
                   {d && (
                     <Text size="xs" c="dimmed">
                       {t(`via.${d.via}`)} · {formatDateTime(d.decidedAt)}

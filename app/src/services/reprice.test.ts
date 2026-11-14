@@ -52,7 +52,7 @@ describe('a new price for a line the customer has seen', () => {
     // A line added since and not told yet is not swept into the price change.
     expect((await db.items.get(fluid.id))?.approvalState).toBe('draft');
     const ev = (await db.events.where('orderId').equals(o.id).toArray()).find((e) => e.type === 'price_changed');
-    expect(ev?.payload).toMatchObject({ title: 'Front brake pads replacement', from: 12000, to: 10000 });
+    expect(ev?.payload).toMatchObject({ title: 'FRONT BRAKE PADS REPLACEMENT', from: 12000, to: 10000 });
 
     // The invoice takes the new price.
     const inv = await quickInvoice(o.id);

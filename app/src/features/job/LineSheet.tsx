@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
 import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
-import { itemAmounts, itemTitle } from '../../domain/items';
+import { itemAmounts, itemTitle, lineName } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '../../domain/types';
@@ -100,7 +100,8 @@ async function loadSuggestions(lang: Lang, complaint: string): Promise<Suggestio
   const mine = new Set(words(complaint));
   const alike = new Set(mine.size ? orders.filter((o) => words(o.complaint ?? '').some((w) => mine.has(w))).map((o) => o.id) : []);
   const put = (kind: LineKind, s: Omit<Suggestion, 'uses'>, uses: number) => {
-    const title = (lang === 'ru' ? s.titleRu || s.titleEn : s.titleEn || s.titleRu).trim();
+    // In capitals, as lines are named: the same name typed in any case is one suggestion.
+    const title = lineName((lang === 'ru' ? s.titleRu || s.titleEn : s.titleEn || s.titleRu).trim());
     if (!title) return;
     const had = maps[kind].get(title);
     if (had) had.uses += uses;
@@ -221,7 +222,7 @@ export function LineSheet({
   const lineTotal = price && !own ? itemAmounts({ kind, qty: kind === 'part' ? qty || 1 : 1, ...priced } as OrderItem) : undefined;
   const save = () =>
     run(async () => {
-      const typed = title.trim();
+      const typed = lineName(title.trim());
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
       const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
       const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, ...priced };
@@ -279,7 +280,7 @@ export function LineSheet({
   };
   const showOptions = () =>
     setOptionsSend({
-      text: optionsText({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name }, lang, title.trim(), offers.filter((o) => o.costFils !== undefined).map((o) => ({ kind: o.kind, gross: offerGross(o), days: o.days }))),
+      text: optionsText({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name }, lang, lineName(title.trim()), offers.filter((o) => o.costFils !== undefined).map((o) => ({ kind: o.kind, gross: offerGross(o), days: o.days }))),
       template: 'options',
       lang,
       orderId: b.order.id,
@@ -293,7 +294,7 @@ export function LineSheet({
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
           <div className="line-quick" aria-label={t('qi.frequent')}>
             {suggestions!.top.slice(0, 6).map((name) => (
-              <button key={name} type="button" className="chip" data-active={title === name} onClick={() => pick(name)}>
+              <button key={name} type="button" className="chip" data-active={lineName(title.trim()) === name} onClick={() => pick(name)}>
                 <span className="quick-name">{name}</span>
                 <span className="chip-note">{formatAed(suggested(suggestions!.list.get(name)!).price, uiLang, false)}</span>
               </button>
@@ -330,13 +331,15 @@ export function LineSheet({
               }}
               onChange={(v) => {
                 setTitle(v);
-                const s = suggestions?.list.get(v);
+                const s = suggestions?.list.get(lineName(v.trim()));
                 if (s) {
                   setPicked(s);
                   if ((price === undefined || price === 0) && s.price) takeSuggestion(s);
                 }
               }}
               autoComplete="off"
+              // Names are in capitals: the keyboard types them so, and the field shows them so whatever is typed.
+              autoCapitalize="characters"
               // The keyboard waits for a tap when the chips are on screen (it would cover them) and when a line is
               // edited (it is the price or the state that changes, not the name).
               data-autofocus={!item && !suggestions?.top.length ? true : undefined}
@@ -407,7 +410,7 @@ export function LineSheet({
             <SupplierChips value={supplierId} onChange={setSupplierId} make={b.vehicle.make} />
             {/* Ask the sellers (car, VIN, part, photos), and keep what each offered. */}
             <Group grow gap={8} mt="sm" wrap="nowrap">
-              <RequestButton vehicle={b.vehicle} item={{ titleEn: picked?.titleEn || item?.titleEn || title.trim(), titleRu: undefined, partNumber: partNumber.trim() || undefined, qty: qty || 1 }} supplierId={supplierId} photoIds={kept} />
+              <RequestButton vehicle={b.vehicle} item={{ titleEn: picked?.titleEn || item?.titleEn || lineName(title.trim()), titleRu: undefined, partNumber: partNumber.trim() || undefined, qty: qty || 1 }} supplierId={supplierId} photoIds={kept} />
               <Button variant={offersOpen ? 'filled' : 'light'} leftSection={<IconListDetails size={18} />} onClick={() => setOffersOpen((o) => !o)}>
                 {offers.length ? t('offer.titleN', { n: offers.length }) : t('offer.title')}
               </Button>
