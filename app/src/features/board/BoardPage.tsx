@@ -1,23 +1,24 @@
 import { Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
 import { IconArchive, IconArrowBackUp, IconLayoutKanban, IconPlus } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dayLong } from '../../domain/dates';
 import { lastChange, type Phase } from '../../domain/flow';
+import { coverIndex } from '../../services/cover';
 import { archiveJob, phaseOf } from '../../services/flow';
 import { loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { PHASE_META, usePhaseGlow } from '../job/phase';
 import { InsecureWarning } from './BoardNotices';
+import { BoardRefresh } from './BoardRefresh';
 import { JobRow, type RowSwipe } from './JobRow';
 import { TodayList } from './TodayList';
-import { coverIndex } from '../../services/cover';
 
 /** The board as it was read last: coming back to it shows the cars at once, the live read follows. */
-let lastBoard: OrderBundle[] | undefined;
+let lastBoard: { bundles: OrderBundle[]; covers: Map<string, string> } | undefined;
 
 /*
  * A job that did not change keeps the very bundle the board already shows, so its row is not rendered
@@ -34,12 +35,18 @@ function keep(b: OrderBundle): OrderBundle {
   return b;
 }
 
-async function loadBoard() {
+async function loadBoard(showArchive: boolean) {
   const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
-  const bundles = (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
-  lastBoard = bundles.map(keep);
-  for (const id of kept.keys()) if (!orders.some((o) => o.id === id)) kept.delete(id);
-  return lastBoard;
+  const [open, closed] = await Promise.all([
+    Promise.all(orders.map((o) => loadOrderBundle(o.id))),
+    showArchive ? loadClosed() : undefined,
+  ]);
+  const bundles = open.filter((b): b is OrderBundle => !!b).map(keep);
+  const covers = await coverIndex([...bundles, ...(closed ?? [])].map((b) => b.vehicle.id));
+  const ids = new Set(orders.map((o) => o.id));
+  for (const id of kept.keys()) if (!ids.has(id)) kept.delete(id);
+  lastBoard = { bundles, covers };
+  return { ...lastBoard, closed };
 }
 
 /** The archive's second part: the latest closed jobs of the app (not the history carried over). */
@@ -109,7 +116,7 @@ function Kanban({ jobs, covers, swipe, tick }: { jobs: Job[]; covers?: Map<strin
                 {list.length}
               </Badge>
             </Group>
-            <List animate>
+            <List animate className="board-cards">
               {list.map((j) => (
                 <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} />
               ))}
@@ -122,7 +129,7 @@ function Kanban({ jobs, covers, swipe, tick }: { jobs: Job[]; covers?: Map<strin
 }
 
 /**
- * The workshop at a glance: every car as one row, the one something last happened on first. The chips
+ * The workshop at a glance: every car as one card, newest activity first. The chips
  * on top count the cars on each step (look, price, wait, work, pay…) and filter the list.
  */
 export function BoardPage() {
@@ -130,19 +137,22 @@ export function BoardPage() {
   const lang = useLang();
   const navigate = useNavigate();
   const { run } = useAction();
-  const bundles = useScreenLiveQuery(loadBoard, []) ?? lastBoard;
   const mobile = usePhone();
   const [filter, setFilter] = useState<'all' | 'archive' | Phase>('all');
+  const [refresh, setRefresh] = useState(0);
+  const refreshBoard = useCallback(() => setRefresh((n) => n + 1), []);
   const archive = filter === 'archive';
-  const closed = useScreenLiveQuery(() => (archive ? loadClosed() : Promise.resolve([] as OrderBundle[])), [archive]);
-  const vehicleIds = [...(bundles ?? []), ...(closed ?? [])].map((b) => b.vehicle.id).join(',');
-  const covers = useScreenLiveQuery(() => coverIndex(vehicleIds ? vehicleIds.split(',') : []), [vehicleIds]);
+  const live = useScreenLiveQuery(async () => ({ ...(await loadBoard(archive)), refresh }), [archive, refresh]);
+  const data = live ?? lastBoard;
+  const busy = refresh > 0 && live?.refresh !== refresh;
   // Every five minutes the rows' "how long" moves on (a row is not rendered again otherwise).
   const tick = Math.floor(Date.now() / 300_000);
   // A step picked: the screen glows in its colours, as a job on that step does.
   const glowRef = useRef<HTMLSpanElement>(null);
   usePhaseGlow(glowRef, filter !== 'all' && filter !== 'archive' ? filter : undefined);
-  if (!bundles) return <PageSkeleton />;
+  if (!data) return <PageSkeleton />;
+  const { bundles, covers } = data;
+  const closed = live?.closed;
   // The freshest first: the job something last happened on is on top.
   const fresh = (x: Job, y: Job) => lastChange(y.b).localeCompare(lastChange(x.b));
   const all: Job[] = bundles.map((b) => ({ b, phase: phaseOf(b) })).filter((j) => STEPS.includes(j.phase));
@@ -170,23 +180,26 @@ export function BoardPage() {
 
   const dateLabel = dayLong(new Date(), lang);
   const header = (
-    <PageHeader
-      eyebrow={dateLabel}
-      title={t('board.title')}
-      right={
-        !mobile && (
-          <Button variant={archive ? 'filled' : 'default'} leftSection={<IconArchive size={18} />} onClick={() => setFilter(archive ? 'all' : 'archive')}>
-            {t('board.archive')}
-            {archived.length > 0 ? ` · ${archived.length}` : ''}
-          </Button>
-        )
-      }
-    />
+    <>
+      <BoardRefresh busy={busy} onRefresh={refreshBoard} />
+      <PageHeader
+        eyebrow={dateLabel}
+        title={t('board.title')}
+        right={
+          !mobile && (
+            <Button variant={archive ? 'filled' : 'default'} leftSection={<IconArchive size={18} />} onClick={() => setFilter(archive ? 'all' : 'archive')}>
+              {t('board.archive')}
+              {archived.length > 0 ? ` · ${archived.length}` : ''}
+            </Button>
+          )
+        }
+      />
+    </>
   );
 
   const archiveList =
     archived.length + done.length > 0 ? (
-      <List>
+      <List className="board-cards">
         {archived.map((j) => (
           <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={back(j.b)} />
         ))}
@@ -240,7 +253,7 @@ export function BoardPage() {
       <span ref={glowRef} hidden />
       {header}
       <InsecureWarning />
-      {!archive && (mobile ? <TodayList bundles={bundles} /> : <TodayList bundles={bundles} />)}
+      {!archive && <TodayList bundles={bundles} />}
       {mobile ? (
         <>
           <ScrollTabs
@@ -255,7 +268,7 @@ export function BoardPage() {
           {archive ? (
             archiveList
           ) : shown.length ? (
-            <List animate>
+            <List animate className="board-cards">
               {shown.map((j) => (
                 <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={toArchive(j.b)} />
               ))}

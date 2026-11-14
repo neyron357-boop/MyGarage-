@@ -1,5 +1,5 @@
-import { Group, Modal, Text, ThemeIcon } from '@mantine/core';
-import { IconBuildingFactory2, IconCash, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
+import { Modal, Text } from '@mantine/core';
+import { IconBuildingFactory2, IconCar, IconCash, IconChevronRight, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -25,11 +25,6 @@ export function jobAmount(b: OrderBundle): number {
   return liveLines(b.items).reduce((s, i) => s + itemAmounts(i).gross, 0);
 }
 
-/**
- * A job on the board, in one row: the car's photo with the step it is on (colour and symbol), the plate,
- * the car, how long it has been there, and its money. A tap opens it; a long press (right click) offers
- * to delete it.
- */
 /** What a swipe left (and the long-press menu) does with the row: to the archive, or back to the board. */
 export interface RowSwipe {
   label: string;
@@ -81,30 +76,18 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
   const outside = working && b.items.some((i) => i.outsource?.state === 'out' && i.approvalState !== 'declined' && i.approvalState !== 'cancelled');
   const due = working ? b.order.promisedReadyAt : undefined;
   const dueLate = !!due && due < nowIso();
-  // Short enough to stand beside the plate: the time today, the weekday and the time on another day.
   const dueText = due ? dueShort(due, lang) : '';
   const open = () => navigate(`/orders/${b.order.id}`);
+  const phaseColor = late ? 'red' : m.color;
+  const hasFlags = find > 0 || coming || outside || (flags.debt && phase !== 'debt') || flags.warranty;
   return (
     <>
       <div
-        className="list-row clickable job-row swipe-row"
+        className="job-row swipe-row"
         {...touch}
         style={swipe ? sw.style : undefined}
         data-swiping={sw.dragging || undefined}
         data-past={sw.past || undefined}
-        onClick={() => {
-          if (press.consumeClick() || sw.consumeClick()) return;
-          open();
-        }}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            open();
-          }
-        }}
-        aria-label={`№${b.order.number} ${car}`}
       >
         {swipe && (
           <span className="swipe-action" style={{ background: `var(--mantine-color-${swipe.color}-6)` }} aria-hidden={!sw.open}>
@@ -123,57 +106,55 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
             </button>
           </span>
         )}
-        {cover ? (
-          <span className="job-thumb">
-            <MediaImage id={cover} h={52} w={52} radius="0" />
-            <span className="job-thumb-phase" style={{ background: `var(--mantine-color-${m.color}-6)` }} aria-label={t(`job.phase.${phase}`)}>
-              <m.icon size={13} stroke={2.4} />
+        <button
+          type="button"
+          className="job-card-open"
+          onClick={() => {
+            if (press.consumeClick() || sw.consumeClick()) return;
+            open();
+          }}
+        >
+          {cover && (
+            <span className="job-card-photo">
+              <MediaImage id={cover} thumb={false} h="100%" w="100%" radius="0" loading="lazy" />
             </span>
-          </span>
-        ) : (
-          // The same 52 pt square as a photo: the plates of all the rows line up.
-          <ThemeIcon variant="light" color={m.color} size={52} radius={15} style={{ flexShrink: 0 }}>
-            <m.icon size={24} stroke={1.8} />
-          </ThemeIcon>
-        )}
-        <div className="body">
-          <Group gap={8} wrap="nowrap" justify="space-between">
-            <Group gap={8} wrap="nowrap" style={{ minWidth: 0, overflow: 'hidden' }}>
+          )}
+          <span className="job-card-info">
+            <span className="job-card-title">
+              {!cover && <span className="job-card-car-icon"><IconCar size={18} stroke={1.8} aria-hidden /></span>}
+              <span>{car || `№${b.order.number}`}</span>
+              <IconChevronRight className="job-card-chevron" size={17} stroke={2.1} aria-hidden />
+            </span>
+            <span className="job-card-line">
               <PlateText plate={b.vehicle.plate} size="sm" />
-              {/* The time promised to the customer, beside the plate; red once it has passed. */}
+              {amount > 0 && <Money fils={amount} fw={700} c={phase === 'debt' ? 'red.7' : undefined} />}
+            </span>
+            <span className="job-card-meta">
+              <span
+                className="row-phase tnum"
+                style={{ background: `var(--mantine-color-${phaseColor}-light)`, color: `var(--mantine-color-${phaseColor}-light-color)` }}
+              >
+                <m.icon size={14} stroke={2.3} aria-hidden />
+                {t(`job.phase.${phase}`)} · {booked ? dueShort(booked, lang) : shortDuration(hours, lang)}
+              </span>
               {due && (
-                <Text size="sm" c={dueLate ? 'red.7' : 'orange.7'} fw={600} className="tnum row-due" aria-label={t('job.due')}>
-                  <IconClock size={14} stroke={2.2} aria-hidden />
-                  <span className="row-due-text">{dueText}</span>
+                <Text span size="xs" c={dueLate ? 'red.7' : 'orange.7'} fw={700} className="tnum row-due">
+                  <IconClock size={14} stroke={2} aria-hidden />
+                  <span aria-label={`${t('job.due')}: ${dueText}`}>{dueText}</span>
                 </Text>
               )}
-            </Group>
-            {/* The amount is always whole; in a narrow column (the computer's board) the promised time gives way. */}
-            {amount > 0 && (
-              <span style={{ flexShrink: 0 }}>
-                <Money fils={amount} fw={700} c={phase === 'debt' ? 'red.7' : undefined} />
-              </span>
-            )}
-          </Group>
-          <Group gap={6} wrap="nowrap" mt={5} style={{ minWidth: 0 }}>
-            {/* The step first, in its colour, with how long the car has been on it (red when too long). */}
-            <span
-              className="row-phase tnum"
-              style={{ background: `var(--mantine-color-${late ? 'red' : m.color}-light)`, color: `var(--mantine-color-${late ? 'red' : m.color}-light-color)` }}
-            >
-              <m.icon size={13} stroke={2.4} aria-hidden />
-              {t(`job.phase.${phase}`)} · {booked ? dueShort(booked, lang) : shortDuration(hours, lang)}
+              {hasFlags && (
+                <span className="job-card-flags">
+                  {find > 0 && <IconPackage size={16} stroke={2} color="var(--mantine-color-orange-6)" aria-label={t('flags.waitingParts')} />}
+                  {coming && <IconTruckDelivery size={16} stroke={2} color="var(--mantine-color-cobalt-6)" aria-label={t('flags.partsComing')} />}
+                  {outside && <IconBuildingFactory2 size={16} stroke={2} color="var(--mantine-color-teal-6)" aria-label={t('flags.outside')} />}
+                  {flags.debt && phase !== 'debt' && <IconCash size={16} stroke={2} color="var(--mantine-color-red-6)" aria-label={t('flags.debt')} />}
+                  {flags.warranty && <IconRepeat size={16} stroke={2} color="var(--mantine-color-grape-6)" aria-label={t('flags.warranty')} />}
+                </span>
+              )}
             </span>
-            <Text size="sm" c="dimmed" lineClamp={1} style={{ minWidth: 0 }}>
-              {car || `№${b.order.number}`}
-            </Text>
-            {find > 0 && <IconPackage size={15} stroke={2} color="var(--mantine-color-orange-6)" style={{ flexShrink: 0 }} aria-label={t('flags.waitingParts')} />}
-            {coming && <IconTruckDelivery size={15} stroke={2} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} aria-label={t('flags.partsComing')} />}
-            {outside && <IconBuildingFactory2 size={15} stroke={2} color="var(--mantine-color-teal-6)" style={{ flexShrink: 0 }} aria-label={t('flags.outside')} />}
-            {flags.debt && phase !== 'debt' && <IconCash size={15} stroke={2} color="var(--mantine-color-red-6)" style={{ flexShrink: 0 }} aria-label={t('flags.debt')} />}
-            {flags.warranty && <IconRepeat size={15} stroke={2} color="var(--mantine-color-grape-6)" style={{ flexShrink: 0 }} aria-label={t('flags.warranty')} />}
-          </Group>
-        </div>
+          </span>
+        </button>
       </div>
       {/* The row's actions (long press), a sheet like the iPhone's context menu. */}
       <LazySheet opened={menu}>
