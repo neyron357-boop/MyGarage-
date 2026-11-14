@@ -223,6 +223,232 @@ const check = (name, ok, detail) => {
   }
   check('no horizontal overflow', wide.length === 0, wide);
 
+  // 12. The tab bar under the finger (real touches through CDP, as a finger does them): the lens is
+  //     under the finger at every move — slow, a pause, back again; only the tab where the finger lets
+  //     go opens, once; a fast sweep opens only its last tab; a cancelled or abandoned slide opens
+  //     nothing; a press catches the lens mid-flight; a tap is still a tap.
+  await page.goto(BASE + '#/');
+  await page.waitForTimeout(900);
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' || type === 'touchCancel' ? [] : [{ x, y }] });
+  const lensX = () => page.evaluate(() => { const r = document.querySelector('.tab-lens').getBoundingClientRect(); return Math.round(r.left + r.width / 2); });
+  const [tBoard, tSearch, tMoney, tMore] = await page.evaluate(() => [...document.querySelectorAll('.tab-bar button[data-href]')].map((b) => { const r = b.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; }));
+  const ty = tBoard.y;
+  await page.evaluate(() => {
+    window.__routes = [];
+    const push = history.pushState.bind(history);
+    history.pushState = (a, b, c) => { push(a, b, c); window.__routes.push(location.hash); };
+    addEventListener('pointerdown', () => { const r = document.querySelector('.tab-lens').getBoundingClientRect(); window.__atPress = Math.round(r.left + r.width / 2); }, { capture: true });
+  });
+  const routes = async () => page.evaluate(() => window.__routes.splice(0));
+  /** Slide in small steps; after the 8 px slop, how far the lens was from the finger at worst. */
+  const glide = async (from, to, ms, y = ty) => {
+    const steps = Math.max(2, Math.round(ms / 16));
+    let worst = 0;
+    for (let i = 1; i <= steps; i++) {
+      const x = Math.round(from + ((to - from) * i) / steps);
+      await touch('touchMove', x, y);
+      await page.waitForTimeout(ms / steps);
+      worst = Math.max(worst, Math.abs((await lensX()) - x));
+    }
+    return worst;
+  };
+  await touch('touchStart', tBoard.x, ty);
+  await touch('touchMove', tBoard.x + 10, ty);
+  // The 8 px the finger moved before it was a slide melt away in ~200 ms; from then on the lens is the finger.
+  const catchUp = await glide(tBoard.x + 10, tBoard.x + 30, 250);
+  const slowGap = await glide(tBoard.x + 30, tMoney.x, 800);
+  const between = Math.round((tSearch.x + tMoney.x) / 2);
+  const backGap = await glide(tMoney.x, between, 250);
+  await page.waitForTimeout(450);
+  const pauseGap = Math.abs((await lensX()) - between);
+  const reverseGap = await glide(between, tSearch.x, 300);
+  const midRoutes = await routes();
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  const slow = { catchUp, slowGap, backGap, pauseGap, reverseGap, midRoutes, routes: await routes(), lens: await lensX(), search: tSearch.x };
+  check('tab bar: lens under the finger (slow, pause, back), nothing opens mid-slide', catchUp <= 12 && slowGap <= 1 && backGap <= 1 && pauseGap <= 1 && reverseGap <= 1 && midRoutes.length === 0, slow);
+  check('tab bar: release opens only that tab, once; lens settles on it', slow.routes.join() === '#/search' && Math.abs(slow.lens - tSearch.x) <= 1, slow);
+
+  await touch('touchStart', tSearch.x, ty);
+  await glide(tSearch.x, tMore.x, 120);
+  await glide(tMore.x, tMoney.x, 80);
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  const fast = { routes: await routes(), lens: await lensX(), money: tMoney.x };
+  check('tab bar: a fast sweep opens only the tab of release', fast.routes.join() === '#/money' && Math.abs(fast.lens - tMoney.x) <= 1, fast);
+
+  await touch('touchStart', tMoney.x, ty);
+  await glide(tMoney.x, tBoard.x, 300);
+  await touch('touchCancel');
+  await page.waitForTimeout(800);
+  const cancelled = { routes: await routes(), lens: await lensX(), hash: await page.evaluate(() => location.hash) };
+  check('tab bar: a cancelled slide opens nothing, the lens goes home', cancelled.routes.length === 0 && cancelled.hash === '#/money' && Math.abs(cancelled.lens - tMoney.x) <= 1, cancelled);
+
+  await touch('touchStart', tMoney.x, ty);
+  await glide(tMoney.x, tBoard.x, 250);
+  await glide(tBoard.x, tBoard.x, 32, ty - 170);
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  const abandoned = { routes: await routes(), lens: await lensX() };
+  check('tab bar: let go far off the bar — nothing opens', abandoned.routes.length === 0 && Math.abs(abandoned.lens - tMoney.x) <= 1, abandoned);
+
+  await touch('touchStart', tBoard.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(50);
+  const flying = await lensX();
+  await touch('touchStart', flying, ty);
+  await page.waitForTimeout(60);
+  const caught = { flying, atPress: await page.evaluate(() => window.__atPress), held: await lensX() };
+  await page.waitForTimeout(120);
+  caught.stillHeld = await lensX();
+  await glide(flying, tMore.x, 300);
+  caught.endGap = Math.abs((await lensX()) - tMore.x);
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  Object.assign(caught, { offset: caught.atPress - flying, routes: await routes(), lens: await lensX() });
+  // Motion fixes the lens at its own frame time: at most a frame of travel (a few px) past where the finger met it.
+  check('tab bar: a press catches the lens mid-flight and holds it', flying > tBoard.x + 10 && flying < tMoney.x - 10 && Math.abs(caught.held - caught.atPress) <= 4 && Math.abs(caught.stillHeld - caught.held) <= 0.5, caught);
+  check('tab bar: the caught lens comes under the finger and follows; the release tab opens', caught.endGap <= 1 && caught.routes.join() === '#/,#/more' && Math.abs(caught.lens - tMore.x) <= 1, caught);
+
+  await touch('touchStart', tSearch.x, ty);
+  await touch('touchMove', tSearch.x + 4, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  const tap = { routes: await routes(), lens: await lensX() };
+  check('tab bar: a tap (under the slop) still opens its tab', tap.routes.join() === '#/search' && Math.abs(tap.lens - tSearch.x) <= 1, tap);
+
+  // A quick flick, then a tap at once: Chrome must not take the flick for a fling and swallow the tap.
+  await touch('touchStart', tSearch.x, ty);
+  for (const x of [tSearch.x - 25, tSearch.x - 50, tBoard.x]) {
+    await touch('touchMove', x, ty);
+    await page.waitForTimeout(8);
+  }
+  await touch('touchEnd');
+  await page.waitForTimeout(200);
+  await touch('touchStart', tMoney.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(600);
+  const flickTap = { routes: await routes() };
+  check('tab bar: a tap right after a quick flick is not swallowed', flickTap.routes.join() === '#/,#/money', flickTap);
+
+  // Pressed on the lens but off its centre, then a slow slide: it centres under the finger (the tint,
+  // the lens and the tab that opens agree).
+  const lensNow = await lensX();
+  await touch('touchStart', lensNow + 30, ty);
+  const offCentreCatch = await glide(lensNow + 30, lensNow + 10, 220);
+  const offCentre = { catch: offCentreCatch, gap: await glide(lensNow + 10, tBoard.x, 500) };
+  offCentre.tinted = await page.evaluate(() => document.querySelector('.tab-bar button[data-hover]')?.dataset.href);
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  Object.assign(offCentre, { routes: await routes(), lens: await lensX() });
+  check('tab bar: pressed off the lens centre — it comes under the finger, the tab under both opens', offCentre.gap <= 1 && offCentre.tinted === '/' && offCentre.routes.join() === '#/' && Math.abs(offCentre.lens - tBoard.x) <= 1, offCentre);
+
+  // Pressed on another tab (not the lens), then a slide: the lens comes to the finger and stays under it.
+  await touch('touchStart', tMore.x, ty);
+  await glide(tMore.x, tMore.x - 40, 220);
+  const offLens = { gap: await glide(tMore.x - 40, tSearch.x, 500) };
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  Object.assign(offLens, { routes: await routes(), lens: await lensX() });
+  check('tab bar: pressed off the lens — it comes under the finger and follows', offLens.gap <= 1 && offLens.routes.join() === '#/search' && Math.abs(offLens.lens - tSearch.x) <= 1, offLens);
+
+  // A form with unsaved edits: a slide to another tab asks first, as a tapped tab does; nothing opens until "Leave".
+  await page.evaluate(() => (location.hash = '#/settings'));
+  await page.waitForTimeout(900);
+  await page.locator('.screen[data-role="top"] input:not([type]), .screen[data-role="top"] input[type="text"]').first().fill('Garage edited');
+  await page.waitForTimeout(300);
+  await routes();
+  await touch('touchStart', tMore.x, ty);
+  await glide(tMore.x, tMoney.x, 400);
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  const unsaved = { asked: await page.getByText('Уйти без сохранения?').isVisible(), routes: (await routes()).filter((r) => !r.startsWith('#/settings')), lens: await lensX(), hash: await page.evaluate(() => location.hash) };
+  check('tab bar: a slide with unsaved edits asks first, opens nothing', unsaved.asked && unsaved.routes.length === 0 && unsaved.hash.startsWith('#/settings') && Math.abs(unsaved.lens - tMore.x) <= 1, unsaved);
+  await page.getByRole('button', { name: 'Уйти', exact: true }).click();
+  await page.waitForTimeout(700);
+  const left = { routes: await routes(), lens: await lensX() };
+  check('tab bar: "Leave" then opens the tab of the slide', left.routes.join() === '#/money' && Math.abs(left.lens - tMoney.x) <= 1, left);
+
+  // Reduce Motion: no spring, no swell — a short plain settle (≤150 ms); the finger still drags the lens 1:1.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await touch('touchStart', tSearch.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(250);
+  const rm = { tapLens: await lensX() };
+  await touch('touchStart', tSearch.x, ty);
+  await glide(tSearch.x, tSearch.x + 30, 250);
+  rm.gap = await glide(tSearch.x + 30, tMoney.x, 400);
+  rm.scale = await page.evaluate(() => { const r = document.querySelector('.tab-lens').getBoundingClientRect(); const b = document.querySelector('.tab-bar').getBoundingClientRect(); return Math.round((r.height / (b.height - 4)) * 100) / 100; });
+  await touch('touchEnd');
+  await page.waitForTimeout(250);
+  Object.assign(rm, { releaseLens: await lensX(), routes: await routes() });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  check('tab bar: Reduce Motion — short settle, no swell, still follows the finger', Math.abs(rm.tapLens - tSearch.x) <= 1 && rm.scale === 1 && rm.gap <= 1 && Math.abs(rm.releaseLens - tMoney.x) <= 1 && rm.routes.join() === '#/search,#/money', rm);
+
+  // A second tap while the lens is still flying bends its path at the speed it has (no stop-and-go): a frame or
+  // two after the new aim it moves at least as fast as before it (a stop would start again from ~0 px a frame).
+  await touch('touchStart', tBoard.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  await page.evaluate(() => {
+    window.__track = [];
+    const l = document.querySelector('.tab-lens');
+    const t0 = performance.now();
+    const tick = () => {
+      const r = l.getBoundingClientRect();
+      window.__track.push([performance.now() - t0, r.left + r.width / 2]);
+      if (performance.now() - t0 < 900) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    addEventListener('pointerdown', () => (window.__second = performance.now() - t0), { capture: true });
+  });
+  await touch('touchStart', tSearch.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(90);
+  await page.evaluate(() => (window.__second = undefined));
+  await touch('touchStart', tMore.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(900);
+  const bend = await page.evaluate(() => {
+    const at = window.__second;
+    const after = window.__track.filter(([t]) => t >= at).slice(0, 6);
+    const steps = after.slice(1).map(([, x], k) => Math.round((x - after[k][1]) * 10) / 10);
+    return { at: Math.round(at), steps, end: Math.round(window.__track[window.__track.length - 1][1]) };
+  });
+  await routes();
+  check('tab bar: a second tap mid-flight keeps the lens moving (no stop-and-go)', bend.steps.length >= 5 && (bend.steps[2] + bend.steps[3] + bend.steps[4]) / 3 >= 0.8 * bend.steps[0] && Math.abs(bend.end - tMore.x) <= 1, bend);
+
+  // A sloppy tap (a few px of slide that never left the tab) on the lit tab from a deeper screen: back to the
+  // tab's first screen, as a clean tap does.
+  await touch('touchStart', tBoard.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(900);
+  await page.locator('.screen[data-role="top"] .job-row').first().click();
+  await page.waitForTimeout(900);
+  const deeper = await page.evaluate(() => location.hash);
+  await touch('touchStart', tBoard.x - 8, ty);
+  await glide(tBoard.x - 8, tBoard.x + 8, 120);
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  const sloppy = { deeper, hash: await page.evaluate(() => location.hash) };
+  await routes();
+  check('tab bar: a sloppy tap on the lit tab goes back to its first screen', sloppy.deeper.startsWith('#/orders/') && sloppy.hash === '#/', sloppy);
+
+  // 13. One action per confirmation: two taps on "Accept" before the screen re-renders make one job.
+  await page.goto(BASE + '#/orders/new');
+  await page.waitForTimeout(800);
+  await page.locator('.screen[data-role="top"]').getByLabel('Номер').fill('86420');
+  const jobsBefore = await page.evaluate(async () => (await import('/src/db/db.ts')).db.orders.count());
+  await page.evaluate(() => {
+    const accept = [...document.querySelectorAll('.screen[data-role="top"] button')].find((b) => b.textContent.trim() === 'Принять');
+    accept.click();
+    accept.click();
+  });
+  await page.waitForTimeout(1200);
+  const twice = { added: (await page.evaluate(async () => (await import('/src/db/db.ts')).db.orders.count())) - jobsBefore, hash: await page.evaluate(() => location.hash) };
+  check('double tap on Accept: one job', twice.added === 1 && twice.hash.startsWith('#/orders/'), twice);
+
   // 11. Safari in a tab (not installed): the edge swipe is Safari's own, and going back after it
   //     does not play a second animation.
   const iphone = await browser.newContext({

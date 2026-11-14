@@ -1,7 +1,7 @@
 {
   "name": "mygarage",
   "private": true,
-  "version": "0.13.5",
+  "version": "0.14.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -30,6 +30,7 @@
     "dexie-react-hooks": "^4.4.0",
     "i18next": "^24.2.3",
     "jsbarcode": "^3.12.3",
+    "motion": "14.9.0",
     "pdfjs-dist": "6.4.299",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

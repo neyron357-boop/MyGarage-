@@ -35,7 +35,7 @@ const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditC
 
 export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: OrderBundle; opened: boolean; onClose: () => void; kind?: Payment['kind'] }) {
   const { t } = useTranslation();
-  const { run, busy } = useAction();
+  const { run, busy } = useAction({ exclusive: true });
   const due = bundleAmountDue(b);
   const [kind, setKind] = useState<Payment['kind']>(initialKind ?? 'payment');
   const [method, setMethod] = useState<PayMethod>('cash');
@@ -109,7 +109,7 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
 
 function DebtModal({ b, opened, onClose }: { b: OrderBundle; opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const { run, busy } = useAction();
+  const { run, busy } = useAction({ exclusive: true });
   const sig = useRef<SignatureHandle>(null);
   const due = bundleAmountDue(b);
   const [amount, setAmount] = useState<number | undefined>(due);

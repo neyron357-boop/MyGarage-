@@ -28,6 +28,19 @@ export function hasUnsaved(): boolean {
   return dirty;
 }
 
+/** The guard's question, opened from navigation that is not a click (a slide along the tab bar). */
+let ask: ((to: string) => void) | null = null;
+
+/**
+ * Before a navigation that is not a click on a link: true when it may go now; while a form has unsaved
+ * edits it opens the guard's question instead (which navigates if the user leaves) and returns false.
+ */
+export function mayLeave(to: string): boolean {
+  if (!dirty || !ask) return true;
+  ask(to);
+  return false;
+}
+
 export function useHasUnsaved(): boolean {
   return useSyncExternalStore(subscribe, () => dirty);
 }
@@ -42,6 +55,12 @@ export function UnsavedGuard() {
   const active = useHasUnsaved();
   const [target, setTarget] = useState<string | null>(null);
   useEffect(() => {
+    ask = setTarget;
+    return () => {
+      if (ask === setTarget) ask = null;
+    };
+  }, []);
+  useEffect(() => {
     if (!active) return;
     const beforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -53,6 +72,8 @@ export function UnsavedGuard() {
       const el = (e.target as HTMLElement | null)?.closest?.('a[href], [data-href]') as HTMLElement | null;
       const href = el?.getAttribute('data-href') ? `#${el.getAttribute('data-href')}` : (el?.getAttribute('href') ?? '');
       if (!el || !href.startsWith('#/') || (el as HTMLAnchorElement).target === '_blank') return;
+      // The click a browser may add after a slide along the tab bar: the slide has asked already.
+      if (el.closest('.tab-bar[data-slid]')) return;
       e.preventDefault();
       e.stopPropagation();
       setTarget(href.slice(1));

@@ -180,7 +180,8 @@ export function NewOrderPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { run, busy } = useAction();
+  // One job per "Accept", however fast the second tap comes.
+  const { run, busy } = useAction({ exclusive: true });
   const settings = useSettings();
   const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
   const [make, setMake] = useState('');

@@ -82,13 +82,24 @@ export function useErrorText() {
   );
 }
 
-/** Run an async action with a busy flag and error/success notifications. */
-export function useAction() {
+/**
+ * Run an async action with a busy flag and error/success notifications.
+ *
+ * `exclusive`: for actions whose repeat makes a second record (a job, a payment, a debt) — while one
+ * runs, another call of this hook does nothing (a double tap, Enter and a tap together). Not for hooks
+ * that serve several actions or saves that overlap on purpose (a field's blur-save and the chip tapped
+ * in the same touch, keystrokes): there a dropped call would lose the user's input.
+ */
+export function useAction({ exclusive = false }: { exclusive?: boolean } = {}) {
   const errorText = useErrorText();
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
+  // In flight right now: set at once, not on the next render.
+  const inflight = useRef(false);
   const run = useCallback(
     async <T,>(fn: () => Promise<T>, successKey?: string): Promise<T | undefined> => {
+      if (exclusive && inflight.current) return undefined;
+      inflight.current = true;
       setBusy(true);
       try {
         const r = await fn();
@@ -100,10 +111,11 @@ export function useAction() {
         haptic('error');
         return undefined;
       } finally {
+        inflight.current = false;
         setBusy(false);
       }
     },
-    [errorText, t],
+    [errorText, t, exclusive],
   );
   return { run, busy };
 }

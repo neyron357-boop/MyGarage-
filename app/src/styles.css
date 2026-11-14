@@ -3032,6 +3032,8 @@ html.kb .tab-bar-wrap {
   height: 100%;
   padding: 2px;
   border-radius: 999px;
+  /* The bar takes sideways slides itself (no page pan, no pointercancel mid-slide). */
+  touch-action: none;
 }
 .tab-lens {
   position: absolute;
@@ -3040,14 +3042,12 @@ html.kb .tab-bar-wrap {
   left: 2px;
   width: calc((100% - 4px) / var(--n, 4));
   border-radius: 999px;
-  /* The tab you are in sits on a lens tinted with the accent. */
+  /* The tab you are in sits on a lens tinted with the accent. Where it is and how it swells under a
+     finger is its transform, written by ui/tabBar.tsx through Motion (springs on the compositor that a
+     finger can take mid-flight) — no transition on it here. */
   background: color-mix(in srgb, var(--mantine-color-cobalt-6) 15%, var(--glass-lens));
-  transform: translate3d(calc(var(--i, 0) * 100%), 0, 0);
-  transition: transform 560ms var(--spring), opacity var(--dur-2) ease;
+  will-change: transform;
   pointer-events: none;
-}
-.tab-lens[data-hidden='true'] {
-  opacity: 0;
 }
 .tab-bar button[data-href] {
   position: relative;
@@ -3083,17 +3083,31 @@ html.kb .tab-bar-wrap {
 .tab-bar button[data-href] svg {
   width: 26px;
   height: 26px;
-  transition: transform 380ms var(--spring);
+  transition: transform 200ms var(--ease-out);
 }
+/* Press feedback: subtle and quick (Emil Kowalski: 0.95–0.98, 100–160 ms); no bounce back — no force. */
 .tab-bar button[data-href]:active svg {
-  transform: scale(0.84);
-  transition-duration: 80ms;
+  transform: scale(0.95);
+  transition-duration: 120ms;
 }
 .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-6);
 }
 [data-mantine-color-scheme='dark'] .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-4);
+}
+/* While a finger slides along the bar the tint is on the tab under it (the one that opens on release). */
+.tab-bar[data-drag]:not([data-off]) button[data-href].active:not([data-hover]) {
+  color: var(--mantine-color-text);
+}
+.tab-bar[data-drag] button[data-href][data-hover] {
+  color: var(--mantine-color-cobalt-6);
+}
+[data-mantine-color-scheme='dark'] .tab-bar[data-drag] button[data-href][data-hover] {
+  color: var(--mantine-color-cobalt-4);
+}
+.tab-bar[data-drag] button[data-href]:active svg {
+  transform: none;
 }
 .tab-bar button[data-href]:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
