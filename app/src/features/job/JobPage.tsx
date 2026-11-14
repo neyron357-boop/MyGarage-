@@ -75,7 +75,7 @@ import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, useScreenLiveQuery } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
-import { LazySheet } from '../../ui/lazy';
+import { LazySheet, SheetFor } from '../../ui/lazy';
 import { scrollToTop, useStackBack } from '../../ui/stack';
 import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
@@ -1178,7 +1178,7 @@ export function JobPage() {
           />
         )}
       </LazySheet>
-      {pay && <PaymentModal b={b} opened onClose={() => setPay(null)} kind={pay} />}
+      <SheetFor value={pay}>{(kind, o) => <PaymentModal b={b} opened={o} onClose={() => setPay(null)} kind={kind} />}</SheetFor>
       <LazySheet opened={discountOpen}>{(o) => <DiscountSheet b={b} opened={o} onClose={() => setDiscountOpen(false)} />}</LazySheet>
       <LazySheet opened={customerOpen}>{(o) => <CustomerModal opened={o} onClose={() => setCustomerOpen(false)} customer={c} orderId={oid} />}</LazySheet>
       <SendDialog customer={c} request={sv.send} onClose={() => sv.setSend(null)} onSent={() => void syncStage(oid)} />

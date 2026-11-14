@@ -32,7 +32,7 @@ import {
   IconWand,
   type Icon,
 } from '@tabler/icons-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
@@ -423,9 +423,14 @@ export function DecisionModal({ b, version, opened, onClose, onVerbal }: { b: Or
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const lang = version.language;
-  const items = version.items
+  const awaiting = version.items
     .map((s) => ({ s, item: b.items.find((i) => i.id === s.itemId) }))
     .filter((x): x is { s: typeof x.s; item: OrderItem } => !!x.item && isAwaitingClient(x.item));
+  // While the sheet slides out after the answers are saved, its rows stay as they were: recomputed, the lines
+  // just answered are no longer awaiting the client and the sheet would collapse into "nothing to decide" mid-exit.
+  const shownRows = useRef(awaiting);
+  if (opened) shownRows.current = awaiting;
+  const items = opened ? awaiting : shownRows.current;
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const defaultVia: DecisionVia = version.sentVia === 'in_person' ? 'in_person' : version.sentVia === 'phone' ? 'phone' : 'messenger';
   const [via, setVia] = useState<DecisionVia>(defaultVia);

@@ -30,6 +30,7 @@ import {
   Tooltip,
   type CSSVariablesResolver,
   type MantineColorsTuple,
+  type MantineTransition,
 } from '@mantine/core';
 import { DatePickerInput, DateTimePicker, MonthPickerInput } from '@mantine/dates';
 
@@ -111,6 +112,26 @@ export const FONT_PLATE = 'Oswald, "Arial Narrow", sans-serif';
 
 /** The push and sheet curve of UIKit. */
 export const EASE_IOS = 'cubic-bezier(0.32, 0.72, 0, 1)';
+
+/*
+ * Dialogs on their way out take no taps: their button would run its action again while they slide away
+ * (two payments from one double tap). Mantine applies `out` from the moment a dialog starts to close; the
+ * overlay under it is still there and catches the tap, so nothing falls through to the screen below
+ * either. Otherwise Mantine's own "pop" and "slide-up".
+ */
+type TransitionStyles = Exclude<MantineTransition, string>;
+const POP_OUT: TransitionStyles = {
+  in: { opacity: 1, transform: 'scale(1)' },
+  out: { opacity: 0, transform: 'scale(.9) translateY(10px)', pointerEvents: 'none' },
+  common: { transformOrigin: 'center center' },
+  transitionProperty: 'transform, opacity',
+};
+const SHEET_OUT: TransitionStyles = {
+  in: { opacity: 1, transform: 'translateY(0)' },
+  out: { opacity: 0, transform: 'translateY(100%)', pointerEvents: 'none' },
+  common: { transformOrigin: 'bottom' },
+  transitionProperty: 'transform, opacity',
+};
 
 const inputStyles = { label: { fontWeight: 500, marginBottom: rem(6) }, description: { marginTop: 0 }, input: { borderRadius: rem(12) } };
 /** iOS 26 controls are capsules whatever their height. */
@@ -194,7 +215,7 @@ export const theme = createTheme({
         radius: 'xl',
         centered: true,
         overlayProps: { backgroundOpacity: 0.4, blur: 0 },
-        transitionProps: { transition: 'pop', duration: 200, timingFunction: EASE_IOS },
+        transitionProps: { transition: POP_OUT, duration: 200, timingFunction: EASE_IOS },
       },
       classNames: { root: 'mg-sheet' },
       styles: { title: { fontWeight: 700, fontSize: rem(17), lineHeight: 1.3, letterSpacing: '-0.015em' }, header: { paddingBottom: rem(8) } },
@@ -224,7 +245,7 @@ export const theme = createTheme({
 const phoneOverrides = createTheme({
   components: {
     Modal: Modal.extend({
-      defaultProps: { transitionProps: { transition: 'slide-up', duration: 440, exitDuration: 280, timingFunction: EASE_IOS } },
+      defaultProps: { transitionProps: { transition: SHEET_OUT, duration: 440, exitDuration: 280, timingFunction: EASE_IOS } },
     }),
   },
 });

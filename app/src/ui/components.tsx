@@ -34,6 +34,7 @@ import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
 import { cachedCardUrl, cachedMediaUrl, cardUrl, mediaUrl } from '../services/media';
 import { LazySheet } from './lazy';
+import { actionStart, tapSettled } from './tapGuard';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
 import { useScreen, useScreenTitle, useStack } from './stack';
@@ -1146,14 +1147,34 @@ function ConfirmSheet({
 }: ConfirmProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<false | 'main' | 'second'>(false);
+  // Running now (set at once — a second tap in the same frame does nothing), whatever the sheet does meanwhile;
+  // and done — after a success the button stays busy while the sheet slides out (an invoice issued twice →
+  // a false error), until the sheet is opened anew.
+  const running = useRef(false);
+  const done = useRef(false);
+  useEffect(() => {
+    if (!opened) return;
+    done.current = false;
+    if (!running.current) setBusy(false);
+  }, [opened]);
   const go = async (which: 'main' | 'second', fn: () => Promise<unknown>) => {
+    if (running.current || done.current) return;
+    running.current = true;
     setBusy(which);
+    const started = actionStart();
+    let ok = false;
     try {
-      if (await fn()) onClose();
+      ok = !!(await fn());
+      if (ok) {
+        done.current = true;
+        onClose();
+      }
     } catch {
       // the action reports its own error
     } finally {
-      setBusy(false);
+      running.current = false;
+      if (!ok) setBusy(false);
+      tapSettled(started);
     }
   };
   if (secondary)

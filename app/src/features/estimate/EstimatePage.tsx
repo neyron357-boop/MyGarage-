@@ -26,6 +26,7 @@ import { ConfirmModal, EmptyState, List, ListRow, Money, PageHeader, PageSkeleto
 import { useAction, useLang, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { BlockChip, DecisionModal, ItemModal, ItemRow, addSuggestion, useSuggestions } from './components';
+import { SheetFor } from '../../ui/lazy';
 
 export function TemplateModal({ orderId, opened, onClose, defaultBlock = 'A' }: { orderId: string; opened: boolean; onClose: () => void; defaultBlock?: Block }) {
   const { t } = useTranslation();
@@ -410,7 +411,7 @@ export function EstimatePage() {
           }
         />
       )}
-      {sv.decide && <DecisionModal b={b} version={sv.decide} opened onClose={() => sv.setDecide(null)} onVerbal={sv.setSend} />}
+      <SheetFor value={sv.decide}>{(v, o) => <DecisionModal b={b} version={v} opened={o} onClose={() => sv.setDecide(null)} onVerbal={sv.setSend} />}</SheetFor>
       <SendDialog customer={b.customer} request={sv.send} onClose={() => sv.setSend(null)} />
     </>
   );

@@ -12,6 +12,7 @@ import { App } from './App';
 import { ensureSeed } from './services/seed';
 import { applyAccent } from './ui/accent';
 import { installHaptics, isApple } from './ui/haptics';
+import { installTapGuard } from './ui/tapGuard';
 
 /** The Mini App owns vertical swipes inside its webview. Telegram's header still handles dismissal. */
 function prepareTelegramGestures() {
@@ -49,6 +50,8 @@ async function start() {
   // iPhone shows the pressed state (:active) of buttons and rows only when the page listens to touches.
   document.addEventListener('touchstart', () => undefined, { passive: true });
   installHaptics();
+  // A double tap whose second tap lands on what the first one put under the finger is dropped.
+  installTapGuard();
   try {
     await navigator.storage?.persist?.();
   } catch {

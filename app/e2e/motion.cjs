@@ -449,6 +449,212 @@ const check = (name, ok, detail) => {
   const twice = { added: (await page.evaluate(async () => (await import('/src/db/db.ts')).db.orders.count())) - jobsBefore, hash: await page.evaluate(() => location.hash) };
   check('double tap on Accept: one job', twice.added === 1 && twice.hash.startsWith('#/orders/'), twice);
 
+  // 14. Double taps along the job's path (a finger, through CDP): the second tap of each lands where the first
+  //     one changed what is under the finger — it must do nothing (docs/quality/map.md Q1, Q2, Q4, Q5, Q6).
+  // A demo job at the price step (it has lines; a job just accepted and opened is "diagnostics" too, but empty).
+  const jobId = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts');
+    for (const o of await db.orders.where('stage').equals('diagnostics').toArray()) if (await db.items.where('orderId').equals(o.id).count()) return o.id;
+    return undefined;
+  });
+  await page.evaluate((id) => (location.hash = '#/orders/' + id), jobId);
+  await page.waitForTimeout(1300);
+  await page.evaluate(() => {
+    window.__notes = [];
+    new MutationObserver(() => document.querySelectorAll('.mantine-Notification-root').forEach((n) => { if (!n.__seen) { n.__seen = 1; window.__notes.push(n.textContent.slice(0, 80)); } })).observe(document.body, { childList: true, subtree: true });
+  });
+  const notes = () => page.evaluate(() => window.__notes.splice(0));
+  const facts = () => page.evaluate(async (id) => { const { db } = await import('/src/db/db.ts'); const o = await db.orders.get(id); return { stage: o.stage, invoices: await db.invoices.where('orderId').equals(id).count(), payments: await db.payments.where('orderId').equals(id).count() }; }, jobId);
+  const mainBtn = (name) => page.locator('.screen[data-role="top"] button').filter({ hasText: name }).last();
+  const sheetBtn = (name) => page.locator('.mantine-Modal-content button').filter({ hasText: name }).last();
+  const sheetUp = () => page.evaluate(() => [...document.querySelectorAll('.mantine-Modal-content')].some((m) => m.getBoundingClientRect().top < innerHeight - 20));
+  const twoTaps = async (loc, gap) => {
+    const b = await loc.boundingBox();
+    const x = b.x + b.width / 2;
+    const y = b.y + b.height / 2;
+    for (let k = 0; k < 2; k++) {
+      if (k) await page.waitForTimeout(gap);
+      await touch('touchStart', x, y);
+      await page.waitForTimeout(30);
+      await touch('touchEnd');
+    }
+  };
+  await twoTaps(mainBtn('Согласен'), 70);
+  await page.waitForTimeout(1200);
+  const agree = { sheet: await sheetUp(), ...(await facts()), notes: await notes() };
+  check('double tap on "Agree": agreed once, nothing else opens', !agree.sheet && agree.invoices === 0 && agree.notes.length === 0, agree);
+  if (agree.sheet) await page.keyboard.press('Escape');
+  await mainBtn('Готово').click();
+  await page.waitForTimeout(900);
+  await twoTaps(sheetBtn('Выписать инвойс'), 60);
+  await page.waitForTimeout(1400);
+  const issue = { ...(await facts()), notes: await notes() };
+  check('double tap on "Issue invoice": one invoice, no false error', issue.invoices === 1 && issue.notes.length === 0, issue);
+  await mainBtn('Оплата').click();
+  await page.waitForTimeout(900);
+  await twoTaps(sheetBtn('Провести'), 90);
+  await page.waitForTimeout(1400);
+  const paid = { hash: await page.evaluate(() => location.hash), ...(await facts()) };
+  check('double tap on "Record payment": one payment, the tab bar under the sheet untouched', paid.hash === '#/orders/' + jobId && paid.payments === 1, paid);
+  await twoTaps(mainBtn('Выдать'), 150);
+  await page.waitForTimeout(1500);
+  const out = { ...(await facts()), notes: await notes() };
+  check('double tap on "Hand over": handed over, not reopened', out.stage === 'closed' && !out.notes.some((n) => n.includes('возобнов')), out);
+  // To the board as a finger goes there: its tab.
+  await touch('touchStart', tBoard.x, ty);
+  await touch('touchEnd');
+  await page.waitForTimeout(1300);
+  await page.evaluate(() => {
+    window.__pushes = [];
+    const push = history.pushState.bind(history);
+    history.pushState = (a, b, c) => { push(a, b, c); window.__pushes.push(location.hash); };
+  });
+  await twoTaps(page.locator('.screen[data-role="top"] .job-row').first(), 90);
+  await page.waitForTimeout(1200);
+  const opened = { pushes: await page.evaluate(() => window.__pushes.length) };
+  await page.locator('.screen[data-role="top"] .nav-back').click();
+  await page.waitForTimeout(900);
+  opened.afterBack = await page.evaluate(() => location.hash);
+  check('double tap on a board card: the job opens once, one Back to the board', opened.pushes === 1 && opened.afterBack === '#/', opened);
+
+  // The guard itself (ui/tapGuard.ts), on controls laid over the screen: the same control tapped twice fast
+  // counts twice (a stepper); a label's tap reaches its check box; a control that took the place of the
+  // tapped one within the double tap does not get the second tap.
+  await page.evaluate(() => {
+    const box = document.createElement('div');
+    box.id = 'guard-test';
+    box.style.cssText = 'position:fixed;left:40px;top:300px;z-index:9999;display:flex;flex-direction:column;gap:20px;background:#fff';
+    box.innerHTML = '<button id="g-step" style="width:200px;height:60px">+1</button><label id="g-label" style="display:block;width:200px;height:60px"><input id="g-check" type="checkbox"> check</label><button id="g-a" style="width:200px;height:60px">A</button><button id="g-same" style="width:200px;height:60px">Agree</button>';
+    document.body.appendChild(box);
+    window.__g = { step: 0, b: 0, refused: 0 };
+    document.getElementById('g-step').onclick = () => window.__g.step++;
+    // The same node re-rendered with another action ("Agree" → "Refuse"), as React may reuse a button.
+    const same = document.getElementById('g-same');
+    same.onclick = () => {
+      if (same.textContent === 'Refuse') window.__g.refused++;
+      same.textContent = 'Refuse';
+    };
+    // "A" turns into "B" in the same place, as a main button turns into the next step's.
+    document.getElementById('g-a').onclick = (e) => {
+      const b = document.createElement('button');
+      b.id = 'g-b';
+      b.style.cssText = 'width:200px;height:60px';
+      b.textContent = 'B';
+      b.onclick = () => window.__g.b++;
+      e.currentTarget.replaceWith(b);
+    };
+  });
+  const tapAt = async (sel) => {
+    const b = await page.locator(sel).boundingBox();
+    return [b.x + b.width / 2, b.y + b.height / 2];
+  };
+  const quickTwice = async ([x, y]) => {
+    for (let k = 0; k < 2; k++) {
+      if (k) await page.waitForTimeout(80);
+      await touch('touchStart', x, y);
+      await page.waitForTimeout(20);
+      await touch('touchEnd');
+    }
+    await page.waitForTimeout(400);
+  };
+  await quickTwice(await tapAt('#g-step'));
+  const [lx, ly] = await tapAt('#g-label');
+  await touch('touchStart', lx, ly);
+  await touch('touchEnd');
+  await page.waitForTimeout(400);
+  await quickTwice(await tapAt('#g-a'));
+  await quickTwice(await tapAt('#g-same'));
+  // A near miss beside "+1", then the real tap on it 200 ms later: the miss holds nothing back.
+  const [sx, sy] = await tapAt('#g-step');
+  await touch('touchStart', sx + 116, sy);
+  await touch('touchEnd');
+  await page.waitForTimeout(200);
+  await touch('touchStart', sx + 92, sy);
+  await touch('touchEnd');
+  await page.waitForTimeout(400);
+  // Impatient taps that keep coming where "A" turned into "B": all of them dropped, the window runs on.
+  await page.evaluate(() => {
+    const b = document.getElementById('g-b');
+    const a = document.createElement('button');
+    a.id = 'g-a2';
+    a.style.cssText = 'width:200px;height:60px';
+    a.textContent = 'A';
+    a.onclick = (e) => {
+      const n = document.createElement('button');
+      n.style.cssText = 'width:200px;height:60px';
+      n.textContent = 'B';
+      n.onclick = () => window.__g.b++;
+      e.currentTarget.replaceWith(n);
+    };
+    b.replaceWith(a);
+  });
+  await page.waitForTimeout(400);
+  const [ax, ay] = await tapAt('#g-a2');
+  for (let k = 0; k < 4; k++) {
+    if (k) await page.waitForTimeout(170);
+    await touch('touchStart', ax, ay);
+    await touch('touchEnd');
+  }
+  await page.waitForTimeout(400);
+  const guard = await page.evaluate(() => ({ ...window.__g, checked: document.getElementById('g-check').checked }));
+  await page.evaluate(() => document.getElementById('guard-test').remove());
+  check('tap guard: same control twice counts twice, a label reaches its box, a new control (or new words) under the finger is skipped', guard.step === 3 && guard.checked && guard.b === 0 && guard.refused === 0, guard);
+
+  // A payment sheet closed and another kind opened while the first still slides out: a fresh sheet of that
+  // kind, not the leaving one with its state (a refund saved as a prepayment).
+  await page.evaluate((id) => (location.hash = `#/orders/${id}/details?tab=payments`), jobId);
+  await page.waitForTimeout(1300);
+  const kindBtn = (name) => page.locator('.screen[data-role="top"] button').filter({ hasText: name }).first();
+  await kindBtn('Предоплата').click();
+  await page.waitForTimeout(800);
+  const firstTitle = await page.locator('.mantine-Modal-title').last().textContent();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(320);
+  const rb = await kindBtn('Возврат').boundingBox();
+  await touch('touchStart', rb.x + rb.width / 2, rb.y + rb.height / 2);
+  await touch('touchEnd');
+  await page.waitForTimeout(900);
+  const reopened = await page.evaluate(() => {
+    const m = [...document.querySelectorAll('.mantine-Modal-content')].filter((c) => c.getBoundingClientRect().top < innerHeight - 20);
+    const top = m[m.length - 1];
+    return { title: top?.querySelector('.mantine-Modal-title')?.textContent, kind: top?.querySelector('.mantine-SegmentedControl-label[data-active]')?.textContent };
+  });
+  check('a payment sheet reopened as another kind mid-exit is that kind', firstTitle === 'Предоплата' && reopened.title === 'Возврат' && reopened.kind === 'Возврат', { firstTitle, ...reopened });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(600);
+
+  // A computer (or an iPhone on its side — the wide layout): "Record payment" clicked again the moment its
+  // save ends, while the sheet leaves. A closing dialog takes no clicks: one payment.
+  const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "ru-RU" });
+  const wp = await desk.newPage();
+  wp.on('pageerror', (e) => errors.push('pageerror (wide): ' + e.message));
+  await wp.goto(BASE + '#/settings?tab=data');
+  await wp.getByRole('button', { name: 'Загрузить демо-данные' }).click();
+  await wp.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
+  const wideJob = await wp.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts');
+    for (const o of await db.orders.where('stage').equals('diagnostics').toArray()) if (await db.items.where('orderId').equals(o.id).count()) return o.id;
+    return undefined;
+  });
+  await wp.goto(BASE + '#/orders/' + wideJob);
+  await wp.waitForTimeout(1300);
+  await wp.getByRole('button', { name: 'Согласен' }).last().click();
+  await wp.waitForTimeout(1000);
+  await wp.getByRole('button', { name: 'Готово' }).last().click();
+  await wp.locator('.mantine-Modal-content button').filter({ hasText: 'Выписать инвойс' }).last().click();
+  await wp.waitForTimeout(1300);
+  await wp.getByRole('button', { name: 'Оплата' }).last().click();
+  await wp.waitForTimeout(800);
+  const record = wp.locator('.mantine-Modal-content button').filter({ hasText: 'Провести' }).last();
+  const rbox = await record.boundingBox();
+  await wp.mouse.click(rbox.x + rbox.width / 2, rbox.y + rbox.height / 2);
+  await wp.waitForFunction(() => !document.querySelector('.mantine-Modal-content button[data-loading]'), null, { timeout: 5000 });
+  await wp.mouse.click(rbox.x + rbox.width / 2, rbox.y + rbox.height / 2);
+  await wp.waitForTimeout(1200);
+  const widePaid = await wp.evaluate(async (id) => (await import('/src/db/db.ts')).db.payments.where('orderId').equals(id).count(), wideJob);
+  check('wide layout: "Record payment" clicked again as the sheet leaves — one payment', widePaid === 1, { widePaid });
+  await desk.close();
+
   // 11. Safari in a tab (not installed): the edge swipe is Safari's own, and going back after it
   //     does not play a second animation.
   const iphone = await browser.newContext({

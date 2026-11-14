@@ -108,6 +108,7 @@ import { orderFlags } from './flags';
 import { nextStep, type StepAction } from './nextStep';
 import { DeleteJobModal } from './DeleteJob';
 import { useStackBack } from '../../ui/stack';
+import { SheetFor } from '../../ui/lazy';
 
 const ctxOf = (b: OrderBundle) => ({ customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils });
 
@@ -599,7 +600,7 @@ function ApprovalsTab({ b }: { b: OrderBundle }) {
           />
         );
       })}
-      {decide && <DecisionModal b={b} version={decide} opened onClose={() => setDecide(null)} onVerbal={setSend} />}
+      <SheetFor value={decide}>{(v, o) => <DecisionModal b={b} version={v} opened={o} onClose={() => setDecide(null)} onVerbal={setSend} />}</SheetFor>
       <SendDialog customer={b.customer} request={send} onClose={() => setSend(null)} />
     </Stack>
   );
@@ -1104,8 +1105,8 @@ export function OrderPage() {
           {t('common.confirm')}
         </Button>
       </Modal>
-      {decide && <DecisionModal b={b} version={decide} opened onClose={() => setDecide(null)} onVerbal={setSend} />}
-      {pay && <PaymentModal b={b} opened onClose={() => setPay(false)} />}
+      <SheetFor value={decide}>{(v, o) => <DecisionModal b={b} version={v} opened={o} onClose={() => setDecide(null)} onVerbal={setSend} />}</SheetFor>
+      <SheetFor value={pay}>{(_, o) => <PaymentModal b={b} opened={o} onClose={() => setPay(false)} />}</SheetFor>
       <SendDialog customer={b.customer} request={send} onClose={() => setSend(null)} />
     </>
   );

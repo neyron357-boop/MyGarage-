@@ -14,6 +14,7 @@ import { useAction, useOrderBundle } from '../../ui/hooks';
 import { SendDialog } from '../../ui/SendDialog';
 import { DecisionModal, ItemModal, ItemRow, UrgencyPicker } from './components';
 import { LimitConfirm, SendVersionModal, TemplateModal, useSendVersion } from './EstimatePage';
+import { SheetFor } from '../../ui/lazy';
 
 const PHRASES = ['tornBoot', 'oilLeak', 'wornDiscs', 'wornPads', 'coolantLeak', 'brokenMount', 'wornBelt', 'corrodedPipe', 'looseLink', 'batteryWeak'];
 
@@ -184,7 +185,7 @@ export function FoundProblemPage() {
         />
       )}
       <SendVersionModal opened={sendOpen} onClose={() => setSendOpen(false)} orderId={b.order.id} reason={reason} kind="supplement" onSent={sv.afterSend} onPrepare={sv.prepare} />
-      {sv.decide && <DecisionModal b={b} version={sv.decide} opened onClose={() => { sv.setDecide(null); navigate(`/orders/${b.order.id}`); }} onVerbal={sv.setSend} />}
+      <SheetFor value={sv.decide}>{(v, o) => <DecisionModal b={b} version={v} opened={o} onClose={() => { sv.setDecide(null); navigate(`/orders/${b.order.id}`); }} onVerbal={sv.setSend} />}</SheetFor>
       <SendDialog customer={b.customer} request={sv.send} onClose={() => { sv.setSend(null); navigate(`/orders/${b.order.id}`); }} />
     </>
   );

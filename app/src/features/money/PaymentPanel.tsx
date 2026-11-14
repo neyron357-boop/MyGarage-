@@ -30,6 +30,7 @@ import { DateField } from '../../ui/DateFields';
 import { useAction } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
+import { SheetFor } from '../../ui/lazy';
 
 const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
 
@@ -339,8 +340,8 @@ export function PaymentPanel({ b, allowDebt }: { b: OrderBundle; allowDebt?: boo
         </Section>
       )}
 
-      {payOpen && <PaymentModal b={b} opened onClose={() => setPayOpen(null)} kind={payOpen} />}
-      {debtOpen && <DebtModal b={b} opened onClose={() => setDebtOpen(false)} />}
+      <SheetFor value={payOpen}>{(kind, o) => <PaymentModal b={b} opened={o} onClose={() => setPayOpen(null)} kind={kind} />}</SheetFor>
+      <SheetFor value={debtOpen}>{(_, o) => <DebtModal b={b} opened={o} onClose={() => setDebtOpen(false)} />}</SheetFor>
       <Modal opened={creditOpen} onClose={() => setCreditOpen(false)} title={t('invoice.correct')}>
         <Text size="sm" mb="sm">
           {t('invoice.correctExplain')}

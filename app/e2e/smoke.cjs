@@ -45,6 +45,25 @@ async function launchBrowser() {
       }
     };
   }
+  // A person's pace: at least 400 ms between clicks. The app drops a tap that comes within 350 ms where the
+  // previous tap changed what is under the finger — the second tap of a double tap (ui/tapGuard.ts): nobody
+  // taps a button they have not read yet ("Зафиксировать версию" → "Клиент согласен на всё" in the same place).
+  {
+    const probe = await ctx.newPage();
+    const proto = Object.getPrototypeOf(probe.locator('body'));
+    await probe.close();
+    const click = proto.click;
+    let lastClick = 0;
+    proto.click = async function (opts) {
+      const wait = lastClick + 400 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      try {
+        return await click.call(this, opts);
+      } finally {
+        lastClick = Date.now();
+      }
+    };
+  }
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));

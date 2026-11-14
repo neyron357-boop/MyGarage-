@@ -15,6 +15,7 @@ import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { EntrySheet, INCOME_CATEGORIES, LinkPicker, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
+import { SheetFor } from '../../ui/lazy';
 
 type KindFilter = 'all' | 'in' | 'out';
 
@@ -391,7 +392,7 @@ export function LedgerTab() {
       )}
 
       <EntrySheet opened={!!sheet} onClose={() => setSheet(null)} preset={sheet ?? undefined} />
-      {opening && <OpeningSheet opened onClose={() => setOpening(false)} cash={book.cashStartFils} card={book.cardStartFils} cashLocked={book.cashStartLocked} />}
+      <SheetFor value={opening}>{(_, o) => <OpeningSheet opened={o} onClose={() => setOpening(false)} cash={book.cashStartFils} card={book.cardStartFils} cashLocked={book.cashStartLocked} />}</SheetFor>
       {open && <EntryDetails entry={open} label={label(open)} cats={data.cats} onClose={() => setOpen(null)} />}
     </Stack>
   );

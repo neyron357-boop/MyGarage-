@@ -11,6 +11,7 @@ import { AppError } from '../services/errors';
 import { loadOrderBundle, seenBundle } from '../services/orders';
 import { getSettings } from '../services/settings';
 import { haptic } from './haptics';
+import { actionStart, tapSettled } from './tapGuard';
 import { useScreen } from './stack';
 
 export const PHONE_QUERY = '(max-width: 48em)';
@@ -101,6 +102,7 @@ export function useAction({ exclusive = false }: { exclusive?: boolean } = {}) {
       if (exclusive && inflight.current) return undefined;
       inflight.current = true;
       setBusy(true);
+      const started = actionStart();
       try {
         const r = await fn();
         if (successKey) notifications.show({ color: 'green', message: t(successKey), icon: createElement(IconCheck, { size: 18, stroke: 2.6 }) });
@@ -113,6 +115,8 @@ export function useAction({ exclusive = false }: { exclusive?: boolean } = {}) {
       } finally {
         inflight.current = false;
         setBusy(false);
+        // The screen may change only now (a slow save): a second tap from the finger that started it is judged from here.
+        tapSettled(started);
       }
     },
     [errorText, t, exclusive],
