@@ -42,7 +42,7 @@ import {
 } from '@tabler/icons-react';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
@@ -67,7 +67,7 @@ import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
-import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, StickyBar, undoToast } from '../../ui/components';
+import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
@@ -76,6 +76,7 @@ import { useAction, useLang, useOrderBundle, useScreenLiveQuery } from '../../ui
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { scrollToTop, useStackBack } from '../../ui/stack';
+import { useStuck } from '../../ui/sticky';
 import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
 import { DiscountSheet } from '../money/DiscountSheet';
@@ -86,7 +87,7 @@ import { useSendVersion } from './sendVersion';
 import { DueChip } from './Due';
 import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
 import { MechanicSheet } from './MechanicSheet';
-import { NotesSection } from './Notes';
+import { NotesChat } from './Notes';
 import { OutsourceActions, ReceivedRow, ReturnTerms } from './LineExtras';
 import { RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { ObdLine, useObdImport } from './ObdScan';
@@ -397,6 +398,17 @@ export function JobPage() {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
+  // Two tabs — the job, and its notes (a chat with oneself); the address keeps which, without a step in the history.
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'notes' ? 'notes' : 'main';
+  const pickTab = (v: string) => {
+    if (v === tab) return;
+    setParams(v === 'notes' ? { tab: 'notes' } : {}, { replace: true });
+    if (v !== 'notes') scrollToTop();
+  };
+  // The tabs stay in reach under the navigation bar (a long chat, a long job): backed only once stuck.
+  const tabsMark = useRef<HTMLDivElement>(null);
+  const tabsBar = useRef<HTMLDivElement>(null);
   const stackBack = useStackBack();
   const { run, busy } = useAction();
   const b = useOrderBundle(id);
@@ -447,6 +459,7 @@ export function JobPage() {
   useSwipeHint(!!b && !activeInvoice(b.invoices) && !['closed', 'cancelled', 'booked'].includes(b.order.stage) && liveLines(b.items).some((i) => i.kind !== 'discount'));
   // The screen glows in the colour of the job's step.
   const bodyRef = useRef<HTMLDivElement>(null);
+  useStuck(tabsMark, tabsBar, !!b);
   usePhaseGlow(bodyRef, phase);
 
   // Lines moved by hand in edit mode (≡ at the row's end): the quote and the invoice list them so.
@@ -853,6 +866,22 @@ export function JobPage() {
 
       {/* On a computer the job keeps a readable width (like a sheet on an iPad), not the whole window. */}
       <div className="job-body" ref={bodyRef}>
+      <div ref={tabsMark} aria-hidden />
+      <div ref={tabsBar} className="job-tabs">
+        <ScrollTabs
+          value={tab}
+          onChange={pickTab}
+          mb="0"
+          items={[
+            { value: 'main', label: t('job.tab.main') },
+            { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
+          ]}
+        />
+      </div>
+      {tab === 'notes' ? (
+        <NotesChat orderId={oid} notes={b.notes} editable={open} />
+      ) : (
+      <>
       <Box className="surface" p="md" mb="lg">
         <CarCover vehicleId={b.vehicle.id} hideEmpty={!open} />
         <Group gap="sm" wrap="nowrap" justify="space-between">
@@ -1042,7 +1071,6 @@ export function JobPage() {
       )}
 
       {(phase === 'pay' || phase === 'out') && <HandoverChecks order={b.order} />}
-      <NotesSection orderId={oid} notes={b.notes} editable={open} />
 
       {bar && (
         <StickyBar>
@@ -1051,6 +1079,8 @@ export function JobPage() {
             {bar}
           </div>
         </StickyBar>
+      )}
+      </>
       )}
       </div>
 

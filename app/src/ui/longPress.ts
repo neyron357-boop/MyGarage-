@@ -3,7 +3,9 @@ import { haptic } from './haptics';
 
 /**
  * Long press, the iPhone's way to the actions of a card (and right click on a PC). Moving the finger
- * (scrolling) cancels it; the click that ends a long press does not open the card (`consumeClick`).
+ * (scrolling) cancels it. Lifting the finger after a long press is not a tap: no click follows it — it
+ * would land on what the press opened (a sheet's backdrop) and close it at once; should a click still come,
+ * the card's own tap action is skipped (`consumeClick`).
  */
 export function useLongPress(onLong: () => void, ms = 450) {
   const timer = useRef<number | undefined>(undefined);
@@ -32,7 +34,10 @@ export function useLongPress(onLong: () => void, ms = 450) {
         const t = e.touches[0];
         if (s && t && Math.hypot(t.clientX - s.x, t.clientY - s.y) > 10) clear();
       },
-      onTouchEnd: clear,
+      onTouchEnd: (e?: React.TouchEvent) => {
+        clear();
+        if (fired.current && e?.cancelable) e.preventDefault();
+      },
       onTouchCancel: clear,
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();

@@ -4342,38 +4342,218 @@ html.kb .screen-bottom > .sticky-bar {
 .handover-checks {
   margin-top: 22px;
 }
-/* The job's notes at the bottom: a few rows and a composer like a messenger's. */
-.notes {
-  margin-top: 22px;
+/* The job's two tabs (the job, its notes) stay in reach under the navigation bar while either scrolls; their
+   backing — the screen's own colour and a hairline — shows only once they stick (ui/sticky.ts): at rest they
+   sit on the glow like the rest of the header. */
+.job-tabs {
+  position: sticky;
+  top: var(--app-shell-header-offset, 0px);
+  z-index: 6;
+  margin: 0 calc(-1 * var(--page-pad)) 14px;
+  padding: 4px var(--page-pad) 8px;
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
 }
-.notes .list {
-  margin-bottom: 10px;
+.screen .job-tabs {
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h));
 }
-.note-thumb {
+.job-tabs[data-stuck] {
+  background: var(--app-canvas);
+  box-shadow: 0 0.5px 0 var(--app-hairline);
+}
+
+/* ---------- The job's notes: a chat with oneself (the "Notes" tab) ----------
+   One's own messages on the right in the accent, by day, the newest at the bottom just above the composer.
+   Photos and videos keep a fixed frame (nothing moves as they load — screens keep their scroll offset).
+   The composer floats as glass over the faded edge, as the tab bar does: "+", the text, camera, voice. */
+.notes-chat {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.notes-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.note-day {
+  align-self: center;
+  margin: 14px 0 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--app-card);
+  color: var(--app-label-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.note-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.note-row[data-gap] {
+  margin-top: 8px;
+}
+.note-bubble {
+  max-width: 80%;
+  padding: 7px 12px 6px;
+  border-radius: 20px;
+  background: var(--mantine-color-cobalt-filled);
+  color: var(--mantine-color-white);
+  font-size: 17px;
+  line-height: 1.32;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* The last of a run has its tail (the corner by the edge). */
+.note-bubble[data-tail],
+.note-media[data-tail] {
+  border-bottom-right-radius: 6px;
+}
+.note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The time sits in the bubble's last line, as in a messenger. */
+.note-bubble .note-time {
+  float: right;
+  margin: 7px 0 -3px 10px;
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+.note-media {
+  position: relative;
+  width: min(240px, 68vw);
+  aspect-ratio: 1;
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--app-card);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.note-media[data-kind='video'] {
+  aspect-ratio: 3 / 4;
+  background: var(--mantine-color-black);
+}
+.note-media > .surface-soft {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.note-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.note-photo > * {
+  width: 100% !important;
+  height: 100% !important;
+}
+.note-media video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.note-media .note-time {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--mantine-color-white);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+/* A video's own controls are at its bottom: the time goes up. */
+.note-media[data-kind='video'] .note-time {
+  top: 8px;
+  bottom: auto;
+}
+.note-voice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(220px, 58vw);
+}
+.note-voice .note-play {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  color: var(--mantine-color-cobalt-filled);
+}
+.note-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
   overflow: hidden;
 }
-.note-composer {
+.note-track > i {
+  display: block;
+  height: 100%;
+  background: var(--mantine-color-white);
+  transform-origin: left;
+  transform: scaleX(var(--p, 0));
+  transition: transform 250ms linear;
+}
+.note-length {
+  font-size: 13px;
+  opacity: 0.85;
+}
+.notes-composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 6px 6px 6px 14px;
-  border-radius: 26px;
-  background: var(--app-card);
 }
-.note-composer .mantine-Input-wrapper {
+.notes-composer .mantine-ActionIcon-root {
+  flex-shrink: 0;
+}
+.notes-round {
+  border: 0 !important;
+  color: var(--mantine-color-text) !important;
+}
+.notes-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+}
+.notes-field.recording {
+  gap: 10px;
+}
+.notes-field .mantine-Textarea-root {
+  flex: 1;
+  min-width: 0;
+}
+.notes-field .mantine-Input-wrapper {
   --input-bg: transparent !important;
   --input-bd: transparent !important;
   --input-bd-focus: transparent !important;
 }
-.note-composer .mantine-Textarea-input {
-  padding: 10px 0;
-}
-.note-composer.recording {
-  align-items: center;
+.notes-field .mantine-Textarea-input {
+  padding: 11px 0;
 }
 .rec-dot {
   width: 12px;

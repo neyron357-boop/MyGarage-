@@ -5,18 +5,21 @@ import { AppError } from './errors';
 import { addMedia } from './media';
 
 /**
- * A job's notes: what the mechanic found, what was checked, what the customer was promised — a few
- * words, a photo or a voice message. They are the manager's own: not on any document, can be removed.
+ * A job's notes, a chat with oneself: what the mechanic found, what was checked, what the customer was
+ * promised — a few words, a photo, a video or a voice message. They are the manager's own: not on any
+ * document, can be removed.
  */
-export async function addNote(orderId: string, input: { text?: string; photo?: Blob; voice?: Blob; seconds?: number }): Promise<JobNote> {
+export async function addNote(orderId: string, input: { text?: string; photo?: Blob; video?: Blob; voice?: Blob; seconds?: number }): Promise<JobNote> {
   const text = input.text?.trim();
-  if (!text && !input.photo && !input.voice) throw new AppError('err.emptyNote');
+  if (!text && !input.photo && !input.video && !input.voice) throw new AppError('err.emptyNote');
   const id = uid();
-  const note: JobNote = { id, orderId, kind: input.voice ? 'voice' : input.photo ? 'photo' : 'text', text: text || undefined, createdAt: nowIso() };
+  const kind: JobNote['kind'] = input.voice ? 'voice' : input.video ? 'video' : input.photo ? 'photo' : 'text';
+  const note: JobNote = { id, orderId, kind, text: text || undefined, createdAt: nowIso() };
   if (input.voice) {
     note.mediaId = (await addMedia({ ownerType: 'note', ownerId: id, slot: 'voice', file: input.voice, kind: 'audio' })).id;
     note.seconds = input.seconds ? Math.round(input.seconds) : undefined;
-  } else if (input.photo) note.mediaId = (await addMedia({ ownerType: 'note', ownerId: id, slot: 'photo', file: input.photo })).id;
+  } else if (input.video) note.mediaId = (await addMedia({ ownerType: 'note', ownerId: id, slot: 'video', file: input.video, kind: 'video' })).id;
+  else if (input.photo) note.mediaId = (await addMedia({ ownerType: 'note', ownerId: id, slot: 'photo', file: input.photo })).id;
   await db.transaction('rw', db.notes, db.orders, async () => {
     await db.notes.add(note);
     await db.orders.update(orderId, { updatedAt: note.createdAt });

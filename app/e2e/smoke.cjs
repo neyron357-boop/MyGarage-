@@ -761,10 +761,16 @@ async function launchBrowser() {
     await shot('34a-due-sheet');
     await page.getByRole('dialog', { name: 'Когда будет готова' }).locator('button.chip').first().click();
     await front('.due-chip[data-state="set"]').waitFor();
-    // A note at the bottom of the job, like a chat with oneself.
+    // The job's notes: their own tab, a chat with oneself — the text, "+" for photos and videos, camera, voice.
+    await front('.scroll-tabs > button').filter({ hasText: 'Заметки' }).click();
     await page.getByLabel('Заметка').fill('Front pads at 2 mm, discs OK');
     await front('[aria-label="Добавить"]').click();
-    await page.locator('.notes .list-row', { hasText: 'Front pads at 2 mm' }).waitFor();
+    await front('.note-bubble').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
+    await front('input[data-note-media]').setInputFiles(FIXTURE);
+    await front('.note-photo').first().waitFor();
+    await shot('34a2-notes-chat');
+    await front('.scroll-tabs > button').filter({ hasText: 'Основная' }).click();
+    await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
     // A part with its number and two offers: the first one goes on the line (cost + markup).
     await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
     await dlg.getByLabel('Запчасть').fill('Headlight LH');

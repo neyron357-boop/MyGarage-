@@ -56,7 +56,7 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
         ...press.handlers,
         onTouchStart: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchStart(e), sw.handlers.onTouchStart(e)),
         onTouchMove: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchMove(e), sw.handlers.onTouchMove(e)),
-        onTouchEnd: () => (press.handlers.onTouchEnd(), sw.handlers.onTouchEnd()),
+        onTouchEnd: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchEnd(e), sw.handlers.onTouchEnd()),
         onTouchCancel: () => (press.handlers.onTouchCancel(), sw.handlers.onTouchCancel()),
       }
     : press.handlers;

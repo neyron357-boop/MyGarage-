@@ -45,6 +45,14 @@ describe('job notes', () => {
     b = (await loadOrderBundle(o.id))!;
     expect(b.notes).toHaveLength(2);
   });
+
+  it('a video from the phone is a note of its own ("+" in the notes chat)', async () => {
+    const o = await job();
+    const n = await addNote(o.id, { video: new Blob(['v'], { type: 'video/mp4' }) });
+    expect(n.kind).toBe('video');
+    expect((await db.media.get(n.mediaId!))?.kind).toBe('video');
+    expect((await loadOrderBundle(o.id))!.notes.map((x) => x.kind)).toEqual(['video']);
+  });
 });
 
 describe('parts: return terms, part of an order, work outside', () => {

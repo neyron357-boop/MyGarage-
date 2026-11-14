@@ -866,8 +866,10 @@ export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: strin
       ready.current = true;
       requestAnimationFrame(() => root.setAttribute('data-ready', 'true'));
     }
+    // The row, and each tab: a count that appears (or grows) widens its tab, the pill follows.
     const ro = new ResizeObserver(place);
     ro.observe(root);
+    root.querySelectorAll(':scope > button').forEach((b) => ro.observe(b));
     if (!el) return () => ro.disconnect();
     const left = el.offsetLeft - root.offsetLeft;
     if (left < root.scrollLeft + 8 || left + el.offsetWidth > root.scrollLeft + root.clientWidth - 8) {

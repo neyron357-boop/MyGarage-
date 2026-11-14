@@ -209,9 +209,9 @@ export interface Order {
 export interface JobNote {
   id: string;
   orderId: string;
-  kind: 'text' | 'photo' | 'voice';
+  kind: 'text' | 'photo' | 'video' | 'voice';
   text?: string;
-  /** The photo or the recording (media of the note). */
+  /** The photo, the video or the recording (media of the note). */
   mediaId?: string;
   /** Length of a voice note. */
   seconds?: number;
