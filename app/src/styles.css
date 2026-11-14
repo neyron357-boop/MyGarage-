@@ -139,13 +139,10 @@ body {
 html {
   touch-action: pan-x pan-y;
 }
-/* No pull-to-refresh in the middle of a job (Android Chrome) … */
+/* Phone screens own their scrolling, including what happens at the ends of a list. */
+html,
 body {
   overscroll-behavior-y: none;
-}
-/* … but the iPhone keeps its rubber band at the ends of a list: there pulling never reloads. */
-html.ios body {
-  overscroll-behavior-y: auto;
 }
 ::selection {
   background: color-mix(in srgb, var(--mantine-color-cobalt-5) 26%, transparent);
@@ -565,7 +562,7 @@ html.vv .app-root {
   inset: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: none;
   -webkit-overflow-scrolling: touch;
 }
 /* Room for the navigation bar above, the floating tab bar (or the home indicator) below: the content
@@ -1767,19 +1764,136 @@ html.kb .tab-bar-wrap {
   border-radius: 50%;
   overflow: hidden;
 }
-/* A car's photo on its board row, the step it is on as a small badge in the corner. */
-.job-thumb {
-  position: relative;
-  flex-shrink: 0;
-  width: 52px;
-  height: 52px;
-}
-.job-thumb > .mantine-Image-root,
-.job-thumb > .surface-soft {
-  border-radius: 15px;
+/* Board cards stand on their own. Jobs without photos use the same details in less space. */
+.list.board-cards {
+  display: grid;
+  gap: 14px;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
 }
 .job-row {
-  min-height: 72px;
+  position: relative;
+  overflow: clip;
+  border-radius: var(--radius-group);
+  background: var(--app-card);
+}
+.job-card-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: var(--app-card);
+  cursor: pointer;
+}
+.job-card-open:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: -3px;
+}
+.job-card-photo {
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--app-fill);
+}
+.job-card-photo img {
+  display: block;
+}
+.job-card-info {
+  display: grid;
+  gap: 9px;
+  padding: 13px 15px 14px;
+  transition: background-color var(--dur-1) ease;
+}
+[data-mantine-color-scheme='dark'] .job-card-info {
+  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
+}
+.job-card-open:active .job-card-info {
+  background: var(--app-press);
+  transition: none;
+}
+@media (hover: hover) {
+  .job-card-open:hover .job-card-info {
+    background: var(--app-press);
+  }
+}
+.job-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+.job-card-title > span:not(.job-card-car-icon) {
+  overflow-wrap: anywhere;
+}
+.job-card-car-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--app-fill);
+  color: var(--app-label-2);
+}
+.job-card-chevron {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  color: var(--app-label-3);
+}
+.job-card-line,
+.job-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 9px;
+}
+.job-card-line {
+  justify-content: space-between;
+}
+.job-card-flags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.job-card-meta .row-phase {
+  height: 25px;
+}
+.board-refresh {
+  pointer-events: none;
+  position: absolute;
+  z-index: 5;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-inline-start: -16px;
+  border-radius: 50%;
+  background: var(--app-card);
+  color: var(--mantine-color-cobalt-light-color);
+  box-shadow: inset 0 0 0 0.5px var(--app-hairline), var(--glass-shadow);
+  opacity: var(--pull-opacity, 0);
+  transform: translateY(var(--pull-y, -8px));
+  transition: opacity var(--dur-2) ease, transform var(--dur-2) var(--ease-ios);
+}
+.board-refresh[data-pulling] {
+  transition: none;
+}
+.board-refresh[data-busy] {
+  opacity: 1;
+  transform: translateY(4px);
+}
+.board-refresh .board-refresh-arrow {
+  transform: rotate(var(--pull-rotation, 0deg));
 }
 /* The step of a job on its board row: a capsule in the step's colour, with how long it has been there. */
 .row-phase {
@@ -1794,18 +1908,6 @@ html.kb .tab-bar-wrap {
   font-weight: 650;
   letter-spacing: -0.01em;
   white-space: nowrap;
-}
-.job-thumb-phase {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  color: #fff;
-  box-shadow: 0 0 0 2px var(--app-card);
 }
 
 /* The customer and the complaint in the job's head: plain lines that open their sheet. */
@@ -3985,18 +4087,10 @@ html.kb .screen-bottom > .sticky-bar {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  min-width: 0;
-  overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .row-due > svg {
   flex-shrink: 0;
-}
-.row-due-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 /* The job's profit stays blurred until tapped (the customer may see the screen). */
 .profit-amount {

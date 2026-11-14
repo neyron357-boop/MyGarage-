@@ -493,10 +493,10 @@ export function FormRow({ label, children, onClick, align = 'right', chevron }: 
 }
 
 /** An inset group of rows. With `animate` the rows come, go and change places with motion (ui/motion). */
-export function List({ children, animate }: { children: ReactNode; animate?: boolean }) {
+export function List({ children, animate, className }: { children: ReactNode; animate?: boolean; className?: string }) {
   const ref = useAutoAnimate<HTMLDivElement>(!!animate);
   return (
-    <div className="list" ref={ref}>
+    <div className={className ? `list ${className}` : 'list'} ref={ref}>
       {children}
     </div>
   );
@@ -1049,22 +1049,36 @@ export function MoneyInput({
   );
 }
 
-export function MediaImage({ id, thumb = true, h = 90, w, radius = 'md', onClick }: { id: string; thumb?: boolean; h?: number | string; w?: number | string; radius?: string; onClick?: () => void }) {
+export function MediaImage({ id, thumb = true, h = 90, w, radius = 'md', onClick, loading }: { id: string; thumb?: boolean; h?: number | string; w?: number | string; radius?: string; onClick?: () => void; loading?: 'eager' | 'lazy' }) {
   // A photo shown before is drawn at once (a list coming back, a row rendered again); a new one waits in
   // a quiet grey square (no spinner per photo), then is decoded off the main thread.
   const key = `${id}:${thumb}`;
+  const placeholder = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState<{ key: string; url?: string }>();
   const url = cachedMediaUrl(id, thumb) ?? (loaded?.key === key ? loaded.url : undefined);
   useEffect(() => {
     if (cachedMediaUrl(id, thumb)) return;
     let alive = true;
-    void mediaUrl(id, thumb).then((u) => alive && setLoaded({ key, url: u }));
+    const load = () => void mediaUrl(id, thumb).then((u) => alive && setLoaded({ key, url: u }));
+    let observer: IntersectionObserver | undefined;
+    const target = placeholder.current;
+    if (loading === 'lazy' && target && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(([entry]) => {
+        if (!entry.isIntersecting) return;
+        observer?.disconnect();
+        load();
+      }, { rootMargin: '360px' });
+      observer.observe(target);
+    } else {
+      load();
+    }
     return () => {
       alive = false;
+      observer?.disconnect();
     };
-  }, [id, thumb, key]);
-  if (!url) return <Box h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
-  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" />;
+  }, [id, thumb, key, loading]);
+  if (!url) return <Box ref={placeholder} h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
+  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" loading={loading} />;
 }
 
 /** Thumbnail that opens the full photo. */

@@ -147,6 +147,7 @@ const TAPPABLE = [
   'button.price-tap',
   'button.accent-swatch',
   'button.garage-card',
+  'button.job-card-open',
   'button.action-tile',
   '.scroll-tabs > button',
   '.wizard-steps > button',

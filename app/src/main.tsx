@@ -13,6 +13,22 @@ import { ensureSeed } from './services/seed';
 import { applyAccent } from './ui/accent';
 import { installHaptics, isApple } from './ui/haptics';
 
+/** The Mini App owns vertical swipes inside its webview. Telegram's header still handles dismissal. */
+function prepareTelegramGestures() {
+  const bridge = (window as Window & { TelegramWebviewProxy?: { postEvent: (event: string, data: string) => void } }).TelegramWebviewProxy;
+  if (typeof bridge?.postEvent !== 'function') return;
+  const fragment = location.hash.slice(1);
+  if (fragment.startsWith('tgWebApp')) {
+    // Telegram launch parameters share the fragment with HashRouter. A launch without a route opens the board.
+    history.replaceState(history.state, '', `${location.pathname}${location.search}#/`);
+  }
+  try {
+    bridge.postEvent('web_app_setup_swipe_behavior', JSON.stringify({ allow_vertical_swipe: false }));
+  } catch {
+    // A client without this native event can still use the in-page gesture.
+  }
+}
+
 /** An app, not a web page: iPhone Safari ignores `user-scalable=no`, so pinch-zoom is blocked here. */
 function blockPinchZoom() {
   const stop = (e: Event) => e.preventDefault();
@@ -23,9 +39,10 @@ function blockPinchZoom() {
 async function start() {
   const html = document.documentElement;
   html.lang = i18n.language;
-  // Platform hooks for the stylesheet: the iPhone keeps its rubber band, an installed app its own chrome.
+  // Platform hooks for the stylesheet: an installed app has its own chrome.
   html.classList.toggle('ios', isApple());
   html.classList.toggle('standalone', window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
+  prepareTelegramGestures();
   blockPinchZoom();
   // The accent chosen on this device, before the first paint (no blue flash).
   applyAccent();
