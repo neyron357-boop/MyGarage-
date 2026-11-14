@@ -94,6 +94,7 @@ import { ObdLine, useObdImport } from './ObdScan';
 import { LineSheet, PART_COLOR, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
+import { ShareJobButton } from './ShareJob';
 
 /** What a line is to the job right now, as one symbol. */
 function LineMark({ item }: { item: OrderItem }) {
@@ -826,9 +827,13 @@ export function JobPage() {
           </>
         }
         right={
-          <ActionIcon variant="default" size={40} radius="md" aria-label={t('common.more')} onClick={() => setMore(true)}>
-            <IconDots size={20} />
-          </ActionIcon>
+          <>
+            {/* The job to the garage's group: the car's photo, the car, the customer's name, the lines. */}
+            <ShareJobButton b={b} />
+            <ActionIcon variant="default" size={40} radius="md" aria-label={t('common.more')} onClick={() => setMore(true)}>
+              <IconDots size={20} />
+            </ActionIcon>
+          </>
         }
       />
 

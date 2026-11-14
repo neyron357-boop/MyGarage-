@@ -100,6 +100,21 @@ export function linesText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'pl
 }
 
 /**
+ * The job for the garage's group chat (with the car's photo): the car, the customer by name only (no
+ * phone — the group is not the customer's), the lines with their amounts and the total.
+ */
+export function jobShareText(
+  vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'plate'>,
+  customer: Pick<Customer, 'name' | 'type' | 'companyName'>,
+  items: OrderItem[],
+  lang: Lang,
+): string {
+  const name = ((customer.type === 'company' && customer.companyName) || customer.name || '').trim();
+  const [car, , ...rest] = linesText(vehicle, items, lang).split('\n');
+  return [car, ...(name ? [`${tFor(lang)('job.client')}: ${name}`] : []), '', ...rest].join('\n');
+}
+
+/**
  * A request to a parts seller, in English (the trade's language here, whatever the customer speaks): the
  * car with its VIN, the part with its number and how many — to paste to several sellers with the photos.
  */

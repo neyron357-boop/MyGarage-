@@ -539,6 +539,17 @@ async function launchBrowser() {
     await shot('30f-customer-from-base');
     await dlg.locator('.suggest').filter({ hasText: 'Сергей Иванов' }).click();
     await page.locator('.screen[data-role="top"] .job-line').filter({ hasText: 'Сергей Иванов' }).waitFor();
+    // The job to the garage group (v0.13): the share sheet gets the car's photo and the text — the car, the
+    // customer by name only, the lines with their amounts.
+    await page.evaluate(() => {
+      window.__shared = null;
+      navigator.canShare = () => true;
+      navigator.share = async (d) => { window.__shared = { text: d.text, files: (d.files || []).map((f) => f.name) }; };
+    });
+    await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Поделиться', exact: true }).click();
+    const shared = await page.evaluate(() => window.__shared);
+    if (!shared || shared.files.length !== 1 || !/^Nissan Sunny/.test(shared.text) || !/Клиент: Сергей Иванов/.test(shared.text) || !/WASH/.test(shared.text) || !/Итого/.test(shared.text) || shared.text.includes('971'))
+      throw new Error('the job shared to the group: ' + JSON.stringify(shared));
   });
   await step('v0.13: a job from an invoice PDF in one go', async () => {
     // The garage's tax invoice (as Eaglecart prints it): a new car and customer, the lines at the printed prices.
