@@ -62,7 +62,7 @@ import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
-import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
@@ -541,16 +541,19 @@ export function JobPage() {
   };
   // Where a part is — not on a done line (it is fitted), nor after the invoice.
   // The whole list of lines as text, one tap: to paste to a supplier, the customer, anywhere.
+  // The parts by name only, without prices: pasted to a parts seller as they are.
+  const parts = live.filter((i) => i.kind === 'part');
   const copyLines = () =>
     run(async () => {
-      if (!(await copyText(linesText(b.vehicle, live, docLang)))) throw new AppError('err.copy');
+      if (!(await copyText(partNamesText(parts, docLang)))) throw new AppError('err.copy');
       haptic('light');
     }, 'job.copiedLines');
-  const copyButton = (size: number) => (
-    <ActionIcon variant="light" color="gray" size={size} radius="xl" aria-label={t('job.copyLines')} onClick={() => void copyLines()} style={{ flexShrink: 0 }}>
-      <IconCopy size={size > 40 ? 20 : 18} />
-    </ActionIcon>
-  );
+  const copyButton = (size: number) =>
+    parts.length > 0 && (
+      <ActionIcon variant="light" color="gray" size={size} radius="xl" aria-label={t('job.copyLines')} onClick={() => void copyLines()} style={{ flexShrink: 0 }}>
+        <IconCopy size={size > 40 ? 20 : 18} />
+      </ActionIcon>
+    );
   const partNote = (i: OrderItem) =>
     i.kind === 'part' && !inv && !i.done
       ? partStateOf(i) === 'ordered' && i.receivedQty
@@ -1007,7 +1010,7 @@ export function JobPage() {
                   <IconDiscount size={20} />
                 </ActionIcon>
               )}
-              {lines.length > 0 && copyButton(44)}
+              {copyButton(44)}
             </Group>
           )}
           {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (

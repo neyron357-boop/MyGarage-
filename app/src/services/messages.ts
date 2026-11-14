@@ -100,6 +100,17 @@ export function linesText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'pl
 }
 
 /**
+ * The parts of a job by name only, without prices — to paste to a parts seller: one per line, how many when
+ * more than one.
+ */
+export function partNamesText(items: OrderItem[], lang: Lang): string {
+  return items
+    .filter((i) => i.kind === 'part')
+    .map((i) => itemTitle(i, lang) + (i.qty !== 1 ? ` × ${i.qty}` : ''))
+    .join('\n');
+}
+
+/**
  * The job for the garage's group chat (with the car's photo): the car, the customer by name only (no
  * phone — the group is not the customer's), the lines with their amounts and the total.
  */

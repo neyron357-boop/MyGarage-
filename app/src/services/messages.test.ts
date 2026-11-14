@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer, EstimateVersion, Order, OrderItem, SnapshotItem, Vehicle } from '../domain/types';
-import { jobShareText, linesText, telegramChatUrl, versionMessage, whatsappUrl } from './messages';
+import { jobShareText, linesText, partNamesText, telegramChatUrl, versionMessage, whatsappUrl } from './messages';
 
 describe('quotation message', () => {
   it('names the discount once, right before the total', () => {
@@ -29,6 +29,14 @@ describe('the lines as text (copy)', () => {
       item({ kind: 'part', titleEn: 'Oil filter' }),
     ], 'en');
     expect(text).toBe('Honda Accord 2017 · Dubai R 7720\n\n1. FRONT BRAKE PADS REPLACEMENT — 105.00 AED\n2. FRONT BRAKE PADS (SET) (2 × 31.50 AED) — 63.00 AED\n3. OIL FILTER — ?\n\nTotal: 168.00 AED (VAT 8.00 AED)');
+  });
+});
+
+describe('the parts as text (copy)', () => {
+  it('the part names only, one per line, how many when more than one — no prices, no work', () => {
+    const item = (o: Partial<OrderItem>) => ({ kind: 'part', qty: 1, unitPriceFils: 5000, vatRateBp: 500, approvalState: 'draft', ...o }) as OrderItem;
+    const text = partNamesText([item({ titleEn: 'Engine belt' }), item({ kind: 'labor', titleEn: 'Belt replacement' }), item({ titleEn: 'Spark plug', qty: 4 }), item({ titleRu: 'Ролик натяжителя' })], 'en');
+    expect(text).toBe('ENGINE BELT\nSPARK PLUG × 4\nРОЛИК НАТЯЖИТЕЛЯ');
   });
 });
 
