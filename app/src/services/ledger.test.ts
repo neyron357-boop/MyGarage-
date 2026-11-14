@@ -118,6 +118,24 @@ describe('money book', () => {
   });
 });
 
+describe('the cash box', () => {
+  it("lists each movement on its operation's day (not when it was typed), with what was in the box after it", async () => {
+    await setOpeningBalances(8500, 0);
+    // Typed today, out of order — as rows of a money sheet brought in: their days come from the book.
+    await addIncome({ date: '2026-07-09', category: 'service', amountFils: 2500, method: 'cash', note: 'second' });
+    await addIncome({ date: '2026-07-08', category: 'service', amountFils: 20000, method: 'cash', note: 'first' });
+    await addExpense({ date: '2026-07-09', categoryId: (await db.expenseCategories.toArray())[0].id, amountFils: 28000, vatFils: 0, method: 'cash' });
+    await addExpense({ date: '2026-07-09', categoryId: (await db.expenseCategories.toArray())[0].id, amountFils: 1000, vatFils: 0, method: 'card' });
+    const st = await cashState();
+    expect(st.lines.map((l) => [l.date, l.m.direction, l.after, l.timed])).toEqual([
+      ['2026-07-08', 'in', 28500, false],
+      ['2026-07-09', 'in', 31000, false],
+      ['2026-07-09', 'out', 3000, false],
+    ]);
+    expect(st.expected).toBe(3000);
+  });
+});
+
 describe('an expense in the book', () => {
   it('shows the vendor with the note but keeps the note as typed for editing', async () => {
     const e = await addExpense({ date: '2026-11-05', categoryId: await cat('tools'), amountFils: 12000, vatFils: 571, method: 'card', vendor: 'Ace Hardware', note: 'Bearing puller' });

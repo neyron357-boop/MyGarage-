@@ -2,6 +2,7 @@ import { ActionIcon, Modal, Stack, Text } from '@mantine/core';
 import { IconFileSpreadsheet, IconTableExport, IconTableImport } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { formatAed } from '../../domain/money';
 import { exportMoneySheet, importMoneyPlan, planMoneyImport, type MoneyImportPlan } from '../../services/moneySheet';
 import { ConfirmModal } from '../../ui/components';
@@ -20,6 +21,7 @@ export function MoneySheetActions() {
   const [opened, setOpened] = useState(false);
   const [file, setFile] = useState<File>();
   const [plan, setPlan] = useState<MoneyImportPlan | null>(null);
+  const [, setParams] = useSearchParams();
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!opened) return;
@@ -79,7 +81,10 @@ export function MoneySheetActions() {
           run(async () => {
             if (!plan) return true;
             const n = await importMoneyPlan(plan);
+            // The rows are on their own days: the book opens on the month of the newest one (not this month).
+            const newest = plan.rows.reduce((d, r) => (r.date > d ? r.date : d), '');
             setPlan(null);
+            if (newest) setParams({ tab: 'book', month: newest.slice(0, 7) }, { replace: true });
             haptic('success');
             return n >= 0;
           }, 'moneySheet.done')

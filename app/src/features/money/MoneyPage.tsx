@@ -106,11 +106,13 @@ function CashTab() {
         )}
       </Box>
       <Section title={t('cash.movements')} mt={0}>
-        {st.movements.length === 0 ? (
+        {st.lines.length === 0 ? (
           <EmptyState icon={IconCashRegister}>{t('cash.noMovements')}</EmptyState>
         ) : (
           <List>
-            {[...st.movements].reverse().map((m) => (
+            {/* The newest first, each on its operation's own day (a sheet's row on its day, not the import's) and
+                with what was in the box after it — as the money sheet's "Cash Balance". */}
+            {[...st.lines].reverse().map(({ m, date, timed, after }) => (
               <ListRow
                 key={m.id}
                 left={
@@ -119,8 +121,15 @@ function CashTab() {
                   </ThemeIcon>
                 }
                 title={t(`cashReason.${m.reason}`)}
-                subtitle={`${formatDateTime(m.at)}${m.note ? ` · ${m.note}` : ''}`}
-                right={<Money fils={m.direction === 'in' ? m.amountFils : -m.amountFils} c={m.direction === 'in' ? 'green' : 'red'} size="sm" />}
+                subtitle={`${timed ? formatDateTime(m.at) : formatDate(date)}${m.note ? ` · ${m.note}` : ''}`}
+                right={
+                  <Stack gap={0} align="flex-end">
+                    <Money fils={m.direction === 'in' ? m.amountFils : -m.amountFils} c={m.direction === 'in' ? 'green' : 'red'} size="sm" />
+                    <Text size="xs" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
+                      {t('ledger.cashShort')} {formatAed(after).replace(/^-/, '−')}
+                    </Text>
+                  </Stack>
+                }
               />
             ))}
           </List>

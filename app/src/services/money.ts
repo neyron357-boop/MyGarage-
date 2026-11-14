@@ -227,7 +227,28 @@ export async function cashState() {
   // Before the first closing the cash box starts from the book's opening cash ("Cash Start").
   const opening = last?.actualFils ?? settings?.cashStartFils ?? 0;
   const t = cashTotals(open);
-  return { opening, movements: open, inFils: t.inFils, outFils: t.outFils, expected: opening + t.inFils - t.outFils, lastClosing: last };
+  // Each movement at the moment of its operation: an income or an expense of the book has its own day (typed
+  // a day later, or a row of a money sheet brought in) — in that order, with what was in the box after it.
+  const [incomes, expenses] = await Promise.all([
+    db.incomes.bulkGet(open.map((m) => m.incomeId).filter((id): id is string => !!id)),
+    db.expenses.bulkGet(open.map((m) => m.expenseId).filter((id): id is string => !!id)),
+  ]);
+  const entries = new Map<string, { date: string; createdAt: string }>();
+  for (const e of [...incomes, ...expenses]) if (e) entries.set(e.id, e);
+  const placed = open
+    .map((m) => {
+      const e = entries.get(m.incomeId ?? m.expenseId ?? '');
+      const date = e?.date ?? dubaiDate(m.at);
+      // The time is shown when it is the operation's own (made that day), not the day a sheet was brought in.
+      return { m, date, timed: !e || dubaiDate(m.at) === e.date, key: `${date} ${e?.createdAt ?? m.at} ${m.at}` };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+  let box = opening;
+  const lines = placed.map(({ m, date, timed }) => {
+    box += m.direction === 'in' ? m.amountFils : -m.amountFils;
+    return { m, date, timed, after: box };
+  });
+  return { opening, movements: open, lines, inFils: t.inFils, outFils: t.outFils, expected: opening + t.inFils - t.outFils, lastClosing: last };
 }
 
 export async function closeCashDay(actualFils: number, comment?: string): Promise<CashClosing> {

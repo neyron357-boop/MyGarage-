@@ -1,8 +1,8 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCreditCard, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dayHeading, formatDate, monthKey, monthRange } from '../../domain/dates';
 import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
@@ -189,7 +189,13 @@ export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEnt
 export function LedgerTab() {
   const { t } = useTranslation();
   const lang = useLang();
-  const [month, setMonth] = useState(monthKey());
+  // The month asked in the address (a money sheet just brought in lands there), else this month.
+  const [params] = useSearchParams();
+  const asked = params.get('month');
+  const [month, setMonth] = useState(() => (asked && /^\d{4}-\d{2}$/.test(asked) ? asked : monthKey()));
+  useEffect(() => {
+    if (asked && /^\d{4}-\d{2}$/.test(asked)) setMonth(asked);
+  }, [asked]);
   const [kind, setKind] = useState<KindFilter>('all');
   const [purse, setPurse] = useState<'all' | Purse>('all');
   const [q, setQ] = useState('');
@@ -377,7 +383,7 @@ export function LedgerTab() {
                           {/* As a bank shows it: money in green with a plus, money out in the text's colour with a minus. */}
                           <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />
                           <Text size="10px" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
-                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter)}` : `${t('ledger.cardShort')} ${formatAed(e.cardAfter)}`}
+                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : `${t('ledger.cardShort')} ${formatAed(e.cardAfter).replace(/^-/, '−')}`}
                           </Text>
                         </Stack>
                       }
