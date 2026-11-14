@@ -723,29 +723,6 @@ const check = (name, ok, detail) => {
   await page.evaluate(() => document.getElementById('guard-test').remove());
   check('tap guard: same control twice counts twice, a label reaches its box, a new control (or new words) under the finger is skipped', guard.step === 3 && guard.checked && guard.b === 0 && guard.refused === 0, guard);
 
-  // A payment sheet closed and another kind opened while the first still slides out: a fresh sheet of that
-  // kind, not the leaving one with its state (a refund saved as a prepayment).
-  await page.evaluate((id) => (location.hash = `#/orders/${id}/details?tab=payments`), jobId);
-  await page.waitForTimeout(1300);
-  const kindBtn = (name) => page.locator('.screen[data-role="top"] button').filter({ hasText: name }).first();
-  await kindBtn('Предоплата').click();
-  await page.waitForTimeout(800);
-  const firstTitle = await page.locator('.mantine-Modal-title').last().textContent();
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(320);
-  const rb = await kindBtn('Возврат').boundingBox();
-  await touch('touchStart', rb.x + rb.width / 2, rb.y + rb.height / 2);
-  await touch('touchEnd');
-  await page.waitForTimeout(900);
-  const reopened = await page.evaluate(() => {
-    const m = [...document.querySelectorAll('.mantine-Modal-content')].filter((c) => c.getBoundingClientRect().top < innerHeight - 20);
-    const top = m[m.length - 1];
-    return { title: top?.querySelector('.mantine-Modal-title')?.textContent, kind: top?.querySelector('.mantine-SegmentedControl-label[data-active]')?.textContent };
-  });
-  check('a payment sheet reopened as another kind mid-exit is that kind', firstTitle === 'Предоплата' && reopened.title === 'Возврат' && reopened.kind === 'Возврат', { firstTitle, ...reopened });
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(600);
-
   // A computer (or an iPhone on its side — the wide layout): "Record payment" clicked again the moment its
   // save ends, while the sheet leaves. A closing dialog takes no clicks: one payment.
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "ru-RU" });

@@ -15,7 +15,7 @@ import { Field, MediaImage, PageHeader, PageSkeleton, PlateText, ScrollTabs, Sec
 import { DamageDiagram } from '../../ui/DamageDiagram';
 import { useAction, useOrderBundle } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
-import { VersionCard } from '../estimate/components';
+import { VersionCard } from './VersionCard';
 
 function SignatureImg({ id }: { id?: string }) {
   const [url, setUrl] = useState<string>();
@@ -63,12 +63,13 @@ export function ClaimPage() {
             {t('claim.noIntake')}
           </Alert>
         )}
-        <Section title={t('claim.compare')} description={t('claim.compareHint')} mt={0}>
+        {/* The check-in photos; beside them the hand-over's, on jobs that had that act (it is gone since v0.15). */}
+        <Section title={b.handover ? t('claim.compare') : t('claim.atIntake')} description={b.handover ? t('claim.compareHint') : undefined} mt={0}>
           <ScrollTabs value={slot} onChange={setSlot} mb="sm" items={[...REQUIRED_SLOTS, 'dashboard'].map((s) => ({ value: s, label: t(`slot.${s}`) }))} />
-          <SimpleGrid cols={2} spacing="sm">
+          <SimpleGrid cols={b.handover ? 2 : 1} spacing="sm">
             {[
               { label: t('handover.before'), date: b.intake?.signedAt, m: before },
-              { label: t('handover.after'), date: b.handover?.signedAt, m: after },
+              ...(b.handover ? [{ label: t('handover.after'), date: b.handover.signedAt, m: after }] : []),
             ].map((x) => (
               <Box key={x.label} className="surface" p={6}>
                 {x.m ? (
@@ -81,9 +82,11 @@ export function ClaimPage() {
                   </Box>
                 )}
                 <Stack gap={2} px={4} pt={8} pb={2}>
-                  <Badge variant="light" color={x.label === t('handover.before') ? 'gray' : 'cobalt'} w="fit-content">
-                    {x.label}
-                  </Badge>
+                  {b.handover && (
+                    <Badge variant="light" color={x.label === t('handover.before') ? 'gray' : 'cobalt'} w="fit-content">
+                      {x.label}
+                    </Badge>
+                  )}
                   <Text size="xs" c="dimmed">
                     {x.date ? formatDateTime(x.date) : '—'}
                   </Text>

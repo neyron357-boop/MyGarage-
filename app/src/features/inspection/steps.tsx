@@ -18,16 +18,14 @@ import {
   TagsInput,
   Text,
   TextInput,
-  ThemeIcon,
   Title,
 } from '@mantine/core';
 import { IconAlertTriangle, IconCamera, IconCameraOff, IconCheck, IconCircleCheck, IconCircleX, IconFileDescription, IconFileTypePdf, IconId, IconMinus, IconRefresh, IconTrash, IconVideo } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatDate, formatDateTime } from '../../domain/dates';
+import { formatDateTime } from '../../domain/dates';
 import { EXTRA_SLOTS, FUEL_LEVELS, MULKIYA_SLOTS, REQUIRED_SLOTS } from '../../domain/inspection';
 import { checkLabel, lightLabel, quickList } from '../../domain/quickLists';
-import { itemAmounts, itemTitle } from '../../domain/items';
 import { formatPhone } from '../../domain/phone';
 import type { CheckState, DamageMark, DamageType, DamageView, FuelLevel, Inspection, Media } from '../../domain/types';
 import { addDamageMark, addInspectionPhoto, removeDamageMark, updateDamageMark, updateInspection } from '../../services/inspections';
@@ -39,11 +37,11 @@ import { CaptureButton } from '../../ui/CaptureButton';
 import { useObdImport } from '../job/ObdScan';
 import { PhotoViewer, type ViewerItem } from '../../ui/PhotoViewer';
 import { WalkaroundCamera } from '../../ui/WalkaroundCamera';
-import { List, ListRow, MediaImage, Money, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
+import { List, ListRow, MediaImage, MoneyInput, Photo, PlateText, SelectCard } from '../../ui/components';
 import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
 import { DateTimeField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang, useSettings } from '../../ui/hooks';
+import { useAction, useSettings } from '../../ui/hooks';
 import { LazyTextarea, LazyTextInput } from '../../ui/LazyText';
 
 export interface StepProps {
@@ -921,55 +919,6 @@ export function ConditionsStep({ insp }: StepProps) {
         <Box mt="md">
           <DateTimeField label={t('cond.promised')} placeholder={t('common.notSet')} disabled={insp.locked} value={c.promisedReadyAt} onChange={(v) => set({ promisedReadyAt: v })} />
         </Box>
-      </Card>
-    </Stack>
-  );
-}
-
-/** Handover summary: what was done, what the customer declined, warranty. */
-export function WorkSummaryStep({ b }: StepProps) {
-  const { t } = useTranslation();
-  const lang = useLang();
-  const approved = b.items.filter((i) => i.approvalState === 'approved');
-  const declined = b.items.filter((i) => i.approvalState === 'declined');
-  const declinedAt = (id: string) => b.decisions.filter((d) => d.itemId === id && d.decision === 'decline').pop()?.decidedAt;
-  return (
-    <Stack gap="md">
-      <List>
-        {approved.map((i) => (
-          <ListRow
-            key={i.id}
-            left={
-              <ThemeIcon variant="light" color={i.done ? 'green' : 'gray'} radius="xl">
-                {i.done ? <IconCheck size={16} /> : <IconMinus size={16} />}
-              </ThemeIcon>
-            }
-            title={itemTitle(i, lang)}
-            subtitle={[i.partNumber, i.customerSupplied ? t('item.customerSupplied') : ''].filter(Boolean).join(' · ') || undefined}
-            right={<Money fils={itemAmounts(i).gross} size="sm" />}
-          />
-        ))}
-      </List>
-      {declined.length > 0 && (
-        <Alert color="orange" title={t('handover.declined')}>
-          <Stack gap={4}>
-            {declined.map((i) => (
-              <Text key={i.id} size="sm">
-                {itemTitle(i, lang)} — {t('handover.declinedOn', { date: formatDate(declinedAt(i.id)) })}
-              </Text>
-            ))}
-          </Stack>
-        </Alert>
-      )}
-      <Card>
-        {b.intake?.conditions?.oldParts && (
-          <Text size="sm" mb="sm">
-            <b>{t('cond.oldParts')}:</b> {t(`cond.${b.intake.conditions.oldParts}`)}
-          </Text>
-        )}
-        <Text size="sm" c="dimmed">
-          {(b.settings.warrantyText[lang] ?? '').replace('{months}', String(b.settings.warrantyLaborMonths)).replace('{km}', String(b.settings.warrantyLaborKm))}
-        </Text>
       </Card>
     </Stack>
   );

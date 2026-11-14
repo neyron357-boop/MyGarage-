@@ -1,27 +1,24 @@
-import { Alert, Badge, Box, Button, Group, SimpleGrid, Stack, Switch, Text, Textarea, TextInput, ThemeIcon, Title } from '@mantine/core';
-import { IconArrowLeft, IconArrowRight, IconCheck, IconFileTypePdf, IconLock, IconSend, IconSignature, IconX } from '@tabler/icons-react';
+import { Alert, Badge, Box, Button, Group, Stack, Switch, Text, Textarea, TextInput, ThemeIcon } from '@mantine/core';
+import { IconArrowLeft, IconArrowRight, IconCheck, IconFileTypePdf, IconLock, IconSend } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDateTime } from '../../domain/dates';
-import { REQUIRED_SLOTS, validateInspection, type MissingKey } from '../../domain/inspection';
-import { checkLabel, lightLabel } from '../../domain/quickLists';
-import { formatAed } from '../../domain/money';
+import { REQUIRED_SLOTS } from '../../domain/inspection';
 import type { Inspection } from '../../domain/types';
 import { inspectionPdf, openPdf } from '../../services/documents';
 import { addAddendum, completeInspection, getOrCreateInspection, inspectionState, signInspection, updateInspection } from '../../services/inspections';
 import { simpleMessage } from '../../services/messages';
-import { bundleAmountDue, updateOrder } from '../../services/orders';
+import { updateOrder } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
-import { EmptyState, Field, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
+import { EmptyState, FormRow, PageHeader, PageSkeleton, PlateText, RowGroup, Section, StickyBar, SuccessMark } from '../../ui/components';
 import { DateTimeField } from '../../ui/DateFields';
 import { useAction, useErrorText, useOrderBundle } from '../../ui/hooks';
 import { scrollToTop } from '../../ui/stack';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
-import { PaymentPanel } from '../money/PaymentPanel';
 import {
   BelongingsStep,
   ChecksStep,
@@ -31,28 +28,10 @@ import {
   DashboardStep,
   ObdStep,
   PhotosStep,
-  WorkSummaryStep,
   type StepProps,
 } from './steps';
 
 type StepDef = { key: string; C: ComponentType<StepProps> };
-
-function PaymentStep({ b }: StepProps) {
-  const { t } = useTranslation();
-  const due = bundleAmountDue(b);
-  return (
-    <Stack>
-      {due <= 0 || b.debts.some((d) => d.status === 'open') ? (
-        <Alert color="green" icon={<IconCheck />}>
-          {t('handover.paidOk')}
-        </Alert>
-      ) : (
-        <Alert color="orange">{t('handover.payFirst')}</Alert>
-      )}
-      <PaymentPanel b={b} allowDebt />
-    </Stack>
-  );
-}
 
 const Empty = () => null;
 
@@ -79,39 +58,19 @@ function legacySteps(insp: Inspection): StepDef[] {
   ];
 }
 
-const HANDOVER_STEPS: StepDef[] = [
-  { key: 'photos', C: PhotosStep },
-  { key: 'dashboard', C: DashboardStep },
-  { key: 'summary', C: WorkSummaryStep },
-  { key: 'payment', C: PaymentStep },
-  { key: 'sign', C: Empty },
-];
-
-const MISSING_STEP: Record<MissingKey, string> = {
-  photos: 'photos',
-  damage: 'damage',
-  mileage: 'dashboard',
-  fuel: 'dashboard',
-  obd: 'obd',
-  complaint: 'complaint',
-  policeReport: 'complaint',
-  conditions: 'conditions',
-  signer: 'sign',
-};
-
 /** Whether a step already has what it needs (drives the check marks). */
 function stepDone(key: string, p: StepProps): boolean {
-  const { insp, media, marks, b } = p;
+  const { insp, media, marks } = p;
   const slots = new Set(media.map((m) => m.slot));
   switch (key) {
     case 'vehicle':
       return true;
     case 'photos':
-      return insp.kind === 'intake' ? REQUIRED_SLOTS.some((s) => slots.has(s)) : REQUIRED_SLOTS.every((s) => slots.has(s) || insp.skippedPhotos[s]);
+      return REQUIRED_SLOTS.some((s) => slots.has(s));
     case 'damage':
       return !!insp.noDamage || marks.length > 0;
     case 'dashboard':
-      return insp.kind === 'intake' ? insp.mileageKm !== undefined || insp.fuelLevel !== undefined : insp.mileageKm !== undefined && insp.fuelLevel !== undefined;
+      return insp.mileageKm !== undefined || insp.fuelLevel !== undefined;
     case 'finish':
       return insp.locked || !!insp.completedAt;
     case 'obd':
@@ -124,12 +83,6 @@ function stepDone(key: string, p: StepProps): boolean {
       return !!insp.complaint?.trim() && (!insp.accidentRepair || (!!insp.policeReportNo?.trim() && slots.has('police_report')));
     case 'conditions':
       return !!insp.conditions;
-    case 'summary':
-      return true;
-    case 'payment':
-      return bundleAmountDue(b) <= 0 || b.debts.some((d) => d.status === 'open');
-    case 'sign':
-      return insp.locked;
     default:
       return false;
   }
@@ -185,116 +138,8 @@ function FinishStep({ props, onDone }: { props: StepProps; onDone: (i: Inspectio
   );
 }
 
-function SignStep({ props, onSigned, goTo }: { props: StepProps; onSigned: (i: Inspection) => void; goTo: (key: string) => void }) {
-  const { t } = useTranslation();
-  const { run, busy } = useAction();
-  const { insp, media, marks, b } = props;
-  const sig = useRef<SignatureHandle>(null);
-  const [name, setName] = useState(b.customer.name);
-  const lang = insp.language;
-  const tc = (k: string, o?: Record<string, unknown>) => t(k, { ...o, lng: lang });
-  const slots = new Set(media.filter((m) => m.kind === 'photo' || m.kind === 'video').map((m) => m.slot));
-  const missing = validateInspection(insp, slots, marks, { policePhoto: slots.has('police_report') });
-  const unpaid = insp.kind === 'handover' && bundleAmountDue(b) > 0 && !b.debts.some((d) => d.status === 'open');
-  const c = insp.conditions;
-  const fails = Object.entries(insp.functionChecks)
-    .filter(([, v]) => v === 'fail')
-    .map(([k]) => checkLabel(tc, k));
-  return (
-    <Stack gap="md">
-      {missing.length > 0 && (
-        <Alert color="red" title={t('sign.missingTitle')}>
-          <Group gap={6} mt={4}>
-            {missing.map((m) => (
-              <Button key={m} size="compact-sm" variant="white" color="red" h="auto" py={4} styles={{ label: { whiteSpace: 'normal', textAlign: 'left' } }} onClick={() => goTo(MISSING_STEP[m])}>
-                {t(`missing.${m}`)}
-              </Button>
-            ))}
-          </Group>
-        </Alert>
-      )}
-      {unpaid && (
-        <Alert color="red">
-          {t('handover.payFirst')}{' '}
-          <Button size="compact-sm" variant="white" color="red" onClick={() => goTo('payment')}>
-            {t('step.payment')}
-          </Button>
-        </Alert>
-      )}
-      <Box className="surface" p="lg">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <div>
-            <div className="eyebrow">{b.settings.name}</div>
-            <Title order={4} mt={2}>
-              {tc(insp.kind === 'intake' ? 'pdf.intakeTitle' : 'pdf.handoverTitle')}
-            </Title>
-            <Text size="xs" c="dimmed">
-              №{b.order.number} · {formatDateTime(new Date().toISOString())}
-            </Text>
-          </div>
-          <PlateText plate={b.vehicle.plate} size="sm" />
-        </Group>
-        <SimpleGrid cols={{ base: 2, sm: 3 }} mt="md" spacing="md" verticalSpacing="sm">
-          <Field label={tc('pdf.vehicle')}>
-            {b.vehicle.make} {b.vehicle.model} {b.vehicle.year ?? ''}
-          </Field>
-          <Field label={tc('pdf.customer')}>{b.customer.name}</Field>
-          <Field label={tc('pdf.photos')}>{media.filter((m) => m.kind === 'photo').length}</Field>
-          <Field label={tc('intake.mileage')}>{insp.mileageKm !== undefined ? `${insp.mileageKm.toLocaleString('ru-RU')} ${tc('unit.km')}` : '—'}</Field>
-          <Field label={tc('intake.fuel')}>{insp.fuelLevel !== undefined ? tc(`fuel.${insp.fuelLevel}`) : '—'}</Field>
-          <Field label={tc('intake.lights')}>{insp.warningLights.length ? insp.warningLights.map((l) => lightLabel(tc, l)).join(', ') : tc('pdf.none')}</Field>
-          {insp.kind === 'intake' && (
-            <>
-              <Field label={tc('pdf.damage')}>{insp.noDamage ? tc('damage.none') : marks.map((m, i) => `${i + 1}. ${tc(`damage.type.${m.type}`)}`).join(', ') || '—'}</Field>
-              <Field label={tc('step.obd')}>{insp.obdNoCodes ? tc('intake.obdNone') : insp.obdCodes.join(', ') || insp.obdSkipReason || '—'}</Field>
-              <Field label={tc('pdf.notWorking')}>{fails.join(', ') || tc('pdf.none')}</Field>
-              <Field label={tc('intake.keys')}>{insp.keysCount ?? '—'}</Field>
-              <Field label={tc('intake.belongings')}>{insp.belongings || tc('pdf.none')}</Field>
-              {c?.noCallLimitFils !== undefined && <Field label={tc('cond.noCallLimit')}>{c.noCallLimitFils ? formatAed(c.noCallLimitFils, lang) : tc('cond.alwaysCall')}</Field>}
-            </>
-          )}
-        </SimpleGrid>
-        {insp.kind === 'intake' && (
-          <>
-            <Field label={tc('order.complaint')}>{insp.complaint}</Field>
-            <Text size="xs" c="dimmed" mt="md" lh={1.5}>
-              {b.settings.intakeTerms[lang]}
-            </Text>
-          </>
-        )}
-        {insp.kind === 'handover' && (
-          <Text size="sm" mt="md">
-            {tc('pdf.handoverStatement')}
-          </Text>
-        )}
-      </Box>
-      <Box className="surface" p="md">
-        <TextInput label={t('sign.name')} value={name} onChange={(e) => setName(e.currentTarget.value)} required mb="sm" />
-        <SignatureBox ref={sig} height={190} />
-      </Box>
-      <Button
-        size="lg"
-        leftSection={<IconSignature />}
-        loading={busy}
-        disabled={missing.length > 0 || unpaid}
-        onClick={() =>
-          run(async () => {
-            if (!sig.current || sig.current.isEmpty()) throw new Error(t('sign.required'));
-            const signed = await signInspection(insp.id, name, sig.current.toBlob());
-            onSigned(signed);
-          }, 'sign.done')
-        }
-      >
-        {t('sign.button')}
-      </Button>
-      <Text size="xs" c="dimmed" ta="center">
-        {t('sign.freezeHint')}
-      </Text>
-    </Stack>
-  );
-}
-
-export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
+/** The intake act: the car's photos, damage, dashboard, scanner, checks — none of it required ("…" → "Photos"). */
+export function InspectionWizard() {
   const { id } = useParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -307,16 +152,15 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
   const [addendum, setAddendum] = useState('');
   useEffect(() => {
     if (!id) return;
-    getOrCreateInspection(id, kind).then(
+    getOrCreateInspection(id, 'intake').then(
       (i) => setInspId(i.id),
       (e) => setError(errorText(e)),
     );
-  }, [id, kind, errorText]);
+  }, [id, errorText]);
   // null: the report is gone (its job was deleted while this screen waited in the stack).
   const st = useLiveQuery(() => (inspId ? inspectionState(inspId).catch(() => null) : undefined), [inspId]);
   const addenda = useLiveQuery(() => (inspId ? db.addenda.where('inspectionId').equals(inspId).toArray() : []), [inspId]);
-  const intakeMedia = useLiveQuery(async () => (kind === 'handover' && b?.intake ? db.media.where('ownerId').equals(b.intake.id).toArray() : undefined), [kind, b?.intake?.id]);
-  const steps = kind === 'intake' ? INTAKE_STEPS : HANDOVER_STEPS;
+  const steps = INTAKE_STEPS;
   const [step, setStep] = useState<number | null>(null);
   const [dir, setDir] = useState<'next' | 'prev'>('next');
   const [justSigned, setJustSigned] = useState(false);
@@ -336,7 +180,7 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
   if (b === null || st === null) return <EmptyState title={t('err.notFound')} />;
   if (!b || !st || step === null) return <PageSkeleton variant="detail" />;
   const { insp, media, marks } = st;
-  const props: StepProps = { insp, media, marks, b, intakeMedia };
+  const props: StepProps = { insp, media, marks, b };
   const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
 
   const goto = (n: number) => {
@@ -346,21 +190,17 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
     if (!insp.locked) void updateInspection(insp.id, { step: n });
     scrollToTop();
   };
-  const gotoKey = (key: string) => {
-    const i = steps.findIndex((s) => s.key === key);
-    if (i >= 0) goto(i);
-  };
 
   const offerSend = (i: Inspection) =>
     setSend({
-      text: simpleMessage(i.kind === 'intake' ? 'carReceived' : 'documents', ctx, i.language),
-      template: i.kind === 'intake' ? 'carReceived' : 'documents',
+      text: simpleMessage('carReceived', ctx, i.language),
+      template: 'carReceived',
       lang: i.language,
       orderId: b.order.id,
       pdf: () => inspectionPdf(i.id),
     });
 
-  const title = t(kind === 'intake' ? 'intake.title' : 'handover.title');
+  const title = t('intake.title');
   const subtitle = (
     <Group gap={8}>
       <PlateText plate={b.vehicle.plate} size="xs" />
@@ -431,15 +271,6 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
     );
   }
 
-  if (kind === 'handover' && b.order.stage !== 'ready') {
-    return (
-      <>
-        <PageHeader back={`/orders/${b.order.id}`} title={title} subtitle={subtitle} />
-        <Alert color="orange">{t('handover.notReady')}</Alert>
-      </>
-    );
-  }
-
   const S = steps[step];
   const doneCount = steps.filter((s) => stepDone(s.key, props)).length;
   return (
@@ -450,27 +281,21 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
         title={t(`step.${S.key}`)}
         subtitle={subtitle}
         right={
-          kind === 'intake' ? (
-            // "Done" on any step: save what is filled in and go back to the job (the tinted confirm button).
-            <Button
-              size="compact-md"
-              fz={17}
-              fw={600}
-              loading={busy}
-              onClick={() =>
-                run(async () => {
-                  await completeInspection(insp.id);
-                  navigate(`/orders/${b.order.id}`);
-                }, 'finish.saved')
-              }
-            >
-              {t('intake.done')}
-            </Button>
-          ) : (
-            <Button variant="subtle" color="gray" size="compact-md" leftSection={<IconX size={16} />} onClick={() => navigate(`/orders/${b.order.id}`)}>
-              {t('intake.later')}
-            </Button>
-          )
+          // "Done" on any step: save what is filled in and go back to the job (the tinted confirm button).
+          <Button
+            size="compact-md"
+            fz={17}
+            fw={600}
+            loading={busy}
+            onClick={() =>
+              run(async () => {
+                await completeInspection(insp.id);
+                navigate(`/orders/${b.order.id}`);
+              }, 'finish.saved')
+            }
+          >
+            {t('intake.done')}
+          </Button>
         }
       />
       <div className="wizard-steps" role="tablist" ref={chips} aria-label={t('intake.stepsLabel', { done: doneCount, total: steps.length })}>
@@ -497,31 +322,18 @@ export function InspectionWizard({ kind }: { kind: 'intake' | 'handover' }) {
               window.setTimeout(() => void inspectionPdf(i.id).catch(() => undefined), 1500);
             }}
           />
-        ) : S.key === 'sign' ? (
-          <SignStep
-            props={props}
-            goTo={gotoKey}
-            onSigned={(i) => {
-              haptic('success');
-              setJustSigned(true);
-              scrollToTop();
-              offerSend(i);
-              // Freeze the PDF of the signed act (with its SHA-256) a moment later, after the animation.
-              window.setTimeout(() => void inspectionPdf(i.id).catch(() => undefined), 1500);
-            }}
-          />
         ) : (
           <S.C {...props} />
         )}
       </Box>
-      {S.key !== 'sign' && S.key !== 'finish' && (
+      {S.key !== 'finish' && (
         <StickyBar>
           <Group gap="xs" wrap="nowrap">
             <Button variant="light" color="gray" disabled={step === 0} onClick={() => goto(step - 1)} leftSection={<IconArrowLeft size={18} />}>
               {t('common.back')}
             </Button>
             <Button style={{ flex: 1 }} onClick={() => goto(step + 1)} rightSection={<IconArrowRight size={18} />}>
-              {kind === 'handover' && step + 1 === steps.length - 1 ? t('intake.toSign') : t('common.next')}
+              {t('common.next')}
             </Button>
           </Group>
         </StickyBar>

@@ -34,7 +34,6 @@ export interface StageContext {
   /** The intake act is saved (signed by the customer or not). */
   intakeDone: boolean;
   sentVersions: number;
-  handoverSigned: boolean;
   amountDueFils: number;
   debtSigned: boolean;
   qcComplete: boolean;
@@ -120,7 +119,7 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
       }
       return ctx.qcComplete ? { ok: true } : { ok: false, reason: 'stageErr.qcIncomplete' };
     case 'delivered':
-      if (!ctx.handoverSigned) return { ok: false, reason: 'stageErr.handoverNotSigned' };
+      // Gone: paid, or with a signed debt (no hand-over act — it is optional, as the intake one).
       return ctx.amountDueFils <= 0 || ctx.debtSigned ? { ok: true } : { ok: false, reason: 'stageErr.unpaid' };
     case 'closed':
       // Closed without payment and without a debt: whatever was due is let go (services/flow.ts closeUnpaid).

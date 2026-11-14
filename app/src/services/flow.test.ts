@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, lineDone, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage, takeBack } from './flow';
+import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage, takeBack } from './flow';
 import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -76,6 +76,22 @@ describe('lazy flow', () => {
     await carArrived(booked.id);
     expect(await state(booked.id)).toEqual({ phase: 'look', stage: 'diagnostics' });
     expect((await db.orders.get(booked.id))!.arrivedAt).toBeTruthy();
+  });
+
+  it('on credit: the customer signs, the car leaves with the debt; the payment that clears it closes the job', async () => {
+    const o = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Diagnostics', unitPriceFils: 20000 });
+    await approveAll(o.id);
+    const inv = await quickInvoice(o.id);
+    await expect(leaveOnDebt(o.id)).rejects.toMatchObject({ code: 'sign.required' });
+    await leaveOnDebt(o.id, { amountFils: inv.totalFils, dueDate: '2026-12-01', signature: new Blob(['sig'], { type: 'image/png' }) });
+    let b = (await loadOrderBundle(o.id))!;
+    expect({ phase: phaseOf(b), stage: b.order.stage, debts: b.debts.map((d) => d.status) }).toEqual({ phase: 'debt', stage: 'delivered', debts: ['open'] });
+    // Signed once: a second go does not sign again.
+    await expect(leaveOnDebt(o.id)).rejects.toMatchObject({ code: 'stageErr.notAllowed' });
+    await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: inv.totalFils });
+    b = (await loadOrderBundle(o.id))!;
+    expect({ stage: b.order.stage, debts: b.debts.map((d) => d.status) }).toEqual({ stage: 'closed', debts: ['paid'] });
   });
 
   it('a part fitted (marked done) lets the job waiting for its parts go on', async () => {

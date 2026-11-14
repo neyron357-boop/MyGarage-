@@ -282,7 +282,6 @@ export function stageContext(b: OrderBundle): StageContext {
     items: b.items,
     intakeDone: !!b.intake?.locked || !!b.intake?.completedAt,
     sentVersions: b.versions.length,
-    handoverSigned: !!b.handover?.locked,
     amountDueFils: bundleAmountDue(b),
     debtSigned: b.debts.some((d) => d.status === 'open'),
     qcComplete: !!b.order.qcDoneAt,

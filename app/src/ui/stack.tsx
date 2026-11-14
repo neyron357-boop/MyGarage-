@@ -21,7 +21,7 @@ import { layers } from './historyLayer';
 /** The screens of the bottom tab bar. */
 export const TAB_ROOTS = new Set(['/', '/search', '/money', '/more']);
 /** Work at the car gets the whole screen: no tab bar under its buttons. */
-const FOCUS_RE = /^\/orders\/(new|[^/]+\/(intake|handover|invoice))$/;
+const FOCUS_RE = /^\/orders\/(new|[^/]+\/(intake|invoice))$/;
 /** Presented from the bottom (and dismissed down), like composing a new message. */
 const MODAL_RE = /^\/orders\/new$/;
 

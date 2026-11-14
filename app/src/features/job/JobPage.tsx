@@ -21,7 +21,6 @@ import {
   IconHourglassHigh,
   IconKey,
   IconListCheck,
-  IconListDetails,
   IconMenu2,
   IconMessage2,
   IconPackage,
@@ -60,9 +59,9 @@ import type { OrderItem, Payment } from '../../domain/types';
 import { tFor } from '../../i18n';
 import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
-import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
+import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, updateItem } from '../../services/estimate';
-import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
+import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -79,11 +78,11 @@ import { LazySheet, SheetFor } from '../../ui/lazy';
 import { scrollToTop, useStackBack } from '../../ui/stack';
 import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
-import { useSendVersion } from '../estimate/EstimatePage';
 import { DiscountSheet } from '../money/DiscountSheet';
-import { PaymentModal } from '../money/PaymentPanel';
+import { DebtModal, PaymentModal } from '../money/PaymentSheets';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover, MulkiyaTile, VinTile } from './CarCover';
+import { useSendVersion } from './sendVersion';
 import { DueChip } from './Due';
 import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
 import { MechanicSheet } from './MechanicSheet';
@@ -143,7 +142,6 @@ const TILE_COLOR: Record<string, string> = {
   discount: 'pink',
   select: 'teal',
   amend: 'grape',
-  details: 'gray',
 };
 
 /** Everything else that can happen to a job, as a grid of tiles: one tap, one word each. */
@@ -422,6 +420,7 @@ export function JobPage() {
   const [unpaid, setUnpaid] = useState(false);
   const [remove, setRemove] = useState(false);
   const [pay, setPay] = useState<Payment['kind'] | null>(null);
+  const [debtOpen, setDebtOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   // Changing the lines once the invoice is out: confirmed first (a credit note), then what was tapped.
@@ -694,14 +693,16 @@ export function JobPage() {
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
   if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
   if (open && (lines.length > 0 || inv) && (!inv || due > 0)) tiles.push({ key: 'discount', icon: IconDiscount, onClick: () => setDiscountOpen(true) });
-  // The car leaves now, the money comes later: a signed debt (on the payments tab of the details).
-  if (inv && due > 0 && phase === 'pay') tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => navigate(`/orders/${oid}/details?tab=payments`) });
+  // The car leaves now, the money comes later: the customer signs the debt right here and the car goes with it;
+  // once signed, the tile opens the signed paper.
+  const openDebt = b.debts.find((d) => d.status === 'open');
+  if (openDebt) tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => void run(async () => openPdf(await debtPdf(openDebt.id))) });
+  else if (inv && due > 0 && phase === 'pay') tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => setDebtOpen(true) });
   // The car leaves and nothing is owed: no payment, no debt (warranty, goodwill, the money will not come).
   if (canCloseUnpaid(b.order.stage, due)) tiles.push({ key: 'unpaid', icon: IconCashOff, color: 'orange', onClick: () => setUnpaid(true) });
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
-  tiles.push({ key: 'details', icon: IconListDetails, onClick: () => navigate(`/orders/${oid}/details`) });
   if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
@@ -739,6 +740,18 @@ export function JobPage() {
       <Button fullWidth color="green" loading={busy} leftSection={<IconChecks size={20} />} onClick={() => setFinish(true)}>
         {t('job.done')} · {formatAed(sum.gross)}
       </Button>
+    );
+  else if (phase === 'pay' && openDebt)
+    // A debt signed before the car left (an older job): it can go with it now.
+    bar = (
+      <Group gap={10} wrap="nowrap">
+        <Button variant="default" leftSection={<IconCash size={18} />} onClick={() => setPay('payment')} style={{ flex: '0 0 auto' }}>
+          {t('job.pay')}
+        </Button>
+        <Button color="teal" loading={busy} leftSection={<IconKey size={20} />} onClick={() => run(async () => (await leaveOnDebt(oid), haptic('success')), 'debt.saved')} style={{ flex: 1 }}>
+          {t('debt.give')}
+        </Button>
+      </Group>
     );
   else if (phase === 'pay' || phase === 'debt')
     bar = (
@@ -1177,6 +1190,7 @@ export function JobPage() {
         )}
       </LazySheet>
       <SheetFor value={pay}>{(kind, o) => <PaymentModal b={b} opened={o} onClose={() => setPay(null)} kind={kind} />}</SheetFor>
+      <SheetFor value={debtOpen}>{(_, o) => <DebtModal b={b} opened={o} onClose={() => setDebtOpen(false)} />}</SheetFor>
       <LazySheet opened={discountOpen}>{(o) => <DiscountSheet b={b} opened={o} onClose={() => setDiscountOpen(false)} />}</LazySheet>
       <LazySheet opened={customerOpen}>{(o) => <CustomerModal opened={o} onClose={() => setCustomerOpen(false)} customer={c} orderId={oid} />}</LazySheet>
       <SendDialog customer={c} request={sv.send} onClose={() => sv.setSend(null)} onSent={() => void syncStage(oid)} />

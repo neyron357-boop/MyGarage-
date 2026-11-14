@@ -278,7 +278,6 @@ describe('stage transitions', () => {
     items: [],
     intakeDone: false,
     sentVersions: 0,
-    handoverSigned: false,
     amountDueFils: 0,
     debtSigned: false,
     qcComplete: false,
@@ -315,12 +314,10 @@ describe('stage transitions', () => {
       false,
     );
   });
-  it('delivery requires a signed act and payment or a signed debt', () => {
-    expect(checkTransition('ready', 'delivered', base({ amountDueFils: 0 })).ok).toBe(false);
-    expect(checkTransition('ready', 'delivered', base({ handoverSigned: true, amountDueFils: 100 })).ok).toBe(false);
-    expect(checkTransition('ready', 'delivered', base({ handoverSigned: true, amountDueFils: 100, debtSigned: true })).ok).toBe(
-      true,
-    );
+  it('the car leaves paid or with a signed debt (the hand-over act is optional)', () => {
+    expect(checkTransition('ready', 'delivered', base({ amountDueFils: 0 })).ok).toBe(true);
+    expect(checkTransition('ready', 'delivered', base({ amountDueFils: 100 }))).toEqual({ ok: false, reason: 'stageErr.unpaid' });
+    expect(checkTransition('ready', 'delivered', base({ amountDueFils: 100, debtSigned: true })).ok).toBe(true);
     expect(checkTransition('delivered', 'closed', base({ amountDueFils: 100 })).ok).toBe(false);
   });
   it('closes from any working stage once the invoice is paid (quick path)', () => {

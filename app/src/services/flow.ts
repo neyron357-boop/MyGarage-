@@ -9,7 +9,7 @@ import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
 import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, setDone, updateItem, withdrawItems } from './estimate';
-import { issueCreditNote } from './money';
+import { createDebt, issueCreditNote } from './money';
 import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, stageContext, type OrderBundle } from './orders';
 
 /**
@@ -43,6 +43,25 @@ export async function syncStage(orderId: string): Promise<void> {
     const via = stepToward(b.order.stage, want);
     if (!via || !(await hop(orderId, via))) return;
   }
+}
+
+/** Where a car can leave from with an invoice: the workshop's stages (the invoice makes "ready" reachable from each). */
+const LEAVES_FROM: Stage[] = ['intake', 'diagnostics', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check', 'ready'];
+
+/**
+ * The car leaves now, the money comes later: the customer signs the debt here and the job is gone with money
+ * due ("debt", red on the board) until it is paid — the payment that clears it closes the job and the debt
+ * (services/money.ts). A debt signed earlier is taken as it is.
+ */
+export async function leaveOnDebt(orderId: string, debt?: { amountFils: number; dueDate: string; signature: Blob }): Promise<void> {
+  const b = await loadOrderBundle(orderId);
+  if (!b) throw new AppError('err.notFound');
+  if (!activeInvoice(b.invoices) || bundleAmountDue(b) <= 0 || !LEAVES_FROM.includes(b.order.stage)) throw new AppError('stageErr.notAllowed');
+  const signed = b.debts.some((d) => d.status === 'open');
+  if (!signed && !debt) throw new AppError('sign.required');
+  if (!signed && debt) await createDebt(orderId, debt.amountFils, debt.dueDate, debt.signature);
+  if (b.order.stage !== 'ready') await changeStage(orderId, 'ready');
+  await changeStage(orderId, 'delivered');
 }
 
 /** A booked car has come: it is in, and — as at check-in — goes straight on to diagnostics. */

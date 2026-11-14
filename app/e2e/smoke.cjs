@@ -184,37 +184,6 @@ async function launchBrowser() {
     await page.getByRole('link', { name: 'Открыть заказ' }).or(page.getByRole('button', { name: 'Открыть заказ' })).first().click();
     await page.getByText('Смотрим').first().waitFor();
     await shot('10-job-after-intake', true);
-    // Everything about the job (stages by hand, photos, documents, journal) stays under "…" → "Подробно".
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Подробно' }).click();
-    await page.getByText('Диагностика / оценка').first().waitFor();
-    await shot('10b-order-details', true);
-  });
-  await step('estimate', async () => {
-    await page.getByRole('button', { name: 'Подробная оценка' }).first().click();
-    await page.getByRole('button', { name: 'Из шаблона' }).first().click();
-    await page.getByRole('dialog').getByText('Замена передних колодок').click();
-    await page.getByText('Обычно вместе с этим меняют').waitFor();
-    await page.getByRole('button', { name: '+ в B' }).first().click();
-    await page.waitForTimeout(500);
-    await shot('11-estimate', true);
-    await page.getByRole('button', { name: 'Отправить на согласование' }).click();
-    await page.getByRole('dialog').getByText('Клиент рядом', { exact: true }).click();
-    await page.getByRole('button', { name: 'Зафиксировать версию' }).click();
-    await page.getByRole('button', { name: 'Клиент согласен на всё' }).click();
-    await shot('12-decisions', true);
-    await page.getByRole('dialog').getByRole('button', { name: /^Сохранить ответ/ }).click();
-    await page.getByText('Открыть чат').waitFor();
-    await shot('13-verbal-confirmation');
-    await page.locator('.mantine-Modal-close').first().click();
-  });
-  await step('order work tab', async () => {
-    const url = page.url().replace('/estimate', '/details');
-    await page.goto(url.split('?')[0] + '?tab=work');
-    await page.getByText('Ждём запчасть').first().waitFor();
-    await shot('14-order-work', true);
-    await page.goto(url.split('?')[0] + '?tab=approvals');
-    await shot('15-order-approvals', true);
   });
   await step('pdfs', async () => {
     const out = await page.evaluate(async () => {
@@ -255,58 +224,36 @@ async function launchBrowser() {
     return Buffer.from(out, 'latin1');
   };
   let patrol;
-  await step('work done, QC, ready', async () => {
+  await step('on credit: the car leaves with a signed debt, the payment that clears it closes the job', async () => {
     patrol = await page.evaluate(async () => { const { db } = await import('/src/db/db.ts'); const v = (await db.vehicles.toArray()).find((x) => x.model === 'Patrol'); return (await db.orders.where('vehicleId').equals(v.id).first()).id; });
-    await page.goto(BASE + `#/orders/${patrol}/details?tab=work`);
-    await page.getByText('Согласовано').first().waitFor();
-    const todo = page.getByRole('button', { name: 'Готово', exact: true });
-    while (await todo.count()) { await todo.first().click(); await page.waitForTimeout(400); }
-    await page.getByRole('button', { name: 'Работы выполнены → проверка' }).first().click();
-    await page.getByRole('button', { name: 'Контроль качества' }).first().click();
-    const qc = page.getByRole('dialog').locator('.choice-card');
-    await qc.first().waitFor();
-    for (let i = 0; i < await qc.count(); i++) await qc.nth(i).click();
-    await shot('18-qc');
-    await page.getByRole('button', { name: 'Проверка пройдена → Готово' }).click();
-    await page.getByRole('button', { name: 'Выдача машины' }).waitFor();
-  });
-  await step('handover with invoice and payment', async () => {
-    await page.getByRole('button', { name: 'Выдача машины' }).click();
-    await page.getByText('Шаг 1 из 5').waitFor();
-    for (let i = 0; i < 8; i++) {
-      await front('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
-      await page.getByText(`${i + 1} / 8`).waitFor({ timeout: 10000 });
-    }
-    await shot('19-handover-photos', true);
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByLabel('Пробег').fill('150020');
-    await page.getByText('¾').click();
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await shot('20-handover-summary', true);
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByRole('button', { name: 'Выписать инвойс' }).click();
-    await page.getByRole('dialog').getByText('Выписать инвойс?').waitFor();
-    await shot('20b-invoice-confirm');
-    await page.getByRole('dialog').getByRole('button', { name: 'Выписать инвойс' }).click();
-    await page.getByText('Открыть чат').waitFor();
-    await closeModal();
-    await page.getByRole('button', { name: 'Принять оплату' }).click();
-    await page.getByRole('dialog').getByText('Карта', { exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Провести' }).click();
-    await page.getByText('Оплачено (или оформлен долг) — можно подписывать').waitFor();
-    await shot('21-handover-payment', true);
-    await page.getByRole('button', { name: 'К подписи' }).click();
-    const canvas = front('canvas').first();
+    await page.goto(BASE + `#/orders/${patrol}`);
+    const dlg = page.getByRole('dialog');
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByRole('button', { name: /^Оплата/ }).waitFor();
+    // "…" → "В долг": the customer signs for the sum and the date, and the car goes.
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'В долг' }).click();
+    await dlg.getByText('Подпись клиента').waitFor();
+    const canvas = dlg.locator('canvas').first();
     await canvas.scrollIntoViewIfNeeded();
     const c = await canvas.boundingBox();
     await page.mouse.move(c.x + 30, c.y + 100); await page.mouse.down();
     for (let i = 0; i < 15; i++) await page.mouse.move(c.x + 30 + i * 15, c.y + 100 - Math.cos(i / 2) * 30);
     await page.mouse.up();
-    await page.getByRole('button', { name: 'Подписать и сохранить' }).click();
-    await page.getByText('Открыть чат').waitFor({ timeout: 15000 });
-    await closeModal();
-    await page.goto(BASE + `#/orders/${patrol}`);
-    await page.getByText('Закрыт').first().waitFor();
+    await shot('19-on-credit', true);
+    await dlg.getByRole('button', { name: 'Подписать расписку' }).click();
+    await page.getByText('Долг оформлен').first().waitFor();
+    // Gone with money due: the step "debt"; its money is still taken here, and the signed paper opens from "…".
+    const gone = await page.evaluate(async (id) => { const { loadOrderBundle } = await import('/src/services/orders.ts'); const { phaseOf } = await import('/src/services/flow.ts'); const b = await loadOrderBundle(id); return { phase: phaseOf(b), stage: b.order.stage, debts: b.debts.map((d) => d.status) }; }, patrol);
+    if (gone.phase !== 'debt' || gone.stage !== 'delivered' || gone.debts.join() !== 'open') throw new Error('on credit: ' + JSON.stringify(gone));
+    await shot('20-on-credit-gone', true);
+    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await dlg.getByText('Карта', { exact: true }).click();
+    await dlg.getByRole('button', { name: 'Провести' }).click();
+    await page.getByRole('button', { name: 'Возобновить' }).waitFor();
+    const paid = await page.evaluate(async (id) => { const { loadOrderBundle } = await import('/src/services/orders.ts'); const b = await loadOrderBundle(id); return { stage: b.order.stage, debts: b.debts.map((d) => d.status) }; }, patrol);
+    if (paid.stage !== 'closed' || paid.debts.join() !== 'paid') throw new Error('paid off: ' + JSON.stringify(paid));
     await shot('22-order-closed', true);
   });
   await step('quick lists', async () => {
@@ -998,7 +945,7 @@ async function launchBrowser() {
   });
   await step('claim page', async () => {
     await page.goto(BASE + `#/orders/${patrol}/claim`);
-    await page.getByText('Было / стало').waitFor();
+    await page.getByText('Фото при приёмке').waitFor();
     await shot('23-claim', true);
   });
   await step('money, reports, parts, settings', async () => {

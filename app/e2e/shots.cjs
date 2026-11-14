@@ -86,8 +86,6 @@ async function launchBrowser() {
       await settle(900);
       await shot(`${prefix}-02f-job-${k}`);
     }
-    await go(order + '/details?tab=work');
-    await shot(`${prefix}-03-order-details`);
     await go('#/orders/new');
     await shot(`${prefix}-04-new-order`);
     await go('#/search?q=' + encodeURIComponent('масло'));
