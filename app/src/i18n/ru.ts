@@ -1313,6 +1313,12 @@ export const ru = {
   settings: {
     lastBackup: 'Последняя копия: {{date}}',
     backupWhere: 'Файл .mygarage со всеми данными и фото. Храните на ПК или в Google Drive.',
+    restoreHolds: 'В копии: заказов {{orders}}, фото и файлов {{files}}',
+    restoreNoFiles: 'В копии: заказов {{orders}}, фото нет',
+    restoreProgress: 'Фото и файлы: {{done}} из {{total}}',
+    restoredTitle: 'Данные восстановлены',
+    restoredText: 'Заказов {{orders}}, фото и файлов {{files}}',
+    restoreLost: 'не удалось: {{n}}',
     restoreTitle: 'Восстановить из резервной копии?',
     restoreText: 'Все данные на этом устройстве будут заменены данными из файла. Сначала мы проверим, что файл целый.',
     restore: 'Заменить данные',

@@ -1315,6 +1315,12 @@ export const en: typeof ru = {
   settings: {
     lastBackup: 'Last backup: {{date}}',
     backupWhere: 'A .mygarage file with all data and photos. Keep it on a PC or in Google Drive.',
+    restoreHolds: 'In the backup: {{orders}} jobs, {{files}} photos and files',
+    restoreNoFiles: 'In the backup: {{orders}} jobs, no photos',
+    restoreProgress: 'Photos and files: {{done}} of {{total}}',
+    restoredTitle: 'Data restored',
+    restoredText: '{{orders}} jobs, {{files}} photos and files',
+    restoreLost: 'could not be restored: {{n}}',
     restoreTitle: 'Restore from a backup?',
     restoreText: 'All data on this device will be replaced with the data from the file. We check the file is complete first.',
     restore: 'Replace data',

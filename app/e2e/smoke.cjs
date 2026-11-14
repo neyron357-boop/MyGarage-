@@ -1081,6 +1081,37 @@ async function launchBrowser() {
     await page.goto(BASE + '#/more');
     await page.getByText(/^(Светлая|Light)$/).click();
   });
+  await step('v0.13.3: a backup brings every photo back', async () => {
+    // The whole garage to a file, then back through "Accept the file" (as from another device): every photo
+    // and PDF comes back readable, and a banner says what came back.
+    await page.evaluate(async () => (await import('/src/i18n/index.ts')).setLang('ru'));
+    const saved = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { exportBackup } = await import('/src/services/backup.ts');
+      const file = await exportBackup();
+      const buf = new Uint8Array(await file.arrayBuffer());
+      let s = '';
+      for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      return { files: await db.mediaBlobs.count(), data: btoa(s) };
+    });
+    if (!saved.files) throw new Error('no photos to back up');
+    await page.goto(BASE + '#/more');
+    await page.getByText('На другое устройство').click();
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('dialog').getByRole('button', { name: 'Принять файл' }).click()]);
+    await chooser.setFiles({ name: 'mygarage.mygarage', mimeType: 'application/octet-stream', buffer: Buffer.from(saved.data, 'base64') });
+    await page.getByRole('dialog').last().getByText(`фото и файлов ${saved.files}`).waitFor();
+    await shot('36-restore-confirm');
+    await page.getByRole('dialog').last().getByRole('button', { name: /^Заменить/ }).click();
+    await page.getByText('Данные восстановлены').first().waitFor({ timeout: 60000 });
+    const back = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      let readable = 0;
+      for (const r of await db.mediaBlobs.toArray()) if ((await r.blob.arrayBuffer()).byteLength === r.blob.size && r.blob.size > 0) readable++;
+      return { files: await db.mediaBlobs.count(), readable };
+    });
+    if (back.files !== saved.files || back.readable !== saved.files) throw new Error('photos after the restore: ' + JSON.stringify({ saved: saved.files, ...back }));
+    await shot('36b-restored');
+  });
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
   await browser.close();
   if (errors.length) process.exit(1);

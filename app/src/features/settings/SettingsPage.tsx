@@ -48,7 +48,8 @@ import { db, uid } from '../../db/db';
 import { dubaiDate, formatDateTime } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import type { Employee, ExpenseCategory, JobTemplate, Settings, TemplateItem } from '../../domain/types';
-import { importBackup, saveBackupFile, wipeAll } from '../../services/backup';
+import { saveBackupFile, wipeAll } from '../../services/backup';
+import { RestoreModal } from './RestoreModal';
 import { loadDemoData } from '../../services/demo';
 import { blobToDataUrl } from '../../services/media';
 import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
@@ -479,7 +480,6 @@ function DeviceCard() {
 
 function DataTab() {
   const { t } = useTranslation();
-  const lang = useLang();
   const { run, busy } = useAction();
   const counts = useLiveQuery(async () => ({ orders: await db.orders.count(), customers: await db.customers.count(), media: await db.media.count() }), []);
   const backup = useBackupAge();
@@ -548,32 +548,7 @@ function DataTab() {
           {t('settings.wipe')}
         </Button>
       </Card>
-      <ConfirmModal
-        opened={!!restoreFile}
-        onClose={() => setRestoreFile(null)}
-        title={t('settings.restoreTitle')}
-        confirmLabel={t('settings.restore')}
-        color="red"
-        icon={<IconUpload size={18} />}
-        onConfirm={() =>
-          run(async () => {
-            if (!restoreFile) return false;
-            await importBackup(restoreFile);
-            window.location.reload();
-            return true;
-          })
-        }
-      >
-        <Box className="surface-soft" p="sm" mb="sm">
-          <Text size="sm" fw={600} style={{ wordBreak: 'break-all' }}>
-            {restoreFile?.name}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {restoreFile ? formatBytes(restoreFile.size, lang) : ''}
-          </Text>
-        </Box>
-        <Text size="sm">{t('settings.restoreText')}</Text>
-      </ConfirmModal>
+      <RestoreModal file={restoreFile} onClose={() => setRestoreFile(null)} title={t('settings.restoreTitle')} confirmLabel={t('settings.restore')} text={t('settings.restoreText')} />
       <Modal opened={wipe} onClose={() => setWipe(false)} title={t('settings.wipe')}>
         <Text size="sm" mb="sm">
           {t('settings.wipeConfirm')}

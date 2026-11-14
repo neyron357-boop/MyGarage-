@@ -3,11 +3,11 @@ import { IconDeviceDesktop, IconDeviceMobile, IconDownload, IconShare, IconUploa
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dubaiDate } from '../../domain/dates';
-import { exportBackup, importBackup, markBackupDone } from '../../services/backup';
-import { ConfirmModal } from '../../ui/components';
+import { exportBackup, markBackupDone } from '../../services/backup';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang } from '../../ui/hooks';
+import { useLang } from '../../ui/hooks';
 import { canShareFile, downloadFile } from '../../ui/share';
+import { RestoreModal } from '../settings/RestoreModal';
 
 /** "3,4 МБ" / "3.4 MB": the size in the interface's own number format. */
 function size(bytes: number, lang: string): string {
@@ -25,7 +25,6 @@ function size(bytes: number, lang: string): string {
 export function TransferSheet({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const lang = useLang();
-  const { run } = useAction();
   const [file, setFile] = useState<File>();
   const [incoming, setIncoming] = useState<File | null>(null);
   // The file is made as the sheet opens: iOS shares only straight from the tap.
@@ -75,23 +74,7 @@ export function TransferSheet({ opened, onClose }: { opened: boolean; onClose: (
           </Text>
         </Stack>
       </Modal>
-      <ConfirmModal
-        opened={!!incoming}
-        onClose={() => setIncoming(null)}
-        title={t('transfer.confirmTitle')}
-        confirmLabel={t('transfer.replace')}
-        color="red"
-        onConfirm={() =>
-          run(async () => {
-            if (!incoming) return false;
-            await importBackup(incoming);
-            window.location.reload();
-            return true;
-          })
-        }
-      >
-        <Text size="sm">{t('transfer.confirmText', { name: incoming?.name ?? '' })}</Text>
-      </ConfirmModal>
+      <RestoreModal file={incoming} onClose={() => setIncoming(null)} title={t('transfer.confirmTitle')} confirmLabel={t('transfer.replace')} text={t('transfer.confirmText', { name: incoming?.name ?? '' })} />
     </>
   );
 }

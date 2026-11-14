@@ -52,7 +52,7 @@ export async function exportBackup(): Promise<Blob> {
   return new Blob([header, json, ...files], { type: 'application/octet-stream' });
 }
 
-type Restorable = { tables: Record<string, unknown[]>; blobs: { id: string; blob: Blob; thumb?: Blob }[] };
+type Restorable = { exportedAt?: string; tables: Record<string, unknown[]>; blobs: { id: string; blob: Blob; thumb?: Blob }[] };
 
 async function readBackup(file: Blob): Promise<Restorable> {
   const head = await file.slice(0, MAGIC.length).text();
@@ -68,10 +68,10 @@ async function readBackup(file: Blob): Promise<Restorable> {
       if (r.offset < 0 || base + r.offset + r.size > file.size) throw new AppError('err.backupDamaged');
       return file.slice(base + r.offset, base + r.offset + r.size, r.type);
     };
-    return { tables: manifest.tables, blobs: manifest.blobs.map((b) => ({ id: b.id, blob: at(b.blob), thumb: b.thumb ? at(b.thumb) : undefined })) };
+    return { exportedAt: manifest.exportedAt, tables: manifest.tables, blobs: (manifest.blobs ?? []).map((b) => ({ id: b.id, blob: at(b.blob), thumb: b.thumb ? at(b.thumb) : undefined })) };
   }
   // v1: one JSON document with files as data URLs.
-  let data: { format?: string; tables?: Record<string, unknown[]>; blobs?: { id: string; blob: string; thumb?: string }[] };
+  let data: { format?: string; exportedAt?: string; tables?: Record<string, unknown[]>; blobs?: { id: string; blob: string; thumb?: string }[] };
   try {
     data = JSON.parse(await file.text());
   } catch {
@@ -79,22 +79,59 @@ async function readBackup(file: Blob): Promise<Restorable> {
   }
   if (data?.format !== FORMAT || !data.tables) throw new AppError('err.notBackup');
   return {
+    exportedAt: data.exportedAt,
     tables: data.tables,
     blobs: (data.blobs ?? []).map((b) => ({ id: b.id, blob: dataUrlToBlob(b.blob), thumb: b.thumb ? dataUrlToBlob(b.thumb) : undefined })),
   };
 }
 
+/** What a backup file holds, read from its manifest before anything is replaced (shown on the confirmation). */
+export interface BackupSummary {
+  exportedAt?: string;
+  orders: number;
+  customers: number;
+  /** Photos, voice notes, PDFs and signatures in the file. */
+  files: number;
+}
+
+export async function backupSummary(file: Blob): Promise<BackupSummary> {
+  const data = await readBackup(file);
+  const count = (t: string) => data.tables[t]?.length ?? 0;
+  return { exportedAt: data.exportedAt, orders: count('orders'), customers: count('customers'), files: data.blobs.length };
+}
+
+export interface RestoreResult {
+  orders: number;
+  /** Files (photos, voice notes, PDFs) restored. */
+  files: number;
+  /** Files the device would not take (each was tried on its own). */
+  lost: number;
+}
+
+/**
+ * A stored file as a copy of its own bytes. A piece of the picked backup file (`slice`) is only a window on
+ * that file: Safari on the iPhone does not keep it in the database (it fails, or stays a link to a temporary
+ * file that is gone after the reload — the data came back without its photos).
+ */
+async function ownCopy(b: Blob): Promise<Blob> {
+  return new Blob([await b.arrayBuffer()], { type: b.type });
+}
+
 /**
  * Replace all local data with a backup file (v2 or the older v1 JSON). The whole file is checked
- * before anything on the device is deleted. The page reloads afterwards.
+ * before anything on the device is deleted. The files (photos, voice notes, PDFs) follow the tables a
+ * few at a time, each read out of the backup into memory first; one the device refuses does not stop the
+ * others — it is counted. `onProgress` hears the files as they go. The page reloads afterwards.
  */
-export async function importBackup(file: Blob): Promise<void> {
+export async function importBackup(file: Blob, onProgress?: (done: number, total: number) => void): Promise<RestoreResult> {
   const data = await readBackup(file);
   const name = db.name;
   db.close();
   await GarageDB.delete(name);
   const fresh = new GarageDB(name);
   await fresh.open();
+  const total = data.blobs.length;
+  let lost = 0;
   try {
     await fresh.transaction('rw', fresh.tables, async () => {
       for (const [tableName, rows] of Object.entries(data.tables)) {
@@ -102,13 +139,32 @@ export async function importBackup(file: Blob): Promise<void> {
         if (table && table.name !== 'mediaBlobs' && rows.length) await table.bulkAdd(rows);
       }
     });
-    // Files go in small batches: each batch is read from the backup file straight into the database.
-    for (let i = 0; i < data.blobs.length; i += 40) {
-      await fresh.mediaBlobs.bulkAdd(data.blobs.slice(i, i + 40));
+    onProgress?.(0, total);
+    for (let i = 0; i < total; i += 12) {
+      const batch = (
+        await Promise.all(
+          data.blobs.slice(i, i + 12).map(async (b) => {
+            try {
+              return { id: b.id, blob: await ownCopy(b.blob), thumb: b.thumb ? await ownCopy(b.thumb) : undefined };
+            } catch {
+              lost++;
+              return null;
+            }
+          }),
+        )
+      ).filter((x): x is { id: string; blob: Blob; thumb: Blob | undefined } => !!x);
+      try {
+        await fresh.mediaBlobs.bulkPut(batch);
+      } catch {
+        // One by one: only the file the device refuses is left out.
+        for (const row of batch) await fresh.mediaBlobs.put(row).catch(() => void lost++);
+      }
+      onProgress?.(Math.min(total, i + 12), total);
     }
   } finally {
     fresh.close();
   }
+  return { orders: data.tables.orders?.length ?? 0, files: total - lost, lost };
 }
 
 export async function wipeAll(): Promise<void> {

@@ -51,6 +51,7 @@ import { useSheetSwipe } from './ui/sheetSwipe';
 import { hintNavigation, PhoneStack, scrollToTop, useViewportSync } from './ui/stack';
 import { UnsavedGuard } from './ui/unsaved';
 import { cssResolver, phoneTheme, theme } from './ui/theme';
+import { useRestoreReport } from './features/settings/RestoreModal';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
 function AppRoutes({ location }: { location: Location }) {
@@ -418,6 +419,8 @@ function Providers({ children }: { children: React.ReactNode }) {
   const lang = useLang();
   const mobile = usePhone();
   useBannerDismiss();
+  // After a restore and its reload: what came back.
+  useRestoreReport();
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
       <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />

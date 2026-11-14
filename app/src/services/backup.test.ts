@@ -1,9 +1,9 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { createCustomer, createVehicle } from './customers';
 import { AppError } from './errors';
-import { exportBackup, importBackup } from './backup';
+import { backupSummary, exportBackup, importBackup } from './backup';
 import { addMedia } from './media';
 import { createOrder } from './orders';
 import { ensureSeed } from './seed';
@@ -72,6 +72,41 @@ describe('backup', () => {
     await reopen();
     expect((await db.customers.get(c.id))?.phone).toBe('+971559876543');
     expect((await db.mediaBlobs.get(photo.id))?.blob.size).toBe(70_000);
+  });
+
+  it('stores each file as its own copy, says what the backup holds, counts the files as they come back', async () => {
+    const { photo } = await sampleData();
+    const file = await exportBackup();
+    expect(await backupSummary(file)).toMatchObject({ orders: 1, customers: 1, files: 2 });
+    // A piece of the picked file is only a window on it (Safari on the iPhone does not keep those): every file
+    // is read out of the backup into memory before it is stored.
+    const read = vi.spyOn(Blob.prototype, 'arrayBuffer');
+    const steps: [number, number][] = [];
+    const result = await importBackup(file, (done, total) => steps.push([done, total]));
+    const sizes = read.mock.contexts.map((b) => (b as Blob).size);
+    read.mockRestore();
+    expect(sizes).toEqual(expect.arrayContaining([70_000, 5_000]));
+    await reopen();
+    expect(result).toEqual({ orders: 1, files: 2, lost: 0 });
+    expect(steps[steps.length - 1]).toEqual([2, 2]);
+    const row = (await db.mediaBlobs.get(photo.id))!;
+    expect(new Uint8Array(await row.blob.arrayBuffer())).toEqual(bytes(70_000, 7));
+  });
+
+  it('a file the device will not take does not stop the others — it is counted', async () => {
+    const { photo, pdf } = await sampleData();
+    const file = await exportBackup();
+    const read = Blob.prototype.arrayBuffer;
+    const spy = vi.spyOn(Blob.prototype, 'arrayBuffer').mockImplementation(function (this: Blob) {
+      if (this.size === 5_000) return Promise.reject(new Error('NotReadableError'));
+      return read.call(this);
+    });
+    const result = await importBackup(file);
+    spy.mockRestore();
+    await reopen();
+    expect(result).toEqual({ orders: 1, files: 1, lost: 1 });
+    expect((await db.mediaBlobs.get(photo.id))?.blob.size).toBe(70_000);
+    expect(await db.mediaBlobs.get(pdf.id)).toBeUndefined();
   });
 
   it('rejects other files without touching the data', async () => {
