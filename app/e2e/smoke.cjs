@@ -468,6 +468,8 @@ async function launchBrowser() {
     await grip('Polish').waitFor();
     // The sheet has gone (its shade would take the press).
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    // The lines in the middle of the screen, clear of the floating bar (as a finger would scroll them up first).
+    await grip('Polish').evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await settled();
     const from = await grip('Polish').boundingBox();
     const to = await grip('Wash').boundingBox();
