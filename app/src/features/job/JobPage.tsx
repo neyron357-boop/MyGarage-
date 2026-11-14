@@ -61,8 +61,8 @@ import { tFor } from '../../i18n';
 import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
-import { addItem, removeItem, restoreItem, setDone, updateItem, withdrawItems } from '../../services/estimate';
-import { amendInvoice, answerLines, approveAll, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage } from '../../services/flow';
+import { addItem, removeItem, restoreItem, setDone, updateItem } from '../../services/estimate';
+import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -369,7 +369,7 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
             leftSection={<IconPencil size={18} />}
             onClick={() =>
               run(async () => {
-                if (waiting) await withdrawItems([i.id]);
+                if (waiting) await takeBack([i.id]);
                 else await reviseLine(i.id);
                 onClose();
                 onEdit({ ...i, approvalState: 'draft', done: false });
@@ -380,7 +380,7 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
           </Button>
         )}
         {(waiting || (agreed && !invoiced)) && (
-          <Button variant="subtle" color="red" loading={busy} onClick={() => act(() => (waiting ? withdrawItems([i.id], { cancel: true }) : dropLine(i.id)))}>
+          <Button variant="subtle" color="red" loading={busy} onClick={() => act(() => (waiting ? takeBack([i.id], { cancel: true }) : dropLine(i.id)))}>
             {t('job.drop')}
           </Button>
         )}
@@ -437,15 +437,13 @@ export function JobPage() {
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
-  // A percentage discount follows the lines; the stage follows the job's facts.
+  // A percentage discount follows the lines (it writes only when it is off). The stage is moved by the
+  // actions that change the job (services/flow.ts), never by opening it: a look changes nothing.
   const baseKey = b ? discountBase(b.items).map((i) => `${i.id}:${itemAmounts(i).gross}`).join('|') : '';
   const pctDiscount = !!b?.items.some((i) => i.kind === 'discount' && i.approvalState === 'draft' && i.discountPctBp);
   useEffect(() => {
     if (orderId && pctDiscount) syncDiscount(orderId).catch((e) => console.error(e));
   }, [orderId, baseKey, pctDiscount]);
-  useEffect(() => {
-    if (orderId && phase) syncStage(orderId).catch((e) => console.error(e));
-  }, [orderId, phase]);
   // Once on a device: the first line peeks to the left — lines can be swiped.
   useSwipeHint(!!b && !activeInvoice(b.invoices) && !['closed', 'cancelled', 'booked'].includes(b.order.stage) && liveLines(b.items).some((i) => i.kind !== 'discount'));
   // The screen glows in the colour of the job's step.
@@ -571,7 +569,7 @@ export function JobPage() {
       ? undefined
       : i.approvalState === 'draft'
         ? { label: t('common.delete'), icon: IconTrash, color: 'red', onCommit: () => void removeLine(i) }
-        : { label: t('job.drop'), icon: IconTrash, color: 'red', full: false, onCommit: () => void run(async () => (await (isAwaitingClient(i) ? withdrawItems([i.id], { cancel: true }) : dropLine(i.id)), haptic('light'))) };
+        : { label: t('job.drop'), icon: IconTrash, color: 'red', full: false, onCommit: () => void run(async () => (await (isAwaitingClient(i) ? takeBack([i.id], { cancel: true }) : dropLine(i.id)), haptic('light'))) };
   const swipeOn = (i: OrderItem): SwipeSpec | undefined =>
     picking || !canPick(i)
       ? undefined
@@ -710,7 +708,7 @@ export function JobPage() {
   let bar: ReactNode = null;
   if (phase === 'booked')
     bar = (
-      <Button fullWidth loading={busy} onClick={() => run(() => changeStage(oid, 'intake'))}>
+      <Button fullWidth loading={busy} onClick={() => run(() => carArrived(oid))}>
         {t('job.arrived')}
       </Button>
     );

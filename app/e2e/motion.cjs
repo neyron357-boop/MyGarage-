@@ -33,7 +33,8 @@ const check = (name, ok, detail) => {
 
   await page.goto(BASE + '#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-  await page.waitForTimeout(2000);
+  // The demo is written for a few seconds: nothing below may race it (cards moving, the journal growing).
+  await page.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
   // The board is one compact row per car: a few more cars make it longer than the screen.
   await page.evaluate(async () => {
     const { checkIn } = await import('/src/services/orders.ts');
@@ -54,11 +55,40 @@ const check = (name, ok, detail) => {
   const tabBarY = () => page.evaluate(() => Math.round(document.querySelector('.tab-bar-wrap').getBoundingClientRect().top));
   const docScroll = () => page.evaluate(() => ({ y: window.scrollY, h: document.scrollingElement.scrollHeight, vh: innerHeight }));
 
+  // The board's cars as they stand, by plate; and how much the journal holds (a look writes nothing).
+  const rows = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.stack > .screen[data-role="top"] .job-row')].map((c) => {
+        const r = c.getBoundingClientRect();
+        return { plate: (c.querySelector('[class*="plate"]')?.textContent || '').replace(/\s+/g, ' ').trim(), top: Math.round(r.top), bottom: Math.round(r.bottom) };
+      }),
+    );
+  const inView = async () => (await rows()).filter((r) => r.bottom > 120 && r.top < 700).map((r) => r.plate);
+  const journal = () => page.evaluate(async () => (await import('/src/db/db.ts')).db.events.count());
+  // A finger (CDP touches), as on the phone — with a mouse click Chromium anchored the scroll elsewhere, and the
+  // jump of the board after "Back" did not show.
+  const fingerCdp = await ctx.newCDPSession(page);
+  const fingerTap = async (x, y) => {
+    await fingerCdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    await page.waitForTimeout(60);
+    await fingerCdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const tapRow = (r) => fingerTap(195, Math.round((r.top + r.bottom) / 2));
+  const tapBack = async () => {
+    const b = await page.locator('.screen[data-role="top"] .nav-back').boundingBox();
+    await fingerTap(Math.round(b.x + b.width / 2), Math.round(b.y + b.height / 2));
+  };
+
   // 1. Board scrolled down, then open a job: the new screen slides in from the right.
   await page.evaluate(() => document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTo(0, 420));
   await page.waitForTimeout(200);
   const barBefore = await tabBarY();
-  await page.locator('.screen[data-role="top"] .job-row').last().click();
+  const before = await rows();
+  const rowsBefore = before.map((r) => r.plate);
+  const journalBefore = await journal();
+  // One of the cars just checked in, in the middle of the screen: a job nobody has opened yet.
+  const fresh = before.findIndex((r) => r.plate.includes('M4000') && r.top > 160 && r.bottom < 700);
+  await tapRow(before[fresh >= 0 ? fresh : before.findIndex((r) => r.top > 160 && r.bottom < 700)]);
   const mid = await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -75,14 +105,14 @@ const check = (name, ok, detail) => {
   );
   check('push: new screen slides in from the right', mid.some((x) => x > 100) && mid[mid.length - 1] === 0, mid);
   await page.waitForTimeout(200);
-  // Where the board was when the job opened (Playwright scrolls the card into view before tapping it).
+  // Where the board was when the job opened.
   const boardScroll = await page.evaluate(() => Math.round(document.querySelector('.stack > .screen[data-role="below"] .screen-scroll').scrollTop));
   const afterPush = await screens();
   check('push: board stays mounted underneath, hidden', afterPush.length === 2 && afterPush[0].role === 'below' && afterPush[0].vis === 'hidden' && afterPush[1].role === 'top', afterPush);
   check('push: tab bar did not move', (await tabBarY()) === barBefore, { barBefore, now: await tabBarY() });
 
   // 2. Back button: the board returns at the same scroll position, without reloading.
-  await page.locator('.screen[data-role="top"] .nav-back').click();
+  await tapBack();
   await page.waitForTimeout(700);
   const back = await page.evaluate(() => ({
     hash: location.hash,
@@ -90,8 +120,81 @@ const check = (name, ok, detail) => {
     title: document.querySelector('.screen[data-role="top"] .large-title')?.textContent,
     leaving: document.querySelectorAll('.stack > .screen[data-role="out"]').length,
   }));
-  // (Scroll anchoring may shift it a little when a card above changed meanwhile: the same cards stay in view.)
-  check('back: board again, scroll position kept', back.hash === '#/' && back.title === 'Мастерская' && back.leaving === 0 && boardScroll > 50 && Math.abs(back.scroll - boardScroll) < 40, { ...back, boardScroll });
+  // The same place to the pixel (no scroll anchoring on screens: an iPhone list keeps its offset).
+  check('back: board again, scroll position kept', back.hash === '#/' && back.title === 'Мастерская' && back.leaving === 0 && boardScroll > 50 && Math.abs(back.scroll - boardScroll) <= 2, { ...back, boardScroll });
+  // Opening a job is only a look: its stage, its journal and its place on the board stay as they were.
+  const rowsAfter = (await rows()).map((r) => r.plate);
+  const journalAfter = await journal();
+  check('back: a look changed nothing (same order, no journal entry)', journalAfter === journalBefore && rowsAfter.join('|') === rowsBefore.join('|'), { journalBefore, journalAfter, rowsBefore: rowsBefore.slice(-4), rowsAfter: rowsAfter.slice(-4) });
+
+  // 2b. A job that did change goes on top of the board; the board stays where it was (the scroll does not
+  // follow the card up): the cards that were in view are still in view.
+  const seen = await rows();
+  const mid2 = seen.findIndex((r) => r.top > 260 && r.bottom < 620);
+  const changedPlate = seen[mid2]?.plate;
+  const viewBefore = await inView();
+  const scrollBefore = await page.evaluate(() => Math.round(document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop));
+  await tapRow(seen[mid2]);
+  await page.waitForTimeout(900);
+  await page.evaluate(async () => {
+    const id = location.hash.match(/orders\/([^/?]+)/)[1];
+    const { updateOrder } = await import('/src/services/orders.ts');
+    await updateOrder(id, { complaint: 'Knock from the front left' });
+  });
+  await page.waitForTimeout(300);
+  await tapBack();
+  await page.waitForTimeout(800);
+  const changed = { scroll: await page.evaluate(() => Math.round(document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop)), first: (await rows())[0]?.plate, view: await inView() };
+  const stayed = viewBefore.filter((p) => p !== changedPlate);
+  check(
+    'back after a change: the job on top, the board where it was',
+    mid2 >= 0 && changed.first === changedPlate && Math.abs(changed.scroll - scrollBefore) <= 2 && stayed.every((p) => changed.view.includes(p)),
+    { mid2, changedPlate, scrollBefore, ...changed, viewBefore },
+  );
+
+  // 2c. The same on a long board (24 cars, deep down): a card from the middle goes on top, and React moves every
+  // card above it — Chromium's scroll anchoring lost its card and took the board up to its top (2000 → 64).
+  {
+    const dc = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'ru-RU' });
+    const dp = await dc.newPage();
+    dp.on('pageerror', (e) => errors.push('pageerror (long board): ' + e.message));
+    await dp.goto(BASE + '#/');
+    await dp.locator('.screen[data-role="top"] .large-title').first().waitFor();
+    await dp.evaluate(async () => {
+      const { checkIn } = await import('/src/services/orders.ts');
+      for (let k = 0; k < 24; k++) await checkIn({ plate: { emirate: 'DXB', code: 'M', number: String(50000 + k) }, make: 'Toyota', model: 'Yaris', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+    });
+    await dp.waitForTimeout(1200);
+    const dcdp = await dc.newCDPSession(dp);
+    const dtap = async (x, y) => {
+      await dcdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      await dp.waitForTimeout(60);
+      await dcdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    const scrollOf = () => dp.evaluate(() => Math.round(document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTop));
+    await dp.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTo(0, 2000));
+    await dp.waitForTimeout(400);
+    const deepBefore = await scrollOf();
+    const card = await dp.evaluate(() => {
+      const c = [...document.querySelectorAll('.stack > .screen[data-role="top"] .job-row')].find((e) => { const r = e.getBoundingClientRect(); return r.top > 260 && r.bottom < 640; });
+      const r = c.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), plate: (c.querySelector('[class*="plate"]')?.textContent || '').trim() };
+    });
+    await dtap(card.x, card.y);
+    await dp.waitForTimeout(900);
+    await dp.evaluate(async () => {
+      const id = location.hash.match(/orders\/([^/?]+)/)[1];
+      const { updateOrder } = await import('/src/services/orders.ts');
+      await updateOrder(id, { complaint: 'Knock from the front left' });
+    });
+    await dp.waitForTimeout(300);
+    const nb = await dp.locator('.screen[data-role="top"] .nav-back').boundingBox();
+    await dtap(Math.round(nb.x + nb.width / 2), Math.round(nb.y + nb.height / 2));
+    await dp.waitForTimeout(900);
+    const deep = { before: deepBefore, after: await scrollOf(), first: await dp.evaluate(() => (document.querySelector('.stack > .screen[data-role="top"] .job-row [class*="plate"]')?.textContent || '').trim()), card: card.plate };
+    check('long board: a changed card goes on top, the board stays deep down', deep.before > 1000 && Math.abs(deep.after - deep.before) <= 2 && deep.first === deep.card, deep);
+    await dc.close();
+  }
 
   // 3. Edge swipe: the previous screen is visible under the finger and becomes the screen.
   await page.locator('.screen[data-role="top"] .job-row').first().click();
@@ -668,7 +771,7 @@ const check = (name, ok, detail) => {
   sp.on('pageerror', (e) => errors.push('pageerror (iphone): ' + e.message));
   await sp.goto(BASE + '#/settings?tab=data');
   await sp.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-  await sp.waitForTimeout(1500);
+  await sp.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
   await sp.goto(BASE + '#/');
   await sp.waitForTimeout(1000);
   await sp.locator('.screen[data-role="top"] .job-row').first().click();

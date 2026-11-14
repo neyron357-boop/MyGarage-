@@ -126,7 +126,7 @@ describe('fast path', () => {
     let b = (await loadOrderBundle(o.id))!;
     expect(b.customer.name).toBe('');
     expect(b.customer.phone).toBe('');
-    expect(b.order.stage).toBe('intake');
+    expect(b.order.stage).toBe('diagnostics');
     // Same plate again: the existing car and customer are reused, the missing phone is filled in.
     const again = await checkIn({ vehicleId: b.vehicle.id, plate: b.vehicle.plate, make: '', model: '', name: 'Omar', phone: '055 111 2222', docLanguage: 'en', complaint: '', arrivedNow: false, bookedFor: new Date().toISOString() });
     expect(again.vehicleId).toBe(b.vehicle.id);

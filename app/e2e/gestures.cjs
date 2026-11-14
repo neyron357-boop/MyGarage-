@@ -7,12 +7,14 @@ const path = require('path');
  * (AGENTS.md, "Стандарт качества MyGarage"). No ffmpeg needed: `node e2e/gesture-player.cjs` turns the frames of
  * two builds into one page that plays the same gestures side by side.
  * Usage: start the dev server (npm run dev -- --port 5173), then: node e2e/gestures.cjs <outDir> [label]
+ * (GESTURES=board-return,tabbar-slow — only those).
  * Writes <label>-<gesture>.frames.json and <label>-gestures.json (where the tab bar's lens was under the finger,
  * which tabs opened).
  */
 const OUT = process.argv[2] || path.join(__dirname, '..', 'test-results', 'gestures');
 const LABEL = process.argv[3] || 'now';
 const BASE = process.env.BASE_URL || 'http://localhost:5173/';
+const ONLY = process.env.GESTURES ? process.env.GESTURES.split(',') : null;
 fs.mkdirSync(OUT, { recursive: true });
 
 async function launch() {
@@ -32,6 +34,7 @@ async function launch() {
   const errors = [];
   // A fresh context per gesture: one recording each.
   async function gesture(name, fn) {
+    if (ONLY && !ONLY.includes(name)) return;
     const ctx = await browser.newContext({
       viewport: { width: 390, height: 844 },
       deviceScaleFactor: 2,
@@ -44,7 +47,7 @@ async function launch() {
     page.on('console', (m) => m.type() === 'error' && errors.push(`${name}: ${m.text()}`));
     await page.goto(BASE + '#/settings?tab=data');
     await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-    await page.waitForTimeout(2500);
+    await page.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
     await page.goto(BASE + '#/');
     await page.locator('.tab-bar').waitFor();
     await page.waitForTimeout(800);
@@ -114,7 +117,8 @@ async function launch() {
     const res = await fn({ page, touch, tabs });
     res.navigations = await page.evaluate(() => window.__nav);
     res.hash = await page.evaluate(() => location.hash);
-    const gaps = (await page.evaluate(() => window.__gaps)).slice().sort((x, y) => x - y);
+    // (A gesture away from the tab bar turns the lens measure off: window.__gaps = null.)
+    const gaps = ((await page.evaluate(() => window.__gaps)) || []).slice().sort((x, y) => x - y);
     if (gaps.length) res.lensFromFinger = { moves: gaps.length, median: gaps[gaps.length >> 1], max: gaps[gaps.length - 1] };
     results[name] = res;
     await page.waitForTimeout(600);
@@ -209,6 +213,59 @@ async function launch() {
     await touch('touchEnd');
     await page.waitForTimeout(700);
     return { expectTab: search.href, under, lensAfter: await lensAt(page) };
+  });
+
+  // 6. Deep down the board: a job opened and closed with « ‹ » (only a look), then another one changed and closed
+  // with the edge swipe. The board stays where it was: a look changes nothing, a changed job goes on top without
+  // pulling the scroll after it. Needs the dev server (the cars are checked in through the app's own modules).
+  await gesture('board-return', async ({ page, touch }) => {
+    await page.evaluate(async () => {
+      window.__gaps = null;
+      const { checkIn } = await import('/src/services/orders.ts');
+      for (let k = 0; k < 24; k++) await checkIn({ plate: { emirate: 'DXB', code: 'M', number: String(40000 + k) }, make: 'Toyota', model: 'Yaris', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+    });
+    await page.waitForTimeout(900);
+    const scrollTop = () => page.evaluate(() => Math.round(document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTop));
+    const cardMid = () =>
+      page.evaluate(() => {
+        const c = [...document.querySelectorAll('.stack > .screen[data-role="top"] .job-row')].find((e) => { const r = e.getBoundingClientRect(); return r.top > 300 && r.bottom < 640; });
+        const r = c.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), plate: (c.querySelector('[class*="plate"]')?.textContent || '').trim() };
+      });
+    const tap = async (x, y) => { await touch('touchStart', x, y); await page.waitForTimeout(60); await touch('touchEnd'); };
+    const first = () => page.evaluate(() => (document.querySelector('.stack > .screen[data-role="top"] .job-row [class*="plate"]')?.textContent || '').trim());
+    await page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTo(0, 2000));
+    await page.waitForTimeout(500);
+    // A look: open, « ‹ ».
+    const look = { before: await scrollTop() };
+    const a = await cardMid();
+    look.opened = a.plate;
+    await tap(a.x, a.y);
+    await page.waitForTimeout(900);
+    const back = await page.evaluate(() => { const r = document.querySelector('.stack > .screen[data-role="top"] .nav-back').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; });
+    await tap(back.x, back.y);
+    await page.waitForTimeout(1100);
+    look.after = await scrollTop();
+    look.onTop = await first();
+    // A change: open another, the job changes (the complaint is written), the edge swipe back.
+    const change = { before: await scrollTop() };
+    const b = await cardMid();
+    change.opened = b.plate;
+    await tap(b.x, b.y);
+    await page.waitForTimeout(900);
+    await page.evaluate(async () => {
+      const id = location.hash.match(/orders\/([^/?]+)/)[1];
+      const { updateOrder } = await import('/src/services/orders.ts');
+      await updateOrder(id, { complaint: 'Knock from the front left' });
+    });
+    await page.waitForTimeout(500);
+    await touch('touchStart', 6, 420);
+    await slide(touch, page, 421, 6, 300, 320);
+    await touch('touchEnd');
+    await page.waitForTimeout(1100);
+    change.after = await scrollTop();
+    change.onTop = await first();
+    return { look, change };
   });
 
   fs.writeFileSync(path.join(OUT, `${LABEL}-gestures.json`), JSON.stringify({ results, errors }, null, 1));

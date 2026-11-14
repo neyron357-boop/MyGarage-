@@ -89,7 +89,8 @@ async function launchBrowser() {
   await step('load demo', async () => {
     await page.goto(BASE + '#/settings?tab=data');
     await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-    await page.waitForTimeout(1500);
+    // Written for a few seconds: the steps below must not race it.
+    await page.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
     await page.goto(BASE + '#/');
     await page.getByText('Camry').first().waitFor();
     await shot('02-board-demo', true);

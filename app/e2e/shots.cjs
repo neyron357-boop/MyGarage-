@@ -47,7 +47,8 @@ async function launchBrowser() {
 
   await go('#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-  await settle(6000);
+  await page.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
+  await settle(1500);
   // The "demo data loaded" banner would sit over every picture (the mouse of the test pauses it).
   await page.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
 
@@ -122,7 +123,7 @@ async function launchBrowser() {
   // The computer's browser has its own (empty) storage: the demo first, as on the phone.
   await dp.goto(BASE + '#/settings?tab=data');
   await dp.getByRole('button', { name: 'Загрузить демо-данные' }).click();
-  await dp.waitForTimeout(1500);
+  await dp.getByText('Демо-данные загружены').first().waitFor({ timeout: 20000 });
   await dp.goto(BASE + '#/');
   await dp.waitForTimeout(1200);
   await dp.screenshot({ path: `${OUT}/desktop-01-board.png` });

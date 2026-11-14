@@ -570,6 +570,10 @@ html.vv .app-root {
   /* The list keeps the iPhone's rubber band at its ends; the pull at the top is ui/pullRefresh (board). */
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+  /* As an iPhone list: rows that change or move keep the scroll offset where it is. Chromium's scroll
+     anchoring followed a card that went to the top of the board (back on the board — at its very top),
+     and WebKit's is still in the works: the same place on every engine. */
+  overflow-anchor: none;
 }
 /* Room for the navigation bar above, the floating tab bar (or the home indicator) below: the content
    scrolls on under the glass, and the last row still comes up clear of it. */

@@ -92,8 +92,19 @@ export interface CheckInInput {
  * Fast check-in in one step and one transaction: the plate is enough. A typed phone that already
  * belongs to a customer links to that customer; name and phone may stay empty and be added later
  * (they are filled in on an existing customer only where missing).
+ *
+ * A car that is here goes straight on to diagnostics — the mechanic looks at it, the intake act is
+ * optional. It is the check-in that moves it, not the first look at the job: opening a job never
+ * changes it (the board would put it on top).
  */
 export async function checkIn(input: CheckInInput): Promise<Order> {
+  const order = await enter(input);
+  if (!input.arrivedNow) return order;
+  await tryStage(order.id, 'diagnostics');
+  return (await db.orders.get(order.id)) ?? order;
+}
+
+function enter(input: CheckInInput): Promise<Order> {
   return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.counters, db.events], async () => {
     let vehicle = input.vehicleId ? await db.vehicles.get(input.vehicleId) : undefined;
     let customer: Customer | undefined;

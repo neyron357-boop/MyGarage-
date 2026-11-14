@@ -45,6 +45,12 @@ export async function syncStage(orderId: string): Promise<void> {
   }
 }
 
+/** A booked car has come: it is in, and — as at check-in — goes straight on to diagnostics. */
+export async function carArrived(orderId: string): Promise<void> {
+  await changeStage(orderId, 'intake');
+  await syncStage(orderId);
+}
+
 const viaOf = (sent: SendVia): DecisionVia => (sent === 'in_person' ? 'in_person' : sent === 'phone' ? 'phone' : 'messenger');
 
 async function answer(items: OrderItem[], decision: 'approve' | 'decline'): Promise<void> {
@@ -173,6 +179,18 @@ export async function dropLine(itemId: string): Promise<void> {
   });
   await syncDiscount(item.orderId);
   await syncStage(item.orderId);
+}
+
+/**
+ * Lines waiting for the customer's answer taken back: drafts again (to change them and tell again), or —
+ * with `cancel` — off the job (kept in the history as cancelled). The discount and the stage follow what
+ * is left: with the rest agreed, the work goes on.
+ */
+export async function takeBack(itemIds: string[], opts: { cancel?: boolean } = {}): Promise<void> {
+  const first = itemIds.length ? await db.items.get(itemIds[0]) : undefined;
+  if (!first || !(await withdrawItems(itemIds, opts))) return;
+  await syncDiscount(first.orderId);
+  await syncStage(first.orderId);
 }
 
 /**

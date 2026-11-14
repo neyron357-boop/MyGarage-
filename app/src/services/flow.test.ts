@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, closeUnpaid, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage } from './flow';
+import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage, takeBack } from './flow';
 import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -25,7 +25,8 @@ beforeEach(async () => {
 describe('lazy flow', () => {
   it('check-in, findings, "agreed", parts, done, paid, gone: the job moves by itself', async () => {
     const o = await job();
-    expect(await state(o.id)).toEqual({ phase: 'look', stage: 'intake' });
+    // The car is here: it stands on diagnostics at once (not from the first look at the job).
+    expect(await state(o.id)).toEqual({ phase: 'look', stage: 'diagnostics' });
     await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Front brake pads replacement', unitPriceFils: 12000 });
     const part = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 18000 });
     await syncStage(o.id);
@@ -59,6 +60,41 @@ describe('lazy flow', () => {
     expect(await state(o.id)).toEqual({ phase: 'work', stage: 'in_progress' });
     expect((await db.items.get(b.id))!.approvalState).toBe('declined');
     expect((await db.decisions.where('orderId').equals(o.id).toArray()).map((d) => d.via)).toEqual(['messenger', 'messenger']);
+  });
+
+  it('the stage moves with what is done, never with a look: check-in, a booked car that comes', async () => {
+    const o = await job();
+    expect(o.stage).toBe('diagnostics');
+    expect((await db.events.where('orderId').equals(o.id).toArray()).map((e) => e.type).sort()).toEqual(['created', 'stage']);
+    // What the job screen did on every opening: nothing to move, nothing written.
+    await syncStage(o.id);
+    expect(await db.events.where('orderId').equals(o.id).count()).toBe(2);
+    expect((await db.orders.get(o.id))!.stageChangedAt).toBe(o.stageChangedAt);
+
+    const booked = await checkIn({ plate: { emirate: 'DXB', code: 'B', number: '24680' }, make: 'Kia', model: 'Rio', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: false, bookedFor: new Date().toISOString() });
+    expect(booked.stage).toBe('booked');
+    await carArrived(booked.id);
+    expect(await state(booked.id)).toEqual({ phase: 'look', stage: 'diagnostics' });
+    expect((await db.orders.get(booked.id))!.arrivedAt).toBeTruthy();
+  });
+
+  it('a waiting line taken off: with the rest agreed, the work goes on', async () => {
+    const o = await job();
+    const a = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    const b = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'A/C service', unitPriceFils: 15000 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    await syncStage(o.id);
+    await answerLines([a.id], 'approve');
+    expect(await state(o.id)).toEqual({ phase: 'wait', stage: 'awaiting_approval' });
+    await takeBack([b.id], { cancel: true });
+    expect(await state(o.id)).toEqual({ phase: 'work', stage: 'in_progress' });
+    expect((await db.items.get(b.id))!.approvalState).toBe('cancelled');
+    // Taken back to change it (a draft again): the stage does not go back by itself.
+    const c = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Wheel alignment', unitPriceFils: 8000 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    await takeBack([c.id]);
+    expect((await db.items.get(c.id))!.approvalState).toBe('draft');
+    expect((await state(o.id)).stage).toBe('in_progress');
   });
 
   it('something else found during the work goes to the customer first', async () => {
