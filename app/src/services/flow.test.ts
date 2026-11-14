@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage, takeBack } from './flow';
+import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, lineDone, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage, takeBack } from './flow';
 import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -65,10 +65,10 @@ describe('lazy flow', () => {
   it('the stage moves with what is done, never with a look: check-in, a booked car that comes', async () => {
     const o = await job();
     expect(o.stage).toBe('diagnostics');
-    expect((await db.events.where('orderId').equals(o.id).toArray()).map((e) => e.type).sort()).toEqual(['created', 'stage']);
+    expect((await db.events.where('orderId').equals(o.id).toArray()).map((e) => [e.type, e.payload?.stage])).toEqual([['created', 'diagnostics']]);
     // What the job screen did on every opening: nothing to move, nothing written.
     await syncStage(o.id);
-    expect(await db.events.where('orderId').equals(o.id).count()).toBe(2);
+    expect(await db.events.where('orderId').equals(o.id).count()).toBe(1);
     expect((await db.orders.get(o.id))!.stageChangedAt).toBe(o.stageChangedAt);
 
     const booked = await checkIn({ plate: { emirate: 'DXB', code: 'B', number: '24680' }, make: 'Kia', model: 'Rio', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: false, bookedFor: new Date().toISOString() });
@@ -76,6 +76,16 @@ describe('lazy flow', () => {
     await carArrived(booked.id);
     expect(await state(booked.id)).toEqual({ phase: 'look', stage: 'diagnostics' });
     expect((await db.orders.get(booked.id))!.arrivedAt).toBeTruthy();
+  });
+
+  it('a part fitted (marked done) lets the job waiting for its parts go on', async () => {
+    const o = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Pads replacement', unitPriceFils: 12000 });
+    const part = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 18000 });
+    await approveAll(o.id);
+    expect(await state(o.id)).toEqual({ phase: 'work', stage: 'awaiting_parts' });
+    await lineDone(part.id, true);
+    expect(await state(o.id)).toEqual({ phase: 'work', stage: 'in_progress' });
   });
 
   it('a waiting line taken off: with the rest agreed, the work goes on', async () => {

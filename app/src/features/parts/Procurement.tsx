@@ -150,6 +150,8 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
               onClick={() =>
                 run(async () => {
                   await createReturn(item.id, { reason: retReason, expectedRefundFils: retAmount ?? 0, refundType: retType });
+                  // A part sent back no longer holds the job up.
+                  await syncStage(item.orderId);
                   onClose();
                 }, 'common.saved')
               }

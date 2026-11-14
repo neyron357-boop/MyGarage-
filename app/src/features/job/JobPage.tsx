@@ -61,8 +61,8 @@ import { tFor } from '../../i18n';
 import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
-import { addItem, removeItem, restoreItem, setDone, updateItem } from '../../services/estimate';
-import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
+import { addItem, updateItem } from '../../services/estimate';
+import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { linesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -334,7 +334,7 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
           </Group>
         )}
         {agreed && !invoiced && (
-          <Button color="green" variant={i.done ? 'light' : 'filled'} loading={busy} leftSection={<IconChecks size={18} />} onClick={() => act(() => setDone(i.id, !i.done))}>
+          <Button color="green" variant={i.done ? 'light' : 'filled'} loading={busy} leftSection={<IconChecks size={18} />} onClick={() => act(() => lineDone(i.id, !i.done))}>
             {i.done ? t('job.lineUndone') : t('job.lineDone')}
           </Button>
         )}
@@ -480,9 +480,9 @@ export function JobPage() {
 
   const removeLine = (i: OrderItem) =>
     run(async () => {
-      const removed = await removeItem(i.id);
+      const [removed] = await removeLines([i.id]);
       setSheet(null);
-      if (removed) undoToast(t('item.removed', { title: itemTitle(removed, lang) }), t('common.undo'), () => void restoreItem(removed));
+      if (removed) undoToast(t('item.removed', { title: itemTitle(removed, lang) }), t('common.undo'), () => void restoreLines([removed]));
     });
   /** The quote to the customer's chat; the lines wait for the answer only once it really went. */
   const toClient = () => run(() => sv.prepare(oid, { via: c.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp' }));
@@ -576,7 +576,7 @@ export function JobPage() {
       : isAwaitingClient(i)
         ? { label: t('job.agreed'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await answerLines([i.id], 'approve'), haptic('success'))) }
         : i.approvalState === 'approved'
-          ? { label: i.done ? t('job.lineUndone') : t('job.lineDone'), icon: IconChecks, color: i.done ? 'gray' : 'green', onCommit: () => void run(async () => (await setDone(i.id, !i.done), haptic(i.done ? 'light' : 'success'))) }
+          ? { label: i.done ? t('job.lineUndone') : t('job.lineDone'), icon: IconChecks, color: i.done ? 'gray' : 'green', onCommit: () => void run(async () => (await lineDone(i.id, !i.done), haptic(i.done ? 'light' : 'success'))) }
           : undefined;
   const row = (i: OrderItem) => (
     <PickRow

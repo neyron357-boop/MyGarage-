@@ -84,11 +84,21 @@ const check = (name, ok, detail) => {
   await page.waitForTimeout(200);
   const barBefore = await tabBarY();
   const before = await rows();
-  const rowsBefore = before.map((r) => r.plate);
-  const journalBefore = await journal();
-  // One of the cars just checked in, in the middle of the screen: a job nobody has opened yet.
+  // One of the cars just checked in, in the middle of the screen — set a step behind its facts (as an older job,
+  // or one moved by hand, can stand): the job screen used to "fix" such a stage on every opening.
   const fresh = before.findIndex((r) => r.plate.includes('M4000') && r.top > 160 && r.bottom < 700);
-  await tapRow(before[fresh >= 0 ? fresh : before.findIndex((r) => r.top > 160 && r.bottom < 700)]);
+  check('push: a fresh job in the middle of the screen', fresh >= 0, before);
+  const lookAt = before[fresh >= 0 ? fresh : before.findIndex((r) => r.top > 160 && r.bottom < 700)];
+  await page.evaluate(async (n) => {
+    const { db } = await import('/src/db/db.ts');
+    const v = (await db.vehicles.toArray()).find((x) => x.plate.number === n);
+    const o = v && (await db.orders.where('vehicleId').equals(v.id).first());
+    if (o) await db.orders.update(o.id, { stage: 'intake' });
+  }, lookAt.plate.replace(/\D/g, '').slice(-5));
+  await page.waitForTimeout(300);
+  const rowsBefore = (await rows()).map((r) => r.plate);
+  const journalBefore = await journal();
+  await tapRow(lookAt);
   const mid = await page.evaluate(
     () =>
       new Promise((resolve) => {
@@ -129,28 +139,37 @@ const check = (name, ok, detail) => {
 
   // 2b. A job that did change goes on top of the board; the board stays where it was (the scroll does not
   // follow the card up): the cards that were in view are still in view.
+  // The card on top of the board (by plate), waited for instead of a fixed pause.
+  const firstPlateIs = (p, on = page) =>
+    on
+      .waitForFunction((want) => location.hash === '#/' && (document.querySelector('.stack > .screen[data-role="top"] .job-row [class*="plate"]')?.textContent || '').replace(/\s+/g, ' ').trim() === want, p, { timeout: 5000 })
+      .then(() => on.waitForTimeout(150))
+      .catch(() => undefined);
   const seen = await rows();
   const mid2 = seen.findIndex((r) => r.top > 260 && r.bottom < 620);
-  const changedPlate = seen[mid2]?.plate;
-  const viewBefore = await inView();
-  const scrollBefore = await page.evaluate(() => Math.round(document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop));
-  await tapRow(seen[mid2]);
-  await page.waitForTimeout(900);
-  await page.evaluate(async () => {
-    const id = location.hash.match(/orders\/([^/?]+)/)[1];
-    const { updateOrder } = await import('/src/services/orders.ts');
-    await updateOrder(id, { complaint: 'Knock from the front left' });
-  });
-  await page.waitForTimeout(300);
-  await tapBack();
-  await page.waitForTimeout(800);
-  const changed = { scroll: await page.evaluate(() => Math.round(document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop)), first: (await rows())[0]?.plate, view: await inView() };
-  const stayed = viewBefore.filter((p) => p !== changedPlate);
-  check(
-    'back after a change: the job on top, the board where it was',
-    mid2 >= 0 && changed.first === changedPlate && Math.abs(changed.scroll - scrollBefore) <= 2 && stayed.every((p) => changed.view.includes(p)),
-    { mid2, changedPlate, scrollBefore, ...changed, viewBefore },
-  );
+  if (mid2 < 0) check('back after a change: the job on top, the board where it was', false, { noCardMidScreen: seen });
+  else {
+    const changedPlate = seen[mid2].plate;
+    const viewBefore = await inView();
+    const scrollBefore = await page.evaluate(() => Math.round(document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop));
+    await tapRow(seen[mid2]);
+    await page.waitForFunction(() => /^#\/orders\/[^/]+$/.test(location.hash), null, { timeout: 5000 });
+    await page.evaluate(async () => {
+      const id = location.hash.match(/orders\/([^/?]+)/)[1];
+      const { updateOrder } = await import('/src/services/orders.ts');
+      await updateOrder(id, { complaint: 'Knock from the front left' });
+    });
+    await page.waitForTimeout(300);
+    await tapBack();
+    await firstPlateIs(changedPlate);
+    const changed = { scroll: await page.evaluate(() => Math.round(document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop)), first: (await rows())[0]?.plate, view: await inView() };
+    const stayed = viewBefore.filter((p) => p !== changedPlate);
+    check(
+      'back after a change: the job on top, the board where it was',
+      changed.first === changedPlate && Math.abs(changed.scroll - scrollBefore) <= 2 && stayed.every((p) => changed.view.includes(p)),
+      { mid2, changedPlate, scrollBefore, ...changed, viewBefore },
+    );
+  }
 
   // 2c. The same on a long board (24 cars, deep down): a card from the middle goes on top, and React moves every
   // card above it — Chromium's scroll anchoring lost its card and took the board up to its top (2000 → 64).
@@ -164,7 +183,8 @@ const check = (name, ok, detail) => {
       const { checkIn } = await import('/src/services/orders.ts');
       for (let k = 0; k < 24; k++) await checkIn({ plate: { emirate: 'DXB', code: 'M', number: String(50000 + k) }, make: 'Toyota', model: 'Yaris', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
     });
-    await dp.waitForTimeout(1200);
+    await dp.waitForFunction(() => document.querySelectorAll('.stack > .screen[data-role="top"] .job-row').length >= 24, null, { timeout: 10000 });
+    await dp.waitForTimeout(300);
     const dcdp = await dc.newCDPSession(dp);
     const dtap = async (x, y) => {
       await dcdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
@@ -181,7 +201,7 @@ const check = (name, ok, detail) => {
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), plate: (c.querySelector('[class*="plate"]')?.textContent || '').trim() };
     });
     await dtap(card.x, card.y);
-    await dp.waitForTimeout(900);
+    await dp.waitForFunction(() => /^#\/orders\/[^/]+$/.test(location.hash), null, { timeout: 5000 });
     await dp.evaluate(async () => {
       const id = location.hash.match(/orders\/([^/?]+)/)[1];
       const { updateOrder } = await import('/src/services/orders.ts');
@@ -190,7 +210,7 @@ const check = (name, ok, detail) => {
     await dp.waitForTimeout(300);
     const nb = await dp.locator('.screen[data-role="top"] .nav-back').boundingBox();
     await dtap(Math.round(nb.x + nb.width / 2), Math.round(nb.y + nb.height / 2));
-    await dp.waitForTimeout(900);
+    await firstPlateIs(card.plate.replace(/\s+/g, ' ').trim(), dp);
     const deep = { before: deepBefore, after: await scrollOf(), first: await dp.evaluate(() => (document.querySelector('.stack > .screen[data-role="top"] .job-row [class*="plate"]')?.textContent || '').trim()), card: card.plate };
     check('long board: a changed card goes on top, the board stays deep down', deep.before > 1000 && Math.abs(deep.after - deep.before) <= 2 && deep.first === deep.card, deep);
     await dc.close();

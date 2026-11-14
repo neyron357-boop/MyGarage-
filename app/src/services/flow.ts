@@ -8,7 +8,7 @@ import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } f
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
-import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, updateItem, withdrawItems } from './estimate';
+import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, setDone, updateItem, withdrawItems } from './estimate';
 import { issueCreditNote } from './money';
 import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, stageContext, type OrderBundle } from './orders';
 
@@ -179,6 +179,13 @@ export async function dropLine(itemId: string): Promise<void> {
   });
   await syncDiscount(item.orderId);
   await syncStage(item.orderId);
+}
+
+/** A line done (or not after all): a part fitted counts as there, so the job waiting for its parts goes on. */
+export async function lineDone(itemId: string, done: boolean): Promise<void> {
+  await setDone(itemId, done);
+  const item = await db.items.get(itemId);
+  if (item) await syncStage(item.orderId);
 }
 
 /**
