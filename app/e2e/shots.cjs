@@ -36,7 +36,8 @@ async function launchBrowser() {
       await settle(350);
     }
     // Screens slide in (View Transitions): wait for that and any other animation before the picture.
-    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
+    // Only animations that run in time: one tied to a scroll (the glow under the title) never finishes.
+    await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline === document.timeline).map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
     await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: !!opts.full });
     console.log('shot', name);
   };

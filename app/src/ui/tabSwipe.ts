@@ -4,7 +4,7 @@ import { haptic } from './haptics';
 
 /** Things that take a sideways drag themselves: the tab swipe leaves them alone. */
 const OWN_SWIPE =
-  '.chip-row:not(.wrap), .scroll-tabs, .today-strip, .swipe-row, .kanban, .strip-row, [data-sort-id], input, textarea, select, [role="slider"]';
+  '.chip-row:not(.wrap), .scroll-tabs, .today-strip, .swipe-row, .kanban, .strip-row, [data-sort-id], input, textarea, select, [role="slider"], video, audio, [controls]';
 /** The strip along the left edge belongs to "Back" (ui/stack). */
 const EDGE = 28;
 /** A touch becomes a drag after 8 px; sideways only when the first move is clearly sideways. */
@@ -55,6 +55,15 @@ function xNow(el: HTMLElement): number {
 
 const touchOf = (list: TouchList, id: number) => Array.from(list).find((t) => t.identifier === id);
 
+/**
+ * A speed the spring can take without the page passing its place: a critically damped spring overshoots once its
+ * start speed is over ω × the way to go (ω = √stiffness). A throw harder than that only lands sooner.
+ */
+const capped = (v: number, way: number, stiffness: number) => {
+  const max = Math.sqrt(stiffness) * Math.abs(way);
+  return Math.max(-max, Math.min(max, v));
+};
+
 /** One page from the next: the screen's width — each page keeps its own margins, as on a phone's pager. */
 const spanOf = (el: HTMLElement) => el.closest<HTMLElement>('.screen-scroll')?.clientWidth || document.documentElement.clientWidth || el.offsetWidth || 1;
 
@@ -66,6 +75,8 @@ interface Ghost {
   layer: HTMLElement;
   copy: HTMLElement;
   anim?: AnimationPlaybackControls;
+  /** The screen's scroll when the copy was taken (a page come back to its copy is put back there). */
+  scrollTop: number;
 }
 
 function makeGhost(el: HTMLElement, x: number): Ghost | null {
@@ -95,7 +106,7 @@ function makeGhost(el: HTMLElement, x: number): Ghost | null {
   // In the same place of the page (its styles still apply), fixed to the screen: the new tab may open at its
   // top or at its end — the leaving page does not ride along.
   parent.append(layer);
-  return { layer, copy };
+  return { layer, copy, scrollTop: el.closest('.screen-scroll')?.scrollTop ?? 0 };
 }
 
 function dropGhost(g: Ghost) {
@@ -227,7 +238,7 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
     };
     /** Back home: the page to 0, its copies with it (on the same spring, from where they are). */
     const settle = (velocity = 0) => {
-      const how = reduced() ? PLAIN : { ...SNAP, velocity };
+      const how = reduced() ? PLAIN : { ...SNAP, velocity: capped(velocity, xNow(el), SNAP.stiffness) };
       const a = animate(el, { x: 0 }, how);
       s.anim = a;
       rest(a);
@@ -239,14 +250,23 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
     const onScroll = () => {
       const g = s.g;
       if (!g || g.axis !== 'x' || !scroller || Math.abs(scroller.scrollTop - g.scrollTop) < SCROLL_WINS) return;
-      s.g = null;
+      endGesture();
       settle();
     };
     const onStart = (e: TouchEvent) => {
-      // A second finger is ignored: the first one goes on.
-      if (s.g || e.touches.length !== 1) return;
+      if (s.g) {
+        // A second finger is ignored: the first one goes on.
+        if (e.touches.length !== 1) return;
+        // One finger on the glass and still a gesture: its let-go never came. Closed, back home.
+        const g = s.g;
+        endGesture();
+        if (g.axis === 'x' || g.caught) settle();
+      }
+      if (e.touches.length !== 1) return;
       const t = e.touches[0];
       if (t.clientX < EDGE || (e.target as Element | null)?.closest?.(OWN_SWIPE)) return;
+      // Something on the screen must not be lost to a page turn (a voice note being recorded).
+      if (el.closest('.screen')?.querySelector('[data-hold-page]')) return;
       const width = spanOf(el);
       const moving = !!s.anim || s.followers.some((f) => f.ghost.anim);
       let x = 0;
@@ -274,6 +294,23 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
         x,
         scrollTop: scroller?.scrollTop ?? 0,
       };
+      // (An icon inside a button is an SVG element: any element takes these listeners.)
+      const node = e.target as HTMLElement;
+      node.addEventListener('touchmove', onMove, { passive: true });
+      node.addEventListener('touchend', onEnd, { passive: true });
+      node.addEventListener('touchcancel', onCancel, { passive: true });
+      unlisten = () => {
+        node.removeEventListener('touchmove', onMove);
+        node.removeEventListener('touchend', onEnd);
+        node.removeEventListener('touchcancel', onCancel);
+      };
+    };
+    let unlisten: (() => void) | null = null;
+    /** The gesture is over: its touch is not followed any more. */
+    const endGesture = () => {
+      s.g = null;
+      unlisten?.();
+      unlisten = null;
     };
     const onMove = (e: TouchEvent) => {
       const g = s.g;
@@ -285,7 +322,7 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
         if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
         g.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
         if (g.axis === 'y') {
-          s.g = null;
+          endGesture();
           if (g.caught) settle();
           return;
         }
@@ -302,16 +339,17 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
     const onEnd = (e: TouchEvent) => {
       const g = s.g;
       if (!g || !touchOf(e.changedTouches, g.id)) return;
-      s.g = null;
+      endGesture();
       if (g.axis !== 'x') {
         if (g.caught) settle();
         return;
       }
-      // The speed over the last 100 ms (a finger that stopped before letting go has none).
+      // The speed over the last 100 ms (a finger that stopped before letting go has none). Moves closer in time
+      // than a frame tell no speed: their timestamps would make one of thousands of px per ms.
       const recent = g.samples.filter(([time]) => time >= e.timeStamp - 100);
       const [t0, x0] = recent[0] ?? [0, g.x];
       const [t1, x1] = recent[recent.length - 1] ?? [0, g.x];
-      const v = recent.length > 1 && t1 > t0 ? (x1 - x0) / (t1 - t0) : 0;
+      const v = recent.length > 1 && t1 - t0 >= 8 ? (x1 - x0) / (t1 - t0) : 0;
       const x = g.x;
       const { order: o, value: cur, onChange: go } = live.current;
       const dir: 1 | -1 = x < 0 ? 1 : -1;
@@ -334,8 +372,9 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
       }
       if (!reduced()) {
         // Out at once — on the compositor, while the new tab is built: all of the group by the same way.
-        const how = { ...PAGE, velocity: h.v };
         const by = -dir * span - x;
+        h.v = capped(h.v, by, PAGE.stiffness);
+        const how = { ...PAGE, velocity: h.v };
         for (const f of h.group) f.ghost.anim = animate(f.ghost.copy, { x: [x + f.off, x + f.off + by] }, how);
         h.path = spring({ keyframes: [x, x + by], ...how });
       }
@@ -357,22 +396,17 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
     const onCancel = () => {
       const g = s.g;
       if (!g) return;
-      s.g = null;
+      endGesture();
       if (g.axis === 'x' || g.caught) settle();
     };
 
     el.style.touchAction = 'pan-y';
     el.addEventListener('touchstart', onStart, { passive: true });
-    el.addEventListener('touchmove', onMove, { passive: true });
-    el.addEventListener('touchend', onEnd, { passive: true });
-    el.addEventListener('touchcancel', onCancel, { passive: true });
     scroller?.addEventListener('scroll', onScroll, { passive: true });
     s.off = () => {
       el.removeEventListener('touchstart', onStart);
-      el.removeEventListener('touchmove', onMove);
-      el.removeEventListener('touchend', onEnd);
-      el.removeEventListener('touchcancel', onCancel);
       scroller?.removeEventListener('scroll', onScroll);
+      unlisten?.();
     };
 
     // How the page comes in.
@@ -406,15 +440,17 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
       done = now.done;
     }
     const from = gx + h.dir * h.span;
-    // The group, now beside the new page. A copy where the new page is — the old tab come back to its copy —
-    // gives way to it.
+    // A copy where the new page is — the old tab come back to its copy — gives way to it, and the page comes back
+    // to the scroll it was taken at (a tab that opens at its top or at its end has moved the screen meanwhile).
+    const home = h.group.find((f) => Math.abs(f.off - h.dir * h.span) < 1);
+    const cameBack = !!home;
+    if (home && scroller) scroller.scrollTop = home.ghost.scrollTop;
+    // The group, now beside the new page.
     const top = Math.max(0, el.getBoundingClientRect().top);
     const group: Follower[] = [];
-    let cameBack = false;
     for (const f of h.group) {
       const off = f.off - h.dir * h.span;
-      if (Math.abs(off) < 1) cameBack = true;
-      if (Math.abs(off) < 1 || done) {
+      if (f === home || done) {
         dropGhost(f.ghost);
         continue;
       }

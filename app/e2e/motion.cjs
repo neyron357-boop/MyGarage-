@@ -938,6 +938,86 @@ const check = (name, ok, detail) => {
     { glows, maxScroll },
   );
   await setScroll(0);
+  await page.waitForTimeout(200);
+  // The node under the finger goes away mid-touch (React replaced it: a skeleton, a picture loading): the rest of
+  // the touch goes to the detached node — the page still hears the let-go, and the next swipe works.
+  FY = await free();
+  await touch('touchStart', 300, FY);
+  for (let i = 1; i <= 6; i++) { await touch('touchMove', 300 - i * 10, FY); await page.waitForTimeout(16); }
+  const gone = await page.evaluate(([x, y]) => {
+    const n = document.elementFromPoint(x, y);
+    window.__gone = { n, parent: n.parentNode, next: n.nextSibling };
+    n.remove();
+    return n.className?.baseVal ?? n.className;
+  }, [240, FY]);
+  for (let i = 7; i <= 9; i++) { await touch('touchMove', 300 - i * 10, FY); await page.waitForTimeout(16); }
+  await touch('touchEnd');
+  await page.waitForTimeout(500);
+  await page.evaluate(() => { const g = window.__gone; g.parent.insertBefore(g.n, g.next); });
+  const afterGone = await pagePx();
+  hashes.length = 0;
+  await touch('touchStart', 320, FY);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 320 - i * 10, FY); await page.waitForTimeout(16); }
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  check('tab swipe: the touched node replaced mid-touch — the page goes home, the next swipe turns it', afterGone === 0 && (await jobTab()) === 'notes', { gone, afterGone, tab: await jobTab(), hashes });
+  // What was typed in the notes and not sent stays through a swipe to the job and back.
+  await page.locator('.stack > .screen[data-role="top"] textarea').first().fill('Pads at 2 mm');
+  await page.waitForTimeout(150);
+  FY = 300;
+  await touch('touchStart', 70, FY);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 70 + i * 10, FY); await page.waitForTimeout(16); }
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  FY = await free();
+  await touch('touchStart', 320, FY);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 320 - i * 10, FY); await page.waitForTimeout(16); }
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  const draft = await page.locator('.stack > .screen[data-role="top"] textarea').first().inputValue();
+  check('tab swipe: the unsent note survives a swipe to the job and back', (await jobTab()) === 'notes' && draft === 'Pads at 2 mm', { tab: await jobTab(), draft });
+  // A voice note being recorded holds the tab; a video's own controls scrub, they do not turn the page.
+  await page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .notes-composer').setAttribute('data-hold-page', ''));
+  await touch('touchStart', 70, 300);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 70 + i * 10, 300); await page.waitForTimeout(16); }
+  const heldPx = await pagePx();
+  await touch('touchEnd');
+  await page.waitForTimeout(500);
+  await page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .notes-composer').removeAttribute('data-hold-page'));
+  const vy = await page.evaluate(() => {
+    const v = document.createElement('video');
+    v.controls = true;
+    v.style.cssText = 'display:block;width:300px;height:120px;background:#000';
+    v.id = 'probe-video';
+    document.querySelector('.stack > .screen[data-role="top"] .job-panel').prepend(v);
+    const r = v.getBoundingClientRect();
+    return Math.round(r.top + r.height / 2);
+  });
+  await touch('touchStart', 260, vy);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 260 - i * 10, vy); await page.waitForTimeout(16); }
+  const videoPx = await pagePx();
+  await touch('touchEnd');
+  await page.waitForTimeout(500);
+  await page.evaluate(() => document.getElementById('probe-video')?.remove());
+  check('tab swipe: held while a voice note records; a video scrubs itself', heldPx === 0 && videoPx === 0 && (await jobTab()) === 'notes', { heldPx, videoPx, tab: await jobTab() });
+  // Back to the job from a scrolled job: a page dragged back to its own copy comes back at its own scroll.
+  await page.locator('.stack > .screen[data-role="top"] .scroll-tabs button').first().click();
+  await page.waitForTimeout(700);
+  await setScroll(320);
+  await page.waitForTimeout(300);
+  const mainTop0 = await page.evaluate(() => Math.round(document.querySelector('.stack > .screen[data-role="top"] .job-panel').getBoundingClientRect().top));
+  FY = 420;
+  await touch('touchStart', 320, FY);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 320 - i * 10, FY); await page.waitForTimeout(16); }
+  await touch('touchEnd');
+  await page.waitForTimeout(90);
+  await touch('touchStart', 150, FY);
+  for (let i = 1; i <= 8; i++) { await touch('touchMove', 150 + i * 30, FY); await page.waitForTimeout(8); }
+  await touch('touchEnd');
+  await page.waitForTimeout(800);
+  const mainTop1 = await page.evaluate(() => Math.round(document.querySelector('.stack > .screen[data-role="top"] .job-panel').getBoundingClientRect().top));
+  check('tab swipe: caught and brought back to its copy — the job comes back at its own scroll', (await jobTab()) === 'main' && Math.abs(mainTop1 - mainTop0) <= 2, { mainTop0, mainTop1, scroll: await scrollOf() });
+  await setScroll(0);
   }
 
   // 11. Safari in a tab (not installed): the edge swipe is Safari's own, and going back after it

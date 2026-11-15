@@ -195,11 +195,22 @@ function useChatScroll(fill: React.RefObject<HTMLDivElement>, count: number) {
   return toEnd;
 }
 
+/**
+ * What was typed and not sent yet, per job: the composer goes away with its tab (a swipe or a tap to the job) and
+ * comes back with the text where it was left.
+ */
+const drafts = new Map<string, string>();
+
 /** The bottom of the chat: "+" (photos and videos from the phone), the text, the camera and the voice. */
 function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () => void; onFocus: () => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
-  const [text, setText] = useState('');
+  const [text, setShown] = useState(() => drafts.get(orderId) ?? '');
+  const setText = (v: string) => {
+    setShown(v);
+    if (v) drafts.set(orderId, v);
+    else drafts.delete(orderId);
+  };
   const rec = useRecorder();
   const gallery = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
@@ -233,7 +244,7 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
 
   if (rec.recording)
     return (
-      <div className="notes-composer" role="group" aria-label={t('notes.recording')}>
+      <div className="notes-composer" role="group" aria-label={t('notes.recording')} data-hold-page>
         <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('common.cancel')} onClick={rec.cancel}>
           <IconX size={22} />
         </ActionIcon>

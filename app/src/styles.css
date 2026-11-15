@@ -503,6 +503,15 @@ a {
     animation-timeline: --screen !important;
     animation-range: 0px 440px !important;
   }
+  /* The keyboard has moved the visible area (html.vv places the app over what is visible): the glow goes too. */
+  html.vv .screen-body::before {
+    top: var(--vv-top, 0px);
+  }
+  /* The board pulled down (ui/pullRefresh): the page is moved by a transform, so the glow is held by --pull
+     against it — the timeline would move it a second time if the list scrolled meanwhile. */
+  .screen-body[data-pulled]::before {
+    animation-name: none !important;
+  }
 }
 @keyframes mg-glow-scroll {
   to {

@@ -77,7 +77,8 @@ async function launchBrowser() {
   }
   const front = (sel) => page.locator(`.screen[data-role="top"] ${sel}, .page-shell ${sel}`);
   // Screens slide in (View Transitions): wait for that and any other animation before the picture.
-  const settled = () => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
+  // (Only animations that run in time: one tied to a scroll — the glow under the title — never finishes.)
+  const settled = () => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline === document.timeline).map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
   let unpaidJob = '';
   const shot = async (n, full = false) => {
     await settled();
