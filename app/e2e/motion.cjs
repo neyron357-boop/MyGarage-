@@ -755,6 +755,191 @@ const check = (name, ok, detail) => {
   check('wide layout: "Record payment" clicked again as the sheet leaves — one payment', widePaid === 1, { widePaid });
   await desk.close();
 
+  // 15. The job's tabs move like pages under a finger (ui/tabSwipe): 1:1, a pause, a reversal, a short let-go,
+  //     a page turn with the old page going out beside the new one, a catch on the way, a fling, a cancel; the
+  //     vertical scroll, a line's own swipe and the Back strip are left alone; a rubber band before the first tab.
+  //     And the glow under the title: held by the screen, moved by its scroll 1:1 (it stays at the top while
+  //     the list bounces there — that part only a phone shows).
+  {
+  const tabJob = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts');
+    const v = (await db.vehicles.toArray()).find((x) => x.plate?.number === '45678');
+    return v && (await db.orders.where('vehicleId').equals(v.id).first())?.id;
+  });
+  await page.evaluate((id) => (location.hash = '#/orders/' + id), tabJob);
+  await page.waitForTimeout(1300);
+  const pagePx = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('.stack > .screen[data-role="top"] .job-panel');
+      const p = el?.offsetParent;
+      return el && p ? Math.round((el.getBoundingClientRect().left - (p.getBoundingClientRect().left + p.clientLeft + el.offsetLeft)) * 10) / 10 : null;
+    });
+  const jobTab = () => page.evaluate(() => (location.hash.includes('tab=notes') ? 'notes' : 'main'));
+  const scrollOf = () => page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTop);
+  const setScroll = (y) => page.evaluate((y) => { document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTop = y; }, y);
+  // Every change of the address (the tabs replace it: no hashchange).
+  const hashes = [];
+  await page.exposeFunction('__hashSeen', (h) => hashes.push(h));
+  await page.evaluate(() => {
+    for (const k of ['pushState', 'replaceState']) {
+      const orig = history[k].bind(history);
+      history[k] = (st, title, url) => {
+        orig(st, title, url);
+        window.__hashSeen(location.hash);
+      };
+    }
+  });
+  // A free spot of the job (the car card: no line, no strip), whatever the scroll.
+  const free = async () => {
+    const b = await page.locator('.stack > .screen[data-role="top"] .job-panel .surface').first().boundingBox();
+    return Math.round(Math.max(b.y + 40, Math.min(b.y + b.height - 30, 300)));
+  };
+  await setScroll(0);
+  await page.waitForTimeout(200);
+  let FY = await free();
+  // Slow, a pause, back.
+  await touch('touchStart', 300, FY);
+  const slow = [];
+  for (let i = 1; i <= 30; i++) {
+    await touch('touchMove', 300 - i * 4, FY);
+    await page.waitForTimeout(16);
+    // (Chrome sends no move within its touch slop, 15 px: the page starts with the first move it gets.)
+    if (i * 4 > 16) slow.push(Math.round(((await pagePx()) - -i * 4) * 10) / 10);
+  }
+  check('tab swipe: slow drag — the page is the finger (±1 px)', slow.every((d) => Math.abs(d) <= 1), slow.filter((d) => Math.abs(d) > 1).slice(0, 5));
+  const held0 = await pagePx();
+  await page.waitForTimeout(400);
+  const held1 = await pagePx();
+  check('tab swipe: a pause — the page does not creep', held0 === held1, { held0, held1 });
+  const back = [];
+  for (let i = 1; i <= 10; i++) {
+    await touch('touchMove', 180 + i * 6, FY);
+    await page.waitForTimeout(16);
+    back.push(Math.round((await pagePx()) - (180 + i * 6 - 300)));
+  }
+  check('tab swipe: a reversal — no jump', back.every((d) => Math.abs(d) <= 1), back);
+  await touch('touchEnd');
+  await page.waitForTimeout(500);
+  check('tab swipe: let go short — back home, the tab stays', (await pagePx()) === 0 && (await jobTab()) === 'main', { x: await pagePx(), tab: await jobTab() });
+  // A page turn: the old page goes on out beside the new one, one change of the address.
+  hashes.length = 0;
+  await touch('touchStart', 320, FY);
+  for (let i = 1; i <= 18; i++) { await touch('touchMove', 320 - i * 10, FY); await page.waitForTimeout(16); }
+  await page.waitForTimeout(150);
+  await touch('touchEnd');
+  await page.waitForTimeout(70);
+  const turning = await page.evaluate(() => {
+    const g = document.querySelector('.stack > .screen[data-role="top"] .tab-ghost > *');
+    const p = document.querySelector('.stack > .screen[data-role="top"] .job-panel');
+    const sc = document.querySelector('.stack > .screen[data-role="top"] .screen-scroll');
+    // Side by side, a screen apart: between them the two margins of the page.
+    return g && p && { gap: Math.round(p.getBoundingClientRect().left - g.getBoundingClientRect().right), margins: sc.clientWidth - p.offsetWidth };
+  });
+  await page.waitForTimeout(700);
+  const turned = { tab: await jobTab(), x: await pagePx(), ghosts: await page.locator('.tab-ghost').count(), hashes: [...hashes] };
+  check(
+    'tab swipe: past a third — the notes open, the old page goes out beside the new one',
+    !!turning && Math.abs(turning.gap - turning.margins) <= 2 && turned.tab === 'notes' && turned.x === 0 && turned.ghosts === 0 && turned.hashes.length === 1,
+    { turning, turned },
+  );
+  // Caught on the way: back to the job by a fling, a finger lands while the page comes in.
+  await touch('touchStart', 90, FY);
+  for (let i = 1; i <= 8; i++) { await touch('touchMove', 90 + i * 25, FY); await page.waitForTimeout(8); }
+  await touch('touchEnd');
+  await page.waitForTimeout(60);
+  FY = await free();
+  const flying = await pagePx();
+  await touch('touchStart', 200, FY);
+  await page.waitForTimeout(20);
+  const caught = await pagePx();
+  await page.waitForTimeout(250);
+  const stillCaught = await pagePx();
+  await touch('touchMove', 212, FY);
+  await page.waitForTimeout(16);
+  await touch('touchMove', 224, FY);
+  await page.waitForTimeout(16);
+  const carried = await pagePx();
+  await touch('touchEnd');
+  await page.waitForTimeout(600);
+  check(
+    'tab swipe: caught on its way — held where it was, then the finger carries it (no jump)',
+    (await jobTab()) === 'main' && flying !== 0 && Math.abs(caught - flying) < 40 && stillCaught === caught && Math.abs(carried - (caught + 24)) <= 1 && (await pagePx()) === 0,
+    { flying, caught, stillCaught, carried, rest: await pagePx(), tab: await jobTab() },
+  );
+  // A fling: a short fast move turns the page — once.
+  hashes.length = 0;
+  await touch('touchStart', 300, FY);
+  for (let i = 1; i <= 4; i++) { await touch('touchMove', 300 - i * 15, FY); await page.waitForTimeout(8); }
+  await touch('touchEnd');
+  await page.waitForTimeout(700);
+  check('tab swipe: a fling — one page turn', (await jobTab()) === 'notes' && hashes.length === 1, { tab: await jobTab(), hashes });
+  await page.locator('.stack > .screen[data-role="top"] .scroll-tabs button').first().click();
+  await page.waitForTimeout(700);
+  // A system gesture takes the touch: back home, nothing opens.
+  FY = await free();
+  await touch('touchStart', 300, FY);
+  for (let i = 1; i <= 15; i++) { await touch('touchMove', 300 - i * 12, FY); await page.waitForTimeout(16); }
+  await touch('touchCancel');
+  await page.waitForTimeout(500);
+  check('tab swipe: cancelled — back home, the tab stays', (await pagePx()) === 0 && (await jobTab()) === 'main', { x: await pagePx(), tab: await jobTab() });
+  // Up and down is a scroll.
+  const s0 = await scrollOf();
+  await touch('touchStart', 200, 640);
+  for (let i = 1; i <= 12; i++) { await touch('touchMove', 200 + i * 1.5, 640 - i * 18); await page.waitForTimeout(16); }
+  await touch('touchEnd');
+  await page.waitForTimeout(500);
+  const s1 = await scrollOf();
+  check('tab swipe: a vertical drag scrolls, the page stays', s1 - s0 > 100 && (await pagePx()) === 0 && (await jobTab()) === 'main', { scrolled: s1 - s0, x: await pagePx() });
+  // A line's own swipe and the Back strip.
+  await setScroll(0);
+  await page.waitForTimeout(200);
+  const line = await page.locator('.stack > .screen[data-role="top"] .job-panel .swipe-row').first().boundingBox();
+  const ly = Math.round(Math.min(line.y + line.height / 2, 760));
+  await setScroll(Math.max(0, line.y + line.height / 2 - 500));
+  await page.waitForTimeout(200);
+  const line2 = await page.locator('.stack > .screen[data-role="top"] .job-panel .swipe-row').first().boundingBox();
+  const ly2 = Math.round(line2.y + line2.height / 2);
+  await touch('touchStart', 330, ly2);
+  for (let i = 1; i <= 12; i++) { await touch('touchMove', 330 - i * 12, ly2); await page.waitForTimeout(16); }
+  const rowPx = await pagePx();
+  await touch('touchCancel');
+  await page.waitForTimeout(500);
+  await touch('touchStart', 10, 420);
+  for (let i = 1; i <= 6; i++) { await touch('touchMove', 10 + i * 12, 420); await page.waitForTimeout(16); }
+  const edgePx = await pagePx();
+  await touch('touchCancel');
+  await page.waitForTimeout(500);
+  check('tab swipe: a line swipes itself, the Back strip stays with Back — the page does not move', rowPx === 0 && edgePx === 0 && (await jobTab()) === 'main', { ly, rowPx, edgePx });
+  // Before the first tab: a rubber band.
+  await setScroll(0);
+  await page.waitForTimeout(200);
+  FY = await free();
+  await touch('touchStart', 100, FY);
+  const band = [];
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', 100 + i * 20, FY); await page.waitForTimeout(16); band.push(await pagePx()); }
+  await touch('touchEnd');
+  await page.waitForTimeout(500);
+  const gives = band.every((x, i) => x > 0 && x < (i + 1) * 20 && (i === 0 || x - band[i - 1] < 20));
+  check('tab swipe: before the first tab — a rubber band, then home', gives && (await pagePx()) === 0 && (await jobTab()) === 'main', band);
+  // The glow under the title: fixed in the screen, moved by the screen's scroll — 1:1, gone after 440 px.
+  const glowAt = async (y) => {
+    await setScroll(y);
+    await page.waitForTimeout(150);
+    return page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('.stack > .screen[data-role="top"] .screen-body'), '::before');
+      return { pos: cs.position, ty: Math.round(new DOMMatrix(cs.transform === 'none' ? undefined : cs.transform).m42) };
+    });
+  };
+  const glows = [await glowAt(0), await glowAt(120), await glowAt(5000)];
+  const maxScroll = await scrollOf();
+  check(
+    'glow: held by the screen (it stays at the top when the list bounces there), scrolls away 1:1',
+    glows.every((g) => g.pos === 'fixed') && glows[0].ty === 0 && glows[1].ty === -120 && glows[2].ty === -Math.min(440, maxScroll),
+    { glows, maxScroll },
+  );
+  await setScroll(0);
+  }
+
   // 11. Safari in a tab (not installed): the edge swipe is Safari's own, and going back after it
   //     does not play a second animation.
   const iphone = await browser.newContext({

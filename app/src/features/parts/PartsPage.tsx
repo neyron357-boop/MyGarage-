@@ -147,7 +147,7 @@ export function PartsPage() {
           { value: 'suppliers', label: t('nav.suppliers'), count: suppliers.filter((s) => !s.archivedAt).length },
         ]}
       />
-      <div key={tab} className={`${sw.enter} tab-panel`} {...sw.handlers}>
+      <div key={tab} ref={sw.panel} className="tab-panel">
       {tab === 'needed' && (needed.length ? <List animate>{needed.map(row)}</List> : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
       {tab === 'ordered' && (ordered.length ? <List animate>{ordered.map(row)}</List> : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
       {tab === 'pickup' && (

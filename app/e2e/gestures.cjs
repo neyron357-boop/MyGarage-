@@ -268,6 +268,53 @@ async function launch() {
     return { look, change };
   });
 
+  // 7. The job's two tabs as pages: a slow drag to the left with a pause (the page under the finger), let go —
+  // the notes come in beside it; a fling back to the job; a short drag let go — back home. Measured: where the
+  // page was against the finger on every move, which tabs opened. (Works on a build too: no app modules.)
+  await gesture('job-tabs', async ({ page, touch }) => {
+    await page.evaluate(() => (window.__gaps = null));
+    await page.locator('.stack > .screen[data-role="top"] .job-row').filter({ hasText: '45678' }).first().click();
+    await page.waitForTimeout(1100);
+    const card = await page.evaluate(() => {
+      const r = document.querySelector('.stack > .screen[data-role="top"] .job-body .surface').getBoundingClientRect();
+      return Math.round(r.top + Math.min(260, r.height - 40));
+    });
+    const pageX = () =>
+      page.evaluate(() => {
+        const el = document.querySelector('.stack > .screen[data-role="top"] .job-panel') || document.querySelector('.stack > .screen[data-role="top"] .job-body .surface');
+        const p = el.offsetParent;
+        return Math.round(el.getBoundingClientRect().left - (p.getBoundingClientRect().left + p.clientLeft + el.offsetLeft));
+      });
+    const tabNow = () => page.evaluate(() => (location.hash.includes('tab=notes') ? 'notes' : 'main'));
+    const follow = [];
+    const drag = async (from, to, ms, pauseAt) => {
+      const steps = Math.max(2, Math.round(ms / 16));
+      for (let i = 1; i <= steps; i++) {
+        const x = from + ((to - from) * i) / steps;
+        await touch('touchMove', x, card);
+        await page.waitForTimeout(16);
+        if (i % 4 === 0) follow.push([Math.round(x - 300), await pageX()]);
+        if (pauseAt && i === Math.round(steps / 2)) await page.waitForTimeout(pauseAt);
+      }
+    };
+    await touch('touchStart', 300, card);
+    await drag(300, 110, 900, 350);
+    await touch('touchEnd');
+    await page.waitForTimeout(900);
+    const afterSlow = await tabNow();
+    await touch('touchStart', 80, card);
+    for (let i = 1; i <= 5; i++) { await touch('touchMove', 80 + i * 22, card); await page.waitForTimeout(10); }
+    await touch('touchEnd');
+    await page.waitForTimeout(900);
+    const afterFling = await tabNow();
+    await touch('touchStart', 300, card);
+    await drag(300, 250, 400);
+    await page.waitForTimeout(200);
+    await touch('touchEnd');
+    await page.waitForTimeout(900);
+    return { follow, afterSlow, afterFling, afterShort: await tabNow() };
+  });
+
   fs.writeFileSync(path.join(OUT, `${LABEL}-gestures.json`), JSON.stringify({ results, errors }, null, 1));
   console.log(JSON.stringify({ results, errors }, null, 1));
   await browser.close();

@@ -78,6 +78,7 @@ import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { scrollToTop, useStackBack } from '../../ui/stack';
 import { useStuck } from '../../ui/sticky';
+import { useTabSwipe } from '../../ui/tabSwipe';
 import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
 import { DiscountSheet } from '../money/DiscountSheet';
@@ -389,6 +390,9 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
   );
 }
 
+/** The job's tabs, in their order on screen: the job, and its notes. */
+const JOB_TABS = ['main', 'notes'] as const;
+
 /**
  * The job, on one screen: who and what, the lines (work and parts) with what the customer said to
  * each, and one button for the next step — tell the customer, agreed, done, paid, gone. The job moves
@@ -407,6 +411,8 @@ export function JobPage() {
     setParams(v === 'notes' ? { tab: 'notes' } : {}, { replace: true });
     if (v !== 'notes') scrollToTop();
   };
+  // The two tabs move like pages: the page follows the finger sideways, the other one comes in beside it.
+  const sw = useTabSwipe(JOB_TABS, tab, pickTab);
   // The tabs stay in reach under the navigation bar (a long chat, a long job): backed only once stuck.
   const tabsMark = useRef<HTMLDivElement>(null);
   const tabsBar = useRef<HTMLDivElement>(null);
@@ -881,6 +887,7 @@ export function JobPage() {
           ]}
         />
       </div>
+      <div key={tab} ref={sw.panel} className="job-panel">
       {tab === 'notes' ? (
         <NotesChat orderId={oid} notes={b.notes} editable={open} />
       ) : (
@@ -1092,6 +1099,7 @@ export function JobPage() {
       )}
       </>
       )}
+      </div>
       </div>
 
       <LazySheet opened={!!sheet} warm={editable}>

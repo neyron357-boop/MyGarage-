@@ -800,6 +800,25 @@ async function launchBrowser() {
     await front('input[data-note-media]').setInputFiles(FIXTURE);
     await front('.note-photo').first().waitFor();
     await shot('34a2-notes-chat');
+    // The two tabs move like pages: a swipe to the right on the notes brings the job back, to the left — the notes.
+    const jobSwipe = (dir) =>
+      front('.job-panel').first().evaluate((el, dir) => {
+        const y = 420;
+        const x0 = dir < 0 ? 330 : 60;
+        const touch = (x) => new Touch({ identifier: 2, target: el, clientX: x, clientY: y });
+        const fire = (type, x, list = true) => el.dispatchEvent(new TouchEvent(type, { touches: list ? [touch(x)] : [], changedTouches: [touch(x)], bubbles: true, cancelable: true }));
+        fire('touchstart', x0);
+        for (let i = 1; i <= 8; i++) fire('touchmove', x0 + dir * i * 25);
+        fire('touchend', x0 + dir * 200, false);
+      }, dir);
+    await jobSwipe(1);
+    await page.waitForFunction(() => !location.hash.includes('tab=notes'));
+    await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
+    await page.waitForTimeout(450);
+    await jobSwipe(-1);
+    await page.waitForFunction(() => location.hash.includes('tab=notes'));
+    await front('.note-bubble').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
+    await page.waitForTimeout(450);
     await front('.scroll-tabs > button').filter({ hasText: 'Основная' }).click();
     await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
     // A part with its number and two offers: the first one goes on the line (cost + markup).

@@ -444,8 +444,8 @@ export function MoneyPage() {
           { value: 'debts', label: t('money.debts') },
         ]}
       />
-      {/* The tabs move like pages: a swipe sideways opens the next one, it slides in from its side. */}
-      <div key={tab} className={`${sw.enter} tab-panel`} {...sw.handlers}>
+      {/* The tabs move like pages: the page follows the finger sideways, the next one comes in beside it. */}
+      <div key={tab} ref={sw.panel} className="tab-panel">
         {tab === 'book' && <LedgerTab />}
         {tab === 'cash' && <CashTab />}
         {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}

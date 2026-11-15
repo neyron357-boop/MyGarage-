@@ -481,6 +481,34 @@ a {
     radial-gradient(75% 60% at 100% 0%, color-mix(in srgb, var(--glow-2) var(--glow-b), transparent) 0%, transparent 70%);
   transition: --glow 560ms var(--ease-out), --glow-2 560ms var(--ease-out);
 }
+/* Phone: the glow stays at the top of the screen when the list is pulled past its top (the iPhone's rubber
+   band) — the title and the groups come down over it, as in a system app, and no bare strip with a hard edge
+   opens above them. The glow is held in the screen (fixed) and moved by the screen's own scroll timeline: with
+   the content, 1:1, while it scrolls (gone after 440 px, as before), at rest while the list bounces at its
+   top (the timeline does not go below 0). On the compositor; nothing is written per frame. Where scroll
+   timelines are missing it scrolls with the content as it always did. (The board's own pull holds it with
+   --pull.) This is the content's own scroll, not a motion of its own: Reduce Motion — which turns every
+   animation off below — keeps it, hence the !important. */
+@supports (scroll-timeline: --g y) and (animation-range: 0px 1px) {
+  .screen-scroll {
+    scroll-timeline: --screen y;
+  }
+  .screen-body::before {
+    position: fixed;
+    animation-name: mg-glow-scroll !important;
+    animation-duration: auto !important;
+    animation-timing-function: linear !important;
+    animation-fill-mode: both !important;
+    animation-iteration-count: 1 !important;
+    animation-timeline: --screen !important;
+    animation-range: 0px 440px !important;
+  }
+}
+@keyframes mg-glow-scroll {
+  to {
+    transform: translateY(-440px);
+  }
+}
 :root {
   --glow-a: 17%;
   --glow-b: 11%;
@@ -2359,6 +2387,16 @@ html.kb .tab-bar-wrap {
 }
 .scroll-tabs::-webkit-scrollbar {
   display: none;
+}
+/* The page that leaves after a swipe between tabs (ui/tabSwipe): a still copy, held where it was on the
+   screen while it goes out beside the new one — under the job's stuck tabs, the bars and the edge fade. */
+.tab-ghost {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+  contain: layout paint;
 }
 /* The dark pill under the active tab; it slides between tabs (ScrollTabs positions it). */
 .scroll-tabs-pill {
@@ -4380,24 +4418,44 @@ html.kb .screen-bottom > .sticky-bar {
 }
 
 /* The job's two tabs (the job, its notes) stay in reach under the navigation bar while either scrolls; their
-   backing — the screen's own colour and a hairline — shows only once they stick (ui/sticky.ts): at rest they
-   sit on the glow like the rest of the header. */
+   backing shows only once they stick (ui/sticky.ts): at rest they sit on the glow like the rest of the header. */
 .job-tabs {
   position: sticky;
   top: var(--app-shell-header-offset, 0px);
   z-index: 6;
   margin: 0 calc(-1 * var(--page-pad)) 14px;
   padding: 4px var(--page-pad) 8px;
-  transition:
-    background-color var(--dur-2) var(--ease-out),
-    box-shadow var(--dur-2) var(--ease-out);
 }
 .screen .job-tabs {
   top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h));
 }
-.job-tabs[data-stuck] {
-  background: var(--app-canvas);
-  box-shadow: 0 0.5px 0 var(--app-hairline);
+/* The backing is the scroll edge of iOS 26, as under the bar of every screen: the screen's own colour behind
+   the tabs — on a phone from the top of the screen, behind the bar too — fading out under them. No hairline,
+   and no strip between the bar and the tabs where the content showed through. */
+.job-tabs::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 -18px;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--app-canvas) 0%,
+    var(--app-canvas) calc(100% - 26px),
+    color-mix(in srgb, var(--app-canvas) 0%, transparent) 100%
+  );
+  opacity: 0;
+}
+.screen .job-tabs::before {
+  top: calc(-1 * (env(safe-area-inset-top, 0px) + var(--app-nav-h)));
+}
+.job-tabs[data-stuck]::before {
+  opacity: 1;
+}
+/* Meanwhile the bar's own scroll edge ends at its bottom: it no longer washes over the tabs' top. Both switch
+   at once, in the same frame (a fading backing would let the content show through for a moment). */
+.screen:has(.job-tabs[data-stuck]) > .screen-nav > .nav-bar::before {
+  bottom: 0;
 }
 
 /* ---------- The job's notes: a chat with oneself (the "Notes" tab) ----------
