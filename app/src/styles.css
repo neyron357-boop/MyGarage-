@@ -1275,6 +1275,12 @@ html.kb .tab-bar-wrap {
   color: var(--app-label-2);
   margin-top: 2px;
 }
+/* A small mark set in a line of text (the paperclip of a line with photos): on the text's middle, a space after. */
+.inline-icon {
+  vertical-align: -2px;
+  margin-inline-end: 4px;
+  color: var(--app-label-2);
+}
 .list-row .chevron {
   flex-shrink: 0;
   margin-right: -4px;

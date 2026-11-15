@@ -45,6 +45,25 @@ async function launchBrowser() {
     await page.goto(BASE + hash);
     await settle(ms);
   };
+  // A card slip drawn in the page and kept with the newest movement of the cash box.
+  const addSlip = async () => {
+    const { cashState } = await import('/src/services/money.ts');
+    const { loadLedger } = await import('/src/services/ledger.ts');
+    const { withEntries } = await import('/src/domain/ledger.ts');
+    const { addProofs } = await import('/src/services/proofs.ts');
+    const lines = withEntries((await cashState()).lines, (await loadLedger()).entries);
+    const c = Object.assign(document.createElement('canvas'), { width: 480, height: 720 });
+    const g = c.getContext('2d');
+    g.fillStyle = '#f6f3ec';
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#2b2b2b';
+    g.font = 'bold 36px monospace';
+    g.fillText('CARD SLIP', 40, 90);
+    g.font = '26px monospace';
+    ['MERCHANT  GARAGE', 'AMOUNT    AED 246.75', 'APPROVED  000123'].forEach((s, i) => g.fillText(s, 40, 180 + i * 52));
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+    await addProofs(lines[lines.length - 1].entry, [blob]);
+  };
 
   await go('#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();
@@ -95,6 +114,15 @@ async function launchBrowser() {
     await shot(`${prefix}-06-money`);
     await go('#/money?tab=cash');
     await shot(`${prefix}-06b-cash`);
+    // A movement opens as its line of the book (the job's payment here), with its photos: a card slip kept with it
+    // (added once) puts a paperclip on its line.
+    if (prefix === 'phone-light') await page.evaluate(addSlip);
+    await settle(400);
+    await shot(`${prefix}-06c-cash-photo`, { scroll: 520 });
+    await page.locator('.screen[data-role="top"] .list-row.clickable').first().click();
+    await settle(700);
+    await shot(`${prefix}-06d-cash-entry`);
+    await closeSheet();
     await go('#/more');
     await shot(`${prefix}-07-more`);
     await go('#/settings');
@@ -129,6 +157,12 @@ async function launchBrowser() {
   await dp.goto(BASE + '#/money');
   await dp.waitForTimeout(900);
   await dp.screenshot({ path: `${OUT}/desktop-02-money.png` });
+  // A movement of the cash box, opened.
+  await dp.goto(BASE + '#/money?tab=cash');
+  await dp.waitForTimeout(900);
+  await dp.locator('.list-row.clickable').first().click();
+  await dp.waitForTimeout(700);
+  await dp.screenshot({ path: `${OUT}/desktop-03-cash-entry.png` });
 
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
   await browser.close();

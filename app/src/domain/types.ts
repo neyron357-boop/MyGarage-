@@ -315,6 +315,8 @@ export type MediaOwner =
   | 'return'
   /** A cash movement of the money book (parts bought for cash, cash handed over…): its proofs. */
   | 'movement'
+  /** Money in outside a job's invoice (a sale, a small job): its photos (a slip, a transfer screenshot). */
+  | 'income'
   /** A supplier's business card (both sides). */
   | 'supplier'
   /** A job note's photo or voice message. */

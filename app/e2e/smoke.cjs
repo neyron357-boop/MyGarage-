@@ -1090,6 +1090,26 @@ async function launchBrowser() {
     await closeModal();
     await page.goto(BASE + '#/money?tab=book');
     await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().getByLabel('Пруф').waitFor();
+    // The cash box: a movement opens as its line of the book — the expense, with the photos added there; money in
+    // takes photos too (a sale for cash: the slip), and its line in the box gets the paperclip.
+    await page.evaluate(async () => {
+      const { addIncome } = await import('/src/services/ledger.ts');
+      const { dubaiDate } = await import('/src/domain/dates.ts');
+      await addIncome({ date: dubaiDate(new Date().toISOString()), category: 'sales', amountFils: 1500, method: 'cash', note: 'Proof sale' });
+    });
+    await page.goto(BASE + '#/money?tab=cash');
+    await front('.list-row.clickable').filter({ hasText: 'Proof Shop' }).first().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).nth(1).waitFor();
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await front('.list-row.clickable').filter({ hasText: 'Proof sale' }).first().click();
+    await page.getByRole('dialog').getByText('Продажа', { exact: true }).first().waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить пруф' }).waitFor();
+    await page.locator('input[data-photo-input="proof"]').setInputFiles({ name: 'slip.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+    await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).first().waitFor();
+    await shot('24b-cash-proof');
+    await closeModal();
+    await front('.list-row').filter({ hasText: 'Proof sale' }).first().getByLabel('Пруф').waitFor();
     await page.goto(BASE + '#/reports');
     await page.getByText('Валовая прибыль').first().waitFor();
     await shot('26-reports', true);

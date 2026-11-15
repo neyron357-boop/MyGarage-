@@ -7,6 +7,7 @@ import {
   IconCashRegister,
   IconCreditCard,
   IconLock,
+  IconPaperclip,
   IconPlus,
   IconReceipt2,
   IconUserDollar,
@@ -17,15 +18,17 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, formatDateTime, monthKey } from '../../domain/dates';
-import { expenseEntry } from '../../domain/ledger';
+import { expenseEntry, withEntries } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
+import { loadLedger } from '../../services/ledger';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { proofIndex } from '../../services/proofs';
 import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { SheetFor } from '../../ui/lazy';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet } from './MoneyEntry';
@@ -57,8 +60,16 @@ function MethodPicker({ value, onChange }: { value: PayMethod; onChange: (m: Pay
 function CashTab() {
   const { t } = useTranslation();
   const { run, busy } = useAction();
-  const st = useScreenLiveQuery(cashState, []);
+  // The cash box with the book: a movement opens as its line of the book (the job's payment, the income, the
+  // expense or the movement itself), with its photos — the same sheet as in "Book".
+  const data = useScreenLiveQuery(async () => {
+    const [st, book, cats] = await Promise.all([cashState(), loadLedger(), db.expenseCategories.toArray()]);
+    const lines = withEntries(st.lines, book.entries).reverse();
+    return { st, lines, cats, photos: await proofIndex(lines.map((l) => l.entry.id)) };
+  }, []);
   const closings = useScreenLiveQuery(() => db.cashClosings.orderBy('date').reverse().limit(30).toArray(), []);
+  const label = useCategoryLabel(data?.cats);
+  const [opened, setOpened] = useState<string | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   const [dir, setDir] = useState<'in' | 'out'>('out');
   const [reason, setReason] = useState<CashReason>('collection');
@@ -67,7 +78,10 @@ function CashTab() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [actual, setActual] = useState<number>();
   const [comment, setComment] = useState('');
-  if (!st) return <PageSkeleton />;
+  if (!data) return <PageSkeleton />;
+  const { st } = data;
+  // The sheet follows its entry as it changes; when the day is closed, the line is gone and the sheet with it.
+  const open = opened ? data.lines.find((l) => l.m.id === opened)?.entry : undefined;
   const diff = actual !== undefined ? actual - st.expected : 0;
   return (
     <Stack gap="lg">
@@ -106,22 +120,29 @@ function CashTab() {
         )}
       </Box>
       <Section title={t('cash.movements')} mt={0}>
-        {st.lines.length === 0 ? (
+        {data.lines.length === 0 ? (
           <EmptyState icon={IconCashRegister}>{t('cash.noMovements')}</EmptyState>
         ) : (
           <List>
             {/* The newest first, each on its operation's own day (a sheet's row on its day, not the import's) and
-                with what was in the box after it — as the money sheet's "Cash Balance". */}
-            {[...st.lines].reverse().map(({ m, date, timed, after }) => (
+                with what was in the box after it — as the money sheet's "Cash Balance". A tap opens it; one with
+                photos has a paperclip, as in the book. */}
+            {data.lines.map(({ m, date, timed, after, entry }) => (
               <ListRow
                 key={m.id}
+                onClick={() => setOpened(m.id)}
                 left={
                   <ThemeIcon variant="light" color={m.direction === 'in' ? 'green' : 'red'} size={38} radius="md">
                     {m.direction === 'in' ? <IconArrowDownLeft size={19} /> : <IconArrowUpRight size={19} />}
                   </ThemeIcon>
                 }
                 title={t(`cashReason.${m.reason}`)}
-                subtitle={`${timed ? formatDateTime(m.at) : formatDate(date)}${m.note ? ` · ${m.note}` : ''}`}
+                subtitle={
+                  <>
+                    {data.photos.has(entry.id) && <IconPaperclip size={13} className="inline-icon" aria-label={t('ledger.proof')} />}
+                    {`${timed ? formatDateTime(m.at) : formatDate(date)}${m.note ? ` · ${m.note}` : ''}`}
+                  </>
+                }
                 right={
                   <Stack gap={0} align="flex-end">
                     <Money fils={m.direction === 'in' ? m.amountFils : -m.amountFils} c={m.direction === 'in' ? 'green' : 'red'} size="sm" />
@@ -135,6 +156,7 @@ function CashTab() {
           </List>
         )}
       </Section>
+      <SheetFor value={open}>{(e, o) => <EntryDetails opened={o} entry={e} label={label(e)} cats={data.cats} onClose={() => setOpened(null)} />}</SheetFor>
       {!!closings?.length && (
         <Section title={t('cash.history')} mt={0}>
           <List>
@@ -297,7 +319,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
         </List>
       )}
       <EntrySheet opened={open} onClose={() => setOpen(false)} preset={OUT} />
-      {entry && <EntryDetails entry={entry} label={label(entry)} cats={data.cats} onClose={() => setShown(null)} />}
+      <SheetFor value={entry}>{(e, o) => <EntryDetails opened={o} entry={e} label={label(e)} cats={data.cats} onClose={() => setShown(null)} />}</SheetFor>
     </Stack>
   );
 }

@@ -69,10 +69,10 @@ function OpeningSheet({ opened, onClose, cash, card, cashLocked }: { opened: boo
 }
 
 /**
- * An entry opened from the book: what it was for can be corrected, a money out takes proofs (photos);
- * a mistaken entry is cancelled.
+ * An entry opened from the book, the cash box or the expenses: what it was for can be corrected, money in or out
+ * takes proofs (photos); a mistaken entry is cancelled. Opened for a value — `SheetFor`, so it slides out.
  */
-export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[] }) {
+export function EntryDetails({ entry, label, onClose, cats, opened = true }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[]; opened?: boolean }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
@@ -85,7 +85,7 @@ export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEnt
   const relink = (l: Links) =>
     run(() => (entry.source === 'income' ? updateIncome(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId }) : updateExpense(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId })));
   return (
-    <Modal opened onClose={onClose} title={entry.vendor ? `${label} · ${entry.vendor}` : label}>
+    <Modal opened={opened} onClose={onClose} title={entry.vendor ? `${label} · ${entry.vendor}` : label}>
       <Stack gap="md">
         <Group justify="space-between" align="baseline">
           <Text fz={28} c={entry.kind === 'in' ? 'green.7' : undefined}>
@@ -392,7 +392,7 @@ export function LedgerTab() {
 
       <EntrySheet opened={!!sheet} onClose={() => setSheet(null)} preset={sheet ?? undefined} />
       <SheetFor value={opening}>{(_, o) => <OpeningSheet opened={o} onClose={() => setOpening(false)} cash={book.cashStartFils} card={book.cardStartFils} cashLocked={book.cashStartLocked} />}</SheetFor>
-      {open && <EntryDetails entry={open} label={label(open)} cats={data.cats} onClose={() => setOpen(null)} />}
+      <SheetFor value={open}>{(e, o) => <EntryDetails opened={o} entry={e} label={label(e)} cats={data.cats} onClose={() => setOpen(null)} />}</SheetFor>
     </Stack>
   );
 }

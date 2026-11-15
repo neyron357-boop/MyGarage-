@@ -5,17 +5,21 @@ import { AppError } from './errors';
 import { addMedia, deleteMedia } from './media';
 
 /*
- * Proofs of money spent: photos of a receipt, a supplier's invoice or a transfer, kept with the
- * book entry. They are media of their own — the entry itself (immutable once written) never
- * changes: proofs can be added to any money out at any time, and a wrong one taken off.
+ * Proofs of money: photos of a receipt, a supplier's invoice, a card slip or a transfer screenshot, kept with
+ * the book entry. They are media of their own — the entry itself (immutable once written) never changes:
+ * proofs can be added to any money in or out at any time (from the book or the cash box), and a wrong one
+ * taken off.
  */
 
-const OWNER: Partial<Record<LedgerSource, MediaOwner>> = { expense: 'expense', movement: 'movement', payment: 'payment' };
+const OWNER: Partial<Record<LedgerSource, MediaOwner>> = { expense: 'expense', movement: 'movement', payment: 'payment', income: 'income' };
 
-type EntryRef = Pick<LedgerEntry, 'id' | 'source' | 'kind'>;
+type EntryRef = Pick<LedgerEntry, 'id' | 'source'>;
 
-/** Every money out of the book takes proofs: expenses, cash movements, refunds to a customer. */
-export const takesProofs = (e: Pick<LedgerEntry, 'source' | 'kind'>): boolean => e.kind === 'out' && !!OWNER[e.source];
+/**
+ * Every money of the book takes proofs, in or out: a job's payment, an income, an expense, a cash movement, a
+ * refund. Not a day closing — it is the count itself.
+ */
+export const takesProofs = (e: Pick<LedgerEntry, 'source'>): boolean => !!OWNER[e.source];
 
 /** The receipt taken with the expense and the proofs added later. */
 const isProof = (m: Media) => m.kind === 'photo' && (m.slot === 'proof' || m.slot === 'receipt');
@@ -24,7 +28,7 @@ const byOrder = (a: Media, b: Media) => Number(b.slot === 'receipt') - Number(a.
 
 export async function addProofs(entry: EntryRef, files: Blob[]): Promise<Media[]> {
   const ownerType = OWNER[entry.source];
-  if (!ownerType || entry.kind !== 'out') throw new AppError('err.notFound');
+  if (!ownerType) throw new AppError('err.notFound');
   const added: Media[] = [];
   for (const file of files) added.push(await addMedia({ ownerType, ownerId: entry.id, slot: 'proof', file }));
   return added;

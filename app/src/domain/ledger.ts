@@ -97,6 +97,47 @@ export function expenseEntry(e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardA
   };
 }
 
+/** A cash movement as a line of the book (without the links of its job and the balances after it). */
+export function movementEntry(m: CashMovement): Omit<LedgerEntry, 'cashAfter' | 'cardAfter'> {
+  const date = dubaiDate(m.at);
+  return {
+    id: m.id,
+    source: 'movement',
+    at: sortKey(date, m.at),
+    date,
+    kind: m.direction,
+    purse: 'cash',
+    method: 'cash',
+    amountFils: m.amountFils,
+    category: m.reason,
+    note: m.note,
+    orderId: m.orderId,
+  };
+}
+
+/**
+ * The line of the book a cash movement is: the job's payment, the income or the expense it came with, else the
+ * movement itself (parts bought for cash, cash handed over, a correction).
+ */
+export function entryRefOf(m: Pick<CashMovement, 'id' | 'paymentId' | 'incomeId' | 'expenseId'>): { source: LedgerSource; id: string } {
+  if (m.paymentId) return { source: 'payment', id: m.paymentId };
+  if (m.incomeId) return { source: 'income', id: m.incomeId };
+  if (m.expenseId) return { source: 'expense', id: m.expenseId };
+  return { source: 'movement', id: m.id };
+}
+
+/**
+ * The cash box's lines, each with the line of the book it opens as (`entryRefOf`); a movement of a cancelled
+ * entry — which the book leaves out — opens as the movement itself.
+ */
+export function withEntries<T extends { m: CashMovement; after: number }>(lines: T[], entries: LedgerEntry[]): (T & { entry: LedgerEntry })[] {
+  const byRef = new Map(entries.map((e) => [`${e.source} ${e.id}`, e]));
+  return lines.map((l) => {
+    const r = entryRefOf(l.m);
+    return { ...l, entry: byRef.get(`${r.source} ${r.id}`) ?? { ...movementEntry(l.m), cashAfter: l.after, cardAfter: 0 } };
+  });
+}
+
 export function buildLedger(input: LedgerInput): LedgerResult {
   const orders = new Map(input.orders.map((o) => [o.id, o]));
   const linkOf = (orderId?: string, vehicleId?: string, customerId?: string) => {
@@ -146,20 +187,7 @@ export function buildLedger(input: LedgerInput): LedgerResult {
   // left out together with the entry itself.
   for (const m of input.movements) {
     if (m.paymentId || m.expenseId || m.incomeId) continue;
-    const date = dubaiDate(m.at);
-    raw.push({
-      id: m.id,
-      source: 'movement',
-      at: sortKey(date, m.at),
-      date,
-      kind: m.direction,
-      purse: 'cash',
-      method: 'cash',
-      amountFils: m.amountFils,
-      category: m.reason,
-      note: m.note,
-      ...linkOf(m.orderId),
-    });
+    raw.push({ ...movementEntry(m), ...linkOf(m.orderId) });
   }
   for (const c of input.closings) {
     const date = dubaiDate(c.closedAt);
