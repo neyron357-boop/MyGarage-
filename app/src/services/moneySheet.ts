@@ -21,9 +21,12 @@ function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>): stri
     case 'payment':
       return e.category === 'refund' ? 'Refund' : e.category === 'prepayment' ? 'Customer Deposit' : 'Repair Labor';
     case 'income':
-      return e.category === 'sales' ? 'Sales' : e.category === 'service' ? 'Repair Labor' : 'Other';
-    case 'expense': {
-      const code = cats.get(e.category)?.code;
+      // A debt paid is money for repairs, as a job's payment is.
+      return e.category === 'sales' ? 'Sales' : e.category === 'service' || e.category === 'debt' ? 'Repair Labor' : 'Other';
+    case 'expense':
+    case 'credit': {
+      // A payment of a credit is the expense it pays off, on the day the money went.
+      const code = cats.get(e.credit?.categoryId ?? e.category)?.code;
       return code === 'parts' ? 'Parts Purchases' : code === 'consumables' ? 'Workshop Supplies' : code === 'tools' ? 'Tools & Equipment' : code === 'rent' ? 'Workshop Rent' : code === 'utilities' ? 'Workshop Utilities' : code === 'salaries' ? 'Staff Wages' : 'Other';
     }
     case 'movement':
@@ -35,17 +38,21 @@ function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>): stri
 
 /** The whole money book as the money sheet. */
 export async function moneySheetOfBook(): Promise<MoneySheet> {
-  const [book, cats, orders, vehicles] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.orders.toArray(), db.vehicles.toArray()]);
+  const [book, cats, orders, vehicles, customers] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.orders.toArray(), db.vehicles.toArray(), db.customers.toArray()]);
   const catBy = new Map(cats.map((c) => [c.id, c]));
   const orderBy = new Map(orders.map((o) => [o.id, o]));
   const carBy = new Map(vehicles.map((v) => [v.id, v]));
+  const customerBy = new Map(customers.map((c) => [c.id, c]));
   const rows: MoneyRow[] = book.entries.map((e) => {
     const o = e.orderId ? orderBy.get(e.orderId) : undefined;
     const v = e.vehicleId ? carBy.get(e.vehicleId) : undefined;
     // The sheet's notes say what the money was for: the job and its car, then the note typed.
     const car = v ? [v.make, v.model, formatPlate(v.plate, 'en')].filter(Boolean).join(' ') : '';
-    const about = [o ? `#${o.number}` : '', car].filter(Boolean).join(' ');
-    const what = e.source === 'closing' ? 'Day closing difference' : e.note ?? '';
+    const debt = e.source === 'income' && e.category === 'debt';
+    const c = debt && e.customerId ? customerBy.get(e.customerId) : undefined;
+    // A debt paid names its customer (it has no job of its own: it may pay several).
+    const about = debt ? ['Debt payment', c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) : ''].filter(Boolean).join(' ') : [o ? `#${o.number}` : '', car].filter(Boolean).join(' ');
+    const what = e.source === 'closing' ? 'Day closing difference' : e.source === 'credit' ? ['Credit paid', e.note].filter(Boolean).join(': ') : e.note ?? '';
     return {
       date: e.date,
       type: e.kind === 'in' ? 'Income' : 'Expense',

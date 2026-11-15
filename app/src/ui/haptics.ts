@@ -213,22 +213,54 @@ function addSegmentSwitch(control: Element) {
 }
 
 let frame = 0;
-function scan() {
-  frame = 0;
-  if (typeof document === 'undefined') return;
-  const on = enabled && usesLabels();
+/** What changed since the last frame: the scan looks there only (`null` — everything, as at start or on the setting). */
+let changed: Set<Element> | null = null;
+
+/** Labels, segment switches and switch controls for what is in `root` (and `root` itself). */
+function scanIn(root: Element | Document, on: boolean) {
+  const each = (sel: string, f: (el: Element) => void) => {
+    if (root instanceof Element && root.matches(sel)) f(root);
+    root.querySelectorAll(sel).forEach(f);
+  };
   if (on) {
-    ensureSwitch();
-    document.querySelectorAll(TAPPABLE).forEach(addLabel);
-    document.querySelectorAll(SEGMENT).forEach(addSegmentSwitch);
+    each(TAPPABLE, addLabel);
+    each(SEGMENT, addSegmentSwitch);
   }
-  document.querySelectorAll<HTMLInputElement>(CHECKABLE).forEach((input) => {
+  each(CHECKABLE, (el) => {
+    const input = el as HTMLInputElement;
     if (on && !input.hasAttribute('switch')) input.setAttribute('switch', '');
     else if (!on && input.hasAttribute('switch')) input.removeAttribute('switch');
   });
 }
 
+/**
+ * Once a frame: only where the page changed — not the whole app (every screen kept under the one in front) on each
+ * change: a scan of everything on every key typed kept the iPhone busy enough to lose the keys.
+ */
+function scan() {
+  frame = 0;
+  if (typeof document === 'undefined') return;
+  const on = enabled && usesLabels();
+  if (on) ensureSwitch();
+  const roots = changed;
+  changed = new Set();
+  if (!roots) return scanIn(document, on);
+  for (const el of roots) if (el.isConnected) scanIn(el, on);
+}
+
+/** A scan of everything, next frame (at start; the setting turned on or off). */
 function scheduleScan() {
+  changed = null;
+  if (!frame && typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(scan);
+}
+
+/** What the page added (and where it took something away — a button whose words changed loses its label). */
+function onMutations(records: MutationRecord[]) {
+  if (changed)
+    for (const r of records) {
+      if (r.target.nodeType === 1) changed.add(r.target as Element);
+      r.addedNodes.forEach((n) => n.nodeType === 1 && changed!.add(n as Element));
+    }
   if (!frame && typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(scan);
 }
 
@@ -245,7 +277,7 @@ export function installHaptics() {
   document.documentElement.classList.toggle('no-haptics', !enabled);
   if (usesLabels()) {
     document.documentElement.classList.add('haptic-labels');
-    new MutationObserver(scheduleScan).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });
     scheduleScan();
   }
   if (canVibrate()) {

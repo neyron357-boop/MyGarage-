@@ -1,7 +1,7 @@
 import { Autocomplete, Box, Button, Group, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
 import { IconCar, IconCheck, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -104,8 +104,8 @@ function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) =>
   );
 }
 
-/** Make and model: one tap on a chip or a pick from the built-in list; free text still works. */
-function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model: string; onMake: (v: string) => void; onModel: (v: string) => void }) {
+/** Make and model: one tap on a chip or a pick from the built-in list; free text still works (not drawn again while the plate is typed). */
+const MakeModelBlock = memo(function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model: string; onMake: (v: string) => void; onModel: (v: string) => void }) {
   const { t } = useTranslation();
   const makes = useLiveQuery(() => popularMakes(POPULAR_MAKES), []) ?? POPULAR_MAKES;
   const canon = canonicalMake(make);
@@ -174,7 +174,24 @@ function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model:
       )}
     </Box>
   );
-}
+});
+
+/** What the customer complains of: the garage's phrases as chips, and free text (not drawn again while the plate is typed). */
+const ComplaintBlock = memo(function ComplaintBlock({ complaint, complaints, onAdd, onChange }: { complaint: string; complaints: string[]; onAdd: (p: string) => void; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <Box className="surface" p="md">
+      <div className="chip-row wrap">
+        {complaints.map((p) => (
+          <button key={p} type="button" className="chip" data-active={complaint.includes(p)} onClick={() => onAdd(p)}>
+            {p}
+          </button>
+        ))}
+      </div>
+      <Textarea mt="sm" aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => onChange(e.currentTarget.value)} />
+    </Box>
+  );
+});
 
 export function NewOrderPage() {
   const { t } = useTranslation();
@@ -207,13 +224,20 @@ export function NewOrderPage() {
     if (preVehicle) setPicked(preVehicle);
   }, [preVehicle]);
 
+  // The plate is looked up once the typing pauses, not on every key: each key stays light (an iPhone loses
+  // keys typed while the page is busy — the lookup, its re-render, the cars it brings up).
+  const [lookup, setLookup] = useState(plate);
+  useEffect(() => {
+    const t = window.setTimeout(() => setLookup(plate), 250);
+    return () => window.clearTimeout(t);
+  }, [plate]);
   // The plate is already in the base: offer that car (and its open job, if any). Not as typed — the code
   // left out, another emirate: the cars with that number are offered to pick (`findVehiclesByNumber`).
   const found = useLiveQuery(async () => {
     if (picked) return { match: undefined, byNumber: [] as CheckInCar[] };
-    const m = await findVehicleForCheckIn(plate);
-    return { match: m, byNumber: m ? [] : await findVehiclesByNumber(plate) };
-  }, [picked, plate.emirate, plate.code, plate.number]);
+    const m = await findVehicleForCheckIn(lookup);
+    return { match: m, byNumber: m ? [] : await findVehiclesByNumber(lookup) };
+  }, [picked, lookup.emirate, lookup.code, lookup.number]);
   const match = found?.match;
   const byNumber = found?.byNumber ?? [];
   const suggestions = useLiveQuery(() => (picked || pickedCustomer ? [] : suggestCustomers(phone, name)), [picked, pickedCustomer, phone, name]) ?? [];
@@ -223,19 +247,22 @@ export function NewOrderPage() {
   const owner = known?.owner ?? pickedCustomer;
 
   // Complaint chips: the garage's list (Settings → Lists) — English by default, as it goes on the documents.
-  const complaints = quickList(settings, 'complaints');
-  const addQuick = (phrase: string) => {
+  const complaints = useMemo(() => quickList(settings, 'complaints'), [settings]);
+  const addQuick = useCallback((phrase: string) => {
     setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase}` : phrase));
-  };
+  }, []);
 
   const submit = (target: 'job' | 'book') =>
     run(async () => {
+      // Typed fast and tapped at once: the lookup may not have caught up with the plate — it is looked up here too.
+      const fresh = lookup === plate ? known : await findVehicleForCheckIn(plate).then((m) => (m && !m.activeOrder ? m : undefined));
+      const car = picked ?? fresh;
       const o = await checkIn({
-        vehicleId: known?.vehicle.id,
+        vehicleId: car?.vehicle.id,
         plate,
         make: canonicalMake(make),
         model: canonicalModel(make, model),
-        customerId: owner?.id,
+        customerId: (car?.owner ?? pickedCustomer)?.id,
         name,
         phone,
         docLanguage,
@@ -366,16 +393,7 @@ export function NewOrderPage() {
         <div className="group-title" style={{ marginTop: 22 }}>
           {t('job.complaint')}
         </div>
-        <Box className="surface" p="md">
-          <div className="chip-row wrap">
-            {complaints.map((p) => (
-              <button key={p} type="button" className="chip" data-active={complaint.includes(p)} onClick={() => addQuick(p)}>
-                {p}
-              </button>
-            ))}
-          </div>
-          <Textarea mt="sm" aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} />
-        </Box>
+        <ComplaintBlock complaint={complaint} complaints={complaints} onAdd={addQuick} onChange={setComplaint} />
 
         <div className="group-title" style={{ marginTop: 22 }}>
           {t('job.client')}

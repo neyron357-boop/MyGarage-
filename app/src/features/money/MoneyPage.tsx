@@ -5,36 +5,37 @@ import {
   IconBuildingBank,
   IconCash,
   IconCashRegister,
+  IconClockDollar,
   IconCreditCard,
   IconLock,
   IconPaperclip,
   IconPlus,
   IconReceipt2,
-  IconUserDollar,
   type Icon,
 } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dubaiDate, formatDate, formatDateTime, monthKey } from '../../domain/dates';
+import { formatDate, formatDateTime, monthKey } from '../../domain/dates';
 import { expenseEntry, withEntries } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
-import type { CashReason, PayMethod, SalaryPayment } from '../../domain/types';
+import type { CashReason, ExpenseMethod, PayMethod, SalaryPayment } from '../../domain/types';
+import { loadCredits } from '../../services/debts';
 import { loadLedger } from '../../services/ledger';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
-import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
 import { proofIndex } from '../../services/proofs';
-import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateLine, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar } from '../../ui/components';
+import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { useTabSwipe } from '../../ui/tabSwipe';
+import { DebtsOverview } from './Debts';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet } from './MoneyEntry';
 import { MoneySheetActions } from './MoneySheetActions';
 
-const METHOD_ICON: Record<PayMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
+const METHOD_ICON: Record<ExpenseMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, credit: IconClockDollar };
 
 function MethodPicker({ value, onChange }: { value: PayMethod; onChange: (m: PayMethod) => void }) {
   const { t } = useTranslation();
@@ -227,13 +228,16 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const [shown, setShown] = useState<string | null>(null);
   const [month, setMonth] = useState(monthKey());
   const data = useScreenLiveQuery(async () => {
-    const [list, cats, vehicles] = await Promise.all([
+    const [list, cats, vehicles, credits] = await Promise.all([
       db.expenses.filter((e) => e.date.startsWith(month) && !e.voidedAt).reverse().sortBy('date'),
       db.expenseCategories.toArray(),
       db.vehicles.toArray(),
+      loadCredits(),
     ]);
     const photos = await proofIndex(list.map((e) => e.id));
-    return { list, cats, photos, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
+    // On credit: what is still owed on each (counted as spent all the same — once, when it was taken).
+    const owed = new Map(credits.map((c) => [c.expense.id, c.leftFils]));
+    return { list, cats, photos, owed, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
   }, [month]);
   const label = useCategoryLabel(data?.cats);
   if (!data) return <PageSkeleton />;
@@ -290,6 +294,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
           {data.list.map((e) => {
             const c = data.cats.find((x) => x.id === e.categoryId);
             const I = METHOD_ICON[e.method];
+            const owed = e.method === 'credit' ? data.owed.get(e.id) ?? 0 : 0;
             return (
               <ListRow
                 key={e.id}
@@ -298,7 +303,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
                   data.photos.has(e.id) ? (
                     <MediaImage id={data.photos.get(e.id)!} h={40} />
                   ) : (
-                    <ThemeIcon variant="light" color="gray" size={40} radius="md">
+                    <ThemeIcon variant="light" color={e.method === 'credit' ? 'orange' : 'gray'} size={40} radius="md">
                       <I size={19} />
                     </ThemeIcon>
                   )
@@ -308,7 +313,13 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
                   <Group gap={6} wrap="nowrap" mt={2}>
                     {e.vehicleId && data.vehicles.get(e.vehicleId) && <PlateText plate={data.vehicles.get(e.vehicleId)!.plate} size="xs" />}
                     <Text span size="xs" c="dimmed" lineClamp={2}>
-                      {`${formatDate(e.date)} · ${t(`payment.method.${e.method}`)}${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${e.note ? ` · ${e.note}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
+                      {`${formatDate(e.date)} · ${t(`payment.method.${e.method}`)}`}
+                      {owed > 0 && (
+                        <Text span inherit c="orange.7" fw={600}>
+                          {` · ${t('debt.leftSum', { sum: formatAed(owed) })}`}
+                        </Text>
+                      )}
+                      {`${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${e.note ? ` · ${e.note}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
                     </Text>
                   </Group>
                 }
@@ -394,55 +405,6 @@ function SalariesTab() {
   );
 }
 
-function DebtsTab() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const list = useScreenLiveQuery(async () => {
-    const orders = await db.orders.where('stage').anyOf('delivered', 'closed').toArray();
-    const bundles = (await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[];
-    return bundles.filter((b) => bundleAmountDue(b) > 0);
-  }, []);
-  if (!list) return <PageSkeleton />;
-  if (!list.length) return <EmptyState icon={IconUserDollar} title={t('debt.none')}>{t('debt.noneHint')}</EmptyState>;
-  const total = list.reduce((s, b) => s + bundleAmountDue(b), 0);
-  return (
-    <Stack gap="md">
-      <Box className="surface" p="md">
-        <div className="eyebrow">{t('debt.total')}</div>
-        <Text fz={28} c="red">
-          <Money fils={total} display />
-        </Text>
-      </Box>
-      <List>
-        {list.map((b) => {
-          const d = b.debts.find((x) => x.status === 'open');
-          const overdue = d && d.dueDate < dubaiDate();
-          return (
-            <ListRow
-              key={b.order.id}
-              onClick={() => navigate(`/orders/${b.order.id}?tab=payments`)}
-              chevron
-              title={b.customer.name || t('customer.noName')}
-              subtitle={
-                <Stack gap={2} align="flex-start">
-                  <PlateLine plate={b.vehicle.plate}>{`№${b.order.number}`}</PlateLine>
-                  {d && (
-                    <Text span inherit c={overdue ? 'red' : undefined}>
-                      {`${t('debt.dueDate')} ${formatDate(d.dueDate)}`}
-                      {overdue ? ` · ${t('debt.overdue')}` : ''}
-                    </Text>
-                  )}
-                </Stack>
-              }
-              right={<Money fils={bundleAmountDue(b)} c="red" size="sm" />}
-            />
-          );
-        })}
-      </List>
-    </Stack>
-  );
-}
-
 const MONEY_TABS = ['book', 'cash', 'expenses', 'salaries', 'debts'];
 
 export function MoneyPage() {
@@ -472,7 +434,7 @@ export function MoneyPage() {
         {tab === 'cash' && <CashTab />}
         {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}
         {tab === 'salaries' && <SalariesTab />}
-        {tab === 'debts' && <DebtsTab />}
+        {tab === 'debts' && <DebtsOverview />}
       </div>
     </>
   );

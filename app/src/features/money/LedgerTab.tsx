@@ -1,4 +1,5 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCreditCard, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,11 +9,13 @@ import { dayHeading, formatDate, monthKey, monthRange } from '../../domain/dates
 import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory, IncomeCategory } from '../../domain/types';
+import { companyDebtOf, debtPaymentParts, voidCreditPayment } from '../../services/debts';
 import { loadLedger, setOpeningBalances, updateExpense, updateIncome, voidExpense, voidIncome, type Links } from '../../services/ledger';
 import { proofIndex } from '../../services/proofs';
-import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateText, SearchField } from '../../ui/components';
+import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateLine, PlateText, SearchField } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { CreditSheet } from './Debts';
 import { EntrySheet, INCOME_CATEGORIES, LinkPicker, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
@@ -26,6 +29,7 @@ export function useCategoryLabel(cats: ExpenseCategory[] | undefined) {
   return (e: LedgerEntry) => {
     if (e.source === 'payment') return t(e.category === 'refund' ? 'cashReason.refund' : e.category === 'prepayment' ? 'cashReason.prepayment' : 'ledger.cat.order');
     if (e.source === 'income') return t(`income.category.${e.category}`);
+    if (e.source === 'credit') return t('cashReason.credit_payment');
     if (e.source === 'closing') return t('ledger.cat.closing');
     if (e.source === 'movement') return t(`cashReason.${e.category}`);
     const c = cats?.find((x) => x.id === e.category);
@@ -68,9 +72,71 @@ function OpeningSheet({ opened, onClose, cash, card, cashLocked }: { opened: boo
   );
 }
 
+/** A debt payment: the jobs it went to, with what each got, and what no debt took. */
+function DebtParts({ entry }: { entry: LedgerEntry }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const data = useLiveQuery(async () => {
+    const parts = await debtPaymentParts(entry.id);
+    const orders = await db.orders.bulkGet(parts.map((p) => p.orderId));
+    const vehicles = await db.vehicles.bulkGet(orders.map((o) => o?.vehicleId ?? ''));
+    const customer = entry.customerId ? await db.customers.get(entry.customerId) : undefined;
+    return { parts: parts.map((p, i) => ({ ...p, order: orders[i], vehicle: vehicles[i] })), customer };
+  }, [entry.id, entry.customerId]);
+  if (!data) return null;
+  const rest = entry.amountFils - data.parts.reduce((s, p) => s + p.amountFils, 0);
+  const who = data.customer ? (data.customer.type === 'company' && data.customer.companyName ? data.customer.companyName : data.customer.name) || t('customer.noName') : '';
+  return (
+    <Box>
+      <div className="group-title">{who ? `${t('debt.wentTo')} · ${who}` : t('debt.wentTo')}</div>
+      <List>
+        {data.parts.map((p) => (
+          <ListRow
+            key={p.orderId}
+            chevron
+            onClick={() => navigate(`/orders/${p.orderId}`)}
+            title={p.order ? `№${p.order.number}` : ''}
+            subtitle={p.vehicle && <PlateLine plate={p.vehicle.plate}>{[p.vehicle.make, p.vehicle.model].filter(Boolean).join(' ')}</PlateLine>}
+            right={<Money fils={p.amountFils} size="sm" />}
+          />
+        ))}
+        {rest > 0 && <ListRow title={t('debt.rest')} right={<Money fils={rest} size="sm" c="dimmed" />} />}
+      </List>
+    </Box>
+  );
+}
+
+/** An expense on credit: what is still owed on it, and the way to pay it. */
+function CreditLeft({ expenseId }: { expenseId: string }) {
+  const { t } = useTranslation();
+  const d = useLiveQuery(async () => (await companyDebtOf(expenseId)) ?? null, [expenseId]);
+  const [open, setOpen] = useState(false);
+  if (!d) return null;
+  return (
+    <>
+      <Group justify="space-between" wrap="nowrap" className="surface-soft" p="sm">
+        <Stack gap={0}>
+          <Text size="sm" c="dimmed">
+            {t('debt.left')}
+          </Text>
+          <Money fils={d.leftFils} c={d.leftFils > 0 ? 'orange.7' : 'green.7'} />
+        </Stack>
+        {d.leftFils > 0 && (
+          <Button variant="light" color="orange" onClick={() => setOpen(true)}>
+            {t('debt.payCredit')}
+          </Button>
+        )}
+      </Group>
+      <SheetFor value={open && expenseId}>{(id, o) => <CreditSheet expenseId={id} opened={o} onClose={() => setOpen(false)} />}</SheetFor>
+    </>
+  );
+}
+
 /**
  * An entry opened from the book, the cash box or the expenses: what it was for can be corrected, money in or out
  * takes proofs (photos); a mistaken entry is cancelled. Opened for a value — `SheetFor`, so it slides out.
+ * A debt payment shows the jobs it went to (they keep it: its customer and kind stay); an expense on credit — what
+ * is still owed and the way to pay it; a payment of a credit can only be cancelled.
  */
 export function EntryDetails({ entry, label, onClose, cats, opened = true }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[]; opened?: boolean }) {
   const { t } = useTranslation();
@@ -78,7 +144,9 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
   const navigate = useNavigate();
   const { run, busy } = useAction();
   const [voiding, setVoiding] = useState(false);
-  const editable = entry.source === 'income' || entry.source === 'expense';
+  const debt = entry.source === 'income' && entry.category === 'debt';
+  const editable = (entry.source === 'income' && !debt) || entry.source === 'expense';
+  const cancellable = editable || debt || entry.source === 'credit';
   // An expense shows its vendor with the note; only the note itself is edited here.
   const typed = (entry.source === 'expense' ? entry.expenseNote : entry.note) ?? '';
   const [note, setNote] = useState(typed);
@@ -95,11 +163,13 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
             {formatDate(entry.date)} · {entry.method ? t(`payment.method.${entry.method}`) : t('payment.method.cash')}
           </Text>
         </Group>
-        {entry.source === 'expense' && entry.purse === 'card' && (
+        {(entry.source === 'expense' || entry.source === 'credit') && (entry.method === 'card' || entry.method === 'transfer') && (
           <Text size="xs" c="dimmed">
             {t('ledger.cardOutHint')}
           </Text>
         )}
+        {entry.source === 'expense' && entry.method === 'credit' && <CreditLeft expenseId={entry.id} />}
+        {debt && <DebtParts entry={entry} />}
         {entry.closing && (
           <Text size="sm">
             {t('ledger.closingText', { actual: formatAed(entry.closing.actualFils), diff: formatAed(entry.closing.diffFils) })}
@@ -145,7 +215,7 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
           ) : (
             <span />
           )}
-          {editable && (
+          {cancellable && (
             <Button variant="subtle" color="red" loading={busy} onClick={() => setVoiding(true)}>
               {t('ledger.void')}
             </Button>
@@ -166,6 +236,7 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
         onConfirm={() =>
           run(async () => {
             if (entry.source === 'income') await voidIncome(entry.id);
+            else if (entry.source === 'credit') await voidCreditPayment(entry.id);
             else await voidExpense(entry.id);
             onClose();
             return true;

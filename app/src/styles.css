@@ -1905,14 +1905,17 @@ html.kb .tab-bar-wrap {
   letter-spacing: 0.06em;
 }
 /* A photo tile (ui/photoPick.tsx): a tap — the camera, a hold — the phone's photos. Held long enough, it
-   swells a little ("let go to choose"); the iPhone's own long-press menu and selection stay away. */
+   swells a little ("let go to choose"); the iPhone's own long-press menu and selection stay away — a word
+   selected under a held finger would take the touch over, and the photos would not open. */
 .chip.vin-chip,
-.job-cover {
+.job-cover,
+.strip-tile {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }
-.chip.vin-chip[data-held] {
+.chip.vin-chip[data-held],
+.strip-tile[data-held] {
   --held: 1.08;
   animation: photo-held 260ms var(--spring) forwards;
 }
@@ -1962,6 +1965,26 @@ html.kb .tab-bar-wrap {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+/* Close up (two fingers, a wheel): the whole car back, a round glass button in the corner over the picture. */
+.car3d-whole {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+}
+/* The job card's sheet keeps its height: a point's editor coming or going under the car does not move the car
+   under the finger (the next point would land elsewhere). On a phone it is the tall sheet, the car larger in it. */
+.jc-sheet {
+  min-height: min(780px, 92vh);
+}
+@media (max-width: 48em) {
+  .mg-sheet .mantine-Modal-content.jc-sheet {
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - 20px);
+  }
+  .jc-sheet .car3d {
+    height: clamp(270px, 44dvh, 400px);
+  }
 }
 .jc-pin {
   position: absolute;

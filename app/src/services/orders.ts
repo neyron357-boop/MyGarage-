@@ -2,8 +2,8 @@ import { db, nextNumber, purgeJournal, uid } from '../db/db';
 import { mechanicsOf, toggled } from '../domain/crew';
 import { hoursBetween, nowIso } from '../domain/dates';
 import { whyJobStays, type DeleteBlock } from '../domain/deletion';
-import { amountDue } from '../domain/invoice';
-import { byPosition, summarize } from '../domain/items';
+import { orderDue } from '../domain/debts';
+import { byPosition } from '../domain/items';
 import { checkTransition, isBackward, type StageContext } from '../domain/stages';
 import type {
   Claim,
@@ -269,12 +269,9 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
   });
 }
 
+/** What the job still owes — the one sum everywhere (the job, the board's "Debts", "Money → Debts"): `orderDue`. */
 export function bundleAmountDue(b: OrderBundle): number {
-  // History from Eaglecart: payments were not kept there consistently, so nothing is shown as owed.
-  if (b.order.imported?.history) return 0;
-  const due = amountDue(summarize(b.items).approvedGross, b.invoices, b.payments);
-  // Closed without payment: nothing is owed (money paid over is still shown as such).
-  return b.order.waived ? Math.min(0, due) : due;
+  return orderDue(b.order, b.items, b.invoices, b.payments);
 }
 
 export function stageContext(b: OrderBundle): StageContext {

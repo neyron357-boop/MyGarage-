@@ -5,6 +5,7 @@ import type {
   CashMovement,
   Claim,
   Counter,
+  CreditPayment,
   Customer,
   DamageMark,
   Debt,
@@ -79,6 +80,7 @@ export class GarageDB extends Dexie {
   counters!: Table<Counter, string>;
   notes!: Table<JobNote, string>;
   books!: Table<StoredBook, string>;
+  creditPayments!: Table<CreditPayment, string>;
 
   constructor(name = 'mygarage') {
     super(name);
@@ -127,6 +129,11 @@ export class GarageDB extends Dexie {
     // v4: the supplier base workbook last brought in (its other sheets go back out with an export).
     this.version(4).stores({
       books: 'id',
+    });
+    // v5: expenses on credit and what was paid towards them; a job's payments found by the income they came in.
+    this.version(5).stores({
+      creditPayments: 'id, expenseId, date',
+      payments: 'id, orderId, receivedAt, incomeId',
     });
     installGuards(this);
   }
@@ -188,6 +195,7 @@ function installGuards(db: GarageDB) {
   guard(db.decisions, []);
   guard(db.invoices, ['status']);
   guard(db.payments, []);
+  guard(db.creditPayments, ['voidedAt']);
   guard(db.cashMovements, ['closingId']);
   guard(db.cashClosings, []);
   guard(db.debts, ['status']);

@@ -1,5 +1,5 @@
 import { dubaiDate, inRange } from './dates';
-import type { CashClosing, CashMovement, Expense, Income, Order, PayMethod, Payment } from './types';
+import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Order, Payment } from './types';
 
 /*
  * The money book, kept the way the garage keeps its money sheet:
@@ -7,15 +7,19 @@ import type { CashClosing, CashMovement, Expense, Income, Order, PayMethod, Paym
  * - cash balance = cash start + cash in − cash out (+ the difference found at a day closing);
  * - card balance = card start + card in; money spent by card is tracked ("Card Out") but does NOT
  *   reduce the card balance (it is paid from elsewhere and settled separately).
+ *
+ * The book is the money that moved (v0.20): an expense taken on credit is not a line of it — what is paid towards
+ * it later is ("credit"), on the day and by the way it is paid. A customer's debt paid at once for several jobs is
+ * one line, the income; the jobs' payments it was spread into are not lines of their own.
  */
 
 export type Purse = 'cash' | 'card';
-export const purseOf = (m: PayMethod): Purse => (m === 'cash' ? 'cash' : 'card');
+export const purseOf = (m: ExpenseMethod): Purse => (m === 'cash' ? 'cash' : 'card');
 
-export type LedgerSource = 'payment' | 'income' | 'expense' | 'movement' | 'closing';
+export type LedgerSource = 'payment' | 'income' | 'expense' | 'credit' | 'movement' | 'closing';
 
 export interface LedgerEntry {
-  /** Source record id (payment, income, expense, cash movement or closing). */
+  /** Source record id (payment, income, expense, payment of a credit, cash movement or closing). */
   id: string;
   source: LedgerSource;
   /** Sort key: the entry's day, then the moment it was recorded. */
@@ -23,11 +27,14 @@ export interface LedgerEntry {
   date: string; // YYYY-MM-DD (Dubai)
   kind: 'in' | 'out';
   purse: Purse;
-  method?: PayMethod;
+  /** How it was paid; "credit" only on an expense opened from the expenses (it is not a line of the book). */
+  method?: ExpenseMethod;
   /** Positive; a refund to a customer is an "out" of its purse. */
   amountFils: number;
-  /** "order", "refund", income category, expense category id, or a cash reason ("collection"…). */
+  /** "order", "refund", income category, expense category id, "credit_payment", or a cash reason ("collection"…). */
   category: string;
+  /** A payment of a credit: the expense it pays off. */
+  credit?: { expenseId: string; categoryId: string };
   note?: string;
   /** Expenses: where it was bought and the note as typed (`note` shows both). */
   vendor?: string;
@@ -51,6 +58,8 @@ export interface LedgerInput {
   expenses: Expense[];
   movements: CashMovement[];
   closings: CashClosing[];
+  /** What was paid towards expenses taken on credit. */
+  creditPayments?: CreditPayment[];
   orders: Pick<Order, 'id' | 'vehicleId' | 'customerId'>[];
 }
 
@@ -115,14 +124,35 @@ export function movementEntry(m: CashMovement): Omit<LedgerEntry, 'cashAfter' | 
   };
 }
 
+/** What was paid towards an expense taken on credit, as a line of the book (without the balances after it). */
+export function creditEntry(c: CreditPayment, e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardAfter'> {
+  return {
+    id: c.id,
+    source: 'credit',
+    at: sortKey(c.date, c.paidAt),
+    date: c.date,
+    kind: 'out',
+    purse: purseOf(c.method),
+    method: c.method,
+    amountFils: c.amountFils,
+    category: 'credit_payment',
+    note: [e.vendor, c.note ?? e.note].filter(Boolean).join(' · ') || undefined,
+    credit: { expenseId: e.id, categoryId: e.categoryId },
+    orderId: e.orderId,
+    vehicleId: e.vehicleId,
+    customerId: e.customerId,
+  };
+}
+
 /**
- * The line of the book a cash movement is: the job's payment, the income or the expense it came with, else the
- * movement itself (parts bought for cash, cash handed over, a correction).
+ * The line of the book a cash movement is: the job's payment, the income, the expense or the payment of a credit
+ * it came with, else the movement itself (parts bought for cash, cash handed over, a correction).
  */
-export function entryRefOf(m: Pick<CashMovement, 'id' | 'paymentId' | 'incomeId' | 'expenseId'>): { source: LedgerSource; id: string } {
+export function entryRefOf(m: Pick<CashMovement, 'id' | 'paymentId' | 'incomeId' | 'expenseId' | 'creditPaymentId'>): { source: LedgerSource; id: string } {
   if (m.paymentId) return { source: 'payment', id: m.paymentId };
   if (m.incomeId) return { source: 'income', id: m.incomeId };
   if (m.expenseId) return { source: 'expense', id: m.expenseId };
+  if (m.creditPaymentId) return { source: 'credit', id: m.creditPaymentId };
   return { source: 'movement', id: m.id };
 }
 
@@ -147,6 +177,8 @@ export function buildLedger(input: LedgerInput): LedgerResult {
   const raw: Raw[] = [];
 
   for (const p of input.payments) {
+    // Received within a "debt payment": that income is the line (one movement of money, however many jobs).
+    if (p.incomeId) continue;
     const date = dubaiDate(p.receivedAt);
     raw.push({
       id: p.id,
@@ -178,15 +210,22 @@ export function buildLedger(input: LedgerInput): LedgerResult {
       ...linkOf(i.orderId, i.vehicleId, i.customerId),
     });
   }
+  const expenses = new Map(input.expenses.map((e) => [e.id, e]));
   for (const e of input.expenses) {
-    if (e.voidedAt) continue;
+    // On credit: no money has moved — its payments are the lines.
+    if (e.voidedAt || e.method === 'credit') continue;
     raw.push({ ...expenseEntry(e), ...linkOf(e.orderId, e.vehicleId, e.customerId) });
   }
-  // Cash movements not shown through their payment, income or expense: parts bought for cash,
-  // supplier refunds, handing cash to the owner, corrections. Reversals of cancelled entries are
+  for (const c of input.creditPayments ?? []) {
+    const e = expenses.get(c.expenseId);
+    if (c.voidedAt || !e) continue;
+    raw.push({ ...creditEntry(c, e), ...linkOf(e.orderId, e.vehicleId, e.customerId) });
+  }
+  // Cash movements not shown through their payment, income, expense or payment of a credit: parts bought for
+  // cash, supplier refunds, handing cash to the owner, corrections. Reversals of cancelled entries are
   // left out together with the entry itself.
   for (const m of input.movements) {
-    if (m.paymentId || m.expenseId || m.incomeId) continue;
+    if (m.paymentId || m.expenseId || m.incomeId || m.creditPaymentId) continue;
     raw.push({ ...movementEntry(m), ...linkOf(m.orderId) });
   }
   for (const c of input.closings) {

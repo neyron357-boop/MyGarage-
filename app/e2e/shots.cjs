@@ -72,10 +72,26 @@ async function launchBrowser() {
   // The "demo data loaded" banner would sit over every picture (the mouse of the test pauses it).
   await page.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
 
+  // v0.20: an expense taken on credit and a part of it paid — "Company debts" has a line to show.
+  const addCredit = async () => {
+    const { addExpense } = await import('/src/services/money.ts');
+    const { payCredit } = await import('/src/services/debts.ts');
+    const { db } = await import('/src/db/db.ts');
+    const { dubaiDate } = await import('/src/domain/dates.ts');
+    const cat = (await db.expenseCategories.toArray()).find((c) => c.code === 'parts');
+    const e = await addExpense({ date: dubaiDate(), categoryId: cat.id, amountFils: 100000, vatFils: 0, vendor: 'Al Futtaim Parts', method: 'credit' });
+    await payCredit(e.id, { amountFils: 30000, method: 'cash' });
+  };
+
   const tour = async (prefix) => {
     await go('#/');
     await shot(`${prefix}-01-board`);
     await shot(`${prefix}-01b-board-scrolled`, { scroll: 520 });
+    // v0.20: "Debts" beside "Archive" — one card per customer.
+    await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /Долги|Debts/ }).click();
+    await settle(600);
+    await shot(`${prefix}-01c-board-debts`);
+    await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /^(Все|All)/ }).click();
     // A job with lines (not an appointment): its screen, its sheets.
     await page.locator('.screen[data-role="top"] .job-row').filter({ hasText: /Цена|Ждём|В работе|Price|Waiting|In work/ }).first().click();
     await settle(900);
@@ -123,6 +139,9 @@ async function launchBrowser() {
     await shot(`${prefix}-05-search`);
     await go('#/money');
     await shot(`${prefix}-06-money`);
+    if (prefix === 'phone-light') await page.evaluate(addCredit);
+    await go('#/money?tab=debts');
+    await shot(`${prefix}-06e-debts`);
     await go('#/money?tab=cash');
     await shot(`${prefix}-06b-cash`);
     // A movement opens as its line of the book (the job's payment here), with its photos: a card slip kept with it
@@ -174,6 +193,17 @@ async function launchBrowser() {
   await dp.locator('.list-row.clickable').first().click();
   await dp.waitForTimeout(700);
   await dp.screenshot({ path: `${OUT}/desktop-03-cash-entry.png` });
+  // v0.20: the board's "Debts" (a button in the header beside "Archive") and Money → Debts.
+  await dp.keyboard.press('Escape');
+  await dp.goto(BASE + '#/');
+  await dp.waitForTimeout(900);
+  await dp.getByRole('button', { name: /^Долги/ }).click();
+  await dp.waitForTimeout(900);
+  await dp.screenshot({ path: `${OUT}/desktop-04-board-debts.png` });
+  await dp.evaluate(addCredit);
+  await dp.goto(BASE + '#/money?tab=debts');
+  await dp.waitForTimeout(900);
+  await dp.screenshot({ path: `${OUT}/desktop-05-money-debts.png` });
 
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
   await browser.close();

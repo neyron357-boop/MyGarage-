@@ -121,7 +121,7 @@ function JobCardSheet({ orderId, card, opened, onClose }: { orderId: string; car
   // Without 3D (no WebGL): the drawings, a side at a time.
   const flat: DamageView = view === '3d' ? 'top' : view;
   return (
-    <Modal opened={opened} onClose={onClose} title={t('jobCard.title')}>
+    <Modal opened={opened} onClose={onClose} title={t('jobCard.title')} classNames={{ content: 'jc-sheet' }}>
       <Stack gap="md">
         <SegmentedControl
           fullWidth

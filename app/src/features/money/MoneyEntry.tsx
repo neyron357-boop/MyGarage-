@@ -1,45 +1,50 @@
 import { ActionIcon, Box, Button, Collapse, Group, Modal, SegmentedControl, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconBuildingBank, IconCar, IconCash, IconChevronDown, IconCreditCard, IconReceipt2, IconSearch, IconUser, IconX } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBuildingBank, IconCar, IconCash, IconChevronDown, IconClockDollar, IconCreditCard, IconReceipt2, IconSearch, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate } from '../../domain/dates';
+import { allocate } from '../../domain/debts';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
-import type { IncomeCategory, Order, PayMethod } from '../../domain/types';
+import type { ExpenseMethod, IncomeCategory, Order } from '../../domain/types';
 import { netFromGross, vatOf } from '../../domain/vat';
 import { search, type SearchHit } from '../../services/customers';
+import { loadDebtors } from '../../services/debts';
 import { addIncome, moneyOf, type Links } from '../../services/ledger';
 import { addExpense, categoryMonthSpent } from '../../services/money';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { MoneyInput, PlateText } from '../../ui/components';
+import { Money, MoneyInput, PersonAvatar, PlateText, SelectCard } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 
+/** What an income of its own can be (a debt paid is entered as one, but is not changed into another afterwards). */
 export const INCOME_CATEGORIES: IncomeCategory[] = ['service', 'sales', 'other'];
+const ENTRY_INCOME_CATEGORIES: IncomeCategory[] = [...INCOME_CATEGORIES, 'debt'];
 const OPEN_STAGES = new Set(['booked', 'intake', 'diagnostics', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check', 'ready']);
 
-/** Cash / Card (a bank transfer counts with the card). */
-const PURSE_ICON = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank };
+/** Cash / Card / Bank transfer — and, for an expense, "On credit": nothing is paid yet, the garage owes it. */
+const PURSE_ICON = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, credit: IconClockDollar };
 
-export function PursePicker({ value, onChange, kind }: { value: PayMethod; onChange: (m: PayMethod) => void; kind: 'in' | 'out' }) {
+export function PursePicker({ value, onChange, kind, credit }: { value: ExpenseMethod; onChange: (m: ExpenseMethod) => void; kind: 'in' | 'out'; /** "On credit" offered too (a new expense). */ credit?: boolean }) {
   const { t } = useTranslation();
+  const ways: ExpenseMethod[] = credit ? ['cash', 'card', 'transfer', 'credit'] : ['cash', 'card', 'transfer'];
   return (
     <Stack gap={4}>
-      <div className="chip-row">
-        {(['cash', 'card', 'transfer'] as const).map((m) => {
+      <div className="chip-row wrap" role="radiogroup">
+        {ways.map((m) => {
           const I = PURSE_ICON[m];
           return (
-            <button key={m} type="button" className="chip" data-active={value === m} onClick={() => onChange(m)}>
+            <button key={m} type="button" className="chip" role="radio" aria-checked={value === m} data-active={value === m} data-way={m} onClick={() => onChange(m)}>
               <I size={17} stroke={2} aria-hidden />
-              {t(`payment.method.${m}`)}
+              {m === 'transfer' ? t('ledger.transferFull') : t(`payment.method.${m}`)}
             </button>
           );
         })}
       </div>
-      {kind === 'out' && value !== 'cash' && (
+      {kind === 'out' && (value === 'card' || value === 'transfer') && (
         <Text size="xs" c="dimmed">
           {t('ledger.cardOutHint')}
         </Text>
@@ -156,6 +161,150 @@ export function LinkPicker({ value, onChange }: { value: Links; onChange: (v: Li
   );
 }
 
+/** Whose debt a "debt payment" is, and the job to pay off first. */
+export interface DebtPick {
+  customerId?: string;
+  orderId?: string;
+}
+
+/**
+ * The customer of a "debt payment" — optional. Those who owe are offered at once (who owes most first), anyone
+ * else is found by name, phone or plate. A customer picked shows their debts and where this sum goes: the oldest
+ * first; a tap on a job pays that one first. What nobody owes is shown as money in with no debt to it.
+ */
+function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChange: (v: DebtPick) => void; amountFils: number }) {
+  const { t } = useTranslation();
+  const debtors = useLiveQuery(loadDebtors, []);
+  const picked = useLiveQuery(async () => (value.customerId ? (await db.customers.get(value.customerId)) ?? null : null), [value.customerId]);
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const query = q.trim();
+    if (query.length < 2) {
+      setHits([]);
+      return;
+    }
+    const timer = window.setTimeout(() => void search(query, 6).then((h) => alive && setHits(h)), 150);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [q]);
+  const nameOf = (c: { type: string; companyName?: string; name: string }) => (c.type === 'company' && c.companyName ? c.companyName : c.name) || t('customer.noName');
+
+  if (value.customerId) {
+    const debtor = debtors?.find((d) => d.customer.id === value.customerId);
+    const jobs = debtor ? debtor.cars.flatMap((c) => c.jobs) : [];
+    const plan = allocate(amountFils, jobs.map((j) => ({ orderId: j.order.id, dueFils: j.dueFils, since: j.since })), value.orderId);
+    const got = new Map(plan.parts.map((p) => [p.orderId, p.amountFils]));
+    const c = debtor?.customer ?? picked ?? undefined;
+    return (
+      <Stack gap={8} className="debt-pick">
+        <Group justify="space-between" wrap="nowrap" gap="sm">
+          <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+            <PersonAvatar name={c ? nameOf(c) : ''} company={c?.type === 'company'} size={36} />
+            <Box style={{ minWidth: 0 }}>
+              <Text fw={600} lineClamp={1}>
+                {c ? nameOf(c) : ''}
+              </Text>
+              {debtor ? (
+                <Text size="sm" c="red" className="tnum">
+                  {formatAed(debtor.totalFils)}
+                </Text>
+              ) : (
+                debtors && (
+                  <Text size="sm" c="dimmed">
+                    {t('debt.noDebts')}
+                  </Text>
+                )
+              )}
+            </Box>
+          </Group>
+          <ActionIcon variant="subtle" color="gray" onClick={() => onChange({})} aria-label={t('common.delete')}>
+            <IconX size={18} />
+          </ActionIcon>
+        </Group>
+        {jobs.map((j) => {
+          const part = got.get(j.order.id) ?? 0;
+          return (
+            <SelectCard key={j.order.id} active={value.orderId === j.order.id} onClick={() => onChange({ customerId: value.customerId, orderId: value.orderId === j.order.id ? undefined : j.order.id })}>
+              <Group justify="space-between" wrap="nowrap" gap="sm" data-debt-job={j.order.number}>
+                <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                  <PlateText plate={j.vehicle.plate} size="xs" />
+                  <Text size="sm" fw={600} lineClamp={1}>
+                    №{j.order.number}
+                    <Text span inherit fw={400} c="dimmed">
+                      {[' ', j.vehicle.make, j.vehicle.model].filter(Boolean).join(' ')}
+                    </Text>
+                  </Text>
+                </Group>
+                <Stack gap={0} align="flex-end" style={{ flexShrink: 0 }}>
+                  <Money fils={j.dueFils} size="sm" />
+                  {part > 0 && <Money fils={-part} size="xs" c="green.7" />}
+                </Stack>
+              </Group>
+            </SelectCard>
+          );
+        })}
+        {amountFils > 0 && plan.restFils > 0 && (
+          <Group justify="space-between" wrap="nowrap" px={4} data-debt-rest>
+            <Text size="sm" c="dimmed">
+              {t('debt.rest')}
+            </Text>
+            <Money fils={plan.restFils} size="sm" c="dimmed" />
+          </Group>
+        )}
+      </Stack>
+    );
+  }
+  return (
+    <Stack gap={8}>
+      {!!debtors?.length && (
+        <div className="chip-row bleed" aria-label={t('money.debts')}>
+          {debtors.slice(0, 12).map((d) => (
+            <button key={d.customer.id} type="button" className="chip" data-debtor={d.customer.id} onClick={() => onChange({ customerId: d.customer.id })}>
+              {nameOf(d.customer)}
+              <span className="chip-note">{formatAed(d.totalFils)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <TextInput leftSection={<IconSearch size={18} />} placeholder={t('debt.search')} value={q} onChange={(e) => setQ(e.currentTarget.value)} autoComplete="off" />
+      {hits.length > 0 && (
+        <Stack gap={0} className="surface-soft" style={{ overflow: 'hidden' }}>
+          {hits.map((h) => (
+            <UnstyledButton
+              key={`${h.customer.id}-${h.vehicle?.id ?? ''}`}
+              onClick={() => {
+                setQ('');
+                setHits([]);
+                // Found by a car: its debt is the one to pay off first.
+                const job = h.vehicle ? debtors?.find((d) => d.customer.id === h.customer.id)?.cars.find((c) => c.vehicle.id === h.vehicle!.id)?.jobs[0] : undefined;
+                onChange({ customerId: h.customer.id, orderId: job?.order.id });
+              }}
+              className="tap"
+              style={{ padding: '10px 12px', borderBottom: '0.5px solid var(--app-hairline)' }}
+            >
+              <Group gap="sm" wrap="nowrap">
+                {h.vehicle ? <PlateText plate={h.vehicle.plate} size="xs" /> : <IconUser size={18} />}
+                <Box style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={600} lineClamp={1}>
+                    {nameOf(h.customer)}
+                  </Text>
+                  <Text size="xs" c="dimmed" lineClamp={1}>
+                    {[h.vehicle ? [h.vehicle.make, h.vehicle.model].filter(Boolean).join(' ') : '', h.customer.phone ? formatPhone(h.customer.phone) : ''].filter(Boolean).join(' · ')}
+                  </Text>
+                </Box>
+              </Group>
+            </UnstyledButton>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
 /**
  * Money of one job, car or customer outside its invoice: expenses (parts bought, sublet work…) and
  * other income, with a button to add one already linked to it.
@@ -172,7 +321,7 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
   }, [link[by], by]);
   if (!data) return null;
   const rows = [
-    ...data.incomes.map((i) => ({ id: i.id, date: i.date, at: i.createdAt, in: true, amount: i.amountFils, title: t(`income.category.${i.category}`), note: i.note, method: i.method, orderId: i.orderId })),
+    ...data.incomes.map((i) => ({ id: i.id, date: i.date, at: i.createdAt, in: true, amount: i.amountFils, title: t(`income.category.${i.category}`), note: i.note, method: i.method as ExpenseMethod, orderId: i.orderId })),
     ...data.expenses.map((e) => {
       const c = data.cats.find((x) => x.id === e.categoryId);
       return { id: e.id, date: e.date, at: e.createdAt, in: false, amount: e.amountFils, title: c ? (lang === 'ru' ? c.nameRu : c.nameEn) : '', note: [e.vendor, e.note].filter(Boolean).join(' · '), method: e.method, orderId: e.orderId };
@@ -229,11 +378,15 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
 export interface EntryPreset {
   kind?: 'in' | 'out';
   link?: Links;
+  /** Money in as a "debt payment" (of this customer, this job first). */
+  debt?: DebtPick;
 }
 
 /**
  * One sheet for both ways money moves, like a row of the money sheet: in/out, amount, cash/card,
- * category, what it was for (job, car, customer), a note, the date. Expenses can carry a receipt and VAT.
+ * category, what it was for (job, car, customer), a note, the date. Expenses can carry a receipt and VAT —
+ * and can be taken on credit: no money moves, the garage owes it ("Money → Debts → Company debts").
+ * Money in can be a "debt payment": for a customer picked it is spread over their jobs (`DebtorField`).
  */
 export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClose: () => void; preset?: EntryPreset }) {
   const { t } = useTranslation();
@@ -248,12 +401,13 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     const rank = (code: string) => (order.indexOf(code) < 0 ? 99 : order.indexOf(code));
     return list.sort((a, b) => (uses.get(b.id) ?? 0) - (uses.get(a.id) ?? 0) || rank(a.code) - rank(b.code));
   }, []);
-  const [kind, setKind] = useState<'in' | 'out'>('out');
+  const [kind, setKindState] = useState<'in' | 'out'>('out');
   const [amount, setAmount] = useState<number>();
-  const [method, setMethod] = useState<PayMethod>('cash');
+  const [method, setMethod] = useState<ExpenseMethod>('cash');
   const [incomeCat, setIncomeCat] = useState<IncomeCategory>('service');
   const [expenseCat, setExpenseCat] = useState<string>();
   const [link, setLink] = useState<Links>({});
+  const [debt, setDebt] = useState<DebtPick>({});
   const [note, setNote] = useState('');
   const [date, setDate] = useState(dubaiDate());
   const [more, setMore] = useState(false);
@@ -262,11 +416,20 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const [receipt, setReceipt] = useState<File>();
   const [over, setOver] = useState('');
   const [spent, setSpent] = useState(0);
+  // Money comes in by a way it can be counted: "on credit" is only a way to spend.
+  const setKind = (k: 'in' | 'out') => {
+    setKindState(k);
+    if (k === 'in') setMethod((m) => (m === 'credit' ? 'cash' : m));
+  };
 
   useEffect(() => {
     if (!opened) return;
-    setKind(preset?.kind ?? 'out');
+    setKind(preset?.debt ? 'in' : preset?.kind ?? 'out');
     setLink(preset?.link ?? {});
+    setDebt(preset?.debt ?? {});
+    if (preset?.debt) setIncomeCat('debt');
+    // The sheet opens on real money; "on credit" is picked each time it is meant.
+    setMethod((m) => (m === 'credit' ? 'cash' : m));
     setAmount(undefined);
     setNote('');
     setDate(dubaiDate());
@@ -285,10 +448,14 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
 
   const cat = cats?.find((c) => c.id === expenseCat);
   const overLimit = kind === 'out' && !!cat && cat.monthlyLimitFils > 0 && spent + (amount ?? 0) > cat.monthlyLimitFils;
+  const debtIn = kind === 'in' && incomeCat === 'debt';
   const save = () =>
     run(async () => {
-      if (kind === 'in') await addIncome({ date, category: incomeCat, amountFils: amount ?? 0, method, note, ...link });
-      else
+      if (kind === 'in') {
+        const way = method === 'credit' ? 'cash' : method;
+        if (debtIn) await addIncome({ date, category: 'debt', amountFils: amount ?? 0, method: way, note, customerId: debt.customerId, orderId: debt.orderId });
+        else await addIncome({ date, category: incomeCat, amountFils: amount ?? 0, method: way, note, ...link });
+      } else
         await addExpense({
           date,
           categoryId: expenseCat!,
@@ -319,15 +486,15 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           ]}
         />
         <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
-        <PursePicker value={method} onChange={setMethod} kind={kind} />
+        <PursePicker value={method} onChange={setMethod} kind={kind} credit={kind === 'out'} />
         <div>
           <Text size="sm" fw={500} mb={6}>
             {t('expense.category')}
           </Text>
           <div className="chip-row wrap">
             {kind === 'in'
-              ? INCOME_CATEGORIES.map((c) => (
-                  <button key={c} type="button" className="chip" data-active={incomeCat === c} onClick={() => setIncomeCat(c)}>
+              ? ENTRY_INCOME_CATEGORIES.map((c) => (
+                  <button key={c} type="button" className="chip" data-active={incomeCat === c} data-income={c} onClick={() => setIncomeCat(c)}>
                     {t(`income.category.${c}`)}
                   </button>
                 ))
@@ -338,15 +505,27 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
                 ))}
           </div>
         </div>
-        <div>
-          <Group gap={6} mb={6}>
-            <IconCar size={16} />
-            <Text size="sm" fw={500}>
-              {t('ledger.forWhat')}
-            </Text>
-          </Group>
-          <LinkPicker value={link} onChange={setLink} />
-        </div>
+        {debtIn ? (
+          <div>
+            <Group gap={6} mb={6}>
+              <IconUser size={16} />
+              <Text size="sm" fw={500}>
+                {t('debt.who')}
+              </Text>
+            </Group>
+            <DebtorField value={debt} onChange={setDebt} amountFils={amount ?? 0} />
+          </div>
+        ) : (
+          <div>
+            <Group gap={6} mb={6}>
+              <IconCar size={16} />
+              <Text size="sm" fw={500}>
+                {t('ledger.forWhat')}
+              </Text>
+            </Group>
+            <LinkPicker value={link} onChange={setLink} />
+          </div>
+        )}
         <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
         <UnstyledButton onClick={() => setMore((m) => !m)}>
           <Group gap={4} c="cobalt.6">

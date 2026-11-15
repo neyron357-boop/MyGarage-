@@ -117,7 +117,9 @@ async function launchBrowser() {
     // Fast check-in: the plate first, make and model from chips, the customer is optional.
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Код').fill('B');
-    await page.getByLabel('Номер').fill('55555');
+    // Typed as fast as a thumb types: every digit stays (v0.20 — the iPhone lost some while the page was busy).
+    await page.getByLabel('Номер').pressSequentially('55555', { delay: 12 });
+    if ((await page.getByLabel('Номер').inputValue()) !== '55555') throw new Error('fast typing lost digits: ' + (await page.getByLabel('Номер').inputValue()));
     await page.getByRole('button', { name: 'Lexus', exact: true }).click();
     await page.getByRole('button', { name: 'RX 350', exact: true }).click();
     await page.getByLabel('Телефон').fill('050 777 8899');
@@ -267,6 +269,94 @@ async function launchBrowser() {
     if (paid.stage !== 'closed' || paid.debts.join() !== 'paid') throw new Error('paid off: ' + JSON.stringify(paid));
     await shot('22-order-closed', true);
   });
+  await step('debts by customer, a debt payment, the garage on credit', async () => {
+    // One customer, two jobs gone with debts of 600 and 400 AED: one handed over on credit, one closed with a signed debt.
+    await page.evaluate(async () => {
+      const { checkIn, changeStage } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { approveAll, leaveOnDebt } = await import('/src/services/flow.ts');
+      const { quickInvoice, createDebt } = await import('/src/services/money.ts');
+      const sig = new Blob(['sig'], { type: 'image/png' });
+      const job = async (number, model, aed, customerId) => {
+        const o = await checkIn({ plate: { emirate: 'DXB', code: 'D', number }, make: 'Nissan', model, customerId, name: customerId ? '' : 'Rashid Debtor', phone: customerId ? '' : '050 606 0400', docLanguage: 'en', complaint: '', arrivedNow: true });
+        await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Repair', unitPriceFils: aed * 100, vatRateBp: 0 });
+        await approveAll(o.id);
+        await quickInvoice(o.id);
+        return o;
+      };
+      const a = await job('60600', 'Altima', 600);
+      await leaveOnDebt(a.id, { amountFils: 60000, dueDate: '2026-12-01', signature: sig });
+      const b = await job('40400', 'Sunny', 400, a.customerId);
+      await createDebt(b.id, 40000, '2026-12-15', sig);
+      await changeStage(b.id, 'closed');
+    });
+    const cashNow = () => page.evaluate(async () => (await (await import('/src/services/money.ts')).cashState()).expected);
+    const dlg = page.getByRole('dialog');
+    // The board: "Debts" beside "Archive" — one card for the customer with both cars.
+    await page.goto(BASE + '#/');
+    await front('[role="tab"]').filter({ hasText: 'Долги' }).click();
+    const card = front('.debt-card').filter({ hasText: 'Rashid Debtor' });
+    await card.filter({ hasText: '1 000,00' }).waitFor();
+    await card.locator('.list-row').filter({ hasText: 'Altima' }).waitFor();
+    await card.locator('.list-row').filter({ hasText: 'Sunny' }).waitFor();
+    if (await front('.job-row').filter({ hasText: 'Altima' }).count()) throw new Error('a car gone with a debt is still on the board');
+    await shot('22a-board-debts');
+    // "Take payment": 250 in cash — the oldest debt first; the cash grows by all of it.
+    let before = await cashNow();
+    await card.getByText('Принять оплату').click();
+    await dlg.getByRole('button', { name: 'Оплата долга' }).and(page.locator('[data-active="true"]')).waitFor();
+    await dlg.getByLabel('Сумма').fill('250');
+    await dlg.locator('[data-debt-job]').first().filter({ hasText: '250,00' }).waitFor();
+    await shot('22b-debt-payment');
+    await dlg.getByRole('button', { name: /^Записать приход/ }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    if ((await cashNow()) - before !== 25000) throw new Error('a debt payment of 250 in cash: the cash moved by ' + ((await cashNow()) - before));
+    await card.filter({ hasText: '750,00' }).waitFor();
+    // Money → Debts: the same card, the same sum left.
+    await page.goto(BASE + '#/money?tab=debts');
+    await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).filter({ hasText: '750,00' }).waitFor();
+    // Money in as a debt payment with nobody picked: in the cash, no debt touched.
+    await page.goto(BASE + '#/money?tab=book');
+    before = await cashNow();
+    await front('button').filter({ hasText: /^Приход$/ }).first().click();
+    await dlg.getByLabel('Сумма').fill('100');
+    await dlg.getByRole('button', { name: 'Оплата долга' }).click();
+    await dlg.getByRole('button', { name: /^Записать приход/ }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    if ((await cashNow()) - before !== 10000) throw new Error('money in with no customer: the cash moved by ' + ((await cashNow()) - before));
+    // The garage on credit: 1 000 of parts, nothing paid — the cash stays, the company owes 1 000.
+    before = await cashNow();
+    await front('button').filter({ hasText: /^Расход$/ }).first().click();
+    await dlg.getByLabel('Сумма').fill('1000');
+    await dlg.getByRole('radio', { name: 'В кредит' }).click();
+    await dlg.getByRole('button', { name: /^Записать расход/ }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    if ((await cashNow()) !== before) throw new Error('an expense on credit moved the cash');
+    await page.goto(BASE + '#/money?tab=debts');
+    await front('.kpi').filter({ hasText: 'Мы должны' }).filter({ hasText: '1 000,00' }).waitFor();
+    await shot('22c-money-debts', true);
+    // 300 of it paid in cash: the cash −300, 700 left.
+    await front('.list-row').filter({ hasText: 'Запчасти' }).filter({ hasText: '1 000,00' }).first().click();
+    await dlg.getByLabel('Сумма').fill('300');
+    await dlg.getByRole('button', { name: /^Оплатить/ }).click();
+    await dlg.locator('[data-credit-left="70000"]').waitFor();
+    if (before - (await cashNow()) !== 30000) throw new Error('300 paid towards the credit: the cash moved by ' + (before - (await cashNow())));
+    await shot('22d-credit-paid');
+    await closeModal();
+    await dlg.waitFor({ state: 'detached' });
+    await front('.kpi').filter({ hasText: 'Мы должны' }).filter({ hasText: '700,00' }).waitFor();
+    // The customer pays the rest: both jobs closed, off the debts — back in the archive.
+    await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).getByText('Принять оплату').click();
+    await dlg.getByLabel('Сумма').fill('750');
+    await dlg.getByRole('button', { name: /^Записать приход/ }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).waitFor({ state: 'detached' });
+    await page.goto(BASE + '#/');
+    await front('[role="tab"]').filter({ hasText: 'Архив' }).click();
+    await front('.job-row').filter({ hasText: 'Altima' }).waitFor();
+    await front('.job-row').filter({ hasText: 'Sunny' }).waitFor();
+    await front('[role="tab"]').filter({ hasText: /^Все/ }).click();
+  });
   await step('quick lists', async () => {
     // Settings → Lists: a line added to the complaints is a chip in "New job" (English by default).
     await page.goto(BASE + '#/settings?tab=lists');
@@ -394,6 +484,44 @@ async function launchBrowser() {
     if (!(await damage.element().getAttribute('capture'))) throw new Error('the damage photo tile must open the camera');
     await damage.setFiles(FIXTURE);
     await card.locator('.jc-mark .strip-tile img').waitFor();
+    // A hold on the same tile (v0.20): the phone's photos, and only them — no camera after it; the photo picked
+    // takes the point's photo's place, as a camera's would.
+    const photoOf = () =>
+      page.evaluate(async () => {
+        const { db } = await import('/src/db/db.ts');
+        const o = location.hash.match(/orders\/([^/?]+)/)[1];
+        const insp = await db.inspections.where('orderId').equals(o).filter((i) => i.kind === 'intake').first();
+        return (await db.damageMarks.where('inspectionId').equals(insp.id).first()).mediaId;
+      });
+    const firstPhoto = await photoOf();
+    const tb = await card.locator('.jc-mark .strip-tile[data-empty]').boundingBox();
+    const [damagePhotos] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      (async () => {
+        await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2);
+        await page.mouse.down();
+        await page.waitForTimeout(650);
+        await page.mouse.up();
+      })(),
+    ]);
+    if (await damagePhotos.element().getAttribute('capture')) throw new Error('a hold on the damage photo tile must open the photos');
+    if (await page.waitForEvent('filechooser', { timeout: 900 }).catch(() => null)) throw new Error('a hold opened the camera too');
+    await damagePhotos.setFiles(FIXTURE);
+    for (let i = 0; i < 50 && (await photoOf()) === firstPhoto; i++) await page.waitForTimeout(100);
+    if ((await photoOf()) === firstPhoto) throw new Error('the photo from the phone did not go to the point');
+    await card.locator('.jc-mark .strip-tile img').waitFor();
+    if (await car3d.count()) {
+      // Close up (v0.20): a wheel over the car brings it nearer and puts no point; the round button — the whole car.
+      const pins = await card.locator('.jc-pin').count();
+      const cb = await car3d.boundingBox();
+      await page.mouse.move(cb.x + cb.width * 0.5, cb.y + cb.height * 0.5);
+      for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -120);
+      await card.locator('.car3d-whole').waitFor();
+      await shot('30a2-job-card-close');
+      if ((await card.locator('.jc-pin').count()) !== pins) throw new Error('bringing the car closer put a point');
+      await card.locator('.car3d-whole').click();
+      await card.locator('.car3d-whole').waitFor({ state: 'detached' });
+    }
     await shot('30a3-job-card');
     await card.getByRole('button', { name: 'Готово' }).click();
     await page.getByRole('button', { name: 'Job card', exact: true }).getByText('1', { exact: true }).waitFor();
@@ -875,7 +1003,7 @@ async function launchBrowser() {
     // Nothing owed: not among the debts.
     await page.goto(BASE + '#/money?tab=debts');
     const top = page.locator('.screen[data-role="top"]');
-    await top.getByText('Всего долгов').waitFor();
+    await top.getByText('Нам должны').waitFor();
     if (await top.getByText('57721').count()) throw new Error('a job closed without payment shows as a debt');
   });
   await step('paid to the owner: closed, nothing in the cash', async () => {
@@ -909,7 +1037,7 @@ async function launchBrowser() {
     await shot('33i-job-owner', true);
     if ((await cashOf()) !== before) throw new Error('paid to the owner must not touch the cash');
     await page.goto(BASE + '#/money?tab=debts');
-    await page.locator('.screen[data-role="top"]').getByText('Всего долгов').waitFor();
+    await page.locator('.screen[data-role="top"]').getByText('Нам должны').waitFor();
     if (await page.locator('.screen[data-role="top"]').getByText('24680').count()) throw new Error('paid to the owner is not a debt');
   });
   await step('a new price: tapped on the line — agreed in person, or a waiting line back to the price', async () => {

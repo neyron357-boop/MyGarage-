@@ -122,7 +122,10 @@ export function computeReport(input: ReportInput): Report {
     r.payments[p.method] += p.kind === 'refund' ? -p.amountFils : p.amountFils;
   }
   for (const c of input.closings) if (inRange(c.date, from, to)) r.cashDiffFils += c.diffFils;
-  for (const i of input.incomes ?? []) if (!i.voidedAt && inRange(i.date, from, to)) r.otherIncome += i.amountFils;
+  // A debt payment went to its jobs' invoices (revenue already): only what no job owed is income of its own.
+  const toJobs = new Map<string, number>();
+  for (const p of input.payments) if (p.incomeId) toJobs.set(p.incomeId, (toJobs.get(p.incomeId) ?? 0) + (p.kind === 'refund' ? -p.amountFils : p.amountFils));
+  for (const i of input.incomes ?? []) if (!i.voidedAt && inRange(i.date, from, to)) r.otherIncome += i.category === 'debt' ? Math.max(0, i.amountFils - (toJobs.get(i.id) ?? 0)) : i.amountFils;
 
   r.grossProfit = r.revenueNet + r.otherIncome - r.partsCostNet - r.expensesNet;
   r.averageTicketGross = salesCount ? Math.round(r.revenueGross / salesCount) : 0;

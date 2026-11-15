@@ -4,7 +4,7 @@ import { dubaiDate, monthKey, nowIso } from '../domain/dates';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, paidNet } from '../domain/invoice';
 import { formatAed } from '../domain/money';
-import type { CashClosing, CashMovement, CashReason, Debt, Expense, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
+import type { CashClosing, CashMovement, CashReason, Debt, Expense, ExpenseMethod, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
 import { setDiscount } from './discount';
 import { AppError } from './errors';
 import { recordDecisions, sendVersion, setDone } from './estimate';
@@ -58,8 +58,8 @@ export async function addPayment(orderId: string, input: PaymentInput): Promise<
   return payment;
 }
 
-/** After a payment: close the order and its debt when nothing is due any more. */
-async function settleIfPaid(orderId: string) {
+/** After a payment (on the job, or within a "debt payment"): close the order and its debt when nothing is due any more. */
+export async function settleIfPaid(orderId: string) {
   const b = await loadOrderBundle(orderId);
   if (!b) return;
   if (bundleAmountDue(b) > 0) return;
@@ -227,17 +227,19 @@ export async function cashState() {
   // Before the first closing the cash box starts from the book's opening cash ("Cash Start").
   const opening = last?.actualFils ?? settings?.cashStartFils ?? 0;
   const t = cashTotals(open);
-  // Each movement at the moment of its operation: an income or an expense of the book has its own day (typed
-  // a day later, or a row of a money sheet brought in) — in that order, with what was in the box after it.
-  const [incomes, expenses] = await Promise.all([
+  // Each movement at the moment of its operation: an income, an expense or a payment of a credit has its own
+  // day (typed a day later, or a row of a money sheet brought in) — in that order, with what was in the box after it.
+  const [incomes, expenses, credits] = await Promise.all([
     db.incomes.bulkGet(open.map((m) => m.incomeId).filter((id): id is string => !!id)),
     db.expenses.bulkGet(open.map((m) => m.expenseId).filter((id): id is string => !!id)),
+    db.creditPayments.bulkGet(open.map((m) => m.creditPaymentId).filter((id): id is string => !!id)),
   ]);
   const entries = new Map<string, { date: string; createdAt: string }>();
   for (const e of [...incomes, ...expenses]) if (e) entries.set(e.id, e);
+  for (const c of credits) if (c) entries.set(c.id, { date: c.date, createdAt: c.paidAt });
   const placed = open
     .map((m) => {
-      const e = entries.get(m.incomeId ?? m.expenseId ?? '');
+      const e = entries.get(m.incomeId ?? m.expenseId ?? m.creditPaymentId ?? '');
       const date = e?.date ?? dubaiDate(m.at);
       // The time is shown when it is the operation's own (made that day), not the day a sheet was brought in.
       return { m, date, timed: !e || dubaiDate(m.at) === e.date, key: `${date} ${e?.createdAt ?? m.at} ${m.at}` };
@@ -288,7 +290,8 @@ export interface ExpenseInput {
   amountFils: number;
   vatFils: number;
   vendor?: string;
-  method: PayMethod;
+  /** "credit" — not paid yet: no money moves, the garage owes it (services/debts.ts, `payCredit`). */
+  method: ExpenseMethod;
   /** What it was spent on: a job, or a car / a customer without a job. */
   orderId?: string;
   vehicleId?: string;

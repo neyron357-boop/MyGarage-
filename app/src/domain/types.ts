@@ -5,6 +5,8 @@ export type Lang = 'ru' | 'en';
 export type Emirate = 'DXB' | 'AUH' | 'SHJ' | 'AJM' | 'RAK' | 'UAQ' | 'FUJ';
 export type Channel = 'whatsapp' | 'telegram' | 'call';
 export type PayMethod = 'cash' | 'card' | 'transfer';
+/** How an expense is paid: at once (cash, card, transfer) — or on credit: owed by the garage, paid later in parts. */
+export type ExpenseMethod = PayMethod | 'credit';
 export type Localized = { ru?: string; en?: string };
 
 export interface Plate {
@@ -324,6 +326,8 @@ export type MediaOwner =
   | 'movement'
   /** Money in outside a job's invoice (a sale, a small job): its photos (a slip, a transfer screenshot). */
   | 'income'
+  /** Money paid towards an expense taken on credit: its photos (a slip, a transfer screenshot). */
+  | 'credit'
   /** A supplier's business card (both sides). */
   | 'supplier'
   /** A job note's photo or voice message. */
@@ -580,6 +584,11 @@ export interface Payment {
   reference?: string;
   receiptNumber: string;
   receivedAt: string;
+  /**
+   * Received within an income (a "debt payment" taken at once and spread over the customer's jobs, v0.20): its
+   * money is that income's — no cash movement of its own, not a line of the money book.
+   */
+  incomeId?: string;
 }
 
 export type InvoiceType = 'tax_invoice' | 'simplified_tax_invoice' | 'credit_note';
@@ -643,10 +652,14 @@ export type CashReason =
   | 'parts_purchase'
   | 'expense'
   | 'income'
+  /** Money paid towards an expense taken on credit: its photos (a slip, a transfer screenshot). */
+  | 'credit'
   | 'salary'
   | 'collection'
   | 'supplier_refund'
   | 'adjustment'
+  | 'debt_payment'
+  | 'credit_payment'
   | 'other';
 
 export interface CashMovement {
@@ -659,12 +672,18 @@ export interface CashMovement {
   paymentId?: string;
   expenseId?: string;
   incomeId?: string;
+  /** Cash paid towards an expense taken on credit (`CreditPayment`). */
+  creditPaymentId?: string;
   note?: string;
   closingId?: string;
 }
 
-/** Money received outside a job's invoice: a sold item ("Sales"), a small job done on the spot, other. */
-export type IncomeCategory = 'service' | 'sales' | 'other';
+/**
+ * Money received outside a job's invoice: a sold item ("Sales"), a small job done on the spot, other — or a
+ * customer's debt paid ("debt": spread over their jobs as payments that carry this income's id; what is left over
+ * stays an income of its own).
+ */
+export type IncomeCategory = 'service' | 'sales' | 'other' | 'debt';
 
 export interface Income {
   id: string;
@@ -713,7 +732,8 @@ export interface Expense {
   amountFils: number; // gross
   vatFils: number;
   vendor?: string;
-  method: PayMethod;
+  /** 'credit' — nothing paid yet: the garage owes it (no money moves; paid later with `CreditPayment`s). */
+  method: ExpenseMethod;
   receiptMediaId?: string;
   /** What it was spent on: a job, or just a car / a customer (filled from the job when one is picked). */
   orderId?: string;
@@ -723,6 +743,22 @@ export interface Expense {
   overLimitComment?: string;
   createdAt: string;
   /** Entered by mistake: cancelled (a cash entry is reversed in the cash book, nothing is deleted). */
+  voidedAt?: string;
+}
+
+/**
+ * Money paid towards an expense taken on credit (v0.20): the money moves now, by the way it is really paid; the
+ * expense itself was counted once, when it was taken. Never changed or deleted — one made by mistake is cancelled.
+ */
+export interface CreditPayment {
+  id: string;
+  expenseId: string;
+  method: PayMethod;
+  amountFils: number;
+  date: string; // YYYY-MM-DD (Dubai)
+  paidAt: string;
+  note?: string;
+  /** Entered by mistake: cancelled (a cash one is reversed in the cash book, nothing is deleted). */
   voidedAt?: string;
 }
 

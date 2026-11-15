@@ -11,7 +11,7 @@ import { addMedia, deleteMedia } from './media';
  * taken off.
  */
 
-const OWNER: Partial<Record<LedgerSource, MediaOwner>> = { expense: 'expense', movement: 'movement', payment: 'payment', income: 'income' };
+const OWNER: Partial<Record<LedgerSource, MediaOwner>> = { expense: 'expense', movement: 'movement', payment: 'payment', income: 'income', credit: 'credit' };
 
 type EntryRef = Pick<LedgerEntry, 'id' | 'source'>;
 

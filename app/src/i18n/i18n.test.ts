@@ -28,7 +28,8 @@ describe('translations', () => {
       for (const m of text.matchAll(/\bt[c]?\(\s*'([a-zA-Z0-9_.]+)'/g)) used.add(m[1]);
       for (const m of text.matchAll(/'((?:err|stageErr|common|payment|debt|invoice|decision|estimate|sign|qc|cash|settings)\.[a-zA-Z0-9_.]+)'/g)) used.add(m[1]);
     }
-    const missing = [...used].filter((k) => !ruKeys.has(k));
+    // A plural key (i18next): its forms are `key_one`, `key_few`…
+    const missing = [...used].filter((k) => !ruKeys.has(k) && !ruKeys.has(`${k}_one`));
     expect(missing).toEqual([]);
   });
   it('no empty strings', () => {

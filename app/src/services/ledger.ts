@@ -2,12 +2,13 @@ import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
 import { buildLedger, type LedgerResult } from '../domain/ledger';
 import type { Expense, Income, IncomeCategory, PayMethod } from '../domain/types';
+import { addDebtPayment, voidDebtPayment } from './debts';
 import { AppError } from './errors';
 import { getSettings, saveSettings } from './settings';
 
 /** The whole money book (both purses, running balances) from what the app has recorded. */
 export async function loadLedger(): Promise<LedgerResult & { cashStartFils: number; cardStartFils: number; cashStartLocked: boolean }> {
-  const [settings, payments, incomes, expenses, movements, closings, orders] = await Promise.all([
+  const [settings, payments, incomes, expenses, movements, closings, orders, creditPayments] = await Promise.all([
     getSettings(),
     db.payments.toArray(),
     db.incomes.toArray(),
@@ -15,13 +16,14 @@ export async function loadLedger(): Promise<LedgerResult & { cashStartFils: numb
     db.cashMovements.toArray(),
     db.cashClosings.toArray(),
     db.orders.toArray(),
+    db.creditPayments.toArray(),
   ]);
   // Once a day was closed, the cash box counts from what was counted: the opening cash is the one that
   // closing started from (changing "Cash Start" later would no longer match the cash in the box).
   const first = [...closings].sort((a, b) => a.closedAt.localeCompare(b.closedAt))[0];
   const cashStartFils = first ? first.openingFils : settings.cashStartFils ?? 0;
   const cardStartFils = settings.cardStartFils ?? 0;
-  return { ...buildLedger({ cashStartFils, cardStartFils, payments, incomes, expenses, movements, closings, orders }), cashStartFils, cardStartFils, cashStartLocked: !!first };
+  return { ...buildLedger({ cashStartFils, cardStartFils, payments, incomes, expenses, movements, closings, creditPayments, orders }), cashStartFils, cardStartFils, cashStartLocked: !!first };
 }
 
 /** "Cash Start" and "Card Start": what was in the cash box and on the card when the book began. */
@@ -57,9 +59,13 @@ export interface IncomeInput extends Links {
   note?: string;
 }
 
-/** Money received without a job invoice: an item sold, a small job on the spot, other. */
+/**
+ * Money received without a job invoice: an item sold, a small job on the spot, other. A customer's debt paid
+ * ("debt") is spread over their jobs — `addDebtPayment`.
+ */
 export async function addIncome(input: IncomeInput): Promise<Income> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  if (input.category === 'debt') return (await addDebtPayment({ amountFils: input.amountFils, method: input.method, customerId: input.customerId, orderId: input.orderId, date: input.date, note: input.note })).income;
   const links = await resolveLinks(input);
   const now = nowIso();
   const income: Income = {
@@ -81,10 +87,21 @@ export async function addIncome(input: IncomeInput): Promise<Income> {
   return income;
 }
 
-/** Change what an entry was for (job, car, customer, note, category); the money itself stays. */
+/**
+ * Change what an entry was for (job, car, customer, note, category); the money itself stays. A debt payment
+ * keeps its customer and stays a debt payment (its jobs' payments were made from it): only its note changes.
+ */
 export async function updateIncome(id: string, patch: Partial<Pick<Income, 'category' | 'note'>> & Links): Promise<void> {
+  const income = await db.incomes.get(id);
+  if (!income) throw new AppError('err.notFound');
+  if (income.category === 'debt' || patch.category === 'debt') {
+    if ('note' in patch) await db.incomes.update(id, { note: patch.note?.trim() || undefined });
+    return;
+  }
   const links = 'orderId' in patch || 'vehicleId' in patch || 'customerId' in patch ? await resolveLinks(patch) : {};
-  await db.incomes.update(id, { ...patch, ...links, note: patch.note?.trim() || undefined });
+  const clean: Partial<Income> = { ...patch, ...links };
+  if ('note' in patch) clean.note = patch.note?.trim() || undefined;
+  await db.incomes.update(id, clean);
 }
 
 export async function updateExpense(id: string, patch: Partial<Pick<Expense, 'categoryId' | 'note' | 'vendor'>> & Links): Promise<void> {
@@ -100,6 +117,8 @@ export async function updateExpense(id: string, patch: Partial<Pick<Expense, 'ca
  * book; if it was cash, the cash book gets the opposite movement, so the cash in the box still adds up.
  */
 export async function voidIncome(id: string): Promise<void> {
+  // A debt payment gives back to each job what it paid on it.
+  if ((await db.incomes.get(id))?.category === 'debt') return voidDebtPayment(id);
   await db.transaction('rw', db.incomes, db.cashMovements, async () => {
     const i = await db.incomes.get(id);
     if (!i || i.voidedAt) return;
@@ -112,9 +131,11 @@ export async function voidIncome(id: string): Promise<void> {
 }
 
 export async function voidExpense(id: string): Promise<void> {
-  await db.transaction('rw', db.expenses, db.cashMovements, async () => {
+  await db.transaction('rw', db.expenses, db.cashMovements, db.creditPayments, async () => {
     const e = await db.expenses.get(id);
     if (!e || e.voidedAt) return;
+    // On credit with money already paid towards it: those payments are cancelled first (each moved money).
+    if (e.method === 'credit' && (await db.creditPayments.where('expenseId').equals(id).toArray()).some((p) => !p.voidedAt)) throw new AppError('err.creditPaid');
     const now = nowIso();
     await db.expenses.update(id, { voidedAt: now });
     if (e.method === 'cash') {
