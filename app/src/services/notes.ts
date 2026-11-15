@@ -9,12 +9,13 @@ import { addMedia } from './media';
  * promised — a few words, a photo, a video or a voice message. They are the manager's own: not on any
  * document, can be removed.
  */
-export async function addNote(orderId: string, input: { text?: string; photo?: Blob; video?: Blob; voice?: Blob; seconds?: number; peaks?: number[] }): Promise<JobNote> {
+export async function addNote(orderId: string, input: { text?: string; photo?: Blob; video?: Blob; voice?: Blob; seconds?: number; peaks?: number[]; replyTo?: string }): Promise<JobNote> {
   const text = input.text?.trim();
   if (!text && !input.photo && !input.video && !input.voice) throw new AppError('err.emptyNote');
   const id = uid();
   const kind: JobNote['kind'] = input.voice ? 'voice' : input.video ? 'video' : input.photo ? 'photo' : 'text';
   const note: JobNote = { id, orderId, kind, text: text || undefined, createdAt: nowIso() };
+  if (input.replyTo) note.replyTo = input.replyTo;
   if (input.voice) {
     note.mediaId = (await addMedia({ ownerType: 'note', ownerId: id, slot: 'voice', file: input.voice, kind: 'audio' })).id;
     note.seconds = input.seconds ? Math.round(input.seconds) : undefined;

@@ -950,7 +950,9 @@ export const en: typeof ru = {
     fullDue: 'Full amount',
     save: 'Record',
     kind: { payment: 'Payment', prepayment: 'Prepayment', refund: 'Refund' },
-    method: { cash: 'Cash', card: 'Card', transfer: 'Transfer' },
+    method: { cash: 'Cash', card: 'Card', transfer: 'Transfer', debt: 'On credit', unpaid: 'No payment' },
+    closeUnpaid: 'Close without payment',
+    closedUnpaid: 'Closed without payment',
   },
   qi: {
     partNo: 'Part no.',
@@ -1523,7 +1525,8 @@ export const en: typeof ru = {
   },
   jobCard: {
     title: 'Job card',
-    hint: 'Tap where it is damaged',
+    hint: 'Tap — a damage, drag — turn',
+    view3d: '3D',
     signed: 'The check-in act is signed',
     photo: 'Photo',
   },
@@ -1546,6 +1549,11 @@ export const en: typeof ru = {
     copy: 'Copy',
     copied: 'Copied',
     empty: 'Everything to remember',
+    reply: 'Reply',
+    pickedN: 'Selected: {{n}}',
+    removedN: 'Notes deleted: {{n}}',
+    gone: 'Note deleted',
+    video: 'Video',
   },
   offer: {
     oem: 'Original',

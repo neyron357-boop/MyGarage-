@@ -1,7 +1,9 @@
-import { ActionIcon, Button, Modal, Stack, Text, Textarea } from '@mantine/core';
+import { ActionIcon, Button, Text, Textarea } from '@mantine/core';
 import {
+  IconArrowBackUp,
   IconArrowUp,
   IconCamera,
+  IconCheck,
   IconCopy,
   IconMicrophone,
   IconNotes,
@@ -14,16 +16,15 @@ import {
 } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { dayHeading, dubaiDate, dubaiTime, formatDateTime } from '../../domain/dates';
+import { dayHeading, dubaiDate, dubaiTime } from '../../domain/dates';
 import type { JobNote } from '../../domain/types';
 import { flatPeaks } from '../../domain/waveform';
 import { cachedMediaUrl, mediaUrl } from '../../services/media';
-import { addNote, removeNote, restoreNote, setNotePeaks } from '../../services/notes';
+import { addNote, removeNote, restoreNote, setNotePeaks, type RemovedNote } from '../../services/notes';
 import { copyText } from '../../ui/clipboard';
 import { MediaImage, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
-import { SheetFor } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { useAutoAnimate } from '../../ui/motion';
 import { PhotoViewer } from '../../ui/PhotoViewer';
@@ -31,6 +32,7 @@ import { canRecord, clock, useRecorder } from '../../ui/recorder';
 import { peaksOfBlob, rateLabel, savedVoiceRate, saveVoiceRate, voicePeaks, VOICE_RATES, type VoiceRate } from '../../ui/voice';
 import { AppError } from '../../services/errors';
 import { useScreen } from '../../ui/stack';
+import { useSwipeReply } from '../../ui/swipeReply';
 
 /** Notes this close in time read as one run: one tail, no gap between them. */
 const RUN_MINUTES = 3;
@@ -382,51 +384,137 @@ interface BubbleProps {
   /** A voice note that is the player's current one: playing, or paused at `pos` (seconds). */
   voice: { playing: boolean; pos: number } | null;
   rate: VoiceRate;
+  /** The note this one answers ('gone' — it was deleted): on top of the bubble, a tap goes to it. */
+  quote?: JobNote | 'gone';
+  /** Notes are being picked (a long press began it): a tap picks or lets go, nothing else. */
+  picking: boolean;
+  picked: boolean;
   onPlay: (n: JobNote) => void;
   onSeek: (n: JobNote, frac: number) => void;
   onRate: () => void;
   onPhoto: (n: JobNote) => void;
-  onMenu: (n: JobNote) => void;
+  /** A long press: picking begins with this note. */
+  onHold: (n: JobNote) => void;
+  onPick: (n: JobNote) => void;
+  /** A swipe to the right: the answer to it is written next. */
+  onReply: (n: JobNote) => void;
+  onQuote: (id: string) => void;
 }
 
-/** One note as a message of one's own: on the right, the time in its corner; a long press — copy or delete. */
-const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, onPlay, onSeek, onRate, onPhoto, onMenu }: BubbleProps) {
+/** What a note is, in a few words: its text, or what it holds (a photo, a video, a voice note and its length). */
+function noteGist(n: JobNote, t: (k: string) => string): string {
+  if (n.kind === 'voice') return `${t('notes.voice')} · ${clock(n.seconds ?? 0)}`;
+  if (n.kind === 'photo') return n.text || t('notes.photo');
+  if (n.kind === 'video') return n.text || t('notes.video');
+  return n.text ?? '';
+}
+
+/** The note answered, on top of the answer (a photo's thumbnail beside its words); a tap goes to it. */
+function Quote({ note, onGo }: { note: JobNote | 'gone'; onGo: (id: string) => void }) {
   const { t } = useTranslation();
-  const press = useLongPress(() => onMenu(n));
-  const time = <span className="note-time">{dubaiTime(n.createdAt)}</span>;
-  const media = n.kind === 'photo' || n.kind === 'video';
+  if (note === 'gone')
+    return (
+      <span className="note-quote" data-gone>
+        <span className="note-quote-text">{t('notes.gone')}</span>
+      </span>
+    );
   return (
-    <div className="note-row" data-gap={gap || undefined}>
-      {media && n.mediaId ? (
-        <div className="note-media" data-tail={tail || undefined} data-kind={n.kind} {...press.handlers}>
-          {n.kind === 'photo' ? (
-            <button
-              type="button"
-              className="note-photo"
-              aria-label={t('notes.photo')}
-              onClick={() => {
-                if (!press.consumeClick()) onPhoto(n);
-              }}
-            >
-              <MediaImage id={n.mediaId} card h="100%" w="100%" radius="0" />
-            </button>
-          ) : (
-            <NoteVideo id={n.mediaId} />
-          )}
-          {time}
-        </div>
-      ) : (
-        <div className="note-bubble" data-tail={tail || undefined} data-kind={n.kind} {...press.handlers}>
-          {n.kind === 'voice' ? (
-            <VoiceNote n={n} voice={voice} rate={rate} onPlay={onPlay} onSeek={onSeek} onRate={onRate} consumeClick={press.consumeClick} held={press.held} time={time} />
-          ) : (
-            <>
-              <span className="note-text">{n.text}</span>
-              {time}
-            </>
-          )}
-        </div>
+    <button
+      type="button"
+      className="note-quote"
+      onClick={(e) => {
+        e.stopPropagation();
+        onGo(note.id);
+      }}
+    >
+      {note.kind === 'photo' && note.mediaId && (
+        <span className="note-quote-thumb">
+          <MediaImage id={note.mediaId} h={34} w={34} radius="0" />
+        </span>
       )}
+      <span className="note-quote-text">{noteGist(note, t)}</span>
+    </button>
+  );
+}
+
+/**
+ * One note as a message of one's own: on the right, the time in its corner. A swipe to the right answers it
+ * (ui/swipeReply.ts); a long press begins picking notes (a tick on the left; a tap then picks or lets go).
+ */
+const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, quote, picking, picked, onPlay, onSeek, onRate, onPhoto, onHold, onPick, onReply, onQuote }: BubbleProps) {
+  const { t } = useTranslation();
+  const press = useLongPress(() => onHold(n));
+  const swipe = useSwipeReply(() => onReply(n), !picking);
+  const handlers = {
+    onTouchStart: (e: React.TouchEvent<HTMLElement>) => {
+      press.handlers.onTouchStart(e);
+      swipe.onTouchStart(e);
+    },
+    onTouchMove: (e: React.TouchEvent<HTMLElement>) => {
+      press.handlers.onTouchMove(e);
+      swipe.onTouchMove(e);
+    },
+    onTouchEnd: (e: React.TouchEvent<HTMLElement>) => {
+      press.handlers.onTouchEnd(e);
+      swipe.onTouchEnd();
+    },
+    onTouchCancel: () => {
+      press.handlers.onTouchCancel();
+      swipe.onTouchCancel();
+    },
+    onContextMenu: press.handlers.onContextMenu,
+  };
+  const time = <span className="note-time">{dubaiTime(n.createdAt)}</span>;
+  const media = (n.kind === 'photo' || n.kind === 'video') && !!n.mediaId;
+  const q = quote ? <Quote note={quote} onGo={onQuote} /> : null;
+  return (
+    <div className="note-row" data-gap={gap || undefined} data-picking={picking || undefined} data-picked={picked || undefined} data-note-id={n.id}>
+      {picking && (
+        <span className="note-tick" aria-hidden>
+          {picked && <IconCheck size={15} stroke={3} />}
+        </span>
+      )}
+      <div className="note-swipe" {...handlers}>
+        <span className="note-reply-icon" aria-hidden>
+          <IconArrowBackUp size={18} stroke={2.2} />
+        </span>
+        {media ? (
+          <>
+            {q}
+            <div className="note-media" data-tail={tail || undefined} data-kind={n.kind}>
+              {n.kind === 'photo' ? (
+                <button
+                  type="button"
+                  className="note-photo"
+                  aria-label={t('notes.photo')}
+                  onClick={() => {
+                    if (!press.consumeClick()) onPhoto(n);
+                  }}
+                >
+                  <MediaImage id={n.mediaId!} card h="100%" w="100%" radius="0" />
+                </button>
+              ) : (
+                <NoteVideo id={n.mediaId!} />
+              )}
+              {time}
+            </div>
+          </>
+        ) : (
+          <div className="note-bubble" data-tail={tail || undefined} data-kind={n.kind}>
+            {q}
+            {n.kind === 'voice' ? (
+              <VoiceNote n={n} voice={voice} rate={rate} onPlay={onPlay} onSeek={onSeek} onRate={onRate} consumeClick={press.consumeClick} held={press.held} time={time} />
+            ) : (
+              <>
+                <span className="note-text">{n.text}</span>
+                {time}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      {/* While picking, the whole row is one tap: the note is picked or let go (its photo, its voice wait). */}
+      {picking && <button type="button" className="note-pick" aria-pressed={picked} aria-label={noteGist(n, t) || t('notes.title')} onClick={() => onPick(n)} />}
     </div>
   );
 });
@@ -481,8 +569,25 @@ function useChatScroll(fill: React.RefObject<HTMLDivElement>, count: number) {
  */
 const drafts = new Map<string, string>();
 
-/** The bottom of the chat: "+" (photos and videos from the phone), the text, the camera and the voice. */
-function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () => void; onFocus: () => void }) {
+/**
+ * The bottom of the chat: "+" (photos and videos from the phone), the text, the camera and the voice. Answering a
+ * note (`reply`): the note above the field (× lets it go) — whatever is sent next answers it.
+ */
+function Composer({
+  orderId,
+  onSent,
+  onFocus,
+  reply,
+  onReplyDone,
+  field,
+}: {
+  orderId: string;
+  onSent: () => void;
+  onFocus: () => void;
+  reply: JobNote | null;
+  onReplyDone: () => void;
+  field: React.RefObject<HTMLTextAreaElement>;
+}) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [text, setShown] = useState(() => drafts.get(orderId) ?? '');
@@ -497,17 +602,19 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
   const files = (list: File[]) => {
     if (!list.length) return;
     void run(async () => {
-      for (const f of list) await addNote(orderId, f.type.startsWith('video/') ? { video: f } : { photo: f });
+      for (const f of list) await addNote(orderId, f.type.startsWith('video/') ? { video: f, replyTo: reply?.id } : { photo: f, replyTo: reply?.id });
       haptic('light');
+      onReplyDone();
       onSent();
     });
   };
   const send = () =>
     run(async () => {
       if (!text.trim()) return;
-      await addNote(orderId, { text });
+      await addNote(orderId, { text, replyTo: reply?.id });
       setText('');
       haptic('light');
+      onReplyDone();
       onSent();
     });
   const record = () =>
@@ -515,8 +622,9 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
       const r = await rec.start();
       if (r) {
         // The recording is kept first; its bars follow a moment later (reading it must never cost the note).
-        const note = await addNote(orderId, { voice: r.blob, seconds: r.seconds });
+        const note = await addNote(orderId, { voice: r.blob, seconds: r.seconds, replyTo: reply?.id });
         haptic('success');
+        onReplyDone();
         onSent();
         void peaksOfBlob(r.blob)
           .then((p) => p && setNotePeaks(note.id, p))
@@ -543,13 +651,30 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
         </ActionIcon>
       </div>
     );
+  const replying = reply && (
+    <div className="notes-reply glass" role="group" aria-label={t('notes.reply')}>
+      <IconArrowBackUp size={20} stroke={2.2} className="notes-reply-arrow" aria-hidden />
+      {reply.kind === 'photo' && reply.mediaId && (
+        <span className="note-quote-thumb">
+          <MediaImage id={reply.mediaId} h={34} w={34} radius="0" />
+        </span>
+      )}
+      <span className="notes-reply-text">{noteGist(reply, t)}</span>
+      <ActionIcon size={32} radius="xl" variant="subtle" color="gray" aria-label={t('common.cancel')} onClick={onReplyDone}>
+        <IconX size={18} />
+      </ActionIcon>
+    </div>
+  );
   return (
+    <div className="notes-bottom">
+    {replying}
     <div className="notes-composer">
       <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('notes.attach')} loading={busy} onClick={() => gallery.current?.click()}>
         <IconPlus size={22} />
       </ActionIcon>
       <div className="notes-field glass">
         <Textarea
+          ref={field}
           aria-label={t('notes.add')}
           placeholder={t('notes.add')}
           autosize
@@ -609,38 +734,86 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
         }}
       />
     </div>
+    </div>
   );
 }
 
 /**
  * The job's "Notes" tab: a chat with oneself — everything to remember about the car and the job, typed,
- * photographed, filmed or said. The newest at the bottom, by day; a long press copies or deletes.
+ * photographed, filmed or said. The newest at the bottom, by day. A swipe to the right on a note answers it; a
+ * long press begins picking notes — several at once: answer the one, copy their words, delete them (with Undo).
  */
 export function NotesChat({ orderId, notes, editable }: { orderId: string; notes: JobNote[]; editable: boolean }) {
   const { t } = useTranslation();
   const lang = useLang();
   const { run } = useAction();
-  const [menu, setMenu] = useState<JobNote | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [reply, setReply] = useState<JobNote | null>(null);
+  const [picked, setPicked] = useState<Set<string> | null>(null);
   const fill = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
   const sorted = [...notes].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const byId = new Map(sorted.map((n) => [n.id, n]));
   const player = usePlayer(sorted);
   const onPhoto = useCallback((n: JobNote) => setViewing(n.id), []);
   const toEnd = useChatScroll(fill, sorted.length);
   const animate = useAutoAnimate<HTMLDivElement>();
+  const picking = !!picked;
 
-  const remove = (n: JobNote) =>
+  const onHold = useCallback((n: JobNote) => setPicked((p) => p ?? new Set([n.id])), []);
+  const onPick = useCallback((n: JobNote) => {
+    haptic('selection');
+    setPicked((p) => {
+      if (!p) return p;
+      const next = new Set(p);
+      if (next.has(n.id)) next.delete(n.id);
+      else next.add(n.id);
+      return next.size ? next : null;
+    });
+  }, []);
+  // The answer is written next: the field takes the keyboard (in the swipe's own touch — an iPhone opens it only so).
+  const onReply = useCallback((n: JobNote) => {
+    setReply(n);
+    field.current?.focus();
+  }, []);
+  // The note answered: brought into sight, and it nods.
+  const onQuote = useCallback((id: string) => {
+    const row = fill.current?.querySelector<HTMLElement>(`[data-note-id="${id}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    row.removeAttribute('data-flash');
+    void row.offsetWidth;
+    row.setAttribute('data-flash', '');
+    window.setTimeout(() => row.removeAttribute('data-flash'), 1300);
+  }, []);
+
+  const chosen = sorted.filter((n) => picked?.has(n.id));
+  const words = chosen
+    .map((n) => n.text?.trim())
+    .filter(Boolean)
+    .join('\n');
+  const remove = (list: JobNote[]) =>
     run(async () => {
       // A voice note being played goes quiet with it.
-      player.drop(n.id);
-      const removed = await removeNote(n.id);
-      setMenu(null);
-      if (removed) undoToast(t('notes.removed'), t('common.undo'), () => void restoreNote(removed));
+      for (const n of list) player.drop(n.id);
+      const removed: RemovedNote[] = [];
+      for (const n of list) {
+        const r = await removeNote(n.id);
+        if (r) removed.push(r);
+      }
+      setPicked(null);
+      if (reply && list.some((n) => n.id === reply.id)) setReply(null);
+      if (removed.length)
+        undoToast(removed.length > 1 ? t('notes.removedN', { n: removed.length }) : t('notes.removed'), t('common.undo'), () => {
+          void (async () => {
+            for (const r of removed) await restoreNote(r);
+          })();
+        });
     });
-  const copy = (n: JobNote) =>
+  const copy = () =>
     run(async () => {
-      setMenu(null);
-      if (!n.text || !(await copyText(n.text))) throw new AppError('err.copy');
+      setPicked(null);
+      if (!words || !(await copyText(words))) throw new AppError('err.copy');
     }, 'notes.copied');
 
   const days: [string, JobNote[]][] = [];
@@ -663,7 +836,7 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
             <Text c="dimmed">{t('notes.empty')}</Text>
           </div>
         ) : (
-          <div className="notes-list" ref={animate}>
+          <div className="notes-list" ref={animate} data-picking={picking || undefined}>
             {days.flatMap(([day, list]) => {
               const head = dayHeading(day, lang);
               return [
@@ -678,11 +851,17 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
                     tail={i === list.length - 1 || minutesApart(n, list[i + 1]) > RUN_MINUTES}
                     voice={player.cur?.id === n.id ? { playing: player.cur.playing, pos: player.pos } : null}
                     rate={player.rate}
+                    quote={n.replyTo ? (byId.get(n.replyTo) ?? 'gone') : undefined}
+                    picking={picking}
+                    picked={!!picked?.has(n.id)}
                     onPlay={player.toggle}
                     onSeek={player.seek}
                     onRate={player.cycleRate}
                     onPhoto={onPhoto}
-                    onMenu={setMenu}
+                    onHold={onHold}
+                    onPick={onPick}
+                    onReply={onReply}
+                    onQuote={onQuote}
                   />
                 )),
               ];
@@ -690,29 +869,59 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
           </div>
         )}
       </div>
-      {editable && (
+      {picking ? (
+        // Picking: how many, and what can be done with them — answer (one), copy their words, delete.
         <StickyBar>
-          <Composer orderId={orderId} onSent={() => toEnd(true)} onFocus={() => window.setTimeout(() => toEnd(true), 350)} />
+          <div className="notes-composer notes-picking" role="toolbar" aria-label={t('notes.pickedN', { n: chosen.length })}>
+            <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('common.cancel')} onClick={() => setPicked(null)}>
+              <IconX size={22} />
+            </ActionIcon>
+            <div className="notes-field glass notes-count">
+              <Text fw={600} fz={17} className="tnum">
+                {t('notes.pickedN', { n: chosen.length })}
+              </Text>
+            </div>
+            {editable && chosen.length === 1 && (
+              <ActionIcon
+                size={44}
+                radius="xl"
+                variant="default"
+                className="notes-round glass"
+                aria-label={t('notes.reply')}
+                onClick={() => {
+                  setPicked(null);
+                  onReply(chosen[0]);
+                }}
+              >
+                <IconArrowBackUp size={21} />
+              </ActionIcon>
+            )}
+            {!!words && (
+              <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('notes.copy')} onClick={() => void copy()}>
+                <IconCopy size={20} />
+              </ActionIcon>
+            )}
+            {editable && (
+              <ActionIcon size={44} radius="xl" color="red" aria-label={t('common.delete')} onClick={() => void remove(chosen)}>
+                <IconTrash size={20} />
+              </ActionIcon>
+            )}
+          </div>
         </StickyBar>
+      ) : (
+        editable && (
+          <StickyBar>
+            <Composer
+              orderId={orderId}
+              onSent={() => toEnd(true)}
+              onFocus={() => window.setTimeout(() => toEnd(true), 350)}
+              reply={reply}
+              onReplyDone={() => setReply(null)}
+              field={field}
+            />
+          </StickyBar>
+        )
       )}
-      <SheetFor value={menu}>
-        {(n, opened) => (
-          <Modal opened={opened} onClose={() => setMenu(null)} title={formatDateTime(n.createdAt)}>
-            <Stack gap="sm">
-              {n.text && (
-                <Button variant="light" size="lg" leftSection={<IconCopy size={20} />} onClick={() => void copy(n)}>
-                  {t('notes.copy')}
-                </Button>
-              )}
-              {editable && (
-                <Button variant="light" color="red" size="lg" leftSection={<IconTrash size={20} />} onClick={() => void remove(n)}>
-                  {t('common.delete')}
-                </Button>
-              )}
-            </Stack>
-          </Modal>
-        )}
-      </SheetFor>
       {viewing && (
         <PhotoViewer
           items={photos.map((n) => ({ id: n.mediaId!, title: n.text }))}
@@ -722,7 +931,17 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
           actions={(it) => {
             const n = photos.find((x) => x.mediaId === it.id);
             return editable && n ? (
-              <Button radius="xl" size="md" variant="light" color="red" leftSection={<IconTrash size={18} />} onClick={() => (setViewing(null), void remove(n))}>
+              <Button
+                radius="xl"
+                size="md"
+                variant="light"
+                color="red"
+                leftSection={<IconTrash size={18} />}
+                onClick={() => {
+                  setViewing(null);
+                  void remove([n]);
+                }}
+              >
                 {t('common.delete')}
               </Button>
             ) : null;

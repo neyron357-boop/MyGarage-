@@ -16,7 +16,7 @@ async function launchBrowser() {
   const failures = [];
   for (const channel of channels) {
     try {
-      const browser = await chromium.launch(channel === 'chromium' ? {} : { channel });
+      const browser = await chromium.launch({ ...(channel === 'chromium' ? {} : { channel }), args: ['--enable-unsafe-swiftshader'] });
       console.log(`browser: ${channel} ${browser.version()}`);
       return browser;
     } catch (e) {
@@ -235,9 +235,9 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: /^Оплата/ }).waitFor();
-    // "…" → "В долг": the customer signs for the sum and the date, and the car goes.
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await dlg.getByRole('button', { name: 'В долг' }).click();
+    // "Оплата" → "В долг" (v0.19, in the payment sheet): the customer signs for the sum and the date, and the car goes.
+    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await dlg.getByRole('button', { name: 'В долг', exact: true }).click();
     await dlg.getByText('Подпись клиента').waitFor();
     const canvas = dlg.locator('canvas').first();
     await canvas.scrollIntoViewIfNeeded();
@@ -246,8 +246,15 @@ async function launchBrowser() {
     for (let i = 0; i < 15; i++) await page.mouse.move(c.x + 30 + i * 15, c.y + 100 - Math.cos(i / 2) * 30);
     await page.mouse.up();
     await shot('19-on-credit', true);
-    await dlg.getByRole('button', { name: 'Подписать расписку' }).click();
+    await dlg.getByRole('button', { name: /^Выдать в долг/ }).click();
     await page.getByText('Долг оформлен').first().waitFor();
+    // The signed debt: a row under the total (its paper a tap away) — and under Money → Debts.
+    await front('.list-row').filter({ hasText: 'Долг до' }).waitFor();
+    const number = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.orders.get(id)).number, patrol);
+    await page.goto(BASE + '#/money?tab=debts');
+    await page.locator('.screen[data-role="top"]').getByText('№' + number).first().waitFor();
+    await page.goto(BASE + '#/orders/' + patrol);
+    await page.getByRole('button', { name: /^Оплата/ }).waitFor();
     // Gone with money due: the step "debt"; its money is still taken here, and the signed paper opens from "…".
     const gone = await page.evaluate(async (id) => { const { loadOrderBundle } = await import('/src/services/orders.ts'); const { phaseOf } = await import('/src/services/flow.ts'); const b = await loadOrderBundle(id); return { phase: phaseOf(b), stage: b.order.stage, debts: b.debts.map((d) => d.status) }; }, patrol);
     if (gone.phase !== 'debt' || gone.stage !== 'delivered' || gone.debts.join() !== 'open') throw new Error('on credit: ' + JSON.stringify(gone));
@@ -366,11 +373,21 @@ async function launchBrowser() {
     // The job card (v0.17.3): the car's outline — a tap where it is damaged, its kind, its photo; the chip counts.
     await page.getByRole('button', { name: 'Job card', exact: true }).click();
     const card = page.getByRole('dialog', { name: 'Job card' });
-    // Measured once the sheet has come up (while it slides, the drawing is still moving).
-    await card.locator('svg[role="img"]').waitFor();
+    // The car in 3D (v0.19) — or the drawing where there is no WebGL. Measured once the sheet has come up.
+    const car3d = card.locator('canvas.car3d-canvas');
+    const flat = card.locator('svg[role="img"]');
+    await car3d.or(flat).first().waitFor({ timeout: 20000 });
     await settled();
-    const outline = await card.locator('svg[role="img"]').boundingBox();
-    await page.mouse.click(outline.x + outline.width * 0.3, outline.y + outline.height * 0.3);
+    if (await car3d.count()) {
+      // From above, then a tap on the roof: a point on the top.
+      await card.getByText('Сверху', { exact: true }).click();
+      await page.waitForTimeout(800);
+      const b = await car3d.boundingBox();
+      await page.mouse.click(b.x + b.width * 0.5, b.y + b.height * 0.5);
+    } else {
+      const outline = await flat.boundingBox();
+      await page.mouse.click(outline.x + outline.width * 0.3, outline.y + outline.height * 0.3);
+    }
     await card.getByRole('button', { name: 'Вмятина', exact: true }).click();
     await card.getByRole('button', { name: 'Вмятина', exact: true }).and(page.locator('[data-active="true"]')).waitFor();
     const [damage] = await Promise.all([page.waitForEvent('filechooser'), card.locator('.jc-mark .strip-tile[data-empty]').click()]);
@@ -829,19 +846,22 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: 'Оплата · 210,00 AED' }).waitFor();
-    // “…” → No payment: the car leaves, nothing owed — no payment, no debt.
+    // "…" no longer has "On credit" or "No payment" (v0.19): both are in the payment sheet.
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await dlg.getByRole('button', { name: 'Без оплаты' }).waitFor();
-    await page.waitForTimeout(600);
-    await shot('33c2-more-unpaid');
-    await dlg.getByRole('button', { name: 'Без оплаты' }).click();
-    const ask = page.getByRole('dialog', { name: 'Закрыть без оплаты?' });
-    await ask.getByText('210,00').waitFor();
+    await dlg.getByRole('button', { name: 'Клиент', exact: true }).waitFor();
+    if ((await dlg.getByRole('button', { name: 'Без оплаты', exact: true }).count()) || (await dlg.getByRole('button', { name: 'В долг', exact: true }).count())) throw new Error('"…" still has On credit / No payment');
+    await page.keyboard.press('Escape');
+    await dlg.waitFor({ state: 'hidden' });
+    // "Оплата" → No payment: the car leaves, nothing owed — no payment, no debt.
+    await page.getByRole('button', { name: /^Оплата ·/ }).click();
+    await dlg.getByRole('button', { name: 'Без оплаты', exact: true }).click();
+    await dlg.getByRole('button', { name: 'Оплата у главного' }).waitFor();
+    await page.waitForTimeout(500);
     await shot('33d-close-unpaid');
     // Two ways: paid to the owner (the usual), or no money at all — here, no money.
-    await ask.getByRole('button', { name: 'Оплата у главного' }).waitFor();
-    await ask.getByRole('button', { name: 'Денег не будет' }).click();
-    await ask.waitFor({ state: 'hidden' });
+    await dlg.getByRole('button', { name: 'Денег не будет' }).click();
+    await dlg.getByRole('button', { name: 'Закрыть без оплаты' }).click();
+    await dlg.waitFor({ state: 'hidden' });
     await page.getByText('Закрыт').first().waitFor();
     await page.locator('.list-row').filter({ hasText: 'Без оплаты' }).filter({ hasText: '210,00' }).first().waitFor();
     // (the main button of a job to be paid: «Оплата · сумма»)
@@ -876,13 +896,13 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: 'Оплата · 1 050,00 AED' }).waitFor();
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await dlg.getByRole('button', { name: 'Без оплаты' }).click();
-    const ask = page.getByRole('dialog', { name: 'Закрыть без оплаты?' });
-    await ask.getByText('1 050,00').waitFor();
+    await page.getByRole('button', { name: /^Оплата ·/ }).click();
+    await dlg.getByRole('button', { name: 'Без оплаты', exact: true }).click();
+    // Paid to the owner is the one picked at first.
+    await dlg.getByRole('button', { name: 'Оплата у главного' }).and(page.locator('[data-active="true"]')).waitFor();
     await shot('33h-close-owner');
-    await ask.getByRole('button', { name: 'Оплата у главного' }).click();
-    await ask.waitFor({ state: 'hidden' });
+    await dlg.getByRole('button', { name: 'Закрыть без оплаты' }).click();
+    await dlg.waitFor({ state: 'hidden' });
     await page.getByText('Закрыт').first().waitFor();
     if (await page.getByRole('button', { name: /^Оплата ·/ }).count()) throw new Error('a job paid to the owner still asks for payment');
     await page.locator('.list-row').filter({ hasText: 'Оплата у главного' }).filter({ hasText: '1 050,00' }).first().waitFor();
@@ -982,6 +1002,30 @@ async function launchBrowser() {
     await page.getByLabel('Заметка').fill('Front pads at 2 mm, discs OK');
     await front('[aria-label="Добавить"]').click();
     await front('.note-bubble').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
+    // A note answered (v0.19): picked by a long press (a right click here) — the bar: how many, Reply, Copy, Delete;
+    // "Reply" — the note above the field; the answer quotes it, and the bar is gone once it is sent.
+    const rowOf = (text) => front('.note-row').filter({ has: page.locator('.note-text', { hasText: text }) });
+    await rowOf('Front pads at 2 mm').locator('.note-bubble').click({ button: 'right' });
+    await front('.notes-picking').getByText('Выбрано: 1').waitFor();
+    await front('.notes-picking').getByRole('button', { name: 'Ответить' }).click();
+    await front('.notes-reply').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
+    await page.getByLabel('Заметка').fill('Ordered new pads');
+    await front('[aria-label="Добавить"]').click();
+    await rowOf('Ordered new pads').locator('.note-quote').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
+    if (await front('.notes-reply').count()) throw new Error('the answer bar stays after the answer is sent');
+    // Two picked: copied together (the words, in order); picking ends.
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await rowOf('Ordered new pads').locator('.note-bubble').click({ button: 'right' });
+    await front('.notes-picking').getByText('Выбрано: 1').waitFor();
+    await rowOf('Front pads at 2 mm').locator('.note-pick').click();
+    await front('.notes-picking').getByText('Выбрано: 2').waitFor();
+    await shot('34b-notes-picked');
+    await front('.notes-picking').getByRole('button', { name: 'Скопировать' }).click();
+    await page.getByText('Скопировано').first().waitFor();
+    await front('.notes-picking').waitFor({ state: 'detached' });
+    // (Windows keeps the clipboard's lines as CRLF.)
+    const copied = (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n');
+    if (copied !== 'Front pads at 2 mm, discs OK\nOrdered new pads') throw new Error('notes copied: ' + JSON.stringify(copied));
     await front('input[data-note-media]').setInputFiles(FIXTURE);
     await front('.note-photo').first().waitFor();
     // Voice messages as in WhatsApp (v0.17.2): a recording made in the page (2 s of a tone, louder in the middle),
@@ -1073,7 +1117,7 @@ async function launchBrowser() {
     await page.waitForTimeout(450);
     await jobSwipe(-1);
     await page.waitForFunction(() => location.hash.includes('tab=notes'));
-    await front('.note-bubble').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
+    await front('.note-text').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
     await page.waitForTimeout(450);
     await front('.scroll-tabs > button').filter({ hasText: 'Основная' }).click();
     await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
@@ -1332,8 +1376,9 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByRole('button', { name: 'Загрузить' }).last().click();
     await page.getByText('Таблица загружена').first().waitFor();
     await page.getByText('sheet test expense').first().waitFor();
+    await page.locator('.mantine-Modal-content').filter({ hasText: 'Выгрузить' }).waitFor({ state: 'detached' }).catch(() => undefined);
     await page.goto(BASE + '#/money?tab=expenses&add=1');
-    await page.getByRole('dialog').waitFor();
+    await page.getByRole('dialog').last().waitFor();
     await shot('25-expense');
     await closeModal();
     // Proofs: photos kept with an expense (the entry itself does not change), a paperclip on its line in the book.

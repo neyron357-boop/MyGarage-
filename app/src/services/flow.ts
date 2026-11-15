@@ -48,6 +48,11 @@ export async function syncStage(orderId: string): Promise<void> {
 /** Where a car can leave from with an invoice: the workshop's stages (the invoice makes "ready" reachable from each). */
 const LEAVES_FROM: Stage[] = ['intake', 'diagnostics', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check', 'ready'];
 
+/** The car can leave now with the money owed (the payment sheet's "On credit"): invoiced, money due, still at the garage, no debt signed yet. */
+export function canLeaveOnDebt(b: OrderBundle): boolean {
+  return !!activeInvoice(b.invoices) && bundleAmountDue(b) > 0 && LEAVES_FROM.includes(b.order.stage) && !b.debts.some((d) => d.status === 'open');
+}
+
 /**
  * The car leaves now, the money comes later: the customer signs the debt here and the job is gone with money
  * due ("debt", red on the board) until it is paid — the payment that clears it closes the job and the debt

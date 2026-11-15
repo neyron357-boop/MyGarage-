@@ -100,14 +100,15 @@ export function linesText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'pl
 }
 
 /**
- * The parts of a job by name only, without prices — to paste to a parts seller: one per line, how many when
- * more than one.
+ * The parts of a job by name only, without prices — to paste to a parts seller: the car and its VIN on top (what
+ * a seller asks first), then the parts numbered, how many when more than one.
  */
-export function partNamesText(items: OrderItem[], lang: Lang): string {
-  return items
+export function partNamesText(items: OrderItem[], lang: Lang, car?: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin'>): string {
+  const head = [[car?.make, car?.model, car?.year].filter(Boolean).join(' ').trim(), car?.vin ? `VIN ${car.vin.toUpperCase()}` : ''].filter(Boolean);
+  const parts = items
     .filter((i) => i.kind === 'part')
-    .map((i) => itemTitle(i, lang) + (i.qty !== 1 ? ` × ${i.qty}` : ''))
-    .join('\n');
+    .map((i, k) => `${k + 1}. ${itemTitle(i, lang)}${i.qty !== 1 ? ` × ${i.qty}` : ''}`);
+  return [...head, ...(head.length ? [''] : []), ...parts].join('\n');
 }
 
 /**

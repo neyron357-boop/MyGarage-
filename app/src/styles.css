@@ -736,7 +736,7 @@ html.kb .tab-bar-wrap {
   .search-clear {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -1930,6 +1930,62 @@ html.kb .tab-bar-wrap {
   padding: 8px 0;
   border-radius: var(--radius-group);
   background: var(--app-soft);
+}
+/* The job card's car in 3D (ui/Car3D.tsx): a soft studio light behind it; the finger turns it (the canvas takes the
+   drag — the sheet does not scroll under it); the points are pins over the picture, in their kind's colour. */
+.car3d {
+  position: relative;
+  height: 270px;
+  border-radius: var(--radius-group);
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 30%, var(--app-card) 0%, var(--app-soft) 70%);
+}
+.car3d[data-loading] {
+  animation: car3d-wait 1.4s ease-in-out infinite alternate;
+}
+@keyframes car3d-wait {
+  to {
+    opacity: 0.6;
+  }
+}
+.car3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+.car3d-canvas:active {
+  cursor: grabbing;
+}
+.car3d-pins {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.jc-pin {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 2px solid var(--mantine-color-white);
+  border-radius: 50%;
+  color: var(--mantine-color-white);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: opacity 140ms ease;
+  will-change: transform;
+}
+.jc-pin[data-picked] {
+  box-shadow: 0 0 0 3px var(--mantine-color-cobalt-5), 0 3px 10px rgba(0, 0, 0, 0.4);
 }
 /* The point picked: its number in its colour, its kind as chips; its photo, the camera, off the card. */
 .jc-mark {
@@ -4491,40 +4547,50 @@ html.kb .screen-bottom > .sticky-bar {
 .handover-checks {
   margin-top: 22px;
 }
-/* Under the job's lines: work, a part, a service — three labelled buttons — then the discount and the copy. On a
-   phone the label goes under its symbol (13 pt, as the tab bar's) so all five fit one row without cutting a word. */
-.add-row .add-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 52px;
-  padding: 0 4px;
+/* Under the job's lines: work, a part, a service — tiles of the group's colour, the symbol on its own colour above
+   the word (as the "…" tiles, smaller) — then the extras (the discount, the copy, a change after the invoice) as
+   narrow tiles of the same height, their symbol in the accent. On a computer the word goes beside its symbol. */
+.add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
 }
-.add-row .add-btn .mantine-Button-inner {
-  flex-direction: column;
-  gap: 3px;
+.add-row[data-flush] {
+  margin-top: 0;
 }
-.add-row .add-btn .mantine-Button-section[data-position='left'] {
-  margin: 0;
-}
-.add-row .add-btn .mantine-Button-label {
+.add-row > .action-tile {
+  min-height: 66px;
+  padding: 9px 4px 8px;
+  gap: 4px;
+  border-radius: 18px;
+  background: var(--app-card);
   font-size: 13px;
   font-weight: 600;
-  overflow: visible;
+  letter-spacing: -0.01em;
+}
+.add-row > .add-btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.add-row > .add-btn > .tile-icon {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 0;
+  border-radius: 9px;
+}
+.add-row > .add-extra {
+  flex: 0 0 48px;
+  color: var(--mantine-color-cobalt-6);
+}
+.add-row > .action-tile:active {
+  background: var(--app-press);
 }
 @media (min-width: 600px) {
-  .add-row .add-btn {
-    height: 44px;
-    padding: 0 14px;
-  }
-  .add-row .add-btn .mantine-Button-inner {
+  .add-row > .action-tile {
+    min-height: 52px;
     flex-direction: row;
-    gap: 0;
-  }
-  .add-row .add-btn .mantine-Button-section[data-position='left'] {
-    margin-right: 8px;
-  }
-  .add-row .add-btn .mantine-Button-label {
-    font-size: 16px;
+    gap: 10px;
+    font-size: 15px;
   }
 }
 
@@ -4604,14 +4670,16 @@ html.kb .screen-bottom > .sticky-bar {
   font-weight: 600;
 }
 .note-row {
+  position: relative;
   display: flex;
   justify-content: flex-end;
+  border-radius: 16px;
 }
 .note-row[data-gap] {
   margin-top: 8px;
 }
 .note-bubble {
-  max-width: 80%;
+  max-width: 100%;
   padding: 7px 12px 6px;
   border-radius: 20px;
   background: var(--mantine-color-cobalt-filled);
@@ -4827,6 +4895,152 @@ html.kb .screen-bottom > .sticky-bar {
   .voice-wave[data-playing] .voice-dot-rail {
     transition: none;
   }
+}
+/* A note answered by a swipe to the right (ui/swipeReply.ts): the note and its arrow follow the finger (the arrow
+   comes up with --reply, 0–1); a drag up or down stays the chat's scroll. */
+.note-swipe {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 80%;
+  touch-action: pan-y;
+}
+.note-reply-icon {
+  position: absolute;
+  top: 50%;
+  left: -40px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-top: -15px;
+  border-radius: 50%;
+  background: var(--app-card);
+  color: var(--mantine-color-cobalt-6);
+  opacity: var(--reply, 0);
+  transform: scale(calc(0.5 + 0.5 * var(--reply, 0)));
+  pointer-events: none;
+}
+/* The note answered, on top of the answer: a lighter block of the bubble (a photo's thumbnail beside its words);
+   above a photo or a video — a small bubble of its own. A tap goes to it. */
+.note-quote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin: 1px -5px 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.2);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+.note-quote[data-gone] {
+  font-style: italic;
+  opacity: 0.8;
+  cursor: default;
+}
+.note-quote-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.note-quote-thumb {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.note-swipe > .note-quote {
+  max-width: min(240px, 68vw);
+  margin: 0 0 4px;
+  background: var(--mantine-color-cobalt-filled);
+  color: var(--mantine-color-white);
+}
+/* The note answered nods when its quote is tapped. */
+.note-row[data-flash] .note-swipe {
+  animation: note-nod 1.2s var(--ease-out);
+}
+@keyframes note-nod {
+  15%,
+  35% {
+    transform: scale(1.05);
+  }
+}
+/* Picking notes (a long press began it): a tick on the left of each, the picked ones tinted; a tap anywhere on the
+   row picks or lets go. */
+.notes-list[data-picking] .note-row {
+  padding-left: 38px;
+}
+.note-tick {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  border: 2px solid var(--app-label-3);
+  border-radius: 50%;
+  color: var(--mantine-color-white);
+}
+.note-row[data-picked] {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 12%, transparent);
+}
+.note-row[data-picked] .note-tick {
+  border-color: var(--mantine-color-cobalt-6);
+  background: var(--mantine-color-cobalt-6);
+}
+.note-pick {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* The bottom while answering: the note answered above the field (× lets it go). */
+.notes-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notes-reply {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 5px 6px 5px 14px;
+  border-radius: 22px;
+}
+.notes-reply-arrow {
+  flex-shrink: 0;
+  color: var(--mantine-color-cobalt-6);
+}
+.notes-reply-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes-count {
+  justify-content: center;
 }
 .notes-composer {
   display: flex;

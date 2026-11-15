@@ -948,7 +948,9 @@ export const ru = {
     fullDue: 'Вся сумма',
     save: 'Провести',
     kind: { payment: 'Оплата', prepayment: 'Предоплата', refund: 'Возврат' },
-    method: { cash: 'Наличные', card: 'Карта', transfer: 'Перевод' },
+    method: { cash: 'Наличные', card: 'Карта', transfer: 'Перевод', debt: 'В долг', unpaid: 'Без оплаты' },
+    closeUnpaid: 'Закрыть без оплаты',
+    closedUnpaid: 'Заказ закрыт без оплаты',
   },
   qi: {
     partNo: 'Номер',
@@ -1521,7 +1523,8 @@ export const ru = {
   },
   jobCard: {
     title: 'Job card',
-    hint: 'Тап — место повреждения',
+    hint: 'Тап — повреждение, вести — повернуть',
+    view3d: '3D',
     signed: 'Акт приёмки подписан',
     photo: 'Фото',
   },
@@ -1544,6 +1547,11 @@ export const ru = {
     copy: 'Скопировать',
     copied: 'Скопировано',
     empty: 'Всё, что нужно запомнить',
+    reply: 'Ответить',
+    pickedN: 'Выбрано: {{n}}',
+    removedN: 'Удалено заметок: {{n}}',
+    gone: 'Заметка удалена',
+    video: 'Видео',
   },
   offer: {
     oem: 'Оригинал',

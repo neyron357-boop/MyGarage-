@@ -47,7 +47,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { mechanicsOf } from '../../domain/crew';
-import { hoursBetween, shortDuration } from '../../domain/dates';
+import { formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
 import { activeInvoice, canAmendInvoice, paidNet } from '../../domain/invoice';
@@ -56,7 +56,7 @@ import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
 import { jobProfit } from '../../domain/profit';
-import { canCloseUnpaid, canReopen } from '../../domain/stages';
+import { canReopen } from '../../domain/stages';
 import { sumAmounts } from '../../domain/vat';
 import type { OrderItem, Payment } from '../../domain/types';
 import { tFor } from '../../i18n';
@@ -64,7 +64,7 @@ import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, updateItem } from '../../services/estimate';
-import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
+import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -84,7 +84,7 @@ import { useTabSwipe } from '../../ui/tabSwipe';
 import { useSwipeHint, type SwipeSpec } from '../../ui/swipe';
 import { CustomerModal } from '../customers/forms';
 import { DiscountSheet } from '../money/DiscountSheet';
-import { DebtModal, PaymentModal } from '../money/PaymentSheets';
+import { PaymentModal } from '../money/PaymentSheets';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { useSendVersion } from './sendVersion';
@@ -150,6 +150,43 @@ const TILE_COLOR: Record<string, string> = {
   select: 'teal',
   amend: 'grape',
 };
+
+/** What can be added under a job's lines, each in its own colour: work, a part, a service (done by others). */
+const ADD_KINDS: { kind: LineKind; icon: Icon; color: string; label: string }[] = [
+  { kind: 'labor', icon: IconTool, color: 'blue', label: 'job.addWork' },
+  { kind: 'part', icon: IconPackage, color: 'orange', label: 'job.addPart' },
+  { kind: 'service', icon: IconBuildingStore, color: 'violet', label: 'job.addService' },
+];
+
+/**
+ * Under the job's lines: work, a part, a service as tiles — the symbol on its colour, the word under it, as the
+ * "…" tiles — then the extras (the discount, the copy, a change after the invoice) as narrow tiles beside them.
+ */
+function AddBar({ onAdd, flush, children }: { onAdd: (kind: LineKind) => void; flush?: boolean; children?: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <div className="add-row" data-flush={flush || undefined}>
+      {ADD_KINDS.map(({ kind, icon: I, color, label }) => (
+        <button key={kind} type="button" className="action-tile add-btn" onClick={() => onAdd(kind)}>
+          <span className="tile-icon" style={{ '--c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}>
+            <I size={18} stroke={2.1} aria-hidden />
+          </span>
+          <span>{t(label)}</span>
+        </button>
+      ))}
+      {children}
+    </div>
+  );
+}
+
+/** A narrow tile beside them: its symbol only (the name for screen readers). */
+function AddExtra({ icon: I, label, onClick }: { icon: Icon; label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="action-tile add-extra" aria-label={label} onClick={onClick}>
+      <I size={21} stroke={1.9} aria-hidden />
+    </button>
+  );
+}
 
 /** Everything else that can happen to a job, as a grid of tiles: one tap, one word each. */
 function MoreSheet({ opened, onClose, tiles }: { opened: boolean; onClose: () => void; tiles: Tile[] }) {
@@ -442,10 +479,8 @@ export function JobPage() {
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [confirmPicked, setConfirmPicked] = useState(false);
   const [refuse, setRefuse] = useState(false);
-  const [unpaid, setUnpaid] = useState(false);
   const [remove, setRemove] = useState(false);
   const [pay, setPay] = useState<Payment['kind'] | null>(null);
-  const [debtOpen, setDebtOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   // Changing the lines once the invoice is out: confirmed first (a credit note), then what was tapped.
@@ -568,11 +603,11 @@ export function JobPage() {
   };
   // Where a part is — not on a done line (it is fitted), nor after the invoice.
   // The whole list of lines as text, one tap: to paste to a supplier, the customer, anywhere.
-  // The parts by name only, without prices: pasted to a parts seller as they are.
+  // The parts by name only, without prices — the car and its VIN on top: pasted to a parts seller as they are.
   const parts = live.filter((i) => i.kind === 'part');
   const copyLines = () =>
     run(async () => {
-      if (!(await copyText(partNamesText(parts, docLang)))) throw new AppError('err.copy');
+      if (!(await copyText(partNamesText(parts, docLang, b.vehicle)))) throw new AppError('err.copy');
       haptic('light');
     }, 'job.copiedLines');
   const copyButton = (size: number) =>
@@ -698,6 +733,21 @@ export function JobPage() {
       <ListRow left={<IconCashOff size={20} stroke={1.8} color="var(--mantine-color-orange-6)" aria-hidden />} title={<Text span c="orange.7" inherit>{t('job.unpaid')}</Text>} right={<Money fils={b.order.waived.fils} c="orange.7" />} />
     )
   ) : null;
+  // A signed debt, under the total: the date it is due, and its paper (the customer's signature) a tap away.
+  const openDebt = b.debts.find((d) => d.status === 'open');
+  const debtRow = openDebt ? (
+    <ListRow
+      left={<IconSignature size={20} stroke={1.8} color="var(--mantine-color-red-6)" aria-hidden />}
+      title={<Text span c="red.7" inherit>{t('debt.open', { date: formatDate(openDebt.dueDate) })}</Text>}
+      onClick={() => void run(async () => openPdf(await debtPdf(openDebt.id)))}
+      right={
+        <Group gap={8} wrap="nowrap">
+          <Money fils={openDebt.amountFils} c="red.7" />
+          <IconFileTypePdf size={18} color="var(--mantine-color-dimmed)" aria-label={t('debt.document')} />
+        </Group>
+      }
+    />
+  ) : null;
   // What the job earns (without VAT, less parts, work outside, expenses) — once some cost is known.
   const profit = jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: expenses ?? [] });
   const profitRow = profit.known ? (
@@ -728,13 +778,7 @@ export function JobPage() {
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
   if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
   if (open && (lines.length > 0 || inv) && (!inv || due > 0)) tiles.push({ key: 'discount', icon: IconDiscount, onClick: () => setDiscountOpen(true) });
-  // The car leaves now, the money comes later: the customer signs the debt right here and the car goes with it;
-  // once signed, the tile opens the signed paper.
-  const openDebt = b.debts.find((d) => d.status === 'open');
-  if (openDebt) tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => void run(async () => openPdf(await debtPdf(openDebt.id))) });
-  else if (inv && due > 0 && phase === 'pay') tiles.push({ key: 'debt', icon: IconSignature, color: 'orange', onClick: () => setDebtOpen(true) });
-  // The car leaves and nothing is owed: no payment, no debt (warranty, goodwill, the money will not come).
-  if (canCloseUnpaid(b.order.stage, due)) tiles.push({ key: 'unpaid', icon: IconCashOff, color: 'orange', onClick: () => setUnpaid(true) });
+  // On credit and without payment are ways to settle the job: in the payment sheet ("Pay"), not here.
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
@@ -1000,27 +1044,17 @@ export function JobPage() {
             {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0))}
           </List>
           {amendable && (
-            // Something forgotten or to change after the invoice: the same buttons, the invoice is redone.
-            <Group gap={6} mt="sm" wrap="nowrap" className="add-row">
-              <Button variant="light" className="add-btn" leftSection={<IconTool size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'labor' }) })}>
-                {t('job.addWork')}
-              </Button>
-              <Button variant="light" className="add-btn" leftSection={<IconPackage size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'part' }) })}>
-                {t('job.addPart')}
-              </Button>
-              <Button variant="light" className="add-btn" leftSection={<IconBuildingStore size={18} />} onClick={() => setAmend({ then: () => setSheet({ kind: 'service' }) })}>
-                {t('job.addService')}
-              </Button>
-              <ActionIcon variant="light" size={44} radius="xl" aria-label={t('job.amend')} onClick={() => setAmend({})} style={{ flexShrink: 0 }}>
-                <IconPencil size={20} />
-              </ActionIcon>
-            </Group>
+            // Something forgotten or to change after the invoice: the same tiles, the invoice is redone.
+            <AddBar onAdd={(kind) => setAmend({ then: () => setSheet({ kind }) })}>
+              <AddExtra icon={IconPencil} label={t('job.amend')} onClick={() => setAmend({})} />
+            </AddBar>
           )}
           <Box mt="lg">
             <List>
               <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
               {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
               {due > 0 && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
+              {debtRow}
               {waivedRow}
               {profitRow}
             </List>
@@ -1052,23 +1086,10 @@ export function JobPage() {
           )}
           {editable && phase !== 'booked' && (
             // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
-            <Group gap={6} mt={lines.length ? 'sm' : 0} wrap="nowrap" className="add-row">
-              <Button variant="light" className="add-btn" leftSection={<IconTool size={18} />} onClick={() => setSheet({ kind: 'labor' })}>
-                {t('job.addWork')}
-              </Button>
-              <Button variant="light" className="add-btn" leftSection={<IconPackage size={18} />} onClick={() => setSheet({ kind: 'part' })}>
-                {t('job.addPart')}
-              </Button>
-              <Button variant="light" className="add-btn" leftSection={<IconBuildingStore size={18} />} onClick={() => setSheet({ kind: 'service' })}>
-                {t('job.addService')}
-              </Button>
-              {lines.length > 0 && (
-                <ActionIcon variant="light" size={44} radius="xl" aria-label={t('discount.title')} onClick={() => setDiscountOpen(true)} style={{ flexShrink: 0 }}>
-                  <IconDiscount size={20} />
-                </ActionIcon>
-              )}
-              {copyButton(44)}
-            </Group>
+            <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
+              {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+              {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
+            </AddBar>
           )}
           {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
             // Building the quote: the usual jobs for such a complaint, one tap each (name, last price) — under
@@ -1206,37 +1227,6 @@ export function JobPage() {
       >
         <Text size="sm">{t('job.refuseText')}</Text>
       </ConfirmModal>
-      <ConfirmModal
-        opened={unpaid}
-        onClose={() => setUnpaid(false)}
-        title={t('job.unpaidTitle')}
-        // The usual case first: the customer settled with the owner. Nothing goes into the cash either way.
-        confirmLabel={t('job.paidOwner')}
-        onConfirm={() =>
-          run(async () => {
-            await closeUnpaid(oid, 'owner');
-            haptic('success');
-            scrollToTop();
-            return true;
-          })
-        }
-        secondary={{
-          label: t('job.noMoney'),
-          color: 'orange',
-          onClick: () =>
-            run(async () => {
-              await closeUnpaid(oid);
-              haptic('success');
-              scrollToTop();
-              return true;
-            }),
-        }}
-      >
-        <Text size="sm">{t('job.unpaidText')}</Text>
-        <Text mt="sm" fw={700} fz={20}>
-          <Money fils={due} display />
-        </Text>
-      </ConfirmModal>
       <LazySheet opened={remove}>
         {(o) => (
           <DeleteJobModal
@@ -1253,7 +1243,6 @@ export function JobPage() {
         )}
       </LazySheet>
       <SheetFor value={pay}>{(kind, o) => <PaymentModal b={b} opened={o} onClose={() => setPay(null)} kind={kind} />}</SheetFor>
-      <SheetFor value={debtOpen}>{(_, o) => <DebtModal b={b} opened={o} onClose={() => setDebtOpen(false)} />}</SheetFor>
       <LazySheet opened={discountOpen}>{(o) => <DiscountSheet b={b} opened={o} onClose={() => setDiscountOpen(false)} />}</LazySheet>
       <LazySheet opened={customerOpen}>{(o) => <CustomerModal opened={o} onClose={() => setCustomerOpen(false)} customer={c} orderId={oid} />}</LazySheet>
       <SendDialog customer={c} request={sv.send} onClose={() => sv.setSend(null)} onSent={() => void syncStage(oid)} />

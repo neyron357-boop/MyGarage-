@@ -33,10 +33,16 @@ describe('the lines as text (copy)', () => {
 });
 
 describe('the parts as text (copy)', () => {
-  it('the part names only, one per line, how many when more than one — no prices, no work', () => {
-    const item = (o: Partial<OrderItem>) => ({ kind: 'part', qty: 1, unitPriceFils: 5000, vatRateBp: 500, approvalState: 'draft', ...o }) as OrderItem;
-    const text = partNamesText([item({ titleEn: 'Engine belt' }), item({ kind: 'labor', titleEn: 'Belt replacement' }), item({ titleEn: 'Spark plug', qty: 4 }), item({ titleRu: 'Ролик натяжителя' })], 'en');
-    expect(text).toBe('ENGINE BELT\nSPARK PLUG × 4\nРОЛИК НАТЯЖИТЕЛЯ');
+  const item = (o: Partial<OrderItem>) => ({ kind: 'part', qty: 1, unitPriceFils: 5000, vatRateBp: 500, approvalState: 'draft', ...o }) as OrderItem;
+  const lines = [item({ titleEn: 'Engine belt' }), item({ kind: 'labor', titleEn: 'Belt replacement' }), item({ titleEn: 'Spark plug', qty: 4 }), item({ titleRu: 'Ролик натяжителя' })];
+  it('the car and its VIN on top, then the part names numbered, how many when more than one — no prices, no work', () => {
+    expect(partNamesText(lines, 'en', { make: 'Honda', model: 'Civic', year: 2010, vin: 'jhmfd1671as402297' })).toBe(
+      'Honda Civic 2010\nVIN JHMFD1671AS402297\n\n1. ENGINE BELT\n2. SPARK PLUG × 4\n3. РОЛИК НАТЯЖИТЕЛЯ',
+    );
+  });
+  it('without a VIN or a year: what is known; with nothing known of the car — the parts alone', () => {
+    expect(partNamesText(lines, 'en', { make: 'Honda', model: 'Civic' })).toBe('Honda Civic\n\n1. ENGINE BELT\n2. SPARK PLUG × 4\n3. РОЛИК НАТЯЖИТЕЛЯ');
+    expect(partNamesText(lines, 'en', { make: '', model: '' })).toBe('1. ENGINE BELT\n2. SPARK PLUG × 4\n3. РОЛИК НАТЯЖИТЕЛЯ');
   });
 });
 

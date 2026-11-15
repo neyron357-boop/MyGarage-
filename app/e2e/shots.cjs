@@ -12,7 +12,7 @@ async function launchBrowser() {
   const channels = forced ? [forced] : ['chromium', 'chrome', 'msedge'];
   for (const channel of channels) {
     try {
-      return await chromium.launch(channel === 'chromium' ? {} : { channel });
+      return await chromium.launch({ ...(channel === 'chromium' ? {} : { channel }), args: ['--enable-unsafe-swiftshader'] });
     } catch {
       // try the next one
     }
@@ -103,8 +103,9 @@ async function launchBrowser() {
     await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Job card', exact: true }).click();
     await settle(700);
     if (prefix === 'phone-light') {
-      const outline = await page.getByRole('dialog').locator('svg[role="img"]').boundingBox();
-      if (outline) await page.mouse.click(outline.x + outline.width * 0.3, outline.y + outline.height * 0.3);
+      // The 3D car (or the drawing without WebGL): a tap on its middle — a point.
+      const area = await page.getByRole('dialog').locator('canvas.car3d-canvas, svg[role="img"]').first().boundingBox();
+      if (area) await page.mouse.click(area.x + area.width * 0.5, area.y + area.height * 0.55);
       await settle(600);
     }
     await shot(`${prefix}-02g-job-card`);

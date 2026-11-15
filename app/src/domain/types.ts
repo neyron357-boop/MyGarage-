@@ -220,6 +220,8 @@ export interface JobNote {
   seconds?: number;
   /** A voice note's bars (0–1, domain/waveform.ts), kept from v0.17.2; older ones are read from the recording. */
   peaks?: number[];
+  /** The note this one answers (a swipe to the right on it, v0.19). */
+  replyTo?: string;
   createdAt: string;
 }
 

@@ -986,8 +986,11 @@ export function MoneyInput({
   ariaLabel,
   leftSection,
   big,
+  readOnly,
 }: {
   label: ReactNode;
+  /** Shown, not typed in (the sum a sheet acts on as it is). */
+  readOnly?: boolean;
   /** In a row whose label is beside it: the field's name for screen readers (and tests). */
   ariaLabel?: string;
   /** Before the amount (a quantity: "4 ×" — the price is per unit). */
@@ -1036,6 +1039,7 @@ export function MoneyInput({
       }
       rightSectionWidth={48}
       value={text}
+      readOnly={readOnly}
       // In a form row (no label above) an empty amount still reads as a field: "0" in grey.
       placeholder={label === undefined || big ? '0' : undefined}
       error={error}

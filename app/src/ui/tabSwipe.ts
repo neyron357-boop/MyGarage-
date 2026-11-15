@@ -4,7 +4,7 @@ import { haptic } from './haptics';
 
 /** Things that take a sideways drag themselves: the tab swipe leaves them alone. */
 const OWN_SWIPE =
-  '.chip-row:not(.wrap), .scroll-tabs, .today-strip, .swipe-row, .kanban, .strip-row, [data-sort-id], input, textarea, select, [role="slider"], video, audio, [controls]';
+  '.chip-row:not(.wrap), .scroll-tabs, .today-strip, .swipe-row, .note-swipe, .kanban, .strip-row, [data-sort-id], input, textarea, select, [role="slider"], video, audio, [controls]';
 /** The strip along the left edge belongs to "Back" (ui/stack). */
 const EDGE = 28;
 /** A touch becomes a drag after 8 px; sideways only when the first move is clearly sideways. */

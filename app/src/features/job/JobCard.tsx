@@ -1,24 +1,28 @@
-import { ActionIcon, Button, Modal, Stack, Text } from '@mantine/core';
+import { ActionIcon, Button, Modal, SegmentedControl, Stack, Text } from '@mantine/core';
 import { IconCameraPlus, IconCarCrash, IconLock, IconTrash } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import type { DamageMark, DamageType, DamageView, Inspection } from '../../domain/types';
 import { addDamageMark, addInspectionPhoto, getOrCreateInspection, removeDamageMark, updateDamageMark } from '../../services/inspections';
 import { deleteMedia } from '../../services/media';
 import { MediaImage } from '../../ui/components';
-import { DAMAGE_COLORS, DamageDiagram, ViewPicker } from '../../ui/DamageDiagram';
+import { Car3D, type Car3DHandle, type CarView } from '../../ui/Car3D';
+import { DAMAGE_COLORS, DamageDiagram } from '../../ui/DamageDiagram';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { usePhotoPick } from '../../ui/photoPick';
 
 /*
- * The job card, quickly (v0.17.3): the car's outline, a tap where it is damaged — a numbered point (a
- * scratch until told otherwise), its kind in one tap, its photo with the camera (a hold: from the phone's
- * photos). The points are the check-in act's damage marks (the act is made on the first point): the full act,
- * when it is signed, shows them as they are; a signed act's card is only looked at.
+ * The job card, quickly (v0.17.3): the car — in 3D since v0.19, turned by the finger, or straight to a side — a tap
+ * where it is damaged puts a numbered point (a scratch until told otherwise), its kind in one tap, its photo with the
+ * camera (a hold: from the phone's photos). The points are the check-in act's damage marks, kept as a side and a
+ * place on that side's drawing (the act is made on the first point): the full act, when it is signed, and its PDF
+ * show them as they are; a signed act's card is only looked at.
  */
+
+const VIEWS: CarView[] = ['3d', 'top', 'left', 'right', 'front', 'rear'];
 
 const TYPES: DamageType[] = ['scratch', 'dent', 'chip', 'crack', 'rust', 'other'];
 
@@ -99,26 +103,50 @@ function MarkEditor({ mark, n, insp, onGone }: { mark: DamageMark; n: number; in
 function JobCardSheet({ orderId, card, opened, onClose }: { orderId: string; card: Card; opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { run } = useAction();
-  const [view, setView] = useState<DamageView>('top');
+  // The side picked above the car ('3d' — three-quarters, or turned by the finger).
+  const [view, setView] = useState<CarView>('3d');
+  const car = useRef<Car3DHandle>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const locked = !!card.insp?.locked;
   const marks = card.marks;
   const mark = marks.find((m) => m.id === picked);
-  // A tap on the outline: the point, then its kind and photo right under the drawing.
-  const add = (x: number, y: number) =>
+  // A tap on the car: the point, then its kind and photo right under it.
+  const add = (side: DamageView, x: number, y: number) =>
     void run(async () => {
       const insp = card.insp ?? (await getOrCreateInspection(orderId, 'intake'));
-      const m = await addDamageMark(insp.id, { view, x, y, type: 'scratch' });
+      const m = await addDamageMark(insp.id, { view: side, x, y, type: 'scratch' });
       setPicked(m.id);
     });
+  // Without 3D (no WebGL): the drawings, a side at a time.
+  const flat: DamageView = view === '3d' ? 'top' : view;
   return (
     <Modal opened={opened} onClose={onClose} title={t('jobCard.title')}>
       <Stack gap="md">
-        <ViewPicker value={view} onChange={setView} marks={marks} />
-        <div className="jc-diagram">
-          <DamageDiagram view={view} marks={marks} height={250} onAdd={locked ? undefined : add} onSelect={(m) => setPicked(m.id)} />
-        </div>
+        <SegmentedControl
+          fullWidth
+          size="xs"
+          value={view}
+          onChange={(v) => {
+            setView(v as CarView);
+            car.current?.turnTo(v as CarView);
+          }}
+          data={VIEWS.map((v) => ({ value: v, label: v === '3d' ? t('jobCard.view3d') : t(`damage.view.${v}`) }))}
+        />
+        <Car3D
+          ref={car}
+          marks={marks}
+          picked={picked}
+          locked={locked}
+          onAdd={(at) => add(at.view, at.x, at.y)}
+          onPick={(id) => setPicked(id)}
+          onTurn={() => setView('3d')}
+          fallback={
+            <div className="jc-diagram">
+              <DamageDiagram view={flat} marks={marks} height={250} onAdd={locked ? undefined : (x, y) => add(flat, x, y)} onSelect={(m) => setPicked(m.id)} />
+            </div>
+          }
+        />
         {locked ? (
           // The check-in act is signed: its points are only looked at (a photo — a tap on its chip below).
           <Text c="dimmed" ta="center" fz={15} className="jc-signed">
@@ -145,6 +173,7 @@ function JobCardSheet({ orderId, card, opened, onClose }: { orderId: string; car
                 data-active={m.id === picked}
                 onClick={() => {
                   setView(m.view);
+                  car.current?.face(m);
                   setPicked(m.id);
                   // A signed act's point: its photo, to look at.
                   if (locked && m.mediaId) setPhoto(m.mediaId);

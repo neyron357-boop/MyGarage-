@@ -158,6 +158,9 @@ const TAPPABLE = [
   'button.search-cancel',
   'button.photo-slot',
   'button.voice-rate',
+  'button.note-pick',
+  'button.jc-pin',
+  'button.note-quote',
   '.cam button',
   '.viewer button',
 ].join(',');
