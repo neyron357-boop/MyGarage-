@@ -42,6 +42,9 @@ export function ClaimPage() {
   const before = b.media.find((m) => m.ownerId === b.intake?.id && m.slot === slot);
   const after = b.media.find((m) => m.ownerId === b.handover?.id && m.slot === slot);
   const intakeMarks = b.marks.filter((m) => m.inspectionId === b.intake?.id);
+  const act = b.intake;
+  const recorded =
+    !!act && (act.locked || intakeMarks.length > 0 || b.media.some((m) => m.ownerId === act.id) || act.mileageKm != null || act.fuelLevel != null || !!act.obdCodes?.length || !!act.noDamage);
   const openClaimRec = b.claims.find((c) => !c.closedAt);
   const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
   return (
@@ -58,8 +61,11 @@ export function ClaimPage() {
         }
       />
       <Stack gap="lg">
-        {!b.intake?.locked && (
-          <Alert color="red" icon={<IconAlertTriangle size={18} />}>
+        {/* Nothing recorded at check-in: no act, or an empty one (opened and left, a job card point taken off). Acts
+            are no longer signed in the app (v0.21: its check-in screen is gone), so an unsigned one with something in
+            it is not a warning; signed ones show as before. */}
+        {!recorded && (
+          <Alert color="gray" icon={<IconAlertTriangle size={18} />}>
             {t('claim.noIntake')}
           </Alert>
         )}
@@ -210,7 +216,19 @@ export function ClaimPage() {
       </Stack>
       <Modal opened={warrantyOpen} onClose={() => setWarrantyOpen(false)} title={t('claim.warrantyOrder')}>
         <Textarea label={t('order.complaint')} value={complaint} onChange={(e) => setComplaint(e.currentTarget.value)} autosize minRows={3} />
-        <Button mt="md" fullWidth onClick={() => run(async () => { const o = await createWarrantyOrder(b.order.id, complaint, openClaimRec?.id); navigate(`/orders/${o.id}/intake`); })}>
+        <Button
+          mt="md"
+          fullWidth
+          loading={busy}
+          onClick={() =>
+            run(async () => {
+              const o = await createWarrantyOrder(b.order.id, complaint, openClaimRec?.id);
+              // The sheet goes with the page: on a phone this screen stays under the new job, its sheet would stay on top.
+              setWarrantyOpen(false);
+              navigate(`/orders/${o.id}`);
+            })
+          }
+        >
           {t('claim.createWarranty')}
         </Button>
       </Modal>

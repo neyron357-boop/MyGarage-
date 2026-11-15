@@ -23,7 +23,6 @@ import { BoardPage } from './features/board/BoardPage';
 import { CustomerPage } from './features/customers/CustomerPage';
 import { CustomersPage } from './features/customers/CustomersPage';
 import { VehiclePage } from './features/customers/VehiclePage';
-import { InspectionWizard } from './features/inspection/InspectionWizard';
 import { MoneyPage } from './features/money/MoneyPage';
 import { JobPage } from './features/job/JobPage';
 import { MorePage } from './features/more/MorePage';
@@ -55,7 +54,10 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/search" element={<SearchPage />} />
       <Route path="/orders/new" element={<NewOrderPage />} />
       <Route path="/orders/:id" element={<JobPage />} />
-      <Route path="/orders/:id/intake" element={<InspectionWizard />} />
+      {/* The check-in act's photo screen is gone (v0.21: the job card is the inspection): its address — a history
+          entry, a page left open before the update — shows its job, as the invoice's does (no redirect: Back stays a
+          plain step back). */}
+      <Route path="/orders/:id/intake" element={<JobPage />} />
       <Route path="/orders/:id/invoice" element={<JobPage />} />
       <Route path="/orders/:id/claim" element={<ClaimPage />} />
       <Route path="/customers" element={<CustomersPage />} />

@@ -159,9 +159,6 @@ async function launchBrowser() {
     await shot(`${prefix}-08-settings`);
     await go('#/customers');
     await shot(`${prefix}-09-customers`);
-    await go(order.replace('#', '#') + '/intake');
-    await settle(600);
-    await shot(`${prefix}-10-intake`);
 
     await go('#/money?tab=expenses&add=1', 1200);
     await shot(`${prefix}-12-sheet`);

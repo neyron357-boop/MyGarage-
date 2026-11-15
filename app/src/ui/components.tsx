@@ -41,7 +41,6 @@ import { useScreen, useScreenTitle, useStack } from './stack';
 import { useSwipeRow, type SwipeSpec } from './swipe';
 import { onCelebrate, useAutoAnimate, useRolling } from './motion';
 import { createPortal } from 'react-dom';
-import { PhotoViewer } from './PhotoViewer';
 
 /* ---------------- Toasts ---------------- */
 
@@ -1077,24 +1076,6 @@ export function MediaImage({ id, thumb = true, card, h = 90, w, radius = 'md', o
   }, [key]);
   if (!url) return <Box h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
   return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" />;
-}
-
-/** Thumbnail that opens the full photo. */
-export function Photo({ id, h = 90, w, label }: { id: string; h?: number; w?: number | string; label?: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Stack gap={4} align="center">
-        <MediaImage id={id} h={h} w={w} onClick={() => setOpen(true)} />
-        {label && (
-          <Text size="xs" c="dimmed" ta="center" lh={1.3}>
-            {label}
-          </Text>
-        )}
-      </Stack>
-      {open && <PhotoViewer items={[{ id, title: typeof label === 'string' ? label : undefined }]} index={0} onIndex={() => undefined} onClose={() => setOpen(false)} />}
-    </>
-  );
 }
 
 export function InfoTip({ label, children }: { label: string; children: ReactNode }) {

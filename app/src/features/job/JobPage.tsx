@@ -2,7 +2,6 @@ import { ActionIcon, Box, Button, Group, Modal, SegmentedControl, Stack, Text, T
 import {
   IconBrandWhatsapp,
   IconBuildingStore,
-  IconCamera,
   IconCar,
   IconCash,
   IconCashOff,
@@ -12,7 +11,6 @@ import {
   IconCircleCheckFilled,
   IconCircleX,
   IconClipboardCheck,
-  IconClipboardList,
   IconClock,
   IconCopy,
   IconDiscount,
@@ -140,13 +138,10 @@ interface Tile {
 const TILE_COLOR: Record<string, string> = {
   customer: 'blue',
   car: 'indigo',
-  mechanic: 'orange',
-  photos: 'pink',
   scanner: 'cyan',
   due: 'yellow',
   invoice: 'grape',
   quote: 'grape',
-  discount: 'pink',
   select: 'teal',
   amend: 'grape',
 };
@@ -264,6 +259,20 @@ function dots(parts: ReactNode[]): ReactNode {
       {p}
     </Fragment>
   ));
+}
+
+/**
+ * A mechanic's chip on the job's card: a tap puts them on the job or takes them off; a hold (a right click on a
+ * PC) opens the task for the job's mechanics — in English, with the lines' photos, to share or copy (v0.21: it was
+ * "…" → "Mechanic", which read like a picker of the mechanics the chips already are).
+ */
+function MechanicChip({ name, on, onToggle, onTask }: { name: string; on: boolean; onToggle: () => void; onTask: () => void }) {
+  const press = useLongPress(onTask);
+  return (
+    <button type="button" className="chip mechanic-chip" data-active={on} aria-pressed={on} {...press.handlers} onClick={() => !press.consumeClick() && onToggle()}>
+      {name}
+    </button>
+  );
 }
 
 function PickRow({ onLong, onClick, ...row }: Parameters<typeof ListRow>[0] & { onLong?: () => void }) {
@@ -763,13 +772,12 @@ export function JobPage() {
   ) : null;
   const hasAgreed = live.some((i) => i.kind !== 'discount' && i.approvalState === 'approved');
 
-  // The '…' tiles keep their places: the ones every job has first (customer, car, mechanic, photos), then
-  // what this step brings, and the destructive ones always last.
+  // The '…' tiles keep their places: the ones every job has first (customer, car), then what this step brings,
+  // and the destructive ones always last. Not here (v0.21): the mechanics — their chips on the card (a hold: their
+  // task); the discount — "%" under the lines; the check-in act's photo screen — the job card is the inspection.
   const tiles: Tile[] = [];
   tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
   tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
-  if (open) tiles.push({ key: 'mechanic', icon: IconClipboardList, onClick: () => setMechanicOpen(true) });
-  if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
   // When the car was promised: rarely needed (the user's call, v0.17.3) — a tile here; once set, its chip on the card.
   if (open && phase !== 'booked') tiles.push({ key: 'due', icon: IconClock, onClick: () => setDueOpen(true) });
@@ -777,7 +785,6 @@ export function JobPage() {
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
   if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
-  if (open && (lines.length > 0 || inv) && (!inv || due > 0)) tiles.push({ key: 'discount', icon: IconDiscount, onClick: () => setDiscountOpen(true) });
   // On credit and without payment are ways to settle the job: in the payment sheet ("Pay"), not here.
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
@@ -1002,9 +1009,7 @@ export function JobPage() {
           {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
           {open &&
             mechanics.map((m) => (
-              <button key={m.id} type="button" className="chip" data-active={crew.includes(m.id)} aria-pressed={crew.includes(m.id)} onClick={() => run(() => toggleMechanic(oid, m.id))}>
-                {m.name}
-              </button>
+              <MechanicChip key={m.id} name={m.name} on={crew.includes(m.id)} onToggle={() => void run(() => toggleMechanic(oid, m.id))} onTask={() => setMechanicOpen(true)} />
             ))}
           <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
           <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
@@ -1041,11 +1046,13 @@ export function JobPage() {
                   right={<Money fils={l.gross} />}
                 />
               ))}
-            {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0))}
+            {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0), amendable && due > 0 ? () => setDiscountOpen(true) : undefined)}
           </List>
           {amendable && (
-            // Something forgotten or to change after the invoice: the same tiles, the invoice is redone.
+            // Something forgotten or to change after the invoice: the same tiles, the invoice is redone. "%" — a
+            // discount on the invoice out (a credit note and a new invoice at once), while money is due.
             <AddBar onAdd={(kind) => setAmend({ then: () => setSheet({ kind }) })}>
+              {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
               <AddExtra icon={IconPencil} label={t('job.amend')} onClick={() => setAmend({})} />
             </AddBar>
           )}
@@ -1090,6 +1097,12 @@ export function JobPage() {
               {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
               {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
             </AddBar>
+          )}
+          {editable && phase === 'booked' && lines.length > 0 && (
+            // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one.
+            <div className="add-row">
+              <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />
+            </div>
           )}
           {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
             // Building the quote: the usual jobs for such a complaint, one tap each (name, last price) — under

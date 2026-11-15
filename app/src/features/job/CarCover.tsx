@@ -1,13 +1,13 @@
-import { ActionIcon, Button, Group } from '@mantine/core';
+import { ActionIcon, Button, Group, Stack } from '@mantine/core';
 import { IconCamera, IconCameraPlus, IconCar, IconPhoto, IconTrash } from '@tabler/icons-react';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { carOwned, coverOf, MULKIYA_SIDES, mulkiyaOf, removeCarPhoto, restoreCarPhoto, rotateCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type CarSlot, type MulkiyaSide } from '../../services/cover';
 import { MediaImage, undoToast } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { usePhotoPick } from '../../ui/photoPick';
-import { openVinCheck, readVin, useVinState, VinButton, VinCheckSheet } from './VinRead';
+import { readVin, useVinState, VinButton, VinCheckSheet } from './VinRead';
 
 /**
  * In the photo's full-screen view: take it again, choose another one from the phone's photos, or take a wrong
@@ -124,8 +124,9 @@ export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: n
  * The car's VIN photo as a small tile in the job's card: without one, a tap opens the camera and a long
  * press the phone's photos; with one, the thumbnail — a tap shows it full screen (the VIN typed on the car
  * as its title: retake, choose another, share, read the VIN off it), a long press chooses another from the
- * photos. A photo taken is read at once (./VinRead.tsx): the chip scans while it reads, and an orange dot on it
- * — a read VIN waiting to be looked at — makes a tap open that instead.
+ * photos. A photo taken is read at once (./VinRead.tsx): the chip scans while it reads; a read VIN waiting to be
+ * looked at puts an orange dot on it, and its full view has "Check VIN" (v0.21: the tap still shows the photo;
+ * with no VIN photo the dot is on the Mulkiya the VIN was read off).
  */
 export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string; vin?: string; year?: number; hideEmpty?: boolean }) {
   const { t } = useTranslation();
@@ -152,14 +153,15 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
         className="chip vin-chip"
         data-empty={!photo?.id || undefined}
         data-reading={vinState.reading || undefined}
-        data-check={(vinState.check && !vinState.reading) || undefined}
+        data-check={(vinState.check && !vinState.reading && !!photo?.id) || undefined}
         aria-busy={vinState.reading || undefined}
-        aria-label={vinState.check ? t('vinRead.checkBtn') : photo?.id ? t('job.vinPhoto') : t('job.vinTake')}
+        aria-label={photo?.id ? t('job.vinPhoto') : t('job.vinTake')}
         {...pick.handlers}
         onClick={() => {
           if (pick.consumeClick()) return;
-          if (vinState.check && !vinState.reading) openVinCheck(vehicleId);
-          else if (photo?.id) setViewing(true);
+          // Not read yet whether there is a photo: no camera over one there may be.
+          if (!photo) return;
+          if (photo.id) setViewing(true);
           else pick.camera();
         }}
       >
@@ -198,37 +200,54 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
 }
 
 /**
- * The car's Mulkiya (the registration card), both sides, as a chip beside VIN: a tap takes the side still
- * missing with the camera (the front first; "1/2" while one is there), a long press picks from the phone's
- * photos — two at once go in as front and back. With both, a tap shows them full screen (swipe between the
- * sides: retake or choose another for the one shown), a long press chooses them again from the photos.
+ * In a Mulkiya's full view while one of its sides is still missing: that side — a tap takes it with the camera, a
+ * long press picks it from the phone's photos, as on the chip.
+ */
+function AddSide({ side, onFiles }: { side: MulkiyaSide; onFiles: (files: File[]) => void }) {
+  const { t } = useTranslation();
+  const pick = usePhotoPick(onFiles);
+  return (
+    <>
+      <Button radius="xl" size="md" variant="white" color="dark" className="add-side" leftSection={<IconCameraPlus size={18} />} {...pick.handlers} onClick={() => !pick.consumeClick() && pick.camera()}>
+        {t(`slot.${side}`)}
+      </Button>
+      {pick.inputs}
+    </>
+  );
+}
+
+/**
+ * The car's Mulkiya (the registration card), both sides, as a chip beside VIN: empty, a tap takes the front with the
+ * camera, a long press picks from the phone's photos — two at once go in as front and back. With a side or both
+ * ("1/2" while one is there), a tap shows them full screen (v0.21: the saved photo first, as the VIN's): swipe between
+ * the sides — retake or choose another for the one shown — and, while a side is missing, take or pick it right there;
+ * a long press chooses again from the photos (the missing side first). A read VIN waiting to be looked at puts an
+ * orange dot here when the VIN has no photo of its own (the full view has "Check VIN").
  */
 export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpty?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
   const found = useScreenLiveQuery(async () => {
     const sides = await mulkiyaOf(vehicleId);
-    return { sides, own: await carOwned(Object.values(sides)) };
+    return { sides, own: await carOwned(Object.values(sides)), vin: !!(await vinPhotoOf(vehicleId)) };
   }, [vehicleId]);
   const photos = found?.sides;
   const edits = useCarPhotoEdits(vehicleId);
   const [viewing, setViewing] = useState<number | null>(null);
-  // The side a picker fills when it is not "the next missing one" (the side shown full screen).
-  const [target, setTarget] = useState<MulkiyaSide | null>(null);
   const present = MULKIYA_SIDES.filter((s) => photos?.[s]);
   const missing = MULKIYA_SIDES.filter((s) => !photos?.[s]);
-  const pick = usePhotoPick(
-    (files) =>
-      void run(async () => {
-        // The side shown, or the missing ones first (front, back), then the rest in order.
-        const order = target ? [target] : [...missing, ...present];
-        setTarget(null);
-        for (let i = 0; i < files.length && i < order.length; i++) await setMulkiya(vehicleId, order[i], files[i]);
-        return true;
-      }).then((ok) => ok && readVin(vehicleId, t)),
-    { multiple: true },
-  );
-  const reading = useVinState(vehicleId).reading;
+  /** Photos into the sides in this order (several picked at once: one side each). */
+  const store = (order: MulkiyaSide[]) => (files: File[]) =>
+    void run(async () => {
+      for (let i = 0; i < files.length && i < order.length; i++) await setMulkiya(vehicleId, order[i], files[i]);
+      return true;
+    }).then((ok) => ok && readVin(vehicleId, t));
+  // The chip: one photo goes to the side still missing (the front first); several are front and back, in that order.
+  const pick = usePhotoPick((files) => store(files.length > 1 ? MULKIYA_SIDES : [...missing, ...present])(files), { multiple: true });
+  // The full view's "retake" / "from photos": the side shown — set right as either is opened.
+  const shown = useRef<MulkiyaSide>('mulkiya');
+  const sidePick = usePhotoPick((files) => store([shown.current])(files));
+  const vinState = useVinState(vehicleId);
   if (hideEmpty && !present.length) return null;
   const caption = <VinButton vehicleId={vehicleId} onLook={() => setViewing(null)} />;
   const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s, caption }));
@@ -238,15 +257,17 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
         type="button"
         className="chip vin-chip"
         data-empty={!present.length || undefined}
-        data-reading={(reading && present.length > 0) || undefined}
-        aria-busy={reading || undefined}
+        data-reading={(vinState.reading && present.length > 0) || undefined}
+        data-check={(vinState.check && !vinState.reading && present.length > 0 && found && !found.vin) || undefined}
+        aria-busy={vinState.reading || undefined}
         aria-label={present.length ? t('intake.mulkiya') : t('job.mulkiyaTake')}
         {...pick.handlers}
         onClick={() => {
           if (pick.consumeClick()) return;
-          setTarget(null);
-          if (missing.length) pick.camera();
-          else setViewing(0);
+          // Not read yet what is there: no camera over a side there may be.
+          if (!found) return;
+          if (present.length) setViewing(0);
+          else pick.camera();
         }}
       >
         {present.length ? (
@@ -264,27 +285,25 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
         {present.length === 1 && <span className="chip-note tnum">1/2</span>}
       </button>
       {pick.inputs}
+      {sidePick.inputs}
       {viewing !== null && items.length > 0 && (
         <PhotoViewer
           items={items}
           index={Math.min(viewing, items.length - 1)}
           onIndex={setViewing}
-          onClose={() => {
-            setViewing(null);
-            setTarget(null);
-          }}
+          onClose={() => setViewing(null)}
           onRotate={(item) => edits.rotate(items.find((x) => x.id === item.id)?.side ?? 'mulkiya', item.id)}
           actions={(item) => {
             const side = items.find((x) => x.id === item.id)?.side ?? 'mulkiya';
-            return (
+            const replace = (
               <ReplaceButtons
                 camera={() => {
-                  setTarget(side);
-                  pick.camera();
+                  shown.current = side;
+                  sidePick.camera();
                 }}
                 gallery={() => {
-                  setTarget(side);
-                  pick.gallery();
+                  shown.current = side;
+                  sidePick.gallery();
                 }}
                 // The other side stays on screen; with the last one the view closes (and does not open by itself
                 // when a new one is taken).
@@ -297,6 +316,22 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
                     : undefined
                 }
               />
+            );
+            // A side still missing: taken or picked from here, as on the chip.
+            return missing.length ? (
+              <Stack gap="sm" align="center">
+                <AddSide
+                  side={missing[0]}
+                  onFiles={(files) => {
+                    store([missing[0]])(files);
+                    // The side just added is the one shown (the sides go front, back).
+                    setViewing(MULKIYA_SIDES.indexOf(missing[0]));
+                  }}
+                />
+                {replace}
+              </Stack>
+            ) : (
+              replace
             );
           }}
         />

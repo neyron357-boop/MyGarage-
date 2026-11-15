@@ -9,6 +9,11 @@ export type QuickListKey = 'complaints' | 'warningLights' | 'functionChecks' | '
 export type QuickLists = Partial<Record<QuickListKey, string[]>>;
 
 export const QUICK_LIST_KEYS: QuickListKey[] = ['complaints', 'warningLights', 'functionChecks', 'skipReasons'];
+/**
+ * The lists Settings → Lists offers: the ones a screen still uses. Lamps, checks and photo-skip reasons were the
+ * check-in screen's (gone in v0.21): their words stay stored — old acts say them — but are not edited for nothing.
+ */
+export const EDITED_LIST_KEYS: QuickListKey[] = ['complaints'];
 
 export const DEFAULT_QUICK_LISTS: Record<QuickListKey, string[]> = {
   complaints: [

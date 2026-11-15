@@ -131,65 +131,55 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
     await page.getByText('Смотрим').first().waitFor();
     await shot('03b-job-accepted');
-    // The intake act with photos is optional: "…" → "Фото".
+  });
+  await step('v0.21: «…» without Photos, Mechanic and Discount; the check-in screen gone, its records kept', async () => {
+    // «…»: none of the three tiles (the job card is the inspection; mechanics — their chips; the discount — «％»).
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Фото' }).click();
-    await page.getByText('Шаг 1 из 6').waitFor();
-  });
-  await step('intake photos', async () => {
-    for (let i = 0; i < 8; i++) {
-      await front('input[type=file][accept="image/*"]').nth(i).setInputFiles(FIXTURE);
-      await page.getByText(`${i + 1} / 8`).waitFor({ timeout: 10000 });
-    }
-    // The Mulkiya has two sides: both are shot.
-    await front('button[aria-label="Mulkiya, оборот"]').first().waitFor();
-    await shot('04-intake-photos', true);
-  });
-  await step('intake damage', async () => {
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    const svg = front('svg[role=img]').first();
-    const box = await svg.boundingBox();
-    await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.25);
-    await page.getByRole('dialog').getByText('Вмятина').click();
-    await page.waitForTimeout(300);
-    await page.getByRole('dialog').getByRole('button', { name: 'Готово' }).click();
-    await page.waitForTimeout(300);
-    await shot('05-intake-damage', true);
-  });
-  await step('intake dashboard', async () => {
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByLabel('Пробег').fill('87450');
-    await page.getByText('½').click();
-    await page.getByText('Check Engine').click();
-    await shot('06-intake-dashboard', true);
-  });
-  await step('intake obd/checks', async () => {
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    const tags = page.locator('input[placeholder="P0300"]');
-    await tags.fill('P0300');
-    await tags.press('Enter');
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByRole('button', { name: 'Дальше' }).click();
-    await page.getByText('Шаг 6 из 6').waitFor();
-    await shot('07-intake-finish', true);
-  });
-  await step('intake sign', async () => {
-    const canvas = front('canvas').first();
-    await canvas.scrollIntoViewIfNeeded();
-    const c = await canvas.boundingBox();
-    await page.mouse.move(c.x + 30, c.y + 110);
-    await page.mouse.down();
-    for (let i = 0; i < 20; i++) await page.mouse.move(c.x + 30 + i * 12, c.y + 110 - Math.sin(i / 2) * 40);
-    await page.mouse.up();
-    await shot('08-intake-sign', true);
-    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
-    await page.getByText('Отправить клиенту').first().waitFor({ timeout: 15000 });
-    await page.getByText('Открыть чат').waitFor();
-    await shot('09-send-dialog');
-    await page.locator('.mantine-Modal-close').first().click();
-    await page.getByRole('link', { name: 'Открыть заказ' }).or(page.getByRole('button', { name: 'Открыть заказ' })).first().click();
-    await page.getByText('Смотрим').first().waitFor();
-    await shot('10-job-after-intake', true);
+    const more = page.getByRole('dialog');
+    await more.getByRole('button', { name: 'Клиент', exact: true }).waitFor();
+    for (const gone of ['Фото', 'Механику', 'Скидка'])
+      if (await more.getByRole('button', { name: gone, exact: true }).count()) throw new Error(`«…» still has «${gone}»`);
+    await shot('03c-job-more');
+    await page.keyboard.press('Escape');
+    await more.waitFor({ state: 'hidden' });
+    // The job card chip still opens the inspection: the car in 3D (or its drawings without WebGL).
+    await front('button.vin-chip[aria-label="Job card"]').click();
+    const card = page.getByRole('dialog', { name: 'Job card' });
+    await card.locator('canvas.car3d-canvas').or(card.locator('svg[role="img"]')).first().waitFor({ timeout: 20000 });
+    await card.getByRole('button', { name: 'Готово' }).click();
+    await card.waitFor({ state: 'detached' });
+    // The old screen's address shows its job; the address stays (no redirect to flicker through).
+    await page.goto(page.url().split('?')[0] + '/intake');
+    await page.waitForFunction(() => /^#\/orders\/[^/?]+\/intake$/.test(location.hash));
+    await front(':text("Смотрим")').first().waitFor();
+    // A check-in act signed before (demo data, with its photos; a damage point put on it as the old screen kept them):
+    // its points open in the job card as they were — only to look at — and its photos, report and PDF stay where they
+    // are shown (the claim page and "pdfs" below).
+    const signed = await page.evaluate(async () => {
+      const { db, uid } = await import('/src/db/db.ts');
+      const acts = (await db.inspections.toArray()).filter((i) => i.kind === 'intake' && i.locked);
+      for (const a of acts) {
+        const photos = await db.media.where('ownerId').equals(a.id).count();
+        const o = await db.orders.get(a.orderId);
+        if (!photos || !o || o.stage === 'closed' || o.stage === 'cancelled') continue;
+        await db.damageMarks.add({ id: uid(), inspectionId: a.id, view: 'left', x: 0.5, y: 0.55, type: 'dent' });
+        return { orderId: a.orderId, marks: await db.damageMarks.where('inspectionId').equals(a.id).count(), photos };
+      }
+      return null;
+    });
+    if (!signed) throw new Error('the demo data has no signed check-in act with photos on an open job');
+    await page.goto(BASE + '#/orders/' + signed.orderId);
+    await front('button.vin-chip[aria-label="Job card"]').click();
+    const old = page.getByRole('dialog', { name: 'Job card' });
+    await old.getByText('Акт приёмки подписан').waitFor({ timeout: 20000 });
+    if ((await old.locator('.jc-chip').count()) !== signed.marks) throw new Error('the signed act\'s points are not all on the job card');
+    await shot('03d-job-card-signed');
+    await old.getByRole('button', { name: 'Готово' }).click();
+    await old.waitFor({ state: 'detached' });
+    // The next steps look for a job's buttons on the whole page: one job screen kept, not two.
+    await page.goto(BASE);
+    await page.reload();
+    await page.getByText('Мастерская', { exact: true }).first().waitFor();
   });
   await step('pdfs', async () => {
     const out = await page.evaluate(async () => {
@@ -412,6 +402,26 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
     // The VIN photo, beside the mechanics: a tap takes it, then its thumbnail opens it full screen.
     await shot('30a2-vin-empty');
+    // v0.21: on the empty VIN and Mulkiya chips a hold opens the phone's photos — only them (no camera after it).
+    const holdOn = async (loc) => {
+      const box = await loc.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      const [fc] = await Promise.all([
+        page.waitForEvent('filechooser'),
+        (async () => {
+          await page.mouse.down();
+          await page.waitForTimeout(650);
+          await page.mouse.up();
+        })(),
+      ]);
+      if (await fc.element().getAttribute('capture')) throw new Error('a hold must open the photos, not the camera');
+      if (await page.waitForEvent('filechooser', { timeout: 900 }).catch(() => null)) throw new Error('a hold opened the camera too');
+      return fc;
+    };
+    await (await holdOn(page.getByRole('button', { name: 'Снять VIN' }))).setFiles([]);
+    const emptyMulkiya = await holdOn(page.getByRole('button', { name: 'Снять Mulkiya' }));
+    if ((await emptyMulkiya.element().getAttribute('multiple')) === null) throw new Error('the Mulkiya from the photos takes both sides at once');
+    await emptyMulkiya.setFiles([]);
     const [vinChooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Снять VIN' }).click()]);
     await vinChooser.setFiles({ name: 'vin.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Фото VIN' }).locator('img').waitFor();
@@ -460,6 +470,33 @@ async function launchBrowser() {
     if (!(await mulkiya.element().getAttribute('capture'))) throw new Error('a tap on Mulkiya must open the camera');
     await mulkiya.setFiles({ name: 'mulkiya.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Mulkiya', exact: true }).getByText('1/2').waitFor();
+    // v0.21: a saved side opens with a tap (not the camera); the missing back is taken right there — a hold on its
+    // button picks it from the phone's photos — and it lands on the back, the front stays.
+    await page.getByRole('button', { name: 'Mulkiya', exact: true }).click();
+    const mulkiyaView = page.locator('.viewer');
+    await mulkiyaView.getByText('Mulkiya, лицевая').waitFor();
+    await mulkiyaView.getByRole('button', { name: 'Переснять' }).waitFor();
+    const back = await holdOn(mulkiyaView.getByRole('button', { name: 'Mulkiya, оборот' }));
+    await back.setFiles(FIXTURE);
+    await page.getByRole('button', { name: 'Mulkiya', exact: true }).locator('.vin-thumb').nth(1).waitFor();
+    if (await page.getByRole('button', { name: 'Mulkiya', exact: true }).getByText('1/2').count()) throw new Error('both Mulkiya sides expected');
+    await mulkiyaView.getByText('2 из 2').or(mulkiyaView.getByText('1 из 2')).first().waitFor();
+    await shot('30a2b-mulkiya-sides');
+    await page.keyboard.press('Escape');
+    await mulkiyaView.waitFor({ state: 'detached' });
+    // Opened again: the VIN and both Mulkiya sides are where they were put.
+    const docs = () =>
+      page.evaluate(async () => {
+        const { db } = await import('/src/db/db.ts');
+        const { vinPhotoOf, mulkiyaOf } = await import('/src/services/cover.ts');
+        const v = (await db.vehicles.toArray()).find((x) => x.plateSearch.endsWith('31415'));
+        const m = await mulkiyaOf(v.id);
+        return { vin: !!(await vinPhotoOf(v.id)), front: !!m.mulkiya, back: !!m.mulkiya_back };
+      });
+    await page.reload();
+    await page.getByRole('button', { name: 'Фото VIN' }).locator('img').waitFor();
+    await page.getByRole('button', { name: 'Mulkiya', exact: true }).locator('.vin-thumb').nth(1).waitFor();
+    if (JSON.stringify(await docs()) !== JSON.stringify({ vin: true, front: true, back: true })) throw new Error('the documents\' photos after reopening: ' + JSON.stringify(await docs()));
     // The job card (v0.17.3): the car's outline — a tap where it is damaged, its kind, its photo; the chip counts.
     await page.getByRole('button', { name: 'Job card', exact: true }).click();
     const card = page.getByRole('dialog', { name: 'Job card' });
@@ -597,12 +634,9 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByText(/INV-/).first().waitFor();
-    // A discount after the invoice: credit note and a new invoice (10 % of 320.50 = 32.05).
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Скидка' }).waitFor();
-    await page.waitForTimeout(500);
-    await shot('32a-more');
-    await dlg.getByRole('button', { name: 'Скидка' }).click();
+    // A discount after the invoice — «％» under the invoice's lines (v0.21; it was «…» → «Скидка»): a credit note and
+    // a new invoice (10 % of 320.50 = 32.05).
+    await front('button.add-extra[aria-label="Скидка"]').click();
     await dlg.getByText('%', { exact: true }).click();
     await dlg.getByRole('button', { name: '10 %' }).click();
     await dlg.getByRole('button', { name: 'Оформить скидку' }).click();
@@ -898,8 +932,12 @@ async function launchBrowser() {
     await page.getByText('Проверьте VIN').first().waitFor({ timeout: 90000 });
     const untouched = await vehicle(two.vehicleId);
     if (untouched.vin !== null || untouched.year !== 2019) throw new Error('an unproven VIN went in, or the Mulkiya’s year did not: ' + JSON.stringify(untouched));
-    await front('.vin-chip[data-check]').waitFor();
-    await front('button[aria-label="Проверить VIN"]').click();
+    // The read waits to be looked at: the orange dot is on the Mulkiya it was read off (the VIN has no photo — its chip
+    // still takes one with a tap, v0.21); the Mulkiya opens with a tap, "Check VIN" in its full view.
+    await front('.vin-chip[data-check][aria-label="Mulkiya"]').waitFor();
+    if (!(await front('button[aria-label="Снять VIN"]').count())) throw new Error('the empty VIN chip must still offer the camera');
+    await front('button[aria-label="Mulkiya"]').click();
+    await page.locator('.viewer').getByRole('button', { name: 'Проверить VIN' }).click();
     const sheet = page.getByRole('dialog', { name: 'Проверка VIN' });
     await sheet.locator('img.vin-crop').waitFor();
     if ((await sheet.locator('.vin-boxes > span').count()) !== 17) throw new Error('the VIN is not in its 17 places');
@@ -974,10 +1012,13 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: 'Оплата · 210,00 AED' }).waitFor();
-    // "…" no longer has "On credit" or "No payment" (v0.19): both are in the payment sheet.
+    // "…" no longer has "On credit" or "No payment" (v0.19): both are in the payment sheet; nor (v0.21) Photos,
+    // Mechanic or Discount — with the invoice out, too.
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await dlg.getByRole('button', { name: 'Клиент', exact: true }).waitFor();
-    if ((await dlg.getByRole('button', { name: 'Без оплаты', exact: true }).count()) || (await dlg.getByRole('button', { name: 'В долг', exact: true }).count())) throw new Error('"…" still has On credit / No payment');
+    for (const gone of ['Без оплаты', 'В долг', 'Фото', 'Механику', 'Скидка'])
+      if (await dlg.getByRole('button', { name: gone, exact: true }).count()) throw new Error(`"…" still has «${gone}»`);
+    await shot('32a-more');
     await page.keyboard.press('Escape');
     await dlg.waitFor({ state: 'hidden' });
     // "Оплата" → No payment: the car leaves, nothing owed — no payment, no debt.
@@ -1305,13 +1346,21 @@ async function launchBrowser() {
     await crewChips.nth(1).click();
     await front('.job-foot button.chip[aria-pressed="true"]').nth(1).waitFor();
     if ((await front('.job-foot button.chip[aria-pressed="true"]').count()) !== 2) throw new Error('two mechanics on the job expected');
-    // "…" → Mechanic: the task in English; → Report: what was done, for the customer.
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await dlg.getByRole('button', { name: 'Механику' }).click();
+    // A hold on a mechanic's chip (a right click here) — the task in English (v0.21; it was «…» → «Механику»), and the
+    // chip stays as it was; "…" → Report: what was done, for the customer.
+    await crewChips.nth(0).click({ button: 'right' });
     const task = page.getByRole('dialog', { name: `Механикам · ${names[0]}, ${names[1]}` });
+    await task.waitFor();
+    if ((await front('.job-foot button.chip[aria-pressed="true"]').count()) !== 2) throw new Error('the hold on a mechanic chip must not take the mechanic off');
     if (!/To do:[\s\S]*BUMPER PAINT/.test(await task.locator('textarea').inputValue())) throw new Error('the mechanic task lists the work');
     await shot('34f-mechanic');
     await task.locator('.mantine-Modal-close').click();
+    await task.waitFor({ state: 'detached' });
+    // After the hold, a plain tap on the chip still takes the mechanic off and puts them back.
+    await crewChips.nth(0).click();
+    await front('.job-foot button.chip[aria-pressed="true"]').nth(1).waitFor({ state: 'detached' });
+    await crewChips.nth(0).click();
+    await front('.job-foot button.chip[aria-pressed="true"]').nth(1).waitFor();
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await dlg.getByRole('button', { name: 'Отчёт' }).click();
     await page.getByText('Открыть чат').waitFor();

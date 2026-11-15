@@ -137,7 +137,7 @@ export function haptic(kind: Haptic = 'light') {
 
 /* ---------------- Labels over the controls ---------------- */
 
-/** Controls that tick: buttons of every kind, chips, tabs, the tab bar, wizard steps, camera and photo buttons. */
+/** Controls that tick: buttons of every kind, chips, tabs, the tab bar, photo and viewer buttons. */
 const TAPPABLE = [
   'button.mantine-Button-root:not([type="submit"])',
   'button.mantine-ActionIcon-root:not([type="submit"])',
@@ -150,18 +150,15 @@ const TAPPABLE = [
   'button.job-card-open',
   'button.action-tile',
   '.scroll-tabs > button',
-  '.wizard-steps > button',
   '.tab-bar button',
   'button.tab-plus',
   'button.suggest',
   'button.swipe-btn',
   'button.search-cancel',
-  'button.photo-slot',
   'button.voice-rate',
   'button.note-pick',
   'button.jc-pin',
   'button.note-quote',
-  '.cam button',
   '.viewer button',
 ].join(',');
 /** Real check boxes and switches: they become switch controls and tick by themselves. */
@@ -265,7 +262,7 @@ function onMutations(records: MutationRecord[]) {
 }
 
 /** Selectors for the Android vibration (taps on the same controls). */
-const SELECTION = '.tab-bar button, .scroll-tabs button, .chip, .wizard-steps button, .mantine-SegmentedControl-label, .mantine-Switch-track, .mantine-Switch-input, .mantine-Checkbox-input, .mantine-Chip-label, .choice-card';
+const SELECTION = '.tab-bar button, .scroll-tabs button, .chip, .mantine-SegmentedControl-label, .mantine-Switch-track, .mantine-Switch-input, .mantine-Checkbox-input, .mantine-Chip-label, .choice-card';
 const LIGHT = '.mantine-Button-root, .mantine-ActionIcon-root, .tab-plus, .suggest, .voice-rate';
 
 /**
@@ -286,7 +283,7 @@ export function installHaptics() {
       (e) => {
         const t = e.target as Element | null;
         if (!e.isTrusted || !t || typeof t.closest !== 'function') return;
-        if (t.closest('.cam, .viewer')) return;
+        if (t.closest('.viewer')) return;
         if (t.closest(LIGHT)) haptic('light');
         else if (t.closest(SELECTION)) haptic('selection');
       },

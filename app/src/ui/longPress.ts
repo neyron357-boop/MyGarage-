@@ -40,6 +40,10 @@ export function useLongPress(onLong: () => void, ms = 450) {
         if (fired.current && e?.cancelable) e.preventDefault();
       },
       onTouchCancel: clear,
+      // A mouse press starts afresh: a right click before it (its long press) left no click to use up.
+      onPointerDown: (e: React.PointerEvent) => {
+        if (e.pointerType === 'mouse' && e.button === 0) fired.current = false;
+      },
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();
         clear();

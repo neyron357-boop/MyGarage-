@@ -2,7 +2,7 @@ import { ActionIcon, Button, Stack, Text } from '@mantine/core';
 import { IconArrowUp, IconListDetails, IconPlus, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { cleanList, moveLine, quickList, QUICK_LIST_KEYS, type QuickListKey } from '../../domain/quickLists';
+import { cleanList, EDITED_LIST_KEYS, moveLine, quickList, type QuickListKey } from '../../domain/quickLists';
 import type { Settings } from '../../domain/types';
 import { saveSettings } from '../../services/settings';
 import { Section, Tip } from '../../ui/components';
@@ -102,8 +102,8 @@ function ListEditor({ s, k }: { s: Settings; k: QuickListKey }) {
 }
 
 /**
- * Settings → Lists: the quick picks that go into customer documents (complaints, warning lights, what
- * works, why a photo is missing) — English by default, edited here line by line.
+ * Settings → Lists: the quick picks that go into customer documents — the complaints (v0.21: the check-in screen's
+ * lamps, checks and photo-skip reasons are kept but no longer offered) — English by default, edited here line by line.
  */
 export function ListsTab({ s, onOpenPrices }: { s: Settings; onOpenPrices: () => void }) {
   const { t } = useTranslation();
@@ -112,7 +112,7 @@ export function ListsTab({ s, onOpenPrices }: { s: Settings; onOpenPrices: () =>
       <Text size="sm" c="dimmed">
         {t('settings.lists.intro')}
       </Text>
-      {QUICK_LIST_KEYS.map((k) => (
+      {EDITED_LIST_KEYS.map((k) => (
         <ListEditor key={k} s={s} k={k} />
       ))}
       <Stack mt="xl">
