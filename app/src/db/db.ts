@@ -30,6 +30,7 @@ import type {
   RelatedRule,
   SalaryPayment,
   Settings,
+  StoredBook,
   Supplier,
   SupplierReturn,
   Vehicle,
@@ -77,6 +78,7 @@ export class GarageDB extends Dexie {
   incidents!: Table<Incident, string>;
   counters!: Table<Counter, string>;
   notes!: Table<JobNote, string>;
+  books!: Table<StoredBook, string>;
 
   constructor(name = 'mygarage') {
     super(name);
@@ -121,6 +123,10 @@ export class GarageDB extends Dexie {
     // v3: a job's notes (text, photo, voice).
     this.version(3).stores({
       notes: 'id, orderId, createdAt',
+    });
+    // v4: the supplier base workbook last brought in (its other sheets go back out with an export).
+    this.version(4).stores({
+      books: 'id',
     });
     installGuards(this);
   }

@@ -512,8 +512,40 @@ export interface Supplier {
   service?: boolean;
   /** Front and back of the business card (media). */
   cardMediaIds?: string[];
+  /** Its row in the garage's supplier base workbook (UAE_Contacts.xlsx), when it came from there. */
+  book?: SupplierBookRow;
   createdAt: string;
   archivedAt?: string;
+}
+
+/** A cell of the supplier base workbook: its text and its link. */
+export interface BookCell {
+  v: string;
+  link?: string;
+}
+
+/**
+ * A supplier as a row of the garage's supplier base workbook (UAE_Contacts.xlsx): its ID there and every column as
+ * it came — an export gives back what the app has no field for (email, sites, all numbers, photos, area…).
+ */
+export interface SupplierBookRow {
+  /** The base's own ID ("CT-0067"): a later import updates this supplier instead of adding another. */
+  id: string;
+  /** Its row on "Контакты", by column header. */
+  contact?: Record<string, BookCell>;
+  /** Its row on "Услуги для гаража" (a contractor). */
+  service?: Record<string, BookCell>;
+  /** Its row on the sheet of suppliers near the garage ("Рядом с …"). */
+  nearby?: Record<string, BookCell>;
+}
+
+/** The supplier base workbook last brought in: its other sheets (photo log, questions) go back out as they were. */
+export interface StoredBook {
+  id: 'suppliers';
+  name: string;
+  savedAt: string;
+  /** The .xlsx, in base64 (a backup carries it as text). */
+  data: string;
 }
 
 export interface SupplierReturn {

@@ -107,7 +107,7 @@ export function MoneySheetActions() {
             )}
             {plan.opening && (
               <Text size="sm" c="dimmed">
-                {t('moneySheet.opening', { cash: formatAed(plan.sheet.cashStartFils), card: formatAed(plan.sheet.cardStartFils) })}
+                {t('moneySheet.opening', { cash: formatAed(plan.sheet.cashStartFils) })}
               </Text>
             )}
           </Stack>

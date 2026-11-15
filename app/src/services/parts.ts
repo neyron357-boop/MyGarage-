@@ -7,6 +7,7 @@ import { AppError } from './errors';
 import { addMedia, deleteMedia } from './media';
 import { addExpense } from './money';
 import { logEvent } from './orders';
+import { importSupplierBook } from './supplierBook';
 
 export async function saveSupplier(input: Partial<Supplier> & { name: string }): Promise<Supplier> {
   if (!input.name.trim()) throw new AppError('err.nameRequired');
@@ -23,9 +24,14 @@ export async function saveSupplier(input: Partial<Supplier> & { name: string }):
  * A supplier list of one's own (Excel or CSV, any columns): new ones are added, those already here
  * (same phone, or same name) are left as they are.
  */
-export async function importSuppliers(file: Blob): Promise<{ added: number; skipped: number }> {
+export async function importSuppliers(file: Blob): Promise<{ added: number; skipped: number; updated?: number }> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const zip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+  // The garage's own supplier base workbook (UAE_Contacts.xlsx): brought up to it, kept for the next export.
+  if (zip) {
+    const book = await importSupplierBook(bytes, (file as File).name || undefined);
+    if (book) return { added: book.added, updated: book.updated, skipped: book.same };
+  }
   let rows: string[][];
   try {
     rows = zip ? await readFirstSheet(bytes) : parseCsv(new TextDecoder().decode(bytes));

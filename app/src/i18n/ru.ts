@@ -1146,12 +1146,10 @@ export const ru = {
   money: { book: 'Учёт', cash: 'Касса', expenses: 'Расходы', salaries: 'Зарплаты', debts: 'Долги' },
   ledger: {
     cashBalance: 'Наличные',
-    cardBalance: 'Карта',
     start: 'начало',
     opening: 'Начальные остатки',
-    openingHint: 'Сколько было наличных в кассе и на карте, когда начали вести учёт (Cash Start / Card Start в таблице). Дальше остатки считаются сами.',
+    openingHint: 'Сколько было наличных в кассе, когда начали вести учёт (Cash Start в таблице). Дальше остаток считается сам.',
     cashStart: 'Наличные на начало',
-    cardStart: 'Карта на начало',
     cashStartLocked: 'День уже закрывали с пересчётом наличных — дальше наличные считаются от пересчёта, начало менять нельзя.',
     in: 'Приход',
     out: 'Расход',
@@ -1243,7 +1241,7 @@ export const ru = {
     nothing: 'Новых записей нет — всё уже в учёте',
     existing: 'Уже в учёте: {{n}}',
     skipped: 'Без даты или суммы: {{n}}',
-    opening: 'Начальные остатки: наличные {{cash}}, карта {{card}}',
+    opening: 'Наличные на начало: {{cash}}',
     done: 'Таблица загружена',
   },
   cashReason: {
@@ -1574,8 +1572,9 @@ export const ru = {
     mapHint: 'Ссылка на карту',
     card: 'Визитка',
     cardAdd: 'Визитка',
-    import: 'Из Excel',
     imported: 'Добавлено: {{added}}, уже были: {{skipped}}',
+    importedBook: 'Добавлено: {{added}}, обновлено: {{updated}}',
+    book: 'База поставщиков',
     notFound: 'Никого не нашли',
   },
   mechanic: {

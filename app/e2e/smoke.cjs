@@ -908,6 +908,30 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByText('Марки').waitFor();
     await shot('35b-supplier-card');
     await page.locator('.mantine-Modal-close').first().click();
+    // The supplier base as the garage's own workbook (UAE_Contacts.xlsx): out ready as the sheet opens; a workbook in
+    // brings its suppliers up to it — a new one added, one already here (by phone) updated.
+    await front('button').filter({ hasText: /^Excel$/ }).click();
+    await page.locator('.mantine-Modal-content button.action-tile:not([disabled])', { hasText: 'Выгрузить' }).waitFor();
+    await shot('35c-supplier-book');
+    await page.keyboard.press('Escape');
+    const bookFile = await page.evaluate(async () => {
+      const { buildSupplierBook } = await import('/src/domain/supplierBook.ts');
+      const now = new Date().toISOString();
+      const b = await buildSupplierBook(
+        [
+          { s: { id: 'x1', name: 'Book Spares LLC', phone: '+971551112233', makes: ['Kia'], createdAt: now }, id: 'CT-0901' },
+          { s: { id: 'x2', name: 'Gulf Lights', phone: '+971507654321', parts: 'Фары, фонари', createdAt: now }, id: 'CT-0902' },
+        ],
+        null,
+        now.slice(0, 10),
+      );
+      let s = '';
+      for (const x of b) s += String.fromCharCode(x);
+      return btoa(s);
+    });
+    await front('input[data-suppliers-input]').setInputFiles({ name: 'UAE_Contacts.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(bookFile, 'base64') });
+    await page.getByText('Добавлено: 1, обновлено: 1').first().waitFor();
+    await front('.list-row').filter({ hasText: 'Book Spares LLC' }).waitFor();
     // The search finds suppliers by make and what they sell.
     await page.goto(BASE + '#/search?q=' + encodeURIComponent('nissan фары'));
     await front('.list-row').filter({ hasText: 'Gulf Lights' }).waitFor();

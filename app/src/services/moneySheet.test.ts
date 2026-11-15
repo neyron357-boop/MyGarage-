@@ -46,7 +46,19 @@ describe('the money sheet (Money Tracker workbook)', () => {
     expect(sheet).toContain('<pane ySplit="6.0" topLeftCell="A7" activePane="bottomLeft" state="frozen"/>');
     expect(sheet).toContain('<c r="B4" s="6"><f>ROUND(A4+C4-D4,2)</f><v>5</v></c>');
     expect(sheet).toContain('<c r="F12" s="14"><f t="shared" si="1"/><v>5</v></c>');
-    expect(new TextDecoder().decode(files.get('xl/tables/table1.xml'))).toContain('ref="A6:H1508" displayName="MoneyLog"');
+    // The card has no balance (v0.17): its totals in and out only, no start, no running column; the notes in G.
+    const strings = new TextDecoder().decode(files.get('xl/sharedStrings.xml'));
+    expect(strings).not.toMatch(/Card Start|Card Balance/);
+    expect(strings).toContain('<t>Card In</t>');
+    expect(sheet).toMatch(/<c r="E4" s="7"><f>ROUND\(SUMIFS[^<]*Income[^<]*Card[^<]*\)<\/f><v>1150<\/v><\/c>/);
+    expect(sheet).toMatch(/<c r="F4" s="7"><f>[^<]*Expense[^<]*Card[^<]*<\/f><v>13<\/v><\/c><\/row>/);
+    expect(sheet).not.toMatch(/<c r="H\d+"/);
+    expect(sheet).toMatch(/<c r="G7" s="16" t="s">/);
+    const table = new TextDecoder().decode(files.get('xl/tables/table1.xml'));
+    expect(table).toContain('ref="A6:G1508" displayName="MoneyLog"');
+    expect(table).toContain('<tableColumns count="7">');
+    expect(new TextDecoder().decode(files.get('xl/comments1.xml')).match(/<comment /g)).toHaveLength(1);
+    expect(new TextDecoder().decode(files.get('xl/drawings/vmlDrawing1.vml')).match(/<v:shape /g)).toHaveLength(1);
 
     const back = await readMoneyWorkbook(bytes);
     expect(back.rows).toEqual(SHEET.rows);

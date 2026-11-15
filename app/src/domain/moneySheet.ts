@@ -1,11 +1,12 @@
-import { COMMENTS, CONTENTTYPES, DRAWING, ROOTRELS, SHEETRELS, STYLES, THEME, VML, WORKBOOK, WORKBOOKRELS } from './moneySheetTemplate';
+import { COMMENTS as SHEET_COMMENTS, CONTENTTYPES, DRAWING, ROOTRELS, SHEETRELS, STYLES, THEME, VML as SHEET_VML, WORKBOOK, WORKBOOKRELS } from './moneySheetTemplate';
 import { unzip, zipStore } from './zip';
 
 /*
  * The money sheet — the garage's "Money Tracker — Income & Expenses" workbook (one sheet,
- * "Transactions"): opening cash and card at A4 / E4, the totals beside them, and the MoneyLog table
- * from row 6 — Date · Type (Income / Expense) · Amount (AED, always positive) · Payment (Cash / Card) ·
- * Category · Cash Balance · Card Balance · Notes. Card money spent does not reduce either balance.
+ * "Transactions"): the opening cash at A4, the cash balance and the cash and card totals beside it, and the
+ * MoneyLog table from row 6 — Date · Type (Income / Expense) · Amount (AED, always positive) · Payment
+ * (Cash / Card) · Category · Cash Balance · Notes. The card has no balance (v0.17, the user's call): its money
+ * is only operations — in and out. A sheet of the older layout (Card Start, Card Balance) reads as well.
  *
  * Export writes it exactly as the original (its styles, formulas, lists, colouring and notes), with the
  * balances already worked out so a phone's preview shows them; import reads such a workbook back.
@@ -47,13 +48,16 @@ const aed = (fils: number) => String(Math.round(fils) / 100);
 
 const TITLE = 'Money Tracker';
 const HINT = 'Enter one transaction per row. Always enter a positive amount.';
-const LABELS = ['Cash Start', 'Cash Balance', 'Cash In', 'Cash Out', 'Card Start', 'Card Balance', 'Card In', 'Card Out'];
-const NOTE = 'Enter opening balances in A4 and E4. Card expenses are tracked separately and do not reduce either balance.';
-const HEADERS = ['Date', 'Type', 'Amount (AED)', 'Payment', 'Category', 'Cash Balance', 'Card Balance', 'Notes'];
-const COLS = 'ABCDEFGH';
+const LABELS = ['Cash Start', 'Cash Balance', 'Cash In', 'Cash Out', 'Card In', 'Card Out'];
+const NOTE = 'Enter the opening cash balance in A4. Card payments are listed as operations only: the card has no balance here.';
+const HEADERS = ['Date', 'Type', 'Amount (AED)', 'Payment', 'Category', 'Cash Balance', 'Notes'];
+const COLS = 'ABCDEFG';
+/** The notes on the summary cells: only the cash start's stays (the card's start and balance are gone). */
+const COMMENTS = SHEET_COMMENTS.replace(/<comment authorId="0" ref="(?!A4")[A-Z]+\d+">[\s\S]*?<\/comment>/g, '');
+const VML = SHEET_VML.replace(/<v:shape [^>]*>(?:(?!<\/v:shape>)[\s\S])*?<x:Column>(?!0<)\d+<\/x:Column><\/x:ClientData><\/v:shape>/g, '');
 
 const SHEET_HEAD =
-  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mx="http://schemas.microsoft.com/office/mac/excel/2008/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><sheetPr><pageSetUpPr/></sheetPr><sheetViews><sheetView workbookViewId="0"><pane ySplit="6.0" topLeftCell="A7" activePane="bottomLeft" state="frozen"/><selection activeCell="B8" sqref="B8" pane="bottomLeft"/></sheetView></sheetViews><sheetFormatPr customHeight="1" defaultColWidth="12.63" defaultRowHeight="15.0"/><cols><col customWidth="1" min="1" max="1" width="23.0"/><col customWidth="1" min="2" max="2" width="17.0"/><col customWidth="1" min="3" max="3" width="18.63"/><col customWidth="1" min="4" max="4" width="14.88"/><col customWidth="1" min="5" max="5" width="23.13"/><col customWidth="1" min="6" max="7" width="18.0"/><col customWidth="1" min="8" max="8" width="62.5"/><col customWidth="1" min="9" max="27" width="8.63"/></cols><sheetData>';
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mx="http://schemas.microsoft.com/office/mac/excel/2008/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><sheetPr><pageSetUpPr/></sheetPr><sheetViews><sheetView workbookViewId="0"><pane ySplit="6.0" topLeftCell="A7" activePane="bottomLeft" state="frozen"/><selection activeCell="B8" sqref="B8" pane="bottomLeft"/></sheetView></sheetViews><sheetFormatPr customHeight="1" defaultColWidth="12.63" defaultRowHeight="15.0"/><cols><col customWidth="1" min="1" max="1" width="23.0"/><col customWidth="1" min="2" max="2" width="17.0"/><col customWidth="1" min="3" max="3" width="18.63"/><col customWidth="1" min="4" max="4" width="14.88"/><col customWidth="1" min="5" max="5" width="23.13"/><col customWidth="1" min="6" max="6" width="18.0"/><col customWidth="1" min="7" max="7" width="62.5"/><col customWidth="1" min="8" max="27" width="8.63"/></cols><sheetData>';
 
 const Q = '&quot;';
 const sumifs = (last: number, type: MoneyType, pay: MoneyPayment) =>
@@ -63,7 +67,6 @@ const running = (start: string, inner: string) =>
 const runSum = (type: MoneyType, pay: MoneyPayment) =>
   `SUMIFS($C$7:INDEX($C:$C,ROW()),$B$7:INDEX($B:$B,ROW()),${Q}${type}${Q},$D$7:INDEX($D:$D,ROW()),${Q}${pay}${Q},$C$7:INDEX($C:$C,ROW()),${Q}&gt;0${Q})`;
 const RUNNING_CASH = running('$A$4', `${runSum('Income', 'Cash')}-${runSum('Expense', 'Cash')}`);
-const RUNNING_CARD = running('$E$4', runSum('Income', 'Card'));
 
 const CATEGORY_LIST =
   `${Q}Salary,Side Income,Sales,Refund,Transfer,Groceries,Transport,Housing,Phone &amp; Internet,Health,Shopping,Other,Repair Labor,Diagnostics,Parts Sales,Customer Deposit,Parts Purchases,Workshop Supplies,Tools &amp; Equipment,Outsourced Work,Staff Wages,Workshop Rent${Q}&amp;${Q},Workshop Utilities,Towing &amp; Delivery${Q}`;
@@ -80,7 +83,7 @@ const sheetTail = (last: number) =>
   `<printOptions/><pageMargins bottom="0.75" footer="0.0" header="0.0" left="0.7" right="0.7" top="0.75"/><pageSetup orientation="landscape"/><drawing r:id="rId2"/><legacyDrawing r:id="rId3"/><tableParts count="1"><tablePart r:id="rId5"/></tableParts></worksheet>`;
 
 const tableXml = (last: number) =>
-  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ref="A6:H${last}" displayName="MoneyLog" name="MoneyLog" id="1"><tableColumns count="8">` +
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ref="A6:G${last}" displayName="MoneyLog" name="MoneyLog" id="1"><tableColumns count="7">` +
   HEADERS.map((h, i) => `<tableColumn name="${h}" id="${i + 1}"/>`).join('') +
   `</tableColumns><tableStyleInfo name="Transactions-style" showColumnStripes="0" showFirstColumn="1" showLastColumn="1" showRowStripes="1"/></table>`;
 
@@ -131,36 +134,32 @@ export function buildMoneyWorkbook(sheet: MoneySheet): Uint8Array {
   rows.push(`<row r="2" ht="21.75" customHeight="1">${str('A2', 3, HINT)}${blanks(2, 2)}</row>`);
   rows.push(`<row r="3" ht="21.75" customHeight="1">${LABELS.map((l, i) => str(`${COLS[i]}3`, 4, l)).join('')}</row>`);
   const cashBal = sheet.cashStartFils + b.cashIn - b.cashOut;
-  const cardBal = sheet.cardStartFils + b.cardIn;
   rows.push(
     `<row r="4" ht="21.75" customHeight="1"><c r="A4" s="5"><v>${aed(sheet.cashStartFils)}</v></c>` +
       `<c r="B4" s="6"><f>ROUND(A4+C4-D4,2)</f><v>${aed(cashBal)}</v></c>` +
       `<c r="C4" s="7"><f>${sumifs(last, 'Income', 'Cash')}</f><v>${aed(b.cashIn)}</v></c>` +
       `<c r="D4" s="7"><f>${sumifs(last, 'Expense', 'Cash')}</f><v>${aed(b.cashOut)}</v></c>` +
-      (sheet.cardStartFils ? `<c r="E4" s="8"><v>${aed(sheet.cardStartFils)}</v></c>` : '<c r="E4" s="8"/>') +
-      `<c r="F4" s="6"><f>ROUND(E4+G4,2)</f><v>${aed(cardBal)}</v></c>` +
-      `<c r="G4" s="7"><f>${sumifs(last, 'Income', 'Card')}</f><v>${aed(b.cardIn)}</v></c>` +
-      `<c r="H4" s="7"><f>${sumifs(last, 'Expense', 'Card')}</f><v>${aed(b.cardOut)}</v></c></row>`,
+      `<c r="E4" s="7"><f>${sumifs(last, 'Income', 'Card')}</f><v>${aed(b.cardIn)}</v></c>` +
+      `<c r="F4" s="7"><f>${sumifs(last, 'Expense', 'Card')}</f><v>${aed(b.cardOut)}</v></c></row>`,
   );
   rows.push(`<row r="5" ht="57.75" customHeight="1">${str('A5', 3, NOTE)}${blanks(5, 2)}</row>`);
-  rows.push(`<row r="6" ht="21.75" customHeight="1">${HEADERS.map((h, i) => str(`${COLS[i]}6`, i === 6 ? 10 : 9, h)).join('')}</row>`);
-  // The running balances are one shared formula each, defined on row 7 (as in the original).
+  rows.push(`<row r="6" ht="21.75" customHeight="1">${HEADERS.map((h, i) => str(`${COLS[i]}6`, 9, h)).join('')}</row>`);
+  // The running cash balance is one shared formula, defined on row 7 (as in the original).
   const fCash = (r: number) => (r === 7 ? `<f t="shared" ref="F7:F${last}" si="1">${RUNNING_CASH}</f>` : '<f t="shared" si="1"/>');
-  const fCard = (r: number) => (r === 7 ? `<f t="shared" ref="G7:G${last}" si="2">${RUNNING_CARD}</f>` : '<f t="shared" si="2"/>');
   sheet.rows.forEach((row, i) => {
     const r = 7 + i;
     rows.push(
       `<row r="${r}" ht="21.75" customHeight="1"><c r="A${r}" s="11"><v>${excelSerial(row.date)}</v></c>${str(`B${r}`, 12, row.type)}` +
         `<c r="C${r}" s="13"><v>${aed(row.amountFils)}</v></c>${str(`D${r}`, 12, row.payment)}${str(`E${r}`, 12, row.category)}` +
-        `<c r="F${r}" s="14">${fCash(r)}<v>${aed(b.cash[i])}</v></c><c r="G${r}" s="15">${fCard(r)}<v>${aed(b.card[i])}</v></c>` +
-        (row.notes ? str(`H${r}`, 16, row.notes) : `<c r="H${r}" s="17"/>`) +
+        `<c r="F${r}" s="14">${fCash(r)}<v>${aed(b.cash[i])}</v></c>` +
+        (row.notes ? str(`G${r}`, 16, row.notes) : `<c r="G${r}" s="17"/>`) +
         '</row>',
     );
   });
   for (let r = 7 + sheet.rows.length; r <= last; r++) {
     rows.push(
       `<row r="${r}" ht="21.75" customHeight="1"><c r="A${r}" s="18"/><c r="B${r}" s="19"/><c r="C${r}" s="20"/><c r="D${r}" s="19"/><c r="E${r}" s="19"/>` +
-        `<c r="F${r}" s="14" t="str">${fCash(r)}<v></v></c><c r="G${r}" s="15" t="str">${fCard(r)}<v></v></c><c r="H${r}" s="17"/></row>`,
+        `<c r="F${r}" s="14" t="str">${fCash(r)}<v></v></c><c r="G${r}" s="17"/></row>`,
     );
   }
   const sst =

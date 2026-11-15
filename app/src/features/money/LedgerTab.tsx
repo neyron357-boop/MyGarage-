@@ -37,34 +37,30 @@ function OpeningSheet({ opened, onClose, cash, card, cashLocked }: { opened: boo
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [c, setC] = useState<number | undefined>(cash);
-  const [k, setK] = useState<number | undefined>(card);
   return (
     <Modal opened={opened} onClose={onClose} title={t('ledger.opening')}>
       <Stack>
         <Text size="sm" c="dimmed">
           {t('ledger.openingHint')}
         </Text>
-        <SimpleGrid cols={2}>
-          {cashLocked ? (
-            <Box className="amount-cell">
-              <Text size="sm" fw={500}>
-                {t('ledger.cashStart')}
-              </Text>
-              <Text fz={20} mt={4}>
-                <Money fils={cash} display />
-              </Text>
-            </Box>
-          ) : (
-            <MoneyInput label={t('ledger.cashStart')} value={c} onChange={setC} />
-          )}
-          <MoneyInput label={t('ledger.cardStart')} value={k} onChange={setK} />
-        </SimpleGrid>
+        {cashLocked ? (
+          <Box className="amount-cell">
+            <Text size="sm" fw={500}>
+              {t('ledger.cashStart')}
+            </Text>
+            <Text fz={20} mt={4}>
+              <Money fils={cash} display />
+            </Text>
+          </Box>
+        ) : (
+          <MoneyInput label={t('ledger.cashStart')} value={c} onChange={setC} />
+        )}
         {cashLocked && (
           <Text size="xs" c="dimmed">
             {t('ledger.cashStartLocked')}
           </Text>
         )}
-        <Button loading={busy} onClick={() => run(async () => { await setOpeningBalances(cashLocked ? cash : c ?? 0, k ?? 0); onClose(); }, 'common.saved')}>
+        <Button loading={busy} onClick={() => run(async () => { await setOpeningBalances(cashLocked ? cash : c ?? 0, card); onClose(); }, 'common.saved')}>
           {t('common.save')}
         </Button>
       </Stack>
@@ -183,8 +179,8 @@ export function EntryDetails({ entry, label, onClose, cats }: { entry: LedgerEnt
 }
 
 /**
- * The money book, as the garage kept it in its money sheet: cash and card balances with their
- * opening amounts, in/out of the month for each, and every entry with the balances after it.
+ * The money book, as the garage kept it in its money sheet: the cash balance with its opening amount, in/out
+ * of the month, and every entry — a cash one with the cash after it; card money is only operations (no balance).
  */
 export function LedgerTab() {
   const { t } = useTranslation();
@@ -237,24 +233,21 @@ export function LedgerTab() {
 
   return (
     <Stack gap="lg">
-      <SimpleGrid cols={2} spacing="sm">
-        {(['cash', 'card'] as const).map((p) => (
-          // The two purses as cards, like a bank's: cash in green, the card in the accent.
-          <UnstyledButton key={p} className="money-card tap amount-cell" data-purse={p} p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
-            <div className="money-card-label">
-              {p === 'cash' ? <IconCash size={18} stroke={2} aria-hidden /> : <IconCreditCard size={18} stroke={2} aria-hidden />}
-              {t(p === 'cash' ? 'ledger.cashBalance' : 'ledger.cardBalance')}
-            </div>
-            <Text fz={28} lh={1.1} mt={8}>
-              <Money fils={p === 'cash' ? book.cash : book.card} display roll />
-            </Text>
-            <div className="money-card-foot">
-              {t('ledger.start')} {formatAed(p === 'cash' ? book.cashStartFils : book.cardStartFils)}
-              <IconPencil size={12} aria-hidden />
-            </div>
-          </UnstyledButton>
-        ))}
-      </SimpleGrid>
+      {/* The cash, as a bank's card: its balance and where it started. The card keeps no balance — its money is
+          only operations, in the list below (the user's call, v0.17). */}
+      <UnstyledButton className="money-card tap amount-cell" data-purse="cash" p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
+        <div className="money-card-label">
+          <IconCash size={18} stroke={2} aria-hidden />
+          {t('ledger.cashBalance')}
+        </div>
+        <Text fz={28} lh={1.1} mt={8}>
+          <Money fils={book.cash} display roll />
+        </Text>
+        <div className="money-card-foot">
+          {t('ledger.start')} {formatAed(book.cashStartFils)}
+          <IconPencil size={12} aria-hidden />
+        </div>
+      </UnstyledButton>
 
       <Group gap="sm" grow>
         <Button size="md" color="green" variant="light" leftSection={<IconArrowDownLeft size={20} />} onClick={() => setSheet({ kind: 'in' })}>
@@ -383,7 +376,7 @@ export function LedgerTab() {
                           {/* As a bank shows it: money in green with a plus, money out in the text's colour with a minus. */}
                           <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />
                           <Text size="10px" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
-                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : `${t('ledger.cardShort')} ${formatAed(e.cardAfter).replace(/^-/, '−')}`}
+                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : t('ledger.cardShort')}
                           </Text>
                         </Stack>
                       }

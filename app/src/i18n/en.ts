@@ -1148,12 +1148,10 @@ export const en: typeof ru = {
   money: { book: 'Book', cash: 'Cash', expenses: 'Expenses', salaries: 'Salaries', debts: 'Debts' },
   ledger: {
     cashBalance: 'Cash',
-    cardBalance: 'Card',
     start: 'start',
     opening: 'Opening balances',
-    openingHint: 'Cash in the box and on the card when the book was started (Cash Start / Card Start of the sheet). The balances are counted from here.',
+    openingHint: 'Cash in the box when the book was started (Cash Start of the sheet). The balance is counted from here.',
     cashStart: 'Cash start',
-    cardStart: 'Card start',
     cashStartLocked: 'A day was already closed with counted cash — cash is counted from there, the cash start can no longer change.',
     in: 'Income',
     out: 'Expense',
@@ -1245,7 +1243,7 @@ export const en: typeof ru = {
     nothing: 'Nothing new — it is all in the book already',
     existing: 'Already in the book: {{n}}',
     skipped: 'No date or amount: {{n}}',
-    opening: 'Opening balances: cash {{cash}}, card {{card}}',
+    opening: 'Opening cash: {{cash}}',
     done: 'Sheet imported',
   },
   cashReason: {
@@ -1576,8 +1574,9 @@ export const en: typeof ru = {
     mapHint: 'Map link',
     card: 'Business card',
     cardAdd: 'Card',
-    import: 'From Excel',
     imported: 'Added: {{added}}, already here: {{skipped}}',
+    importedBook: 'Added: {{added}}, updated: {{updated}}',
+    book: 'Supplier base',
     notFound: 'Nobody found',
   },
   mechanic: {

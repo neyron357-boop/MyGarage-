@@ -1,21 +1,22 @@
 import { ActionIcon, Button, Group, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconBrandWhatsapp, IconFileSpreadsheet, IconMapPin, IconPhone, IconPlus, IconTruck } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPlus, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
 import { CAR_MAKES, canonicalMake, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import type { Supplier } from '../../domain/types';
+import { supplierChatLink } from '../../domain/supplierBook';
 import { whatsappUrl } from '../../services/messages';
-import { importSuppliers, saveSupplier, setSupplierCard } from '../../services/parts';
+import { saveSupplier, setSupplierCard } from '../../services/parts';
 import { EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction } from '../../ui/hooks';
 import { PhotoStrip } from '../../ui/PhotoStrip';
+import { SupplierBookActions } from './SupplierBookActions';
 import { Autocomplete } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 
 /** A supplier's card as an iOS form: who, phone, makes, new or used, what they sell, contractor, card photos, map. */
 export function SupplierSheet({ supplier, onClose }: { supplier: Partial<Supplier> | null; onClose: () => void }) {
@@ -130,46 +131,24 @@ export function SupplierSheet({ supplier, onClose }: { supplier: Partial<Supplie
  */
 export function SuppliersTab() {
   const { t } = useTranslation();
-  const { run } = useAction();
   const all = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).sortBy('name'), []);
   // Opened from the search: the supplier found is the one shown.
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
-  const input = useRef<HTMLInputElement>(null);
   if (!all) return null;
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const list = all.filter((s) => {
     const hay = `${s.name} ${s.makes?.join(' ') ?? ''} ${s.parts ?? ''} ${s.address ?? ''} ${s.notes ?? ''} ${s.phone ?? ''} ${s.service ? t('suppliers.contractor') : ''}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   });
-  const importFile = (file: File) =>
-    run(async () => {
-      const r = await importSuppliers(file);
-      haptic('success');
-      notifications.show({ color: 'green', message: t('suppliers.imported', { added: r.added, skipped: r.skipped }) });
-    });
   return (
     <Stack gap="md">
       <Group gap={8} wrap="nowrap">
         <Button leftSection={<IconPlus size={18} />} onClick={() => setEdit({})} style={{ flex: 1 }} aria-label={t('parts.addSupplier')}>
           {t('suppliers.new')}
         </Button>
-        <Button variant="default" leftSection={<IconFileSpreadsheet size={18} />} onClick={() => input.current?.click()} style={{ flex: 1 }}>
-          {t('suppliers.import')}
-        </Button>
-        <input
-          ref={input}
-          type="file"
-          accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          hidden
-          data-suppliers-input
-          onChange={(e) => {
-            const f = e.currentTarget.files?.[0];
-            e.currentTarget.value = '';
-            if (f) void importFile(f);
-          }}
-        />
+        <SupplierBookActions />
       </Group>
       {(all.length > 6 || q) && <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} />}
       {all.length === 0 ? (
@@ -189,8 +168,8 @@ export function SuppliersTab() {
                       <IconMapPin size={18} />
                     </ActionIcon>
                   )}
-                  {s.phone && (
-                    <ActionIcon component="a" href={whatsappUrl(s.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                  {(s.phone || supplierChatLink(s)) && (
+                    <ActionIcon component="a" href={supplierChatLink(s) ?? whatsappUrl(s.phone!, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                       <IconBrandWhatsapp size={19} />
                     </ActionIcon>
                   )}
