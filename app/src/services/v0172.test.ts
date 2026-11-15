@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { mechanicsOf, toggled } from '../domain/crew';
 import { flatPeaks, peaksOf, WAVE_BARS } from '../domain/waveform';
-import { addNote } from './notes';
+import { addNote, setNotePeaks } from './notes';
 import { assignMechanic, checkIn, toggleMechanic } from './orders';
 import { ensureSeed } from './seed';
 
@@ -67,6 +67,13 @@ describe('the bars of a voice message', () => {
     expect([n.kind, n.seconds, n.peaks]).toEqual(['voice', 16, [0.12, 1, 0, 0.5]]);
     expect((await db.notes.get(n.id))!.peaks).toEqual([0.12, 1, 0, 0.5]);
     // Without bars (a browser that cannot read its recording): none kept — the chat draws flat ones.
-    expect((await addNote(o.id, { voice, seconds: 3 })).peaks).toBeUndefined();
+    const later = await addNote(o.id, { voice, seconds: 3 });
+    expect(later.peaks).toBeUndefined();
+    // Kept first, its bars a moment later (v0.17.3: reading the recording never costs the note).
+    await setNotePeaks(later.id, [0.333, 2]);
+    expect((await db.notes.get(later.id))!.peaks).toEqual([0.33, 1]);
+    const text = await addNote(o.id, { text: 'Oil leak' });
+    await setNotePeaks(text.id, [0.5]);
+    expect((await db.notes.get(text.id))!.peaks).toBeUndefined();
   });
 });

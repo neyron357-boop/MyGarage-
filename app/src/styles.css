@@ -762,7 +762,9 @@ html.kb .tab-bar-wrap {
   margin: 0 -12px 0 -4px;
   flex-shrink: 0;
   color: var(--app-label-3);
-  touch-action: none;
+  /* Up and down still scrolls the screen from here; a finger held still a moment lifts the row, and then the grip's
+     own touchmove listener keeps the screen still (ui/sortable.ts). */
+  touch-action: pan-y;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
@@ -1846,6 +1848,60 @@ html.kb .tab-bar-wrap {
     scale: var(--held);
   }
 }
+/* ---------- The job card (features/job/JobCard.tsx): the car's outline, the damage points, their photos ---------- */
+.jc-diagram {
+  padding: 8px 0;
+  border-radius: var(--radius-group);
+  background: var(--app-soft);
+}
+/* The point picked: its number in its colour, its kind as chips; its photo, the camera, off the card. */
+.jc-mark {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 20px;
+  background: var(--app-soft);
+}
+.jc-mark-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.jc-mark-head > .chip-row {
+  flex: 1;
+  min-width: 0;
+}
+.jc-dot {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--mantine-color-white);
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.jc-dot.sm {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+.jc-mark-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.jc-mark-foot .jc-remove {
+  margin-inline-start: auto;
+}
+.chip.jc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 7px;
+}
 /* ---------- Pull to refresh (ui/pullRefresh.tsx): the iPhone's spinner ---------- */
 /* Twelve spokes round a point under the navigation bar: they appear one by one as the page comes down,
    then turn (each fading after the one before) while the refresh runs. */
@@ -1902,8 +1958,8 @@ html.kb .tab-bar-wrap {
 /* ---------- Board cards (features/board/JobRow.tsx) ---------- */
 /* Every car its own card. With a photo the photo is the card (2 : 1 — three cars to a phone screen):
    the step in its colour on it, top left; the car, its plate, the promised time and the money at its
-   foot over a soft shade. Without a photo, a compact card: the step's symbol on a square of its colour,
-   then the same facts. `--c` / `--c-deep` — the step's colour (red when it is late). */
+   foot over a soft shade. Without a photo, the same card with the car drawn in its place, and the same facts.
+   `--c` / `--c-deep` — the step's colour (red when it is late). */
 .list.board-cards,
 [data-mantine-color-scheme='dark'] .list.board-cards {
   /* A column, not a grid: a grid sizes its rows before the cards know their width, and the 2 : 1 photo
@@ -2073,70 +2129,22 @@ html.kb .tab-bar-wrap {
   background: var(--mantine-color-red-filled);
 }
 
-/* Without a photo: one compact card. */
-.job-card-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 76px;
-  padding: 12px 14px;
-}
-.job-card-icon {
+/* No photo of the car yet: the same card (every card one size, the user's call, v0.17.3) — the car drawn large on
+   a dark ground, lit by the step's colour from a corner; the same shade, step and foot over it. */
+.job-card-art {
+  position: absolute;
+  inset: 0;
   display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
-  background: var(--c);
-  color: #fff;
-  box-shadow: 0 6px 16px -8px var(--c);
+  place-items: center end;
+  padding: 0 7% 6% 0;
+  background:
+    radial-gradient(110% 95% at 88% 8%, color-mix(in srgb, var(--c) 42%, transparent) 0%, transparent 62%),
+    linear-gradient(160deg, var(--mantine-color-dark-5) 0%, var(--mantine-color-dark-8) 100%);
+  color: rgb(255 255 255 / 0.17);
 }
-.job-card-body {
-  display: grid;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-.job-card-line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-  min-width: 0;
-}
-.job-card-line:first-child {
-  flex-wrap: nowrap;
-}
-.job-card-row .job-card-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 17px;
-  font-weight: 650;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
-}
-.job-card-row .job-card-amount {
-  flex-shrink: 0;
-  font-size: 17px;
-}
-.job-card-pill {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c) 14%, transparent);
-  color: var(--c);
-  font-size: 13px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-.job-card-row .job-card-mark {
-  width: 24px;
-  height: 24px;
-  background: var(--app-fill);
-  box-shadow: none;
+.job-card-art > svg {
+  width: 44%;
+  height: auto;
 }
 /* Names of two lines at most; a long one ends with "…" rather than pushing the facts away. */
 .job-card-name {
@@ -5082,4 +5090,16 @@ html.kb .screen-bottom > .sticky-bar {
 }
 .list-row .title {
   transition: color 320ms ease;
+}
+/* A signed check-in act's job card: only looked at. */
+.jc-signed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+/* The job card's photo tiles stand out of their grey group. */
+.jc-mark .strip-tile {
+  background: var(--app-card);
 }

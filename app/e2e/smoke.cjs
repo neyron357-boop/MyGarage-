@@ -95,6 +95,9 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     await page.getByText('Camry').first().waitFor();
     await shot('02-board-demo', true);
+    // Every card one size (v0.17.3): a car without a photo has the same card, the car drawn in its place.
+    const cards = await page.evaluate(() => [...document.querySelectorAll('.screen[data-role="top"] .job-card')].map((c) => [Math.round(c.querySelector('.job-card-open').getBoundingClientRect().height), c.hasAttribute('data-art')]));
+    if (!cards.length || new Set(cards.map(([h]) => h)).size !== 1) throw new Error('board cards of different sizes: ' + JSON.stringify(cards));
   });
   await step('search by works and parts', async () => {
     // A Russian word finds the jobs by their lines (the English title too), highlighted.
@@ -360,6 +363,30 @@ async function launchBrowser() {
     if (!(await mulkiya.element().getAttribute('capture'))) throw new Error('a tap on Mulkiya must open the camera');
     await mulkiya.setFiles({ name: 'mulkiya.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Mulkiya', exact: true }).getByText('1/2').waitFor();
+    // The job card (v0.17.3): the car's outline — a tap where it is damaged, its kind, its photo; the chip counts.
+    await page.getByRole('button', { name: 'Job card', exact: true }).click();
+    const card = page.getByRole('dialog', { name: 'Job card' });
+    // Measured once the sheet has come up (while it slides, the drawing is still moving).
+    await card.locator('svg[role="img"]').waitFor();
+    await settled();
+    const outline = await card.locator('svg[role="img"]').boundingBox();
+    await page.mouse.click(outline.x + outline.width * 0.3, outline.y + outline.height * 0.3);
+    await card.getByRole('button', { name: 'Вмятина', exact: true }).click();
+    await card.getByRole('button', { name: 'Вмятина', exact: true }).and(page.locator('[data-active="true"]')).waitFor();
+    const [damage] = await Promise.all([page.waitForEvent('filechooser'), card.locator('.jc-mark .strip-tile[data-empty]').click()]);
+    if (!(await damage.element().getAttribute('capture'))) throw new Error('the damage photo tile must open the camera');
+    await damage.setFiles(FIXTURE);
+    await card.locator('.jc-mark .strip-tile img').waitFor();
+    await shot('30a3-job-card');
+    await card.getByRole('button', { name: 'Готово' }).click();
+    await page.getByRole('button', { name: 'Job card', exact: true }).getByText('1', { exact: true }).waitFor();
+    const marks = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const o = (await db.orders.toArray()).find((x) => x.id === location.hash.match(/orders\/([^/?]+)/)[1]);
+      const insp = await db.inspections.where('orderId').equals(o.id).filter((i) => i.kind === 'intake').first();
+      return (await db.damageMarks.where('inspectionId').equals(insp.id).toArray()).map((m) => [m.view, m.type, !!m.mediaId]);
+    });
+    if (JSON.stringify(marks) !== JSON.stringify([['top', 'dent', true]])) throw new Error('the job card point: ' + JSON.stringify(marks));
     const dlg = page.getByRole('dialog');
     // What the mechanic found: a job and a part (the part first without a price: still to find).
     await page.getByRole('button', { name: 'Работа', exact: true }).click();
@@ -826,8 +853,10 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Sunny', exact: true }).click();
     await page.getByRole('button', { name: 'Принять' }).click();
     const dlg = page.getByRole('dialog');
-    // When the car was promised: a chip on the card, a time from the sheet.
-    await page.getByRole('button', { name: 'Срок' }).click();
+    // When the car was promised: rarely needed — "…" → "Срок" (v0.17.3), a time from the sheet; then its chip on the card.
+    if (await front('.due-chip').count()) throw new Error('an empty "Due" chip is still on the card');
+    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+    await dlg.getByRole('button', { name: 'Срок' }).click();
     await page.getByRole('dialog', { name: 'Когда будет готова' }).locator('button.chip').first().waitFor();
     await shot('34a-due-sheet');
     await page.getByRole('dialog', { name: 'Когда будет готова' }).locator('button.chip').first().click();
@@ -889,6 +918,13 @@ async function launchBrowser() {
     await voice.first().getByRole('button', { name: 'Скорость' }).click();
     await voice.first().getByRole('button', { name: 'Скорость' }).getByText('1,5×').waitFor();
     if ((await page.evaluate(() => localStorage.getItem('mygarage.voiceRate'))) !== '1.5') throw new Error('the voice speed is not kept');
+    // Taps in a row all count (the tap guard knows the pill by its name, not its words): 1,5× → 2× → 1× → 1,5×.
+    const speed = voice.first().getByRole('button', { name: 'Скорость' });
+    await speed.click();
+    await speed.click();
+    await speed.click();
+    await speed.getByText('1,5×').waitFor();
+    if ((await page.evaluate(() => localStorage.getItem('mygarage.voiceRate'))) !== '1.5') throw new Error('quick taps on the voice speed were dropped');
     // A tap halfway along the bars puts the dot there: 0:01 of 0:02.
     const tapWave = async (k, frac) => {
       const box = await voice.nth(k).getByRole('slider', { name: 'Место в записи' }).boundingBox();

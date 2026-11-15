@@ -55,5 +55,7 @@ export function useLongPress(onLong: () => void, ms = 450) {
       fired.current = false;
       return f;
     },
+    /** Whether the press now ending went off as a long press — asked without using it up (the click still is). */
+    held: () => fired.current,
   };
 }

@@ -1,11 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 
-/** The recording formats a phone can make: iPhone (Safari) records MP4/AAC, others WebM/Opus. */
+/** The recording formats a phone can make: iPhone (Safari) records MP4/AAC, Chrome MP4 or WebM with Opus. */
 function pickMime(): string | undefined {
   const MR = typeof MediaRecorder !== 'undefined' ? MediaRecorder : undefined;
   if (!MR?.isTypeSupported) return undefined;
   return ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'].find((m) => MR.isTypeSupported(m));
 }
+
+/**
+ * A voice, cleanly (v0.17.3): one channel at 48 kHz; the phone's own noise reduction (a garage is loud) and level
+ * (near or far from the phone, the same loudness); no echo cancelling — nothing plays while it records, and it
+ * only colours the voice. The recording at 128 kbit/s (Opus or AAC): clear speech, ~1 MB a minute.
+ */
+const VOICE: MediaTrackConstraints = {
+  channelCount: { ideal: 1 },
+  sampleRate: { ideal: 48000 },
+  echoCancellation: false,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+const VOICE_BITS = 128_000;
 
 export function canRecord(): boolean {
   return typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
@@ -41,10 +55,19 @@ export function useRecorder() {
 
   /** Starts recording; the promise ends with the recording when it is stopped. */
   const start = async (): Promise<{ blob: Blob; seconds: number } | null> => {
-    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // A browser that cannot give that voice gives its own (never no recording for a setting); a "no" to the
+    // microphone stays a no — it is not asked twice.
+    const s = await navigator.mediaDevices
+      .getUserMedia({ audio: VOICE })
+      .catch((e: unknown) => ((e as Error)?.name === 'OverconstrainedError' || (e as Error)?.name === 'TypeError' ? navigator.mediaDevices.getUserMedia({ audio: true }) : Promise.reject(e)));
     stream.current = s;
     const mime = pickMime();
-    const r = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
+    let r: MediaRecorder;
+    try {
+      r = new MediaRecorder(s, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: VOICE_BITS });
+    } catch {
+      r = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
+    }
     rec.current = r;
     chunks.current = [];
     cancelled.current = false;

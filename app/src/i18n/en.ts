@@ -1061,7 +1061,7 @@ export const en: typeof ru = {
     noMoney: 'No money coming',
     changePrice: 'Change the price',
     accept: 'Accept',
-    more: { photos: 'Photos', quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', discount: 'Discount', debt: 'On credit', unpaid: 'No payment', refuse: 'Refused', customer: 'Customer', car: 'Car', claim: 'Warranty', select: 'Edit', amend: 'Change', scanner: 'Scanner', remove: 'Delete', mechanic: 'Mechanic', report: 'Report' },
+    more: { photos: 'Photos', quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', discount: 'Discount', debt: 'On credit', unpaid: 'No payment', refuse: 'Refused', customer: 'Customer', car: 'Car', claim: 'Warranty', select: 'Edit', amend: 'Change', scanner: 'Scanner', remove: 'Delete', mechanic: 'Mechanic', report: 'Report', due: 'Due' },
     pickAll: 'All',
     pickNone: 'None',
     removeN: 'Delete · {{n}}',
@@ -1507,6 +1507,12 @@ export const en: typeof ru = {
     notNeeded: 'Not needed',
     more: '{{n}} more',
     less: 'Show less',
+  },
+  jobCard: {
+    title: 'Job card',
+    hint: 'Tap where it is damaged',
+    signed: 'The check-in act is signed',
+    photo: 'Photo',
   },
   notes: {
     title: 'Notes',

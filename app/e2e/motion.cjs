@@ -1020,6 +1020,54 @@ const check = (name, ok, detail) => {
   await setScroll(0);
   }
 
+  // 16. The job's lines keep their grips all the time (v0.17.2) — at the screen's right edge, where a thumb starts a
+  //     scroll: a finger that moves on at once from a grip scrolls the screen and leaves the order; held still a
+  //     moment, the line lifts and moves (v0.17.3).
+  {
+  const finger = (type, x, y) => fingerCdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  const lines = () =>
+    page.evaluate(() => [...document.querySelectorAll('.stack > .screen[data-role="top"] .list-row')].filter((r) => r.querySelector('.sort-grip')).map((r) => r.querySelector('.title').textContent));
+  const grips = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.stack > .screen[data-role="top"] .sort-grip')].map((g) => {
+        const r = g.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), h: Math.round(g.closest('.list-row').getBoundingClientRect().height) };
+      }),
+    );
+  const scrolled = () => page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTop);
+  await page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .sort-grip')?.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(400);
+  const before = await lines();
+  let g = (await grips())[0];
+  const s0 = await scrolled();
+  await finger('touchStart', g.x, g.y);
+  for (let i = 1; i <= 10; i++) {
+    await finger('touchMove', g.x, g.y - i * 14);
+    await page.waitForTimeout(16);
+  }
+  await finger('touchEnd');
+  await page.waitForTimeout(700);
+  const s1 = await scrolled();
+  const flicked = await lines();
+  check('grip: a finger that moves on at once scrolls the screen, the lines stay', before.length >= 2 && s1 > s0 + 40 && JSON.stringify(flicked) === JSON.stringify(before), { s0, s1, before, flicked });
+  await page.evaluate(() => document.querySelector('.stack > .screen[data-role="top"] .sort-grip')?.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(400);
+  g = (await grips())[0];
+  const s2 = await scrolled();
+  await finger('touchStart', g.x, g.y);
+  await page.waitForTimeout(320);
+  for (let i = 1; i <= 12; i++) {
+    await finger('touchMove', g.x, g.y + Math.round(((g.h + 12) * i) / 12));
+    await page.waitForTimeout(16);
+  }
+  await finger('touchEnd');
+  await page.waitForTimeout(1200);
+  const dragged = await lines();
+  const s3 = await scrolled();
+  check('grip: held still a moment, the line lifts and moves (the screen stays)', dragged[0] === before[1] && dragged[1] === before[0] && Math.abs(s3 - s2) <= 2, { before, dragged, s2, s3 });
+  await page.evaluate(() => { document.querySelector('.stack > .screen[data-role="top"] .screen-scroll').scrollTop = 0; });
+  }
+
   // 11. Safari in a tab (not installed): the edge swipe is Safari's own, and going back after it
   //     does not play a second animation.
   const iphone = await browser.newContext({

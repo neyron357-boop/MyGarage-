@@ -1,5 +1,5 @@
 import { Modal, Text } from '@mantine/core';
-import { IconBuildingFactory2, IconCash, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconCar, IconCash, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
 import { memo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -108,7 +108,10 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
     <>
       <div
         className="job-row job-card swipe-row"
-        data-photo={cover ? true : undefined}
+        // Every card the same size (the user's call, v0.17.3): a job without the car's photo has the same 2 : 1
+        // card, with the car drawn on a dark ground in its place.
+        data-photo
+        data-art={cover ? undefined : true}
         {...touch}
         style={swipe ? { ...vars, ...sw.style } : vars}
         data-swiping={sw.dragging || undefined}
@@ -139,55 +142,35 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
             open();
           }}
         >
+          {/* The photo is the card (or, without one, the car drawn in its place): the step on it, the car and its
+              money at its foot over a soft shade. */}
           {cover ? (
-            // The photo is the card: the step on it, the car and its money at its foot over a soft shade.
-            <>
-              <MediaImage id={cover} card h="100%" w="100%" radius="0" />
-              <span className="job-card-shade" aria-hidden />
-              <span className="job-card-top">
-                <span className="job-card-step tnum">
-                  <m.icon size={15} stroke={2.4} aria-hidden />
-                  {stepText}
-                </span>
-                {marks.length > 0 && <span className="job-card-marks">{marks.map(mark)}</span>}
-              </span>
-              <span className="job-card-foot">
-                <span className="job-card-name">{name}</span>
-                <span className="job-card-meta">
-                  <PlateText plate={b.vehicle.plate} size="sm" />
-                  {dueChip}
-                  {amount > 0 && (
-                    <span className="job-card-amount">
-                      <Money fils={amount} fw={700} />
-                    </span>
-                  )}
-                </span>
-              </span>
-            </>
+            <MediaImage id={cover} card h="100%" w="100%" radius="0" />
           ) : (
-            // No photo yet: a compact card — the step's symbol in its colour, then the same facts.
-            <span className="job-card-row">
-              <span className="job-card-icon">
-                <m.icon size={23} stroke={2} aria-hidden />
-              </span>
-              <span className="job-card-body">
-                <span className="job-card-line">
-                  <span className="job-card-name">{name}</span>
-                  {amount > 0 && (
-                    <span className="job-card-amount">
-                      <Money fils={amount} fw={700} c={phase === 'debt' ? 'red.7' : undefined} />
-                    </span>
-                  )}
-                </span>
-                <span className="job-card-line">
-                  <PlateText plate={b.vehicle.plate} size="sm" />
-                  <span className="job-card-pill tnum">{stepText}</span>
-                  {dueChip}
-                  {marks.length > 0 && <span className="job-card-marks">{marks.map(mark)}</span>}
-                </span>
-              </span>
+            <span className="job-card-art" aria-hidden>
+              <IconCar size={120} stroke={1.1} />
             </span>
           )}
+          <span className="job-card-shade" aria-hidden />
+          <span className="job-card-top">
+            <span className="job-card-step tnum">
+              <m.icon size={15} stroke={2.4} aria-hidden />
+              {stepText}
+            </span>
+            {marks.length > 0 && <span className="job-card-marks">{marks.map(mark)}</span>}
+          </span>
+          <span className="job-card-foot">
+            <span className="job-card-name">{name}</span>
+            <span className="job-card-meta">
+              <PlateText plate={b.vehicle.plate} size="sm" />
+              {dueChip}
+              {amount > 0 && (
+                <span className="job-card-amount">
+                  <Money fils={amount} fw={700} />
+                </span>
+              )}
+            </span>
+          </span>
         </button>
       </div>
       {/* The row's actions (long press), a sheet like the iPhone's context menu. */}

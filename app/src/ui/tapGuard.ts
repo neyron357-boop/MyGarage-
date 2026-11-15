@@ -28,8 +28,12 @@ const CONTROL = 'button, a[href], [role="button"], [role="tab"], [role="option"]
 /** The last tap on a control: when it was (`tap`), where its window starts now (`t`), where and what it hit. */
 let last: { tap: number; t: number; x: number; y: number; el: Element; sig: string } | null = null;
 
-/** What a control says: the same node saying something else ("Agree" re-rendered as "Refuse") is another control. */
-const sig = (el: Element) => `${el.getAttribute('aria-label') ?? ''}|${(el.textContent ?? '').trim().slice(0, 80)}`;
+/**
+ * What a control says: the same node saying something else ("Agree" re-rendered as "Refuse") is another control.
+ * A control whose words change with every tap but which stays the same control (a voice note's speed, 1× → 1.5×
+ * → 2×) carries `data-repeat`: it is known by its name alone, and taps in a row all count.
+ */
+const sig = (el: Element) => `${el.getAttribute('aria-label') ?? ''}|${el.hasAttribute('data-repeat') ? '' : (el.textContent ?? '').trim().slice(0, 80)}`;
 
 function onClick(e: MouseEvent) {
   if (!e.isTrusted || e.detail === 0) return;

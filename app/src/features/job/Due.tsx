@@ -40,29 +40,41 @@ function quickTimes(now = nowIso()) {
 const capital = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 
 /**
- * When the car was promised — a chip on the job's card: one tap, then a time from the chips (in two
- * hours, today at six, tomorrow…) or any day and hour. Late — the chip turns red (and the board row).
- * The sheet and its days are made only when it is opened (the job opens without them).
+ * When the car will be ready, to choose: a time from the chips (in two hours, today at six, tomorrow…) or any day
+ * and hour. Opened from "…" → "Due" (rarely needed — the user's call, v0.17.3) or from the chip once a time is
+ * set. The sheet and its days are made only when it is opened (the job opens without them).
+ */
+export function DueSheet({ order, lang, opened, onClose }: { order: Pick<Order, 'id' | 'promisedReadyAt'>; lang: Lang; opened: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <LazySheet opened={opened}>
+      {(o) => (
+        <Modal opened={o} onClose={onClose} title={t('job.dueTitle')}>
+          <DueChoices order={order} lang={lang} onDone={onClose} />
+        </Modal>
+      )}
+    </LazySheet>
+  );
+}
+
+/**
+ * When the car was promised — a chip on the job's card, only once a time is set (to set one: "…" → "Due"). A tap
+ * changes it; late — the chip turns red (and the board row).
  */
 export function DueChip({ order, lang }: { order: Pick<Order, 'id' | 'promisedReadyAt'>; lang: Lang }) {
   const { t } = useTranslation();
   const label = useDueLabel();
   const [open, setOpen] = useState(false);
   const due = order.promisedReadyAt;
-  const late = !!due && due < nowIso();
+  if (!due) return null;
+  const late = due < nowIso();
   return (
     <>
-      <button type="button" className="chip due-chip" data-state={late ? 'late' : due ? 'set' : 'empty'} onClick={() => setOpen(true)} aria-label={t('job.due')}>
+      <button type="button" className="chip due-chip" data-state={late ? 'late' : 'set'} onClick={() => setOpen(true)} aria-label={t('job.due')}>
         <IconClock size={16} stroke={2} aria-hidden />
-        {due ? label(due, lang) : t('job.due')}
+        {label(due, lang)}
       </button>
-      <LazySheet opened={open}>
-        {(o) => (
-          <Modal opened={o} onClose={() => setOpen(false)} title={t('job.dueTitle')}>
-            <DueChoices order={order} lang={lang} onDone={() => setOpen(false)} />
-          </Modal>
-        )}
-      </LazySheet>
+      <DueSheet order={order} lang={lang} opened={open} onClose={() => setOpen(false)} />
     </>
   );
 }

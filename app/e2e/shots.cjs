@@ -99,6 +99,16 @@ async function launchBrowser() {
     await settle(700);
     await shot(`${prefix}-02e-job-part`);
     await closeSheet();
+    // The job card: the car's outline; a tap — a damage point with its kind (the first tour only: it writes).
+    await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Job card', exact: true }).click();
+    await settle(700);
+    if (prefix === 'phone-light') {
+      const outline = await page.getByRole('dialog').locator('svg[role="img"]').boundingBox();
+      if (outline) await page.mouse.click(outline.x + outline.width * 0.3, outline.y + outline.height * 0.3);
+      await settle(600);
+    }
+    await shot(`${prefix}-02g-job-card`);
+    await closeSheet();
     // Jobs on the other steps: waiting for the customer's answer, in work.
     for (const [k, step] of [[1, /Ждём|Waiting/], [2, /В работе|In work/]]) {
       await go('#/');

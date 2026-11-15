@@ -28,6 +28,13 @@ export async function addNote(orderId: string, input: { text?: string; photo?: B
   return note;
 }
 
+/** A voice note's bars, read from its recording after it was kept (domain/waveform.ts). */
+export async function setNotePeaks(id: string, peaks: number[]): Promise<void> {
+  const n = await db.notes.get(id);
+  if (!n || n.kind !== 'voice' || !peaks.length) return;
+  await db.notes.update(id, { peaks: peaks.map((p) => Math.round(Math.max(0, Math.min(1, p)) * 100) / 100) });
+}
+
 /** Everything a removed note took with it, to put it back ("Undo"). */
 export interface RemovedNote {
   note: JobNote;

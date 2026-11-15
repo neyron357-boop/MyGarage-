@@ -13,6 +13,7 @@ import {
   IconCircleX,
   IconClipboardCheck,
   IconClipboardList,
+  IconClock,
   IconCopy,
   IconDiscount,
   IconDots,
@@ -87,7 +88,8 @@ import { DebtModal, PaymentModal } from '../money/PaymentSheets';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { useSendVersion } from './sendVersion';
-import { DueChip } from './Due';
+import { DueChip, DueSheet } from './Due';
+import { JobCardChip } from './JobCard';
 import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
 import { MechanicSheet } from './MechanicSheet';
 import { NotesChat } from './Notes';
@@ -141,6 +143,7 @@ const TILE_COLOR: Record<string, string> = {
   mechanic: 'orange',
   photos: 'pink',
   scanner: 'cyan',
+  due: 'yellow',
   invoice: 'grape',
   quote: 'grape',
   discount: 'pink',
@@ -450,6 +453,7 @@ export function JobPage() {
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [send, setSend] = useState<SendRequest | null>(null);
   const [mechanicOpen, setMechanicOpen] = useState(false);
+  const [dueOpen, setDueOpen] = useState(false);
   // The profit is the manager's: hidden (blurred) until tapped, in case the customer sees the screen.
   const [profitShown, setProfitShown] = useState(false);
   // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
@@ -717,6 +721,8 @@ export function JobPage() {
   if (open) tiles.push({ key: 'mechanic', icon: IconClipboardList, onClick: () => setMechanicOpen(true) });
   if (open) tiles.push({ key: 'photos', icon: IconCamera, onClick: () => navigate(`/orders/${oid}/intake`) });
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
+  // When the car was promised: rarely needed (the user's call, v0.17.3) — a tile here; once set, its chip on the card.
+  if (open && phase !== 'booked') tiles.push({ key: 'due', icon: IconClock, onClick: () => setDueOpen(true) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
@@ -958,6 +964,7 @@ export function JobPage() {
             ))}
           <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} hideEmpty={!open} />
           <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
+          <JobCardChip orderId={oid} open={open} />
         </div>
       </Box>
 
@@ -1125,6 +1132,7 @@ export function JobPage() {
           <MoreSheet opened={o} onClose={() => setMore(false)} tiles={tiles} />
         )}
       </LazySheet>
+      <DueSheet order={b.order} lang={lang} opened={dueOpen} onClose={() => setDueOpen(false)} />
       <LazySheet opened={mechanicOpen}>
         {(o) => (
           <MechanicSheet b={b} opened={o} onClose={() => setMechanicOpen(false)} />

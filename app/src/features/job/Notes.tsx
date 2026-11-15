@@ -18,7 +18,7 @@ import { dayHeading, dubaiDate, dubaiTime, formatDateTime } from '../../domain/d
 import type { JobNote } from '../../domain/types';
 import { flatPeaks } from '../../domain/waveform';
 import { cachedMediaUrl, mediaUrl } from '../../services/media';
-import { addNote, removeNote, restoreNote } from '../../services/notes';
+import { addNote, removeNote, restoreNote, setNotePeaks } from '../../services/notes';
 import { copyText } from '../../ui/clipboard';
 import { MediaImage, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
@@ -43,12 +43,18 @@ const minutesApart = (a: JobNote, b: JobNote) => Math.abs(Date.parse(b.createdAt
  * The callbacks keep their identity (the bubbles are memo: only the one playing is drawn again).
  *
  * One audio element plays every note: an iPhone lets an element play on by itself (the next voice note) only
- * once a tap has started that element — a new element for the next one would stay silent.
+ * once a tap has started that element — a new element for the next one would stay silent. What the element does
+ * by itself is followed too: headphones out, a call or the lock screen pause it — the bubble shows ▶.
  */
 function usePlayer(list: JobNote[]) {
   const audio = useRef<HTMLAudioElement | null>(null);
   /** Whose recording the element holds now: what it reports is that note's, not the one before. */
   const holds = useRef<string | null>(null);
+  /** Playing by the user's word: only a note played to its end hands on to the next one. */
+  const going = useRef(false);
+  /** The latest start or move asked for: an older one whose recording is read late is dropped. */
+  const asked = useRef(0);
+  const alive = useRef(true);
   const [cur, setCur] = useState<{ id: string; playing: boolean } | null>(null);
   const [pos, setPos] = useState(0);
   const [rate, setRate] = useState<VoiceRate>(savedVoiceRate);
@@ -60,70 +66,107 @@ function usePlayer(list: JobNote[]) {
   const screen = useScreen();
   const screenRef = useRef(screen);
   screenRef.current = screen;
-  useEffect(
-    () => () => {
-      const a = audio.current;
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      going.current = false;
       holds.current = null;
+      const a = audio.current;
       if (!a) return;
       a.pause();
       // The recording is let go (an iPhone keeps a few media elements only).
       a.removeAttribute('src');
       a.load();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const api = useRef({
     /** The note's recording put in the element (the one before stops), at `at` seconds. */
     open(n: JobNote, url: string, at: number) {
       const a = (audio.current ??= new Audio());
+      going.current = false;
       a.pause();
       holds.current = n.id;
       a.src = url;
       a.defaultPlaybackRate = rateRef.current;
       a.playbackRate = rateRef.current;
-      // Some browsers set the speed back when the recording loads: it is set again then.
       a.onloadedmetadata = () => {
-        if (holds.current === n.id) a.playbackRate = rateRef.current;
+        if (holds.current !== n.id) return;
+        // Some browsers set the speed back when the recording loads; a place set before it was read may be lost
+        // (WebKit) — both are set again.
+        a.playbackRate = rateRef.current;
+        if (at > 0 && Math.abs(a.currentTime - at) > 0.25) a.currentTime = at;
       };
       // Before the recording is read this is where it will start (the spec's default playback start position).
       if (at > 0) a.currentTime = at;
+      a.onplay = () => {
+        if (holds.current !== n.id) return;
+        going.current = true;
+        setCur({ id: n.id, playing: true });
+      };
+      // Its own pause — headphones out, a call, the lock screen — as well as ours. The end is `onended`'s.
+      a.onpause = () => {
+        if (holds.current !== n.id || a.ended) return;
+        going.current = false;
+        setCur((c) => (c?.id === n.id ? { id: n.id, playing: false } : c));
+      };
       a.ontimeupdate = () => {
         if (holds.current !== n.id) return;
         // The job went under another screen (a phone keeps it there): the voice stops — play goes on from here.
         if (!a.paused && screenRef.current && !screenRef.current.front()) {
+          going.current = false;
           a.pause();
-          setCur((c) => (c ? { id: c.id, playing: false } : c));
         }
         setPos(a.currentTime);
       };
       a.onended = () => {
         if (holds.current !== n.id) return;
+        const played = going.current;
+        going.current = false;
+        if (!played) {
+          // Its dot moved to the very end while it was paused: it stays there, nothing plays on.
+          setPos(a.currentTime);
+          setCur((c) => (c?.id === n.id ? { id: n.id, playing: false } : c));
+          return;
+        }
         holds.current = null;
         setCur(null);
         setPos(0);
+        // Played to its end: the next voice message plays on (none when the note has left the chat).
         const l = listRef.current;
-        const next = l[l.findIndex((x) => x.id === n.id) + 1];
+        const i = l.findIndex((x) => x.id === n.id);
+        const next = i >= 0 ? l[i + 1] : undefined;
         if (next?.kind === 'voice' && next.mediaId) void api.current.start(next, 0);
       };
       setPos(at);
       return a;
     },
     play(n: JobNote, a: HTMLAudioElement) {
+      // At its end: from the start again.
+      if (a.ended || (Number.isFinite(a.duration) && a.duration > 0 && a.currentTime >= a.duration - 0.05)) a.currentTime = 0;
+      going.current = true;
       setCur({ id: n.id, playing: true });
-      a.play().catch(() => setCur((c) => (c?.id === n.id ? { id: n.id, playing: false } : c)));
+      a.play().catch(() => {
+        going.current = false;
+        setCur((c) => (c?.id === n.id ? { id: n.id, playing: false } : c));
+      });
     },
     async start(n: JobNote, at: number) {
       if (!n.mediaId) return;
+      const ask = ++asked.current;
       // An iPhone plays only right in the tap: the address made ahead (by the bubble) is used at once.
       const url = cachedMediaUrl(n.mediaId) ?? (await mediaUrl(n.mediaId));
-      if (url) api.current.play(n, api.current.open(n, url, at));
+      // A later tap (or the chat gone) while the recording was being read: this one is over.
+      if (!url || ask !== asked.current || !alive.current) return;
+      api.current.play(n, api.current.open(n, url, at));
     },
     toggle(n: JobNote) {
       const a = audio.current;
-      const c = curRef.current;
-      if (a && c?.id === n.id) {
-        if (c.playing) {
+      // The element's own state, not the last one drawn (it may have paused by itself a moment ago).
+      if (a && holds.current === n.id && curRef.current?.id === n.id) {
+        if (!a.paused) {
+          going.current = false;
           a.pause();
           setCur({ id: n.id, playing: false });
         } else api.current.play(n, a);
@@ -133,10 +176,11 @@ function usePlayer(list: JobNote[]) {
     },
     seek(n: JobNote, frac: number) {
       const a = audio.current;
-      const mine = !!a && curRef.current?.id === n.id;
+      const mine = !!a && holds.current === n.id && curRef.current?.id === n.id;
       // A recording's length may be unknown to the browser (Chrome's WebM): the note keeps its own.
       const total = mine && Number.isFinite(a!.duration) && a!.duration > 0 ? a!.duration : n.seconds ?? 0;
-      const at = Math.max(0, Math.min(total, frac * total));
+      // Never quite the end: a place at the very end would count as played to it.
+      const at = Math.max(0, Math.min(Math.max(0, total - 0.15), frac * total));
       if (mine) {
         a!.currentTime = at;
         setPos(at);
@@ -144,13 +188,24 @@ function usePlayer(list: JobNote[]) {
       }
       const id = n.mediaId;
       if (!id) return;
+      const ask = ++asked.current;
       // Another note: it becomes the current one there, paused — play goes on from that point.
       void (async () => {
         const url = cachedMediaUrl(id) ?? (await mediaUrl(id));
-        if (!url) return;
+        if (!url || ask !== asked.current || !alive.current) return;
         api.current.open(n, url, at);
         setCur({ id: n.id, playing: false });
       })();
+    },
+    /** A note taken off the chat: when it is the one in the player, its sound stops with it. */
+    drop(id: string) {
+      if (holds.current !== id) return;
+      asked.current++;
+      going.current = false;
+      holds.current = null;
+      audio.current?.pause();
+      setCur(null);
+      setPos(0);
     },
     cycleRate() {
       const next = VOICE_RATES[(VOICE_RATES.indexOf(rateRef.current) + 1) % VOICE_RATES.length];
@@ -167,7 +222,8 @@ function usePlayer(list: JobNote[]) {
   const toggle = useCallback((n: JobNote) => api.current.toggle(n), []);
   const seek = useCallback((n: JobNote, frac: number) => api.current.seek(n, frac), []);
   const cycleRate = useCallback(() => api.current.cycleRate(), []);
-  return { cur, pos, rate, toggle, seek, cycleRate };
+  const drop = useCallback((id: string) => api.current.drop(id), []);
+  return { cur, pos, rate, toggle, seek, cycleRate, drop };
 }
 
 /**
@@ -183,6 +239,7 @@ function VoiceNote({
   onSeek,
   onRate,
   consumeClick,
+  held,
   time,
 }: {
   n: JobNote;
@@ -192,6 +249,8 @@ function VoiceNote({
   onSeek: (n: JobNote, frac: number) => void;
   onRate: () => void;
   consumeClick: () => boolean;
+  /** The bubble's long press went off (its menu is open): the finger lifting is not a move of the dot. */
+  held: () => boolean;
   time: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -199,13 +258,16 @@ function VoiceNote({
   const total = n.seconds ?? 0;
   const [read, setRead] = useState<number[]>();
   const bars = n.peaks ?? read ?? flatPeaks();
-  // A note made before the bars were kept with it: read from the recording once (a moment later — the chat first).
+  // A note made before the bars were kept with it: read from the recording once — a moment later (the chat first;
+  // a note just recorded gets its own bars in that moment).
   useEffect(() => {
     if (n.peaks || !n.mediaId) return;
+    const id = n.mediaId;
     let alive = true;
-    void voicePeaks(n.mediaId).then((p) => alive && p && setRead(p));
+    const later = window.setTimeout(() => void voicePeaks(id).then((p) => alive && p && setRead(p)), 900);
     return () => {
       alive = false;
+      window.clearTimeout(later);
     };
   }, [n.peaks, n.mediaId]);
   // The recording's address made ahead: the tap on play then reaches it at once.
@@ -261,7 +323,8 @@ function VoiceNote({
         onPointerUp={(e) => {
           if (drag === null) return;
           setDrag(null);
-          onSeek(n, fracAt(e.clientX));
+          // A long press here opened the bubble's menu: lifting the finger does not move the dot.
+          if (!held()) onSeek(n, fracAt(e.clientX));
         }}
         // The chat took the finger to scroll: the dot stays where it was.
         onPointerCancel={() => setDrag(null)}
@@ -282,7 +345,8 @@ function VoiceNote({
         </span>
       </div>
       {voice ? (
-        <button type="button" className="voice-rate" aria-label={t('notes.speed')} onClick={onRate}>
+        // Its words change with each tap, yet it is the same control: taps in a row all count (ui/tapGuard).
+        <button type="button" className="voice-rate" data-repeat aria-label={t('notes.speed')} onClick={onRate}>
           {rateLabel(rate, lang)}
         </button>
       ) : (
@@ -354,7 +418,7 @@ const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, onPlay, onSeek,
       ) : (
         <div className="note-bubble" data-tail={tail || undefined} data-kind={n.kind} {...press.handlers}>
           {n.kind === 'voice' ? (
-            <VoiceNote n={n} voice={voice} rate={rate} onPlay={onPlay} onSeek={onSeek} onRate={onRate} consumeClick={press.consumeClick} time={time} />
+            <VoiceNote n={n} voice={voice} rate={rate} onPlay={onPlay} onSeek={onSeek} onRate={onRate} consumeClick={press.consumeClick} held={press.held} time={time} />
           ) : (
             <>
               <span className="note-text">{n.text}</span>
@@ -450,10 +514,13 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
     run(async () => {
       const r = await rec.start();
       if (r) {
-        // The bars are kept with the note: the chat draws them without reading the recording again.
-        await addNote(orderId, { voice: r.blob, seconds: r.seconds, peaks: await peaksOfBlob(r.blob) });
+        // The recording is kept first; its bars follow a moment later (reading it must never cost the note).
+        const note = await addNote(orderId, { voice: r.blob, seconds: r.seconds });
         haptic('success');
         onSent();
+        void peaksOfBlob(r.blob)
+          .then((p) => p && setNotePeaks(note.id, p))
+          .catch(() => undefined);
       }
     });
   // A computer's Enter sends (Shift+Enter — a new line); on a phone Return is a new line, as in its messengers.
@@ -564,6 +631,8 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
 
   const remove = (n: JobNote) =>
     run(async () => {
+      // A voice note being played goes quiet with it.
+      player.drop(n.id);
       const removed = await removeNote(n.id);
       setMenu(null);
       if (removed) undoToast(t('notes.removed'), t('common.undo'), () => void restoreNote(removed));

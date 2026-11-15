@@ -1059,7 +1059,7 @@ export const ru = {
     noMoney: 'Денег не будет',
     changePrice: 'Изменить цену',
     accept: 'Принять',
-    more: { photos: 'Фото', quote: 'Смета', invoice: 'Инвойс', prepay: 'Предоплата', discount: 'Скидка', debt: 'В долг', unpaid: 'Без оплаты', refuse: 'Отказ', customer: 'Клиент', car: 'Машина', claim: 'Гарантия', select: 'Править', amend: 'Изменить', scanner: 'Сканер', remove: 'Удалить', mechanic: 'Механику', report: 'Отчёт' },
+    more: { photos: 'Фото', quote: 'Смета', invoice: 'Инвойс', prepay: 'Предоплата', discount: 'Скидка', debt: 'В долг', unpaid: 'Без оплаты', refuse: 'Отказ', customer: 'Клиент', car: 'Машина', claim: 'Гарантия', select: 'Править', amend: 'Изменить', scanner: 'Сканер', remove: 'Удалить', mechanic: 'Механику', report: 'Отчёт', due: 'Срок' },
     pickAll: 'Все',
     pickNone: 'Снять',
     removeN: 'Удалить · {{n}}',
@@ -1505,6 +1505,12 @@ export const ru = {
     notNeeded: 'Не нужно',
     more: 'Ещё {{n}}',
     less: 'Свернуть',
+  },
+  jobCard: {
+    title: 'Job card',
+    hint: 'Тап — место повреждения',
+    signed: 'Акт приёмки подписан',
+    photo: 'Фото',
   },
   notes: {
     title: 'Заметки',

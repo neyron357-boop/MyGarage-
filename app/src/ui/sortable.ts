@@ -15,6 +15,9 @@ import { haptic } from './haptics';
 
 const EASE = 'cubic-bezier(0.32, 0.72, 0, 1)';
 const SETTLE = 230;
+/** A finger holds a grip this long (ms), within STILL px, before its row lifts. */
+const HOLD = 200;
+const STILL = 8;
 
 interface Drag {
   pointer: number;
@@ -138,54 +141,122 @@ export function useSortable(ids: string[], onMove: (ids: string[]) => void) {
     window.setTimeout(() => move.current(next), SETTLE);
   };
 
-  /** The grip's handlers: drag it (finger or mouse), or move the row with the arrow keys. */
+  /** The row lifts under the pointer; from here it follows it. */
+  const lift = (grip: HTMLElement, id: string, pointer: number, y: number) => {
+    const found = rowsOf(grip);
+    if (!found) return;
+    const from = found.ids.indexOf(id);
+    if (from < 0 || found.rows.length < 2) return;
+    try {
+      grip.setPointerCapture(pointer);
+    } catch {
+      return; // the finger is already gone
+    }
+    const scroller = scrollerOf(grip);
+    const d: Drag = {
+      pointer,
+      ...found,
+      tops: found.rows.map((r) => r.offsetTop),
+      heights: found.rows.map((r) => r.offsetHeight),
+      from,
+      to: from,
+      startY: y,
+      lastY: y,
+      scroller,
+      startScroll: scrollTop(scroller),
+      raf: 0,
+    };
+    found.rows.forEach((r, k) => {
+      r.style.transition = k === from ? 'none' : `transform 220ms ${EASE}`;
+      if (k === from) r.style.zIndex = '2';
+    });
+    found.rows[from].classList.add('sort-lift');
+    // The list's own motion (ui/motion) stays out of it until the new order is in (`clear`).
+    found.rows[from].parentElement?.setAttribute('data-sorting', '');
+    drag.current = d;
+    haptic('medium');
+    d.raf = requestAnimationFrame(() => edgeScroll(d));
+  };
+
+  /**
+   * A finger on a grip waits a moment, still, before the row lifts (the grips are always there now, at the
+   * screen's right edge, where a thumb starts scrolling): a finger that moves on at once scrolls the screen.
+   */
+  const waiting = useRef<{ pointer: number; x: number; y: number; timer: number } | null>(null);
+  const stopWaiting = () => {
+    const w = waiting.current;
+    if (!w) return;
+    window.clearTimeout(w.timer);
+    waiting.current = null;
+  };
+  /** Each grip's own touchmove listener, not passive: while its row is held, the screen does not scroll under it. */
+  const blockers = useRef(new Map<string, (el: HTMLElement | null) => void>());
+  const blocker = (id: string) => {
+    let attach = blockers.current.get(id);
+    if (!attach) {
+      let node: HTMLElement | null = null;
+      const block = (e: TouchEvent) => {
+        if (drag.current && e.cancelable) e.preventDefault();
+      };
+      attach = (el) => {
+        node?.removeEventListener('touchmove', block);
+        node = el;
+        el?.addEventListener('touchmove', block, { passive: false });
+      };
+      blockers.current.set(id, attach);
+    }
+    return attach;
+  };
+
+  /** The grip's handlers: drag it (a finger after a moment's hold, a mouse at once), or move the row with the arrow keys. */
   return (id: string) => ({
     'data-sort-id': id,
+    ref: blocker(id),
     role: 'button' as const,
     tabIndex: 0,
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
-      if (drag.current || pending.current || (e.pointerType === 'mouse' && e.button !== 0)) return;
-      const found = rowsOf(e.currentTarget);
-      if (!found) return;
-      const from = found.ids.indexOf(id);
-      if (from < 0 || found.rows.length < 2) return;
-      // A drag handle, not a tap: no text selection, no scroll (touch-action) under it.
-      e.preventDefault();
+      if (drag.current || pending.current || waiting.current || (e.pointerType === 'mouse' && e.button !== 0)) return;
       e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      const scroller = scrollerOf(e.currentTarget);
-      const d: Drag = {
-        pointer: e.pointerId,
-        ...found,
-        tops: found.rows.map((r) => r.offsetTop),
-        heights: found.rows.map((r) => r.offsetHeight),
-        from,
-        to: from,
-        startY: e.clientY,
-        lastY: e.clientY,
-        scroller,
-        startScroll: scrollTop(scroller),
-        raf: 0,
-      };
-      found.rows.forEach((r, k) => {
-        r.style.transition = k === from ? 'none' : `transform 220ms ${EASE}`;
-        if (k === from) r.style.zIndex = '2';
-      });
-      found.rows[from].classList.add('sort-lift');
-      // The list's own motion (ui/motion) stays out of it until the new order is in (`clear`).
-      found.rows[from].parentElement?.setAttribute('data-sorting', '');
-      drag.current = d;
-      haptic('medium');
-      d.raf = requestAnimationFrame(() => edgeScroll(d));
+      const grip = e.currentTarget;
+      if (e.pointerType === 'touch') {
+        const pointer = e.pointerId;
+        waiting.current = {
+          pointer,
+          x: e.clientX,
+          y: e.clientY,
+          timer: window.setTimeout(() => {
+            const w = waiting.current;
+            waiting.current = null;
+            if (w) lift(grip, id, pointer, w.y);
+          }, HOLD),
+        };
+        return;
+      }
+      // A mouse or a pen: at once, and no text selection under it.
+      e.preventDefault();
+      lift(grip, id, e.pointerId, e.clientY);
     },
     onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      const w = waiting.current;
+      if (w && e.pointerId === w.pointer) {
+        if (Math.hypot(e.clientX - w.x, e.clientY - w.y) > STILL) stopWaiting();
+        else w.y = e.clientY;
+        return;
+      }
       const d = drag.current;
       if (!d || e.pointerId !== d.pointer) return;
       d.lastY = e.clientY;
       follow(d);
     },
-    onPointerUp: (e: React.PointerEvent<HTMLElement>) => drag.current?.pointer === e.pointerId && drop(false),
-    onPointerCancel: (e: React.PointerEvent<HTMLElement>) => drag.current?.pointer === e.pointerId && drop(true),
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
+      if (waiting.current?.pointer === e.pointerId) return stopWaiting();
+      if (drag.current?.pointer === e.pointerId) drop(false);
+    },
+    // The screen took the finger to scroll (before the hold), or the browser took it away.
+    onPointerCancel: (e: React.PointerEvent<HTMLElement>) => {
+      if (waiting.current?.pointer === e.pointerId) return stopWaiting();
+      if (drag.current?.pointer === e.pointerId) drop(true);
+    },
     onLostPointerCapture: (e: React.PointerEvent<HTMLElement>) => drag.current?.pointer === e.pointerId && drop(false),
     // The row under the grip is not tapped by it.
     onClick: (e: React.MouseEvent) => e.stopPropagation(),
