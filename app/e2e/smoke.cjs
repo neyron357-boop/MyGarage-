@@ -650,6 +650,122 @@ async function launchBrowser() {
     if (e.join() !== '2500:subcontract') throw new Error('service expense: ' + JSON.stringify(e));
     await page.keyboard.press('Escape');
   });
+  await step('v0.18: the VIN and year read off the photos — a proven one goes in by itself, the rest is looked at', async () => {
+    // Pictures drawn in the page: a windscreen VIN label (light letters on a dark ground, dust, a little turned) and
+    // a Mulkiya's back. Dust from a fixed seed: the same picture every run.
+    const picture = (o) =>
+      page.evaluate(async (o) => {
+        const { vinCheckDigit } = await import('/src/domain/vin.ts');
+        const fill = (v) => v.slice(0, 8) + (o.adds ? vinCheckDigit(v) : vinCheckDigit(v) === '0' ? '1' : '0') + v.slice(9);
+        const vin = fill(o.vin);
+        const c = document.createElement('canvas');
+        c.width = o.w;
+        c.height = o.h;
+        const g = c.getContext('2d');
+        g.fillStyle = o.ground;
+        g.fillRect(0, 0, c.width, c.height);
+        let seed = 7;
+        const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+        for (let i = 0; i < o.dust; i++) {
+          g.fillStyle = `rgba(255,255,255,${0.2 + rnd() * 0.5})`;
+          g.fillRect(rnd() * c.width, rnd() * c.height, 2, 2);
+        }
+        g.translate(c.width / 2, c.height / 2);
+        g.rotate((o.tilt * Math.PI) / 180);
+        g.fillStyle = o.ink;
+        for (const [text, x, y, size] of o.lines) {
+          g.font = `600 ${size}px Arial, sans-serif`;
+          g.fillText(text.replace('{VIN}', vin), x - c.width / 2, y - c.height / 2);
+        }
+        return { vin, jpeg: c.toDataURL('image/jpeg', 0.9).split(',')[1] };
+      }, o);
+    const car = (number, make, model) =>
+      page.evaluate(
+        async ([number, make, model]) => {
+          const { checkIn } = await import('/src/services/orders.ts');
+          const o = await checkIn({ plate: { emirate: 'DXB', code: 'V', number }, make, model, name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+          return { id: o.id, vehicleId: o.vehicleId };
+        },
+        [number, make, model],
+      );
+    const vehicle = (vehicleId) =>
+      page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const v = await db.vehicles.get(id);
+        return { vin: v.vin ?? null, year: v.year ?? null };
+      }, vehicleId);
+    const waitFor = async (what, fn, ok, ms = 90000) => {
+      const t0 = Date.now();
+      let last;
+      while (Date.now() - t0 < ms) {
+        last = await fn();
+        if (ok(last)) return last;
+        await page.waitForTimeout(250);
+      }
+      throw new Error(`${what}: ${JSON.stringify(last)}`);
+    };
+
+    // 1. The VIN label: its check digit adds up (a Nissan's, made 2016) — in the card at once, the year with it.
+    const one = await car('17017', 'Nissan', 'Patrol');
+    const label = await picture({ w: 1400, h: 900, ground: '#24403f', ink: '#e9f2f0', dust: 1500, tilt: 3, adds: true, vin: 'JN1TANY6?G0123456', lines: [['{VIN}', 330, 470, 64]] });
+    await page.goto(BASE + '#/orders/' + one.id);
+    const [plate] = await Promise.all([page.waitForEvent('filechooser'), front('button[aria-label="Снять VIN"]').click()]);
+    await plate.setFiles({ name: 'vin.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(label.jpeg, 'base64') });
+    await front('.vin-chip[data-reading]').first().waitFor({ timeout: 15000 });
+    await page.getByText(`Записано: ${label.vin} · 2016`).first().waitFor({ timeout: 90000 });
+    const filled = await vehicle(one.vehicleId);
+    if (filled.vin !== label.vin || filled.year !== 2016) throw new Error('the VIN read off the label: ' + JSON.stringify(filled));
+    await shot('30h-vin-read');
+    // "Undo" puts the card back; "Read VIN" in the photo's full view reads it again (the photo is read once: at once).
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await waitFor('undone', () => vehicle(one.vehicleId), (v) => v.vin === null && v.year === null);
+    await front('button[aria-label="Фото VIN"]').click();
+    await page.locator('.viewer').getByRole('button', { name: 'Прочитать VIN' }).click();
+    await waitFor('read again', () => vehicle(one.vehicleId), (v) => v.vin === label.vin && v.year === 2016, 20000);
+    await page.locator('.viewer').getByRole('button', { name: 'Закрыть' }).click();
+    await page.locator('.viewer').waitFor({ state: 'detached' });
+
+    // 2. A Mulkiya with a VIN made for elsewhere (no check digit): not proven — "Check the VIN", an orange dot on the
+    //    VIN chip; its "Model" year, read the same twice, goes in by itself. A tap shows the line the VIN was read off
+    //    and its 17 places; "Save" puts it in.
+    const two = await car('17018', 'Toyota', 'Land Cruiser');
+    const card = await picture({
+      w: 1400,
+      h: 880,
+      ground: '#f3efe2',
+      ink: '#1d1d1d',
+      dust: 0,
+      tilt: 0,
+      adds: false,
+      vin: 'JTMHV05J?K4123456',
+      lines: [
+        ['UNITED ARAB EMIRATES', 80, 110, 44],
+        ['Model: 2019', 80, 250, 46],
+        ['Origin: JAPAN', 760, 250, 46],
+        ['Veh. Type: STATION', 80, 360, 46],
+        ['Chassis No.: {VIN}', 80, 470, 46],
+        ['Engine No.: 1VD0123456', 80, 580, 46],
+      ],
+    });
+    await page.goto(BASE + '#/orders/' + two.id);
+    const [mulkiya] = await Promise.all([page.waitForEvent('filechooser'), front('button[aria-label="Снять Mulkiya"]').click()]);
+    await mulkiya.setFiles({ name: 'mulkiya.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(card.jpeg, 'base64') });
+    await page.getByText('Проверьте VIN').first().waitFor({ timeout: 90000 });
+    const untouched = await vehicle(two.vehicleId);
+    if (untouched.vin !== null || untouched.year !== 2019) throw new Error('an unproven VIN went in, or the Mulkiya’s year did not: ' + JSON.stringify(untouched));
+    await front('.vin-chip[data-check]').waitFor();
+    await front('button[aria-label="Проверить VIN"]').click();
+    const sheet = page.getByRole('dialog', { name: 'Проверка VIN' });
+    await sheet.locator('img.vin-crop').waitFor();
+    if ((await sheet.locator('.vin-boxes > span').count()) !== 17) throw new Error('the VIN is not in its 17 places');
+    if ((await sheet.getByLabel('Год').inputValue()) !== '2019') throw new Error('the Mulkiya’s year is not offered');
+    await settled();
+    await shot('30h2-vin-check');
+    await sheet.getByRole('button', { name: 'Сохранить' }).click();
+    const kept = await waitFor('kept', () => vehicle(two.vehicleId), (v) => !!v.vin, 10000);
+    if (kept.vin.length !== 17 || kept.year !== 2019) throw new Error('the VIN looked at: ' + JSON.stringify(kept));
+    await front('.vin-chip[data-check]').waitFor({ state: 'detached' });
+  });
   await step('archive: a swipe left takes a job off the board, a swipe in the archive brings it back', async () => {
     // A finger's swipe from the right edge of a row to the left (touch events, as on a phone).
     const swipeLeft = (loc) =>

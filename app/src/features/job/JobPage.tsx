@@ -962,7 +962,7 @@ export function JobPage() {
                 {m.name}
               </button>
             ))}
-          <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} hideEmpty={!open} />
+          <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
           <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
           <JobCardChip orderId={oid} open={open} />
         </div>

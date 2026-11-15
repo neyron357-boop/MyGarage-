@@ -52,6 +52,16 @@ export default defineConfig(({ mode }) => {
           // Everything the app needs offline, including the fonts embedded into PDF documents.
           // (.woff duplicates of .woff2 are skipped: every supported browser reads woff2.)
           globPatterns: ['**/*.{js,mjs,css,html,woff2,ttf,png,svg,webmanifest}'],
+          // The VIN reader's engine and model (~7 MB, public/ocr) are not part of the install: they are kept the
+          // first time a VIN is read, and from then on read offline.
+          globIgnores: ['ocr/**'],
+          runtimeCaching: [
+            {
+              urlPattern: ({ url }) => url.pathname.includes('/ocr/'),
+              handler: 'CacheFirst',
+              options: { cacheName: 'mygarage-ocr', expiration: { maxEntries: 12 } },
+            },
+          ],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           cleanupOutdatedCaches: true,
         },
@@ -59,7 +69,7 @@ export default defineConfig(({ mode }) => {
       ...(single ? [viteSingleFile()] : []),
     ],
     // Pre-bundled at dev-server start: discovered later (on the first PDF) they would reload the page.
-    optimizeDeps: { include: ['qrcode', 'jsbarcode/bin/barcodes/CODE128/CODE128B'] },
+    optimizeDeps: { include: ['qrcode', 'jsbarcode/bin/barcodes/CODE128/CODE128B', 'tesseract.js'] },
     build: single
       ? { outDir: 'dist-single', assetsInlineLimit: 100_000_000, chunkSizeWarningLimit: 20000 }
       : { outDir: 'dist', chunkSizeWarningLimit: 4000 },

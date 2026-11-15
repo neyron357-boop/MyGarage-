@@ -7,6 +7,7 @@ import { MediaImage, undoToast } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { usePhotoPick } from '../../ui/photoPick';
+import { openVinCheck, readVin, useVinState, VinButton, VinCheckSheet } from './VinRead';
 
 /**
  * In the photo's full-screen view: take it again, choose another one from the phone's photos, or take a wrong
@@ -122,17 +123,27 @@ export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: n
 /**
  * The car's VIN photo as a small tile in the job's card: without one, a tap opens the camera and a long
  * press the phone's photos; with one, the thumbnail — a tap shows it full screen (the VIN typed on the car
- * as its title: retake, choose another, share), a long press chooses another from the photos.
+ * as its title: retake, choose another, share, read the VIN off it), a long press chooses another from the
+ * photos. A photo taken is read at once (./VinRead.tsx): the chip scans while it reads, and an orange dot on it
+ * — a read VIN waiting to be looked at — makes a tap open that instead.
  */
-export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?: string; hideEmpty?: boolean }) {
+export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string; vin?: string; year?: number; hideEmpty?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
   const photo = useScreenLiveQuery(async () => ({ id: await vinPhotoOf(vehicleId) }), [vehicleId]);
   const [viewing, setViewing] = useState(false);
-  const pick = usePhotoPick(([file]) => void run(() => setVinPhoto(vehicleId, file)));
+  const pick = usePhotoPick(
+    ([file]) =>
+      void run(async () => {
+        await setVinPhoto(vehicleId, file);
+        return true;
+      }).then((ok) => ok && readVin(vehicleId, t)),
+  );
   const edits = useCarPhotoEdits(vehicleId);
+  const vinState = useVinState(vehicleId);
+  const sheet = <VinCheckSheet vehicleId={vehicleId} current={{ vin, year }} />;
   // A closed job shows the VIN photo if there is one — not an empty tile asking for it.
-  if (hideEmpty && !photo?.id) return null;
+  if (hideEmpty && !photo?.id) return sheet;
   return (
     <>
       {/* A chip among the card's chips: a camera while there is no photo, its round thumbnail once there is. */}
@@ -140,11 +151,15 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
         type="button"
         className="chip vin-chip"
         data-empty={!photo?.id || undefined}
-        aria-label={photo?.id ? t('job.vinPhoto') : t('job.vinTake')}
+        data-reading={vinState.reading || undefined}
+        data-check={(vinState.check && !vinState.reading) || undefined}
+        aria-busy={vinState.reading || undefined}
+        aria-label={vinState.check ? t('vinRead.checkBtn') : photo?.id ? t('job.vinPhoto') : t('job.vinTake')}
         {...pick.handlers}
         onClick={() => {
           if (pick.consumeClick()) return;
-          if (photo?.id) setViewing(true);
+          if (vinState.check && !vinState.reading) openVinCheck(vehicleId);
+          else if (photo?.id) setViewing(true);
           else pick.camera();
         }}
       >
@@ -158,9 +173,10 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
         <span>VIN</span>
       </button>
       {pick.inputs}
+      {sheet}
       {viewing && photo?.id && (
         <PhotoViewer
-          items={[{ id: photo.id, title: vin ? `VIN ${vin}` : 'VIN' }]}
+          items={[{ id: photo.id, title: vin ? `VIN ${vin}` : 'VIN', caption: <VinButton vehicleId={vehicleId} onLook={() => setViewing(false)} /> }]}
           index={0}
           onIndex={() => undefined}
           onClose={() => setViewing(false)}
@@ -208,17 +224,22 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
         const order = target ? [target] : [...missing, ...present];
         setTarget(null);
         for (let i = 0; i < files.length && i < order.length; i++) await setMulkiya(vehicleId, order[i], files[i]);
-      }),
+        return true;
+      }).then((ok) => ok && readVin(vehicleId, t)),
     { multiple: true },
   );
+  const reading = useVinState(vehicleId).reading;
   if (hideEmpty && !present.length) return null;
-  const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s }));
+  const caption = <VinButton vehicleId={vehicleId} onLook={() => setViewing(null)} />;
+  const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s, caption }));
   return (
     <>
       <button
         type="button"
         className="chip vin-chip"
         data-empty={!present.length || undefined}
+        data-reading={(reading && present.length > 0) || undefined}
+        aria-busy={reading || undefined}
         aria-label={present.length ? t('intake.mulkiya') : t('job.mulkiyaTake')}
         {...pick.handlers}
         onClick={() => {

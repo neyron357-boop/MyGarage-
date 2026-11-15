@@ -7,3 +7,6 @@ test-results
 screenshots
 
 dist-prof
+
+# The VIN reader's files, copied from node_modules (scripts/ocr-assets.cjs)
+public/ocr

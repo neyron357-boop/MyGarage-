@@ -1827,6 +1827,83 @@ html.kb .tab-bar-wrap {
   margin-left: -11px;
   box-shadow: 0 0 0 2px var(--app-card);
 }
+/* The VIN read off the photos (features/job/VinRead.tsx): while it reads, a band of light runs down the chips'
+   thumbnails, the way a scanner reads (still, in the middle, when motion is reduced); a read waiting to be
+   looked at — an orange dot on the VIN chip. */
+.vin-thumb {
+  position: relative;
+}
+.vin-chip[data-reading] .vin-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 15%, color-mix(in srgb, var(--mantine-color-cobalt-3) 80%, transparent) 50%, transparent 85%);
+  transform: translateY(-100%);
+  animation: vin-scan 1.3s var(--ease-ios) infinite;
+}
+@keyframes vin-scan {
+  to {
+    transform: translateY(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vin-chip[data-reading] .vin-thumb::after {
+    transform: none;
+  }
+}
+.chip.vin-chip[data-check] {
+  position: relative;
+}
+.chip.vin-chip[data-check]::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--mantine-color-orange-6);
+  box-shadow: 0 0 0 2px var(--app-card);
+  pointer-events: none;
+}
+/* The sheet a read VIN is checked on: the line of the photo it was read off, then the VIN in its 17 places
+   (a little apart after the maker's code and before the serial part), the doubtful ones in orange. */
+.vin-crop {
+  display: block;
+  width: 100%;
+  max-height: 96px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #fff;
+}
+.vin-boxes {
+  display: flex;
+  gap: 2px;
+}
+.vin-boxes > span {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--app-fill);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 18px;
+  font-weight: 700;
+}
+.vin-boxes > span[data-gap] {
+  margin-left: 5px;
+}
+.vin-boxes > span[data-doubt] {
+  background: var(--mantine-color-orange-light);
+  color: var(--mantine-color-orange-light-color);
+}
+.vin-input,
+.vin-text {
+  font-family: var(--mantine-font-family-monospace);
+  letter-spacing: 0.06em;
+}
 /* A photo tile (ui/photoPick.tsx): a tap — the camera, a hold — the phone's photos. Held long enough, it
    swells a little ("let go to choose"); the iPhone's own long-press menu and selection stay away. */
 .chip.vin-chip,
