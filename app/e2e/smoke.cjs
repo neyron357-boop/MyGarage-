@@ -320,11 +320,41 @@ async function launchBrowser() {
     const [fromPhotos] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Фото VIN' }).click({ button: 'right' })]);
     if (await fromPhotos.element().getAttribute('capture')) throw new Error('a long press on VIN must open the photos, not the camera');
     await fromPhotos.setFiles([]);
+    // A hold (a mouse held down here) chooses from the photos too: the press's length decides, not which event
+    // ends it (the iPhone may take a long press over and end it with a click — v0.17.2).
+    const vinBox = await page.getByRole('button', { name: 'Фото VIN' }).boundingBox();
+    await page.mouse.move(vinBox.x + vinBox.width / 2, vinBox.y + vinBox.height / 2);
+    const [held] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      (async () => {
+        await page.mouse.down();
+        await page.waitForTimeout(650);
+        await page.mouse.up();
+      })(),
+    ]);
+    if (await held.element().getAttribute('capture')) throw new Error('a hold on VIN must open the photos, not the camera');
+    await held.setFiles([]);
     await page.getByRole('button', { name: 'Фото VIN' }).click();
     await page.locator('.viewer').getByText('VIN', { exact: true }).waitFor();
     await page.locator('.viewer').getByRole('button', { name: 'Из фото' }).waitFor();
-    await page.locator('.viewer button').first().click();
+    // Turned a quarter: the turned copy takes the photo's place (a new photo of the car's VIN).
+    const vinId = () =>
+      page.evaluate(async () => {
+        const { db } = await import('/src/db/db.ts');
+        const { vinPhotoOf } = await import('/src/services/cover.ts');
+        return vinPhotoOf((await db.vehicles.toArray()).find((v) => v.plateSearch.endsWith('31415')).id);
+      });
+    const unturned = await vinId();
+    await page.locator('.viewer').getByRole('button', { name: 'Повернуть' }).click();
+    for (let i = 0; i < 50 && (await vinId()) === unturned; i++) await page.waitForTimeout(100);
+    if ((await vinId()) === unturned) throw new Error('the VIN photo was not turned');
+    await page.locator('.viewer').getByRole('button', { name: 'Повернуть' }).and(page.locator(':not([disabled])')).waitFor();
+    // Taken off: the view closes, the chip asks for a photo again; "Undo" puts it back.
+    await page.locator('.viewer').getByRole('button', { name: 'Удалить' }).click();
     await page.locator('.viewer').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Снять VIN' }).waitFor();
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await page.getByRole('button', { name: 'Фото VIN' }).locator('img').waitFor();
     // The Mulkiya beside VIN: a tap takes the front with the camera, "1/2" until the back is taken too.
     const [mulkiya] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Снять Mulkiya' }).click()]);
     if (!(await mulkiya.element().getAttribute('capture'))) throw new Error('a tap on Mulkiya must open the camera');
@@ -462,9 +492,8 @@ async function launchBrowser() {
     if (await page.locator('.list-row').filter({ hasText: 'Polish' }).count()) throw new Error('the picked lines are still there');
     await page.getByRole('button', { name: 'Отменить' }).last().click();
     await page.locator('.list-row').filter({ hasText: 'Polish' }).first().waitFor();
-    // Lines moved by hand (v0.12): “…” → Edit, the grip of Polish dragged above Wash; the order stays.
-    await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Править' }).click();
+    // Lines moved by hand (v0.12): the grip of Polish dragged above Wash; the order stays. The grip is always
+    // there (v0.17.2) — no edit mode to open first.
     const grip = (name) => page.locator('.screen[data-role="top"] .list-row').filter({ hasText: name }).locator('.sort-grip');
     await grip('Polish').waitFor();
     // The sheet has gone (its shade would take the press).
@@ -483,8 +512,10 @@ async function launchBrowser() {
       const t = [...document.querySelectorAll('.screen[data-role="top"] .list .list-row .title')].map((e) => e.textContent);
       return t.includes('POLISH') && t.indexOf('POLISH') < t.indexOf('WASH');
     });
-    await page.getByRole('button', { name: 'Отмена', exact: true }).first().click();
-    await page.locator('.sort-grip').first().waitFor({ state: 'detached' });
+    // The drop did not open the line, and the list's own motion is back on (no `data-sorting` left on it).
+    await settled();
+    if (await page.getByRole('dialog').count()) throw new Error('dragging a line opened it');
+    if (await page.locator('.screen[data-role="top"] .list[data-sorting]').count()) throw new Error('the list kept data-sorting after the drop');
   });
   await step("scanner report: codes and the car's data from its PDF", async () => {
     const pdf = makePdf([
@@ -520,6 +551,13 @@ async function launchBrowser() {
     await shot('30f-customer-from-base');
     await dlg.locator('.suggest').filter({ hasText: 'Сергей Иванов' }).click();
     await page.locator('.screen[data-role="top"] .job-line').filter({ hasText: 'Сергей Иванов' }).waitFor();
+    // What the customer complains of on this visit (the sheet under the name): it goes to the group too (v0.17.2).
+    const complaintLine = page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Жалоба', exact: true });
+    await complaintLine.click();
+    const complaint = page.getByRole('dialog', { name: 'Жалоба' });
+    await complaint.getByRole('textbox', { name: 'Жалоба' }).fill('Стук спереди при торможении');
+    await complaint.getByRole('button', { name: 'Сохранить' }).click();
+    await complaintLine.getByText('Стук спереди при торможении').waitFor();
     // The job to the garage group (v0.13): the share sheet gets the car's photo and the text — the car, the
     // customer by name only, the lines with their amounts.
     await page.evaluate(() => {
@@ -529,7 +567,8 @@ async function launchBrowser() {
     });
     await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Поделиться', exact: true }).click();
     const shared = await page.evaluate(() => window.__shared);
-    if (!shared || shared.files.length !== 1 || !/^Nissan Sunny/.test(shared.text) || !/Клиент: Сергей Иванов/.test(shared.text) || !/WASH/.test(shared.text) || !/Итого/.test(shared.text) || shared.text.includes('971'))
+    // What the customer complains of goes with it (v0.17.2), under the name.
+    if (!shared || shared.files.length !== 1 || !/^Nissan Sunny/.test(shared.text) || !/Клиент: Сергей Иванов\nЖалоба: Стук спереди при торможении\n/.test(shared.text) || !/WASH/.test(shared.text) || !/Итого/.test(shared.text) || shared.text.includes('971'))
       throw new Error('the job shared to the group: ' + JSON.stringify(shared));
   });
   await step('v0.13: a job from an invoice PDF in one go', async () => {
@@ -800,6 +839,70 @@ async function launchBrowser() {
     await front('.note-bubble').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
     await front('input[data-note-media]').setInputFiles(FIXTURE);
     await front('.note-photo').first().waitFor();
+    // Voice messages as in WhatsApp (v0.17.2): a recording made in the page (2 s of a tone, louder in the middle),
+    // kept with its bars; one more without bars (made before they were kept) gets them from its recording.
+    await page.evaluate(async () => {
+      const { addNote } = await import('/src/services/notes.ts');
+      const { peaksOfBlob } = await import('/src/ui/voice.ts');
+      const orderId = location.hash.match(/orders\/([^/?]+)/)[1];
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const dest = ctx.createMediaStreamDestination();
+      osc.connect(gain).connect(dest);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.setValueAtTime(0.9, ctx.currentTime + 0.7);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + 1.4);
+      osc.start();
+      const rec = new MediaRecorder(dest.stream);
+      const chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      const stopped = new Promise((r) => (rec.onstop = r));
+      rec.start(200);
+      await new Promise((r) => setTimeout(r, 2000));
+      rec.stop();
+      await stopped;
+      osc.stop();
+      void ctx.close();
+      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      await addNote(orderId, { voice: blob, seconds: 2, peaks: await peaksOfBlob(blob) });
+      await addNote(orderId, { voice: blob, seconds: 2 });
+    });
+    const voice = front('.note-voice');
+    await voice.nth(1).waitFor();
+    // Both drawn with the recording's bars: the louder middle stands out (the older note's read from its recording).
+    for (const k of [0, 1])
+      await page.waitForFunction(
+        (k) => {
+          const bars = [...document.querySelectorAll('.screen[data-role="top"] .note-voice')][k]?.querySelectorAll('.voice-bars:not(.voice-played) > i') ?? [];
+          const h = [...bars].map((b) => Number(b.style.getPropertyValue('--h')));
+          return h.length === 36 && Math.max(...h) === 1 && Math.min(...h) < 0.9;
+        },
+        k,
+        { timeout: 10000 },
+      );
+    // Play, then pause: the place is kept, and the microphone has given way to the speed — 1×, a tap: 1,5× (kept
+    // for the next ones).
+    await voice.first().getByRole('button', { name: 'Слушать' }).click();
+    await voice.first().getByRole('button', { name: 'Пауза' }).click();
+    await voice.first().getByRole('button', { name: 'Слушать' }).waitFor();
+    await voice.first().getByRole('button', { name: 'Скорость' }).click();
+    await voice.first().getByRole('button', { name: 'Скорость' }).getByText('1,5×').waitFor();
+    if ((await page.evaluate(() => localStorage.getItem('mygarage.voiceRate'))) !== '1.5') throw new Error('the voice speed is not kept');
+    // A tap halfway along the bars puts the dot there: 0:01 of 0:02.
+    const tapWave = async (k, frac) => {
+      const box = await voice.nth(k).getByRole('slider', { name: 'Место в записи' }).boundingBox();
+      await page.mouse.click(box.x + box.width * frac, box.y + box.height / 2);
+    };
+    await tapWave(0, 0.5);
+    await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] .note-voice [role="slider"]')?.getAttribute('aria-valuenow') === '1');
+    // Near its end and played on: when it ends, the next voice message plays by itself, at the same speed.
+    await tapWave(0, 0.95);
+    await voice.first().getByRole('button', { name: 'Слушать' }).click();
+    await voice.nth(1).getByRole('button', { name: 'Пауза' }).waitFor({ timeout: 8000 });
+    await voice.nth(1).getByRole('button', { name: 'Скорость' }).getByText('1,5×').waitFor();
+    await voice.nth(1).getByRole('button', { name: 'Пауза' }).click();
+    if (await voice.first().getByRole('button', { name: 'Скорость' }).count()) throw new Error('two voice notes in the player at once');
     await shot('34a2-notes-chat');
     // The two tabs move like pages: a swipe to the right on the notes brings the job back, to the left — the notes.
     const jobSwipe = (dir) =>
@@ -871,10 +974,17 @@ async function launchBrowser() {
     // The profit (blurred until tapped): 390 + 500 net − 300 − 300.
     await page.locator('.list-row', { hasText: 'Прибыль' }).click();
     await page.locator('.profit-amount[data-shown="true"]').getByText('290,00').waitFor();
+    // Two mechanics on the job (v0.17.2): each chip on by itself; the task goes to both.
+    const crewChips = front('.job-foot button.chip:not(.due-chip):not(.vin-chip)');
+    const names = await crewChips.allTextContents();
+    await crewChips.nth(0).click();
+    await crewChips.nth(1).click();
+    await front('.job-foot button.chip[aria-pressed="true"]').nth(1).waitFor();
+    if ((await front('.job-foot button.chip[aria-pressed="true"]').count()) !== 2) throw new Error('two mechanics on the job expected');
     // "…" → Mechanic: the task in English; → Report: what was done, for the customer.
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await dlg.getByRole('button', { name: 'Механику' }).click();
-    const task = page.getByRole('dialog', { name: /Механику|Задание механику/ });
+    const task = page.getByRole('dialog', { name: `Механикам · ${names[0]}, ${names[1]}` });
     if (!/To do:[\s\S]*BUMPER PAINT/.test(await task.locator('textarea').inputValue())) throw new Error('the mechanic task lists the work');
     await shot('34f-mechanic');
     await task.locator('.mantine-Modal-close').click();

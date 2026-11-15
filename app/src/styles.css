@@ -736,12 +736,12 @@ html.kb .tab-bar-wrap {
   .search-clear {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root) > .haptic-hit {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .voice-rate) > .haptic-hit {
     inset: -9px -5px;
   }
   :is(.scroll-tabs, .chip-row:not(.wrap)) :is(.mantine-Button-root, .mantine-ActionIcon-root)::after,
@@ -3881,6 +3881,17 @@ html.kb .screen-bottom > .sticky-bar {
   min-height: 60px;
   padding: 8px 12px;
 }
+.viewer-side {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* While the turned copy is saved, the turn button waits. */
+.viewer .cam-icon.viewer-turn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .viewer-top,
 .viewer-bottom {
   transition: opacity var(--dur-2) ease;
@@ -4600,34 +4611,137 @@ html.kb .screen-bottom > .sticky-bar {
   top: 8px;
   bottom: auto;
 }
+/* A voice message, as in WhatsApp: play · the bars of the recording with the dot at the place · the speed while
+   it is the one playing (a microphone otherwise); under the bars how long (how far), the time in the corner.
+   The place (--p, 0–1) colours the bars it has passed and moves the dot — by the compositor (clip, transform). */
 .note-voice {
-  display: flex;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-areas:
+    'play wave side'
+    '. len time';
+  column-gap: 10px;
   align-items: center;
-  gap: 10px;
-  min-width: min(220px, 58vw);
+  width: min(260px, 64vw);
+  padding-top: 2px;
 }
 .note-voice .note-play {
-  flex-shrink: 0;
+  grid-area: play;
   color: var(--mantine-color-cobalt-filled);
 }
-.note-track {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.35);
-  overflow: hidden;
+.voice-wave {
+  grid-area: wave;
+  position: relative;
+  height: 34px;
+  /* Up and down still scrolls the chat; sideways is the dot's. */
+  touch-action: pan-y;
+  cursor: pointer;
+  outline: none;
 }
-.note-track > i {
+.voice-wave:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.voice-bars {
+  position: absolute;
+  inset: 0 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.voice-bars > i {
   display: block;
-  height: 100%;
+  width: 3px;
+  height: calc(4px + var(--h, 0.12) * 22px);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.42);
+}
+.voice-played {
+  clip-path: inset(0 calc((1 - var(--p, 0)) * 100%) 0 0);
+}
+.voice-played > i {
   background: var(--mantine-color-white);
-  transform-origin: left;
-  transform: scaleX(var(--p, 0));
+}
+.voice-dot-rail {
+  position: absolute;
+  inset: 0 2px;
+  pointer-events: none;
+  transform: translateX(calc(var(--p, 0) * 100%));
+}
+.voice-dot {
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--mantine-color-white);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.28);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+/* Playing: the place glides between the player's ticks (four a second). Under the finger it follows at once. */
+.voice-wave[data-playing] .voice-played {
+  transition: clip-path 250ms linear;
+}
+.voice-wave[data-playing] .voice-dot-rail {
   transition: transform 250ms linear;
 }
-.note-length {
+.voice-wave[data-drag] .voice-dot {
+  transform: scale(1.3);
+}
+.voice-mic {
+  grid-area: side;
+  justify-self: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--mantine-color-white);
+}
+.voice-rate {
+  grid-area: side;
+  justify-self: center;
+  position: relative;
+  min-width: 36px;
+  height: 26px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.24);
+  color: var(--mantine-color-white);
+  font: inherit;
   font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.voice-rate:active {
+  transform: scale(0.92);
+}
+.voice-len {
+  grid-area: len;
+  font-size: 12px;
+  line-height: 1.2;
   opacity: 0.85;
+}
+.note-voice .note-time {
+  grid-area: time;
+  justify-self: end;
+  float: none;
+  margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-wave[data-playing] .voice-played,
+  .voice-wave[data-playing] .voice-dot-rail {
+    transition: none;
+  }
 }
 .notes-composer {
   display: flex;

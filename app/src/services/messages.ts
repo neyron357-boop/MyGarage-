@@ -112,17 +112,21 @@ export function partNamesText(items: OrderItem[], lang: Lang): string {
 
 /**
  * The job for the garage's group chat (with the car's photo): the car, the customer by name only (no
- * phone — the group is not the customer's), the lines with their amounts and the total.
+ * phone — the group is not the customer's), what the customer complains of (when it was written down),
+ * the lines with their amounts and the total.
  */
 export function jobShareText(
   vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'plate'>,
   customer: Pick<Customer, 'name' | 'type' | 'companyName'>,
   items: OrderItem[],
   lang: Lang,
+  complaint?: string,
 ): string {
+  const t = tFor(lang);
   const name = ((customer.type === 'company' && customer.companyName) || customer.name || '').trim();
+  const said = complaint?.trim();
   const [car, , ...rest] = linesText(vehicle, items, lang).split('\n');
-  return [car, ...(name ? [`${tFor(lang)('job.client')}: ${name}`] : []), '', ...rest].join('\n');
+  return [car, ...(name ? [`${t('job.client')}: ${name}`] : []), ...(said ? [`${t('job.complaint')}: ${said}`] : []), '', ...rest].join('\n');
 }
 
 /**

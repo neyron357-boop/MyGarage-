@@ -515,6 +515,8 @@ export const ru = {
   photos: {
     share: 'Поделиться',
     save: 'Сохранить',
+    rotate: 'Повернуть',
+    removed: 'Фото удалено',
     add: 'Фото',
     addAria: 'Добавить фото',
     hintOptional: 'Сфотографируйте машину — по желанию, можно пропустить',
@@ -1511,6 +1513,8 @@ export const ru = {
     photo: 'Фото',
     play: 'Слушать',
     pause: 'Пауза',
+    position: 'Место в записи',
+    speed: 'Скорость',
     recording: 'Запись',
     stop: 'Готово',
     send: 'Добавить',
@@ -1580,6 +1584,7 @@ export const ru = {
   mechanic: {
     title: 'Задание механику',
     titleTo: 'Механику · {{name}}',
+    titleToMany: 'Механикам · {{name}}',
     shareN: 'Поделиться · фото {{n}}',
   },
   transfer: {

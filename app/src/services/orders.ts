@@ -1,4 +1,5 @@
 import { db, nextNumber, purgeJournal, uid } from '../db/db';
+import { mechanicsOf, toggled } from '../domain/crew';
 import { hoursBetween, nowIso } from '../domain/dates';
 import { whyJobStays, type DeleteBlock } from '../domain/deletion';
 import { amountDue } from '../domain/invoice';
@@ -358,10 +359,25 @@ export async function updateOrder(orderId: string, patch: Partial<Pick<Order, 'c
   });
 }
 
+/** The job's mechanics, as a list (one, several or none); `mechanicId` keeps the first. */
+async function setMechanics(orderId: string, ids: string[]): Promise<void> {
+  await db.orders.update(orderId, { mechanicIds: ids, mechanicId: ids[0], updatedAt: nowIso() });
+  await logEvent(orderId, 'mechanic', { employeeIds: ids });
+}
+
+/** One mechanic on the job and no other (or nobody). */
 export async function assignMechanic(orderId: string, employeeId: string | undefined): Promise<void> {
-  await db.transaction('rw', db.orders, db.events, async () => {
-    await db.orders.update(orderId, { mechanicId: employeeId, updatedAt: nowIso() });
-    await logEvent(orderId, 'mechanic', { employeeId });
+  await db.transaction('rw', db.orders, db.events, () => setMechanics(orderId, employeeId ? [employeeId] : []));
+}
+
+/** A mechanic put on the job, or taken off it — a job can have several (domain/crew.ts). */
+export async function toggleMechanic(orderId: string, employeeId: string): Promise<string[]> {
+  return db.transaction('rw', db.orders, db.events, async () => {
+    const order = await db.orders.get(orderId);
+    if (!order) throw new AppError('err.notFound');
+    const ids = toggled(mechanicsOf(order), employeeId);
+    await setMechanics(orderId, ids);
+    return ids;
   });
 }
 

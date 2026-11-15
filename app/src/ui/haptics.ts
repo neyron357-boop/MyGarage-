@@ -157,6 +157,7 @@ const TAPPABLE = [
   'button.swipe-btn',
   'button.search-cancel',
   'button.photo-slot',
+  'button.voice-rate',
   '.cam button',
   '.viewer button',
 ].join(',');
@@ -230,7 +231,7 @@ function scheduleScan() {
 
 /** Selectors for the Android vibration (taps on the same controls). */
 const SELECTION = '.tab-bar button, .scroll-tabs button, .chip, .wizard-steps button, .mantine-SegmentedControl-label, .mantine-Switch-track, .mantine-Switch-input, .mantine-Checkbox-input, .mantine-Chip-label, .choice-card';
-const LIGHT = '.mantine-Button-root, .mantine-ActionIcon-root, .tab-plus, .suggest';
+const LIGHT = '.mantine-Button-root, .mantine-ActionIcon-root, .tab-plus, .suggest, .voice-rate';
 
 /**
  * Called once at start: lays the labels over controls as they appear (one observer for the whole

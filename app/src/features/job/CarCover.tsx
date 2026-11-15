@@ -1,15 +1,18 @@
-import { Button, Group } from '@mantine/core';
-import { IconCamera, IconCameraPlus, IconCar, IconPhoto } from '@tabler/icons-react';
+import { ActionIcon, Button, Group } from '@mantine/core';
+import { IconCamera, IconCameraPlus, IconCar, IconPhoto, IconTrash } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { coverOf, MULKIYA_SIDES, mulkiyaOf, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type MulkiyaSide } from '../../services/cover';
-import { MediaImage } from '../../ui/components';
+import { carOwned, coverOf, MULKIYA_SIDES, mulkiyaOf, removeCarPhoto, restoreCarPhoto, rotateCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type CarSlot, type MulkiyaSide } from '../../services/cover';
+import { MediaImage, undoToast } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { usePhotoPick } from '../../ui/photoPick';
 
-/** In the photo's full-screen view: take it again, or choose another one from the phone's photos. */
-function ReplaceButtons({ camera, gallery }: { camera: () => void; gallery: () => void }): ReactNode {
+/**
+ * In the photo's full-screen view: take it again, choose another one from the phone's photos, or take a wrong
+ * one off (the car's own photo; a check-in act's photo stays as the act has it).
+ */
+function ReplaceButtons({ camera, gallery, onDelete }: { camera: () => void; gallery: () => void; onDelete?: () => void }): ReactNode {
   const { t } = useTranslation();
   return (
     <Group gap="sm" justify="center" wrap="nowrap">
@@ -19,8 +22,32 @@ function ReplaceButtons({ camera, gallery }: { camera: () => void; gallery: () =
       <Button radius="xl" size="md" variant="white" color="dark" leftSection={<IconPhoto size={18} />} onClick={gallery}>
         {t('job.fromPhotos')}
       </Button>
+      {onDelete && (
+        <ActionIcon size={44} radius="xl" variant="white" color="red" aria-label={t('common.delete')} onClick={onDelete}>
+          <IconTrash size={20} />
+        </ActionIcon>
+      )}
     </Group>
   );
+}
+
+/**
+ * The full-screen view's two edits of a car's photo: turn it (a quarter to the left — the turned copy takes its
+ * place) and take it off (with Undo).
+ */
+function useCarPhotoEdits(vehicleId: string) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  return {
+    rotate: async (slot: CarSlot, mediaId: string) => {
+      if (!(await run(() => rotateCarPhoto(vehicleId, slot, mediaId)))) throw new Error('not turned');
+    },
+    remove: (mediaId: string) =>
+      run(async () => {
+        const removed = await removeCarPhoto(mediaId);
+        undoToast(t('photos.removed'), t('common.undo'), () => void restoreCarPhoto(removed));
+      }),
+  };
 }
 
 /**
@@ -31,9 +58,14 @@ function ReplaceButtons({ camera, gallery }: { camera: () => void; gallery: () =
 export function CarCover({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpty?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
-  const cover = useScreenLiveQuery(async () => ({ id: await coverOf(vehicleId) }), [vehicleId]);
+  // The photo, and whether it is the car's own (one taken from a check-in act is not taken off here).
+  const cover = useScreenLiveQuery(async () => {
+    const id = await coverOf(vehicleId);
+    return { id, own: !!id && (await carOwned([id])).has(id) };
+  }, [vehicleId]);
   const [viewing, setViewing] = useState(false);
   const pick = usePhotoPick(([file]) => void run(() => setCover(vehicleId, file)));
+  const edits = useCarPhotoEdits(vehicleId);
   if (!cover) return <div className="action-tile job-cover" data-empty="true" aria-hidden="true" />;
   // A closed job shows the photo if the car has one — not a tile asking for it.
   if (hideEmpty && !cover.id) return null;
@@ -56,7 +88,21 @@ export function CarCover({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpt
           index={0}
           onIndex={() => undefined}
           onClose={() => setViewing(false)}
-          actions={() => <ReplaceButtons camera={pick.camera} gallery={pick.gallery} />}
+          onRotate={(it) => edits.rotate('cover', it.id)}
+          actions={(it) => (
+            <ReplaceButtons
+              camera={pick.camera}
+              gallery={pick.gallery}
+              onDelete={
+                cover.own
+                  ? () => {
+                      setViewing(false);
+                      void edits.remove(it.id);
+                    }
+                  : undefined
+              }
+            />
+          )}
         />
       )}
     </>
@@ -84,6 +130,7 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
   const photo = useScreenLiveQuery(async () => ({ id: await vinPhotoOf(vehicleId) }), [vehicleId]);
   const [viewing, setViewing] = useState(false);
   const pick = usePhotoPick(([file]) => void run(() => setVinPhoto(vehicleId, file)));
+  const edits = useCarPhotoEdits(vehicleId);
   // A closed job shows the VIN photo if there is one — not an empty tile asking for it.
   if (hideEmpty && !photo?.id) return null;
   return (
@@ -117,7 +164,17 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
           index={0}
           onIndex={() => undefined}
           onClose={() => setViewing(false)}
-          actions={() => <ReplaceButtons camera={pick.camera} gallery={pick.gallery} />}
+          onRotate={(it) => edits.rotate('vin', it.id)}
+          actions={(it) => (
+            <ReplaceButtons
+              camera={pick.camera}
+              gallery={pick.gallery}
+              onDelete={() => {
+                setViewing(false);
+                void edits.remove(it.id);
+              }}
+            />
+          )}
         />
       )}
     </>
@@ -133,7 +190,12 @@ export function VinTile({ vehicleId, vin, hideEmpty }: { vehicleId: string; vin?
 export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpty?: boolean }) {
   const { t } = useTranslation();
   const { run } = useAction();
-  const photos = useScreenLiveQuery(() => mulkiyaOf(vehicleId), [vehicleId]);
+  const found = useScreenLiveQuery(async () => {
+    const sides = await mulkiyaOf(vehicleId);
+    return { sides, own: await carOwned(Object.values(sides)) };
+  }, [vehicleId]);
+  const photos = found?.sides;
+  const edits = useCarPhotoEdits(vehicleId);
   const [viewing, setViewing] = useState<number | null>(null);
   // The side a picker fills when it is not "the next missing one" (the side shown full screen).
   const [target, setTarget] = useState<MulkiyaSide | null>(null);
@@ -190,6 +252,7 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
             setViewing(null);
             setTarget(null);
           }}
+          onRotate={(item) => edits.rotate(items.find((x) => x.id === item.id)?.side ?? 'mulkiya', item.id)}
           actions={(item) => {
             const side = items.find((x) => x.id === item.id)?.side ?? 'mulkiya';
             return (
@@ -202,6 +265,16 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
                   setTarget(side);
                   pick.gallery();
                 }}
+                // The other side stays on screen; with the last one the view closes (and does not open by itself
+                // when a new one is taken).
+                onDelete={
+                  found?.own.has(item.id)
+                    ? () => {
+                        if (items.length === 1) setViewing(null);
+                        void edits.remove(item.id);
+                      }
+                    : undefined
+                }
               />
             );
           }}

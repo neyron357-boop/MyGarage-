@@ -20,7 +20,8 @@ export function useLongPress(onLong: () => void, ms = 450) {
       onTouchStart: (e: React.TouchEvent) => {
         clear();
         fired.current = false;
-        if (e.touches.length !== 1) return;
+        // A finger on a row's grip (≡, ui/sortable) holds it to move it, not to open its actions.
+        if (e.touches.length !== 1 || (e.target as Element).closest?.('[data-sort-id]')) return;
         start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         timer.current = window.setTimeout(() => {
           timer.current = undefined;
@@ -42,6 +43,8 @@ export function useLongPress(onLong: () => void, ms = 450) {
       onContextMenu: (e: React.MouseEvent) => {
         e.preventDefault();
         clear();
+        // Android's long press on a grip (held before it is dragged) is the drag, not the row's actions.
+        if ((e.target as Element).closest?.('[data-sort-id]')) return;
         fired.current = true;
         onLong();
       },

@@ -6,8 +6,8 @@ import { haptic } from './haptics';
  * under the finger, the others make way, the screen scrolls by itself near its edges; let go and the rows
  * settle in their new places, then `onMove(ids)` saves the new order. Everything under the finger is
  * written into the rows' style (transforms), not React state. The rows stay where the finger left them
- * until the list comes back in the new order, so nothing jumps; keep the list's own animation off while
- * sorting (`<List animate={false}>`).
+ * until the list comes back in the new order, so nothing jumps; meanwhile the list carries `data-sorting`,
+ * and its own animation (`<List animate>`, ui/motion) only remembers the new order instead of sliding it.
  *
  * The grip goes inside the row (a `.list-row`, a child of the list) with `data-sort-id`; the rows that
  * carry a grip are the ones that move, in the order they stand.
@@ -52,6 +52,9 @@ function clear(rows: HTMLElement[]) {
   // The next change of place may slide again.
   void rows[0]?.offsetHeight;
   for (const r of rows) r.style.transition = '';
+  // The list's own motion (ui/motion, `data-sorting`) watches it again once this new order is in: a frame later.
+  const list = rows[0]?.parentElement;
+  if (list) requestAnimationFrame(() => list.removeAttribute('data-sorting'));
 }
 
 export function useSortable(ids: string[], onMove: (ids: string[]) => void) {
@@ -169,6 +172,8 @@ export function useSortable(ids: string[], onMove: (ids: string[]) => void) {
         if (k === from) r.style.zIndex = '2';
       });
       found.rows[from].classList.add('sort-lift');
+      // The list's own motion (ui/motion) stays out of it until the new order is in (`clear`).
+      found.rows[from].parentElement?.setAttribute('data-sorting', '');
       drag.current = d;
       haptic('medium');
       d.raf = requestAnimationFrame(() => edgeScroll(d));

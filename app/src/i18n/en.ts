@@ -517,6 +517,8 @@ export const en: typeof ru = {
   photos: {
     share: 'Share',
     save: 'Save',
+    rotate: 'Rotate',
+    removed: 'Photo deleted',
     add: 'Photo',
     addAria: 'Add photo',
     hintOptional: 'Photograph the car — optional, you can skip it',
@@ -1513,6 +1515,8 @@ export const en: typeof ru = {
     photo: 'Photo',
     play: 'Play',
     pause: 'Pause',
+    position: 'Position',
+    speed: 'Speed',
     recording: 'Recording',
     stop: 'Done',
     send: 'Add',
@@ -1582,6 +1586,7 @@ export const en: typeof ru = {
   mechanic: {
     title: 'Task for the mechanic',
     titleTo: 'To {{name}}',
+    titleToMany: 'To {{name}}',
     shareN: 'Share · {{n}} photos',
   },
   transfer: {

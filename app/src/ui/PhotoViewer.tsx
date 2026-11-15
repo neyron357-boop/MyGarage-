@@ -1,5 +1,5 @@
 import { Loader } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight, IconDownload, IconShare2, IconX } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight, IconDownload, IconRotate, IconShare2, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -59,22 +59,29 @@ function ShareButton({ item }: { item?: ViewerItem }) {
   );
 }
 
+/**
+ * The address of a stored photo: the small picture first (instant), the full one as soon as it is read. Until
+ * a new photo is read, the one before is still given (with its id) — the viewer decides whether to show it.
+ */
 function useFullUrl(id?: string) {
-  const [url, setUrl] = useState<string>();
-  const [thumb, setThumb] = useState<string>();
+  const [shown, setShown] = useState<{ id: string; url: string; full: boolean }>();
   useEffect(() => {
     let alive = true;
-    setUrl(undefined);
-    setThumb(undefined);
     if (!id) return;
-    // The small picture first (instant), the full one as soon as it is read.
-    void mediaUrl(id, true).then((u) => alive && setThumb(u));
-    void mediaUrl(id, false).then((u) => alive && setUrl(u));
+    void mediaUrl(id, true).then((u) => alive && u && setShown((s) => (s?.id === id && s.full ? s : { id, url: u, full: false })));
+    void mediaUrl(id, false).then((u) => alive && u && setShown({ id, url: u, full: true }));
     return () => {
       alive = false;
     };
   }, [id]);
-  return url ?? thumb;
+  return shown;
+}
+
+/** A photo turned on screen while its turned copy is being saved: by how much, scaled to fit as it will. */
+interface Turn {
+  id: string;
+  deg: number;
+  fit: number;
 }
 
 type Pt = { x: number; y: number };
@@ -84,7 +91,9 @@ const SLIDE_MS = 220;
 
 /**
  * Full-screen photo viewer, like the phone's gallery: swipe between photos, pinch or double-tap to
- * zoom, drag down to close, tap to hide the bars. Back closes it too.
+ * zoom, drag down to close, tap to hide the bars. Back closes it too. With `onRotate` the photo can be
+ * turned (a quarter to the left a tap, as in the phone's Photos): it turns at once, and its turned copy —
+ * a new photo in its place — takes over when it is saved.
  */
 export function PhotoViewer({
   items,
@@ -92,18 +101,32 @@ export function PhotoViewer({
   onIndex,
   onClose,
   actions,
+  onRotate,
 }: {
   items: ViewerItem[];
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
   actions?: (item: ViewerItem) => ReactNode;
+  /** Saves the photo turned a quarter to the left; the item then comes back as a new photo (a new id). */
+  onRotate?: (item: ViewerItem) => Promise<unknown>;
 }) {
   const { t } = useTranslation();
   const item = items[index];
   const stored = useFullUrl(item?.src ? undefined : item?.id);
-  const url = item?.src ?? stored;
+  const [turn, setTurn] = useState<Turn | null>(null);
+  // The photo being turned: the button waits until its turned copy is here (a new id in its place).
+  const [turning, setTurning] = useState<string | null>(null);
+  // This photo; or, while it is being turned, the one before it (turned on screen) until the new one is read.
+  const pic = item?.src
+    ? { id: item.id, url: item.src }
+    : stored && (stored.id === item?.id || (turn && stored.id === turn.id && turning === turn.id))
+      ? stored
+      : undefined;
+  const url = pic?.url;
+  const turned = turn && pic && turn.id === pic.id ? turn : null;
   const stage = useRef<HTMLDivElement>(null);
+  const img = useRef<HTMLImageElement>(null);
   const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
   const [slide, setSlide] = useState({ x: 0, y: 0, animate: true });
   const [chrome, setChrome] = useState(true);
@@ -160,6 +183,33 @@ export function PhotoViewer({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [go]);
+
+  // The turned copy is here and read: the button may turn it again.
+  useEffect(() => {
+    if (turning && item?.id !== turning && stored?.id === item?.id) setTurning(null);
+  }, [turning, item?.id, stored?.id]);
+
+  /** A quarter to the left at once (scaled to fit as the turned copy will be), the copy saved meanwhile. */
+  const rotate = () => {
+    if (!onRotate || !item || item.src || turning) return;
+    const id = item.id;
+    const deg = (turn?.id === id ? turn.deg : 0) - 90;
+    const el = img.current;
+    const box = stage.current;
+    const quarter = Math.abs(deg / 90) % 2 === 1;
+    const fit = quarter && el?.offsetWidth && el.offsetHeight && box ? Math.min(box.clientWidth / el.offsetHeight, box.clientHeight / el.offsetWidth) : 1;
+    setView({ scale: 1, x: 0, y: 0 });
+    setTurn({ id, deg, fit });
+    setTurning(id);
+    onRotate(item).then(
+      // Should the photo not come back as a new one, the button is not kept waiting.
+      () => window.setTimeout(() => setTurning((x) => (x === id ? null : x)), 4000),
+      () => {
+        setTurning(null);
+        setTurn(null);
+      },
+    );
+  };
 
   const clampView = (v: View): View => {
     const box = stage.current?.getBoundingClientRect();
@@ -261,26 +311,38 @@ export function PhotoViewer({
   return createPortal(
     <div className="viewer" role="dialog" aria-modal="true" aria-label={item.title} style={{ background: `rgba(0, 0, 0, ${fade})` }} data-chrome={chrome && slide.y === 0}>
       <div className="viewer-top">
-        <button type="button" className="cam-icon" onClick={() => close()} aria-label={t('camera.close')}>
-          <IconX size={22} />
-        </button>
+        {/* Both sides as wide, so the title stays in the middle. */}
+        <div className="viewer-side">
+          <button type="button" className="cam-icon" onClick={() => close()} aria-label={t('camera.close')}>
+            <IconX size={22} />
+          </button>
+          {onRotate && <span className="cam-icon-spacer" aria-hidden />}
+        </div>
         <div className="cam-title">
           {item.title && <div className="cam-title-main">{item.title}</div>}
           {items.length > 1 && <div className="cam-title-sub">{t('camera.of', { n: index + 1, total: items.length })}</div>}
         </div>
-        <ShareButton item={item} />
+        <div className="viewer-side">
+          {onRotate && (
+            <button type="button" className="cam-icon viewer-turn" onClick={rotate} disabled={!!turning || !!item.src} aria-label={t('photos.rotate')}>
+              <IconRotate size={21} />
+            </button>
+          )}
+          <ShareButton item={item} />
+        </div>
       </div>
       <div className="viewer-stage" ref={stage} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div className="viewer-slide" data-animate={slide.animate} style={{ transform: `translate3d(${slide.x}px, ${slide.y}px, 0) scale(${shrink})` }}>
           {url ? (
             <img
-              key={item.id}
+              key={pic?.id}
+              ref={img}
               src={url}
               alt=""
               draggable={false}
               className="viewer-img"
               data-animate={!gesture.current}
-              style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})` }}
+              style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale * (turned?.fit ?? 1)}) rotate(${turned?.deg ?? 0}deg)` }}
             />
           ) : (
             <Loader color="white" />

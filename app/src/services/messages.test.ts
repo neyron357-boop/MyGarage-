@@ -51,6 +51,15 @@ describe('the job for the garage group', () => {
     // A company by its name; no name — no line for it (and never the phone).
     expect(jobShareText(car, { name: 'Ali', type: 'company', companyName: 'Jaggie Trading' } as Customer, lines, 'en').split('\n')[1]).toBe('Customer: Jaggie Trading');
     expect(jobShareText(car, { name: '', type: 'individual', phone: '+971501234567' } as Customer, lines, 'en')).not.toMatch(/Customer|971/);
+    // What the customer complains of, under the name — when it was written down.
+    expect(jobShareText(car, { name: 'Nakash', type: 'individual' } as Customer, lines, 'ru', '  Стук спереди при торможении ').split('\n').slice(0, 4)).toEqual([
+      'Toyota Camry · Дубай B 213131',
+      'Клиент: Nakash',
+      'Жалоба: Стук спереди при торможении',
+      '',
+    ]);
+    expect(jobShareText(car, { name: '', type: 'individual' } as Customer, lines, 'en', 'AC not cooling').split('\n')[1]).toBe('Complaint: AC not cooling');
+    expect(jobShareText(car, { name: 'Nakash', type: 'individual' } as Customer, lines, 'en', '   ')).not.toMatch(/Complaint/);
   });
 });
 

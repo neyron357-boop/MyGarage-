@@ -12,11 +12,12 @@ import {
   IconTrash,
   IconX,
 } from '@tabler/icons-react';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiDate, dubaiTime, formatDateTime } from '../../domain/dates';
 import type { JobNote } from '../../domain/types';
-import { mediaUrl } from '../../services/media';
+import { flatPeaks } from '../../domain/waveform';
+import { cachedMediaUrl, mediaUrl } from '../../services/media';
 import { addNote, removeNote, restoreNote } from '../../services/notes';
 import { copyText } from '../../ui/clipboard';
 import { MediaImage, StickyBar, undoToast } from '../../ui/components';
@@ -27,6 +28,7 @@ import { useLongPress } from '../../ui/longPress';
 import { useAutoAnimate } from '../../ui/motion';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { canRecord, clock, useRecorder } from '../../ui/recorder';
+import { peaksOfBlob, rateLabel, savedVoiceRate, saveVoiceRate, voicePeaks, VOICE_RATES, type VoiceRate } from '../../ui/voice';
 import { AppError } from '../../services/errors';
 import { useScreen } from '../../ui/stack';
 
@@ -34,38 +36,264 @@ import { useScreen } from '../../ui/stack';
 const RUN_MINUTES = 3;
 const minutesApart = (a: JobNote, b: JobNote) => Math.abs(Date.parse(b.createdAt) - Date.parse(a.createdAt)) / 60_000;
 
-/** One player for all the voice notes on the screen: a new one stops the one playing; how far it went (0–1). */
-function usePlayer() {
+/**
+ * One player for all the voice notes on the screen, as in a messenger: a new one stops the one playing; pause
+ * keeps the place and play goes on from it; the dot can be moved — on a note not started too (it then starts
+ * there); the speed (1×, 1.5×, 2×) holds for the next ones; when one ends, the next voice note plays on.
+ * The callbacks keep their identity (the bubbles are memo: only the one playing is drawn again).
+ *
+ * One audio element plays every note: an iPhone lets an element play on by itself (the next voice note) only
+ * once a tap has started that element — a new element for the next one would stay silent.
+ */
+function usePlayer(list: JobNote[]) {
   const audio = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState<string>();
-  const [progress, setProgress] = useState(0);
-  useEffect(() => () => audio.current?.pause(), []);
-  const toggle = async (n: JobNote) => {
-    if (!n.mediaId) return;
-    if (playing === n.id) {
-      audio.current?.pause();
-      setPlaying(undefined);
-      return;
-    }
-    audio.current?.pause();
-    const url = await mediaUrl(n.mediaId);
-    if (!url) return;
-    const a = new Audio(url);
-    audio.current = a;
-    setProgress(0);
-    // A recording's length may be unknown to the browser (webm): the note keeps its own.
-    a.ontimeupdate = () => {
-      const total = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : n.seconds ?? 0;
-      setProgress(total ? Math.min(1, a.currentTime / total) : 0);
+  /** Whose recording the element holds now: what it reports is that note's, not the one before. */
+  const holds = useRef<string | null>(null);
+  const [cur, setCur] = useState<{ id: string; playing: boolean } | null>(null);
+  const [pos, setPos] = useState(0);
+  const [rate, setRate] = useState<VoiceRate>(savedVoiceRate);
+  const rateRef = useRef(rate);
+  const curRef = useRef(cur);
+  curRef.current = cur;
+  const listRef = useRef(list);
+  listRef.current = list;
+  const screen = useScreen();
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  useEffect(
+    () => () => {
+      const a = audio.current;
+      holds.current = null;
+      if (!a) return;
+      a.pause();
+      // The recording is let go (an iPhone keeps a few media elements only).
+      a.removeAttribute('src');
+      a.load();
+    },
+    [],
+  );
+
+  const api = useRef({
+    /** The note's recording put in the element (the one before stops), at `at` seconds. */
+    open(n: JobNote, url: string, at: number) {
+      const a = (audio.current ??= new Audio());
+      a.pause();
+      holds.current = n.id;
+      a.src = url;
+      a.defaultPlaybackRate = rateRef.current;
+      a.playbackRate = rateRef.current;
+      // Some browsers set the speed back when the recording loads: it is set again then.
+      a.onloadedmetadata = () => {
+        if (holds.current === n.id) a.playbackRate = rateRef.current;
+      };
+      // Before the recording is read this is where it will start (the spec's default playback start position).
+      if (at > 0) a.currentTime = at;
+      a.ontimeupdate = () => {
+        if (holds.current !== n.id) return;
+        // The job went under another screen (a phone keeps it there): the voice stops — play goes on from here.
+        if (!a.paused && screenRef.current && !screenRef.current.front()) {
+          a.pause();
+          setCur((c) => (c ? { id: c.id, playing: false } : c));
+        }
+        setPos(a.currentTime);
+      };
+      a.onended = () => {
+        if (holds.current !== n.id) return;
+        holds.current = null;
+        setCur(null);
+        setPos(0);
+        const l = listRef.current;
+        const next = l[l.findIndex((x) => x.id === n.id) + 1];
+        if (next?.kind === 'voice' && next.mediaId) void api.current.start(next, 0);
+      };
+      setPos(at);
+      return a;
+    },
+    play(n: JobNote, a: HTMLAudioElement) {
+      setCur({ id: n.id, playing: true });
+      a.play().catch(() => setCur((c) => (c?.id === n.id ? { id: n.id, playing: false } : c)));
+    },
+    async start(n: JobNote, at: number) {
+      if (!n.mediaId) return;
+      // An iPhone plays only right in the tap: the address made ahead (by the bubble) is used at once.
+      const url = cachedMediaUrl(n.mediaId) ?? (await mediaUrl(n.mediaId));
+      if (url) api.current.play(n, api.current.open(n, url, at));
+    },
+    toggle(n: JobNote) {
+      const a = audio.current;
+      const c = curRef.current;
+      if (a && c?.id === n.id) {
+        if (c.playing) {
+          a.pause();
+          setCur({ id: n.id, playing: false });
+        } else api.current.play(n, a);
+        return;
+      }
+      void api.current.start(n, 0);
+    },
+    seek(n: JobNote, frac: number) {
+      const a = audio.current;
+      const mine = !!a && curRef.current?.id === n.id;
+      // A recording's length may be unknown to the browser (Chrome's WebM): the note keeps its own.
+      const total = mine && Number.isFinite(a!.duration) && a!.duration > 0 ? a!.duration : n.seconds ?? 0;
+      const at = Math.max(0, Math.min(total, frac * total));
+      if (mine) {
+        a!.currentTime = at;
+        setPos(at);
+        return;
+      }
+      const id = n.mediaId;
+      if (!id) return;
+      // Another note: it becomes the current one there, paused — play goes on from that point.
+      void (async () => {
+        const url = cachedMediaUrl(id) ?? (await mediaUrl(id));
+        if (!url) return;
+        api.current.open(n, url, at);
+        setCur({ id: n.id, playing: false });
+      })();
+    },
+    cycleRate() {
+      const next = VOICE_RATES[(VOICE_RATES.indexOf(rateRef.current) + 1) % VOICE_RATES.length];
+      rateRef.current = next;
+      setRate(next);
+      saveVoiceRate(next);
+      const a = audio.current;
+      if (a) {
+        a.defaultPlaybackRate = next;
+        a.playbackRate = next;
+      }
+    },
+  });
+  const toggle = useCallback((n: JobNote) => api.current.toggle(n), []);
+  const seek = useCallback((n: JobNote, frac: number) => api.current.seek(n, frac), []);
+  const cycleRate = useCallback(() => api.current.cycleRate(), []);
+  return { cur, pos, rate, toggle, seek, cycleRate };
+}
+
+/**
+ * A voice message, as in WhatsApp: play, the bars of the recording with the dot at the place (tap a place, or
+ * drag the dot), the speed while it is the one playing (1× → 1.5× → 2×) — a microphone otherwise; under the bars
+ * how long it is (how far it went while it plays), the time in the corner.
+ */
+function VoiceNote({
+  n,
+  voice,
+  rate,
+  onPlay,
+  onSeek,
+  onRate,
+  consumeClick,
+  time,
+}: {
+  n: JobNote;
+  voice: { playing: boolean; pos: number } | null;
+  rate: VoiceRate;
+  onPlay: (n: JobNote) => void;
+  onSeek: (n: JobNote, frac: number) => void;
+  onRate: () => void;
+  consumeClick: () => boolean;
+  time: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const total = n.seconds ?? 0;
+  const [read, setRead] = useState<number[]>();
+  const bars = n.peaks ?? read ?? flatPeaks();
+  // A note made before the bars were kept with it: read from the recording once (a moment later — the chat first).
+  useEffect(() => {
+    if (n.peaks || !n.mediaId) return;
+    let alive = true;
+    void voicePeaks(n.mediaId).then((p) => alive && p && setRead(p));
+    return () => {
+      alive = false;
     };
-    a.onended = () => {
-      setPlaying(undefined);
-      setProgress(0);
-    };
-    setPlaying(n.id);
-    await a.play().catch(() => setPlaying(undefined));
+  }, [n.peaks, n.mediaId]);
+  // The recording's address made ahead: the tap on play then reaches it at once.
+  useEffect(() => {
+    if (n.mediaId) void mediaUrl(n.mediaId);
+  }, [n.mediaId]);
+  const wave = useRef<HTMLDivElement>(null);
+  // Where the finger has the dot (the sound jumps there when it lets go).
+  const [drag, setDrag] = useState<number | null>(null);
+  const fracAt = (x: number) => {
+    const r = wave.current?.getBoundingClientRect();
+    return r && r.width ? Math.max(0, Math.min(1, (x - r.left) / r.width)) : 0;
   };
-  return { playing, progress, toggle };
+  const at = voice ? Math.min(voice.pos, total || voice.pos) : 0;
+  const shown = drag ?? (voice && total ? Math.min(1, at / total) : 0);
+  const seconds = drag !== null ? drag * total : voice ? at : total;
+  const drawn = useMemo(() => bars.map((h, i) => <i key={i} style={{ '--h': h } as CSSProperties} />), [bars]);
+  return (
+    <div className="note-voice" data-active={voice ? true : undefined}>
+      <ActionIcon
+        size={36}
+        radius="xl"
+        variant="white"
+        className="note-play"
+        aria-label={voice?.playing ? t('notes.pause') : t('notes.play')}
+        onClick={() => {
+          if (!consumeClick()) onPlay(n);
+        }}
+      >
+        {voice?.playing ? <IconPlayerPauseFilled size={16} /> : <IconPlayerPlayFilled size={16} />}
+      </ActionIcon>
+      <div
+        ref={wave}
+        className="voice-wave"
+        role="slider"
+        tabIndex={0}
+        aria-label={t('notes.position')}
+        aria-valuemin={0}
+        aria-valuemax={Math.round(total)}
+        aria-valuenow={Math.round(seconds)}
+        aria-valuetext={clock(seconds)}
+        data-drag={drag !== null || undefined}
+        data-playing={(voice?.playing && drag === null) || undefined}
+        style={{ '--p': shown } as CSSProperties}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'mouse' && e.button !== 0) return;
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          setDrag(fracAt(e.clientX));
+        }}
+        onPointerMove={(e) => {
+          if (drag !== null) setDrag(fracAt(e.clientX));
+        }}
+        onPointerUp={(e) => {
+          if (drag === null) return;
+          setDrag(null);
+          onSeek(n, fracAt(e.clientX));
+        }}
+        // The chat took the finger to scroll: the dot stays where it was.
+        onPointerCancel={() => setDrag(null)}
+        onKeyDown={(e) => {
+          if (!total || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+          e.preventDefault();
+          onSeek(n, Math.max(0, Math.min(1, (at + (e.key === 'ArrowRight' ? 5 : -5)) / total)));
+        }}
+      >
+        <span className="voice-bars" aria-hidden>
+          {drawn}
+        </span>
+        <span className="voice-bars voice-played" aria-hidden>
+          {drawn}
+        </span>
+        <span className="voice-dot-rail" aria-hidden>
+          <span className="voice-dot" />
+        </span>
+      </div>
+      {voice ? (
+        <button type="button" className="voice-rate" aria-label={t('notes.speed')} onClick={onRate}>
+          {rateLabel(rate, lang)}
+        </button>
+      ) : (
+        <span className="voice-mic" aria-hidden>
+          <IconMicrophone size={18} stroke={2} />
+        </span>
+      )}
+      <span className="tnum voice-len">{clock(seconds)}</span>
+      {time}
+    </div>
+  );
 }
 
 /** A video note plays in its bubble (the phone's own player, full screen from its controls). */
@@ -87,15 +315,18 @@ interface BubbleProps {
   tail: boolean;
   /** The first of a run: a little room above it. */
   gap: boolean;
-  playing: boolean;
-  progress: number;
+  /** A voice note that is the player's current one: playing, or paused at `pos` (seconds). */
+  voice: { playing: boolean; pos: number } | null;
+  rate: VoiceRate;
   onPlay: (n: JobNote) => void;
+  onSeek: (n: JobNote, frac: number) => void;
+  onRate: () => void;
   onPhoto: (n: JobNote) => void;
   onMenu: (n: JobNote) => void;
 }
 
 /** One note as a message of one's own: on the right, the time in its corner; a long press — copy or delete. */
-function Bubble({ n, tail, gap, playing, progress, onPlay, onPhoto, onMenu }: BubbleProps) {
+const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, onPlay, onSeek, onRate, onPhoto, onMenu }: BubbleProps) {
   const { t } = useTranslation();
   const press = useLongPress(() => onMenu(n));
   const time = <span className="note-time">{dubaiTime(n.createdAt)}</span>;
@@ -123,33 +354,18 @@ function Bubble({ n, tail, gap, playing, progress, onPlay, onPhoto, onMenu }: Bu
       ) : (
         <div className="note-bubble" data-tail={tail || undefined} data-kind={n.kind} {...press.handlers}>
           {n.kind === 'voice' ? (
-            <div className="note-voice">
-              <ActionIcon
-                size={36}
-                radius="xl"
-                variant="white"
-                className="note-play"
-                aria-label={playing ? t('notes.pause') : t('notes.play')}
-                onClick={() => {
-                  if (!press.consumeClick()) onPlay(n);
-                }}
-              >
-                {playing ? <IconPlayerPauseFilled size={16} /> : <IconPlayerPlayFilled size={16} />}
-              </ActionIcon>
-              <span className="note-track" aria-hidden>
-                <i style={{ '--p': playing ? progress : 0 } as CSSProperties} />
-              </span>
-              <span className="tnum note-length">{clock(n.seconds ?? 0)}</span>
-            </div>
+            <VoiceNote n={n} voice={voice} rate={rate} onPlay={onPlay} onSeek={onSeek} onRate={onRate} consumeClick={press.consumeClick} time={time} />
           ) : (
-            <span className="note-text">{n.text}</span>
+            <>
+              <span className="note-text">{n.text}</span>
+              {time}
+            </>
           )}
-          {time}
         </div>
       )}
     </div>
   );
-}
+});
 
 /**
  * The scroll view of this screen (a phone screen) or the window (a computer): to keep the newest note in
@@ -234,7 +450,8 @@ function Composer({ orderId, onSent, onFocus }: { orderId: string; onSent: () =>
     run(async () => {
       const r = await rec.start();
       if (r) {
-        await addNote(orderId, { voice: r.blob, seconds: r.seconds });
+        // The bars are kept with the note: the chat draws them without reading the recording again.
+        await addNote(orderId, { voice: r.blob, seconds: r.seconds, peaks: await peaksOfBlob(r.blob) });
         haptic('success');
         onSent();
       }
@@ -338,9 +555,10 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
   const { run } = useAction();
   const [menu, setMenu] = useState<JobNote | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
-  const player = usePlayer();
   const fill = useRef<HTMLDivElement>(null);
   const sorted = [...notes].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const player = usePlayer(sorted);
+  const onPhoto = useCallback((n: JobNote) => setViewing(n.id), []);
   const toEnd = useChatScroll(fill, sorted.length);
   const animate = useAutoAnimate<HTMLDivElement>();
 
@@ -389,10 +607,12 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
                     n={n}
                     gap={i > 0 && minutesApart(list[i - 1], n) > RUN_MINUTES}
                     tail={i === list.length - 1 || minutesApart(n, list[i + 1]) > RUN_MINUTES}
-                    playing={player.playing === n.id}
-                    progress={player.progress}
-                    onPlay={(x) => void player.toggle(x)}
-                    onPhoto={(x) => setViewing(x.id)}
+                    voice={player.cur?.id === n.id ? { playing: player.cur.playing, pos: player.pos } : null}
+                    rate={player.rate}
+                    onPlay={player.toggle}
+                    onSeek={player.seek}
+                    onRate={player.cycleRate}
+                    onPhoto={onPhoto}
                     onMenu={setMenu}
                   />
                 )),

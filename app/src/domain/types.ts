@@ -160,7 +160,10 @@ export interface Order {
   stage: Stage;
   outcome: Outcome;
   complaint: string;
+  /** The first of `mechanicIds` (a job before v0.17.2 has only this one) — read through `mechanicsOf`. */
   mechanicId?: string;
+  /** The mechanics on the job, in the order they were put on it (domain/crew.ts). */
+  mechanicIds?: string[];
   docLanguage: Lang;
   bookedFor?: string;
   arrivedAt?: string;
@@ -215,6 +218,8 @@ export interface JobNote {
   mediaId?: string;
   /** Length of a voice note. */
   seconds?: number;
+  /** A voice note's bars (0–1, domain/waveform.ts), kept from v0.17.2; older ones are read from the recording. */
+  peaks?: number[];
   createdAt: string;
 }
 

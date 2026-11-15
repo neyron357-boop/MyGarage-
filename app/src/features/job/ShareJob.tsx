@@ -38,7 +38,7 @@ export function ShareJobButton({ b }: { b: OrderBundle }) {
     };
   }, [cover, name]);
   const share = () => {
-    const text = jobShareText(b.vehicle, b.customer, liveLines(b.items), lang);
+    const text = jobShareText(b.vehicle, b.customer, liveLines(b.items), lang, b.order.complaint);
     haptic('light');
     if (typeof navigator.share === 'function') {
       const files = photo ? [photo] : [];

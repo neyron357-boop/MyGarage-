@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { coverIndex, coverOf, setCover } from './cover';
+import { carOwned, coverIndex, coverOf, mulkiyaOf, removeCarPhoto, restoreCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf } from './cover';
 import { addInspectionPhoto, getOrCreateInspection } from './inspections';
 import { checkIn } from './orders';
 import { ensureSeed } from './seed';
@@ -48,5 +48,30 @@ describe("the car's main photo", () => {
     await db.orders.update(again.id, { createdAt: new Date(Date.now() + 60_000).toISOString() });
     const fresh = await addInspectionPhoto((await getOrCreateInspection(again.id, 'intake')).id, 'rear', photo(2));
     expect((await coverIndex([a.vehicleId])).get(a.vehicleId)).toBe(fresh.id);
+  });
+});
+
+describe("the car's photos, edited in their full-screen view", () => {
+  it('takes a wrong one off and puts it back (Undo); a check-in act keeps its own', async () => {
+    const o = await job('44444');
+    const vin = await setVinPhoto(o.vehicleId, photo(1));
+    expect(await carOwned([vin.id, undefined])).toEqual(new Set([vin.id]));
+    const removed = await removeCarPhoto(vin.id);
+    expect(await vinPhotoOf(o.vehicleId)).toBeUndefined();
+    expect(await db.mediaBlobs.get(vin.id)).toBeUndefined();
+    await restoreCarPhoto(removed);
+    expect(await vinPhotoOf(o.vehicleId)).toBe(vin.id);
+    expect((await db.mediaBlobs.get(vin.id))?.blob.size).toBe(3);
+
+    // The Mulkiya photographed in the check-in act: shown on the chip, not the car's own — it is not taken off.
+    const act = await addInspectionPhoto((await getOrCreateInspection(o.id, 'intake')).id, 'mulkiya', photo(2));
+    expect((await mulkiyaOf(o.vehicleId)).mulkiya).toBe(act.id);
+    expect(await carOwned([act.id])).toEqual(new Set());
+    await expect(removeCarPhoto(act.id)).rejects.toThrow();
+    // A side taken for the car wins over the act's, and taken off, the act's shows again.
+    const own = await setMulkiya(o.vehicleId, 'mulkiya', photo(3));
+    expect((await mulkiyaOf(o.vehicleId)).mulkiya).toBe(own.id);
+    await removeCarPhoto(own.id);
+    expect((await mulkiyaOf(o.vehicleId)).mulkiya).toBe(act.id);
   });
 });

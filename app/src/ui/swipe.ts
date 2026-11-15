@@ -64,8 +64,9 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
       start.current = null;
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
-      // The strip along the left edge belongs to "Back" (ui/stack): a touch there never swipes a row.
-      if (t.clientX < 28) return;
+      // The strip along the left edge belongs to "Back" (ui/stack): a touch there never swipes a row; nor does one
+      // on the row's grip (≡, ui/sortable) — that moves the row up and down.
+      if (t.clientX < 28 || (e.target as Element).closest?.('[data-sort-id]')) return;
       row.current = e.currentTarget;
       start.current = { x: t.clientX, y: t.clientY, base: off.current, w: e.currentTarget.offsetWidth };
     },

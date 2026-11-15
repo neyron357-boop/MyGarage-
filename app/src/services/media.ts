@@ -1,7 +1,7 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { sha256Bytes, toHex } from '../domain/sha256';
-import type { Media, MediaOwner } from '../domain/types';
+import type { Media, MediaBlob, MediaOwner } from '../domain/types';
 
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
@@ -33,6 +33,57 @@ export async function compressImage(file: Blob, maxSide = 1920, quality = 0.8): 
   } finally {
     bmp.close();
   }
+}
+
+/**
+ * A photo turned a quarter to the left (−90) or the right (90), or upside down: the picture at its size and a
+ * thumbnail, ready to be stored as is (`addMedia` with `thumb`). Browser only.
+ */
+export async function turnPhoto(file: Blob, turn: 90 | -90 | 180, quality = 0.86): Promise<{ blob: Blob; thumb: Blob }> {
+  const bmp = await createImageBitmap(file);
+  const draw = (max: number, q: number) => {
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const quarter = turn !== 180;
+    const canvas = document.createElement('canvas');
+    canvas.width = quarter ? h : w;
+    canvas.height = quarter ? w : h;
+    const ctx = canvas.getContext('2d')!;
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((turn * Math.PI) / 180);
+    ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
+    return new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', q));
+  };
+  try {
+    return { blob: await draw(1920, quality), thumb: await draw(400, 0.7) };
+  } finally {
+    bmp.close();
+  }
+}
+
+/** A media taken off, with its file — to put it back ("Undo"). */
+export interface RemovedMedia {
+  media: Media;
+  blob?: MediaBlob;
+}
+
+export async function takeMedia(id: string): Promise<RemovedMedia | undefined> {
+  return db.transaction('rw', db.media, db.mediaBlobs, async () => {
+    const media = await db.media.get(id);
+    if (!media) return undefined;
+    const blob = await db.mediaBlobs.get(id);
+    await db.media.delete(id); // throws ImmutableError when locked
+    await db.mediaBlobs.delete(id);
+    return { media, blob };
+  });
+}
+
+export async function putBackMedia(r: RemovedMedia): Promise<void> {
+  await db.transaction('rw', db.media, db.mediaBlobs, async () => {
+    await db.media.put(r.media);
+    if (r.blob) await db.mediaBlobs.put(r.blob);
+  });
 }
 
 export interface AddMediaInput {

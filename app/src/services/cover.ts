@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 import type { Media } from '../domain/types';
-import { addMedia, deleteMedia } from './media';
+import { AppError } from './errors';
+import { addMedia, deleteMedia, mediaBlob, putBackMedia, takeMedia, turnPhoto, type RemovedMedia } from './media';
 
 /*
  * The car's main photo, on its job and on the board: the one taken for it (media of the vehicle,
@@ -46,13 +47,44 @@ export async function coverOf(vehicleId: string): Promise<string | undefined> {
   return (await coverIndex([vehicleId])).get(vehicleId);
 }
 
+/** The places of the car's own photos: its main photo, its VIN plate, the two sides of the Mulkiya. */
+export type CarSlot = 'cover' | 'vin' | MulkiyaSide;
+
 /** One photo the car keeps (its main photo, its VIN plate): a new one replaces the one before. */
-async function setCarPhoto(vehicleId: string, slot: 'cover' | 'vin' | MulkiyaSide, file: Blob): Promise<Media> {
+async function setCarPhoto(vehicleId: string, slot: CarSlot, file: Blob, thumb?: Blob): Promise<Media> {
   const before = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === slot);
-  const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot, file });
+  const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot, file, thumb });
   for (const m of before) await deleteMedia(m.id);
   return media;
 }
+
+/**
+ * The photo shown in a place of the car turned a quarter (−90 — to the left): kept with the car in place of
+ * the one before. A photo of a check-in act is not changed — the car gets its turned copy.
+ */
+export async function rotateCarPhoto(vehicleId: string, slot: CarSlot, mediaId: string, turn: 90 | -90 = -90): Promise<Media> {
+  const blob = await mediaBlob(mediaId);
+  if (!blob) throw new AppError('err.notFound');
+  const turned = await turnPhoto(blob, turn);
+  return setCarPhoto(vehicleId, slot, turned.blob, turned.thumb);
+}
+
+/** Which of these photos are the car's own (taken for it — not a check-in act's, which stay as they are). */
+export async function carOwned(ids: (string | undefined)[]): Promise<Set<string>> {
+  const list = (await db.media.bulkGet(ids.filter((id): id is string => !!id))).filter((m): m is Media => !!m);
+  return new Set(list.filter((m) => m.ownerType === 'vehicle').map((m) => m.id));
+}
+
+/** A wrong photo of the car taken off (its own only) — kept to put back ("Undo"). */
+export async function removeCarPhoto(mediaId: string): Promise<RemovedMedia> {
+  const m = await db.media.get(mediaId);
+  if (!m || m.ownerType !== 'vehicle') throw new AppError('err.notFound');
+  const removed = await takeMedia(mediaId);
+  if (!removed) throw new AppError('err.notFound');
+  return removed;
+}
+
+export const restoreCarPhoto = (r: RemovedMedia) => putBackMedia(r);
 
 /** A new main photo for the car: the one taken for it before goes, the check-in photos stay. */
 export const setCover = (vehicleId: string, file: Blob) => setCarPhoto(vehicleId, 'cover', file);

@@ -53,7 +53,8 @@ export function useAutoAnimate<T extends HTMLElement>(enabled = true): (el: T | 
       const fresh = now.filter((c) => !boxes.has(c));
       const removed = [...gone].filter((n) => n.parentNode !== parent && boxes.has(n));
       if (!added.size && !gone.size) return;
-      if (reduced() || !shown() || fresh.length + removed.length > 6) return remember();
+      // Rows moved by hand (ui/sortable) are already where they land: the new order is only remembered.
+      if (reduced() || !shown() || fresh.length + removed.length > 6 || parent.hasAttribute('data-sorting')) return remember();
       const was = height;
       // The rows that stay slide from where they were to where they are.
       for (const c of now) {

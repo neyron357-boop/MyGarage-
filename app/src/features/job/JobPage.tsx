@@ -45,6 +45,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
+import { mechanicsOf } from '../../domain/crew';
 import { hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
@@ -66,7 +67,7 @@ import { amendInvoice, answerLines, approveAll, carArrived, closeUnpaid, dropLin
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
-import { assignMechanic, bundleAmountDue, changeStage, updateOrder, type OrderBundle } from '../../services/orders';
+import { bundleAmountDue, changeStage, toggleMechanic, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
 import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
@@ -582,9 +583,11 @@ export function JobPage() {
         ? t('parts.nOf', { n: i.receivedQty, of: i.qty })
         : t(`job.part.${partStateOf(i)}`)
       : '';
-  // Work outside: where it stands; who does a line, when it is not the job's mechanic.
+  // Work outside: where it stands; who does a line — unless it is the one mechanic of the job (with several on
+  // it, each line says whose it is).
+  const crew = mechanicsOf(b.order);
   const outNote = (i: OrderItem) => (i.outsource && !i.done ? t(`outsource.states.${i.outsource.state}`) : '');
-  const whoNote = (i: OrderItem) => (i.employeeId && i.employeeId !== b.order.mechanicId ? mechanics.find((m) => m.id === i.employeeId)?.name ?? '' : '');
+  const whoNote = (i: OrderItem) => (i.employeeId && !(crew.length === 1 && crew[0] === i.employeeId) ? mechanics.find((m) => m.id === i.employeeId)?.name ?? '' : '');
   // Swipes on a line, as in the iPhone's lists. Left — off the job: a draft goes at once (with Undo), a
   // line the customer has heard of only uncovers the button (it stays in the history as cancelled).
   // Right — the next good thing: "agreed" on a line that waits, "done" on agreed work.
@@ -649,8 +652,9 @@ export function JobPage() {
           <Money fils={itemAmounts(i).gross} c={i.kind === 'discount' ? 'green.7' : i.approvalState === 'declined' ? 'dimmed' : undefined} />
         )
       }
+      // The grip is always there (the user's call, v0.17.2): a line is moved up or down without edit mode.
       grip={
-        picking && canPick(i) && lines.length > 1 ? (
+        canPick(i) && lines.length > 1 ? (
           <span className="sort-grip" aria-label={t('job.move')} {...sortGrip(i.id)}>
             <IconMenu2 size={20} stroke={2} aria-hidden />
           </span>
@@ -942,13 +946,13 @@ export function JobPage() {
         )}
         <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
         {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
-        {/* One flow of chips: when the car was promised, who does the job, the car's VIN photo. Wrapping,
-            not scrolling — every chip stays in sight, one tap away. */}
+        {/* One flow of chips: when the car was promised, who does the job (one or several — each chip on or
+            off by itself), the car's VIN photo. Wrapping, not scrolling — every chip stays in sight, one tap away. */}
         <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>
           {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
           {open &&
             mechanics.map((m) => (
-              <button key={m.id} type="button" className="chip" data-active={b.order.mechanicId === m.id} onClick={() => run(() => assignMechanic(oid, b.order.mechanicId === m.id ? undefined : m.id))}>
+              <button key={m.id} type="button" className="chip" data-active={crew.includes(m.id)} aria-pressed={crew.includes(m.id)} onClick={() => run(() => toggleMechanic(oid, m.id))}>
                 {m.name}
               </button>
             ))}
