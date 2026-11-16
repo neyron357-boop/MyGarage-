@@ -48,7 +48,7 @@ import { mechanicsOf } from '../../domain/crew';
 import { formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
-import { activeInvoice, canAmendInvoice, paidNet } from '../../domain/invoice';
+import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet } from '../../domain/invoice';
 import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
@@ -533,6 +533,8 @@ export function JobPage() {
   const docLang = b.order.docLanguage;
   const c = b.customer;
   const inv = activeInvoice(b.invoices);
+  // Whom the invoice bills, as its PDF prints it (blank on it — the job's customer now).
+  const billTo = inv && invoiceBuyer(inv.buyer, c);
   const due = Math.max(0, bundleAmountDue(b));
   const live = liveLines(b.items);
   const lines = live.filter((i) => i.kind !== 'discount');
@@ -1023,6 +1025,7 @@ export function JobPage() {
             <ListRow
               left={<IconFileInvoice size={22} stroke={1.7} color="var(--mantine-color-green-6)" aria-hidden />}
               title={inv.number}
+              subtitle={billTo?.name || (billTo?.phone ? formatPhone(billTo.phone) : undefined)}
               right={
                 <Group gap={6} wrap="nowrap">
                   {copyButton(36)}

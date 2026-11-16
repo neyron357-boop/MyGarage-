@@ -3,6 +3,7 @@ import { IconChartBar, IconDownload, IconFileTypePdf, IconShare } from '@tabler/
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
+import { invoiceBuyer } from '../../domain/invoice';
 import { addDays, dubaiDate, formatDate, nowIso } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { computeReport } from '../../domain/reports';
@@ -138,10 +139,13 @@ export function ReportsPage() {
   };
   const exportCsv = async () => {
     const inv = data.invoices.filter((i) => dubaiDate(i.issuedAt) >= f && dubaiDate(i.issuedAt) <= tt);
+    // The buyer as the invoice's PDF prints it (left blank on it — the job's customer now).
+    const customers = new Map((await db.customers.toArray()).map((c) => [c.id, c]));
+    const buyer = (i: (typeof inv)[number]) => invoiceBuyer(i.buyer, customers.get(data.orders.find((o) => o.id === i.orderId)?.customerId ?? ''));
     await downloadBlob(
       toCsv([
         ['number', 'type', 'date', 'buyer', 'buyer_trn', 'net_aed', 'vat_aed', 'total_aed', 'status'],
-        ...inv.map((i) => [i.number, i.type, formatDate(i.issuedAt), i.buyer.name, i.buyer.trn, (i.subtotalFils / 100).toFixed(2), (i.vatFils / 100).toFixed(2), (i.totalFils / 100).toFixed(2), i.status]),
+        ...inv.map((i) => [i.number, i.type, formatDate(i.issuedAt), buyer(i).name, i.buyer.trn, (i.subtotalFils / 100).toFixed(2), (i.vatFils / 100).toFixed(2), (i.totalFils / 100).toFixed(2), i.status]),
       ]),
       `invoices-${f}-${tt}.csv`,
     );

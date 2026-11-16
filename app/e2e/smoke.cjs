@@ -1977,6 +1977,41 @@ async function launchBrowser() {
     await line.locator('.mantine-Modal-close').click();
     await line.waitFor({ state: 'detached' });
   });
+  await step('a customer added after the invoice: on it and in its PDF', async () => {
+    // The car came with no name, the invoice went out and its PDF was given; the customer is typed on the job
+    // afterwards. The invoice itself never changes — what it left blank is the job's customer now.
+    const job = await page.evaluate(async () => {
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { quickInvoice } = await import('/src/services/money.ts');
+      const { invoicePdf } = await import('/src/services/documents.ts');
+      const o = await checkIn({ plate: { emirate: 'DXB', code: 'Z', number: '31862' }, make: 'Hyundai', model: 'Tucson', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'AC SERVICE', qty: 1, unitPriceFils: 15000 });
+      const inv = await quickInvoice(o.id);
+      await invoicePdf(inv.id);
+      return { id: o.id, invoiceId: inv.id, number: inv.number };
+    });
+    await page.goto(BASE + '#/orders/' + job.id);
+    const invRow = front('.list-row').filter({ hasText: job.number });
+    await invRow.waitFor();
+    await front('button').filter({ hasText: /^Клиент$/ }).click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByRole('textbox', { name: /^Имя/ }).fill('Omar Haddad');
+    await dlg.getByRole('textbox', { name: /^Телефон/ }).fill('050 777 1234');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    // On the invoice's row — whom it bills.
+    await invRow.filter({ hasText: 'Omar Haddad' }).waitFor();
+    await shot('32c-invoice-customer-after');
+    const got = await page.evaluate(async (invoiceId) => {
+      const { db } = await import('/src/db/db.ts');
+      const { invoicePdf } = await import('/src/services/documents.ts');
+      const { pdfTextItems } = await import('/src/services/pdfText.ts');
+      const text = (await pdfTextItems((await invoicePdf(invoiceId)).blob)).map((i) => i.str).join(' ');
+      return { buyer: (await db.invoices.get(invoiceId)).buyer.name, name: text.includes('Omar Haddad'), phone: text.includes('+971 50 777 1234') };
+    }, job.invoiceId);
+    if (got.buyer !== '' || !got.name || !got.phone) throw new Error('the customer added after the invoice: ' + JSON.stringify(got));
+  });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {
       const docs = await import('/src/services/documents.ts');

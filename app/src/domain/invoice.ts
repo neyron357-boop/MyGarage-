@@ -1,5 +1,29 @@
 import { byPosition, itemAmounts, itemTitle } from './items';
-import type { Customer, Debt, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, Payment, Stage } from './types';
+import type { Customer, Debt, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, PartySnapshot, Payment, Stage } from './types';
+
+/** The name a customer goes by on a document: a company's name, else the person's. */
+export const buyerName = (c: Pick<Customer, 'type' | 'companyName' | 'name'>): string => (c.type === 'company' && c.companyName ? c.companyName : c.name);
+
+/**
+ * Whom an invoice is billed to, as shown and printed. An issued invoice never changes and keeps the buyer it
+ * was issued to; what that left blank — a car taken in with no name or phone, the customer added on the job
+ * after the invoice — comes from the job's customer now, and only when it is the same person (the name and
+ * the phone the invoice has, if any, are theirs). The TRN is not filled in: a buyer's TRN makes a full tax
+ * invoice — that is a credit note and a new invoice. Nothing to fill in: the invoice's own buyer, the same object.
+ */
+export function invoiceBuyer(buyer: PartySnapshot, now: Pick<Customer, 'type' | 'companyName' | 'name' | 'phone' | 'email' | 'address'> | undefined): PartySnapshot {
+  if (!now) return buyer;
+  const name = buyerName(now).trim();
+  const had = buyer.name.trim();
+  if (had && had.toLowerCase() !== name.toLowerCase()) return buyer;
+  if (buyer.phone && buyer.phone !== now.phone) return buyer;
+  const fill: Partial<PartySnapshot> = {};
+  if (!had && name) fill.name = name;
+  if (!buyer.phone && now.phone) fill.phone = now.phone;
+  if (!buyer.email?.trim() && now.email?.trim()) fill.email = now.email.trim();
+  if (!buyer.address?.trim() && now.address?.trim()) fill.address = now.address.trim();
+  return Object.keys(fill).length ? { ...buyer, ...fill } : buyer;
+}
 
 /** Lines for an invoice: every approved item (including zero-priced customer-supplied parts), in the job's order. */
 export function invoiceLines(items: OrderItem[], lang: Lang): InvoiceLine[] {

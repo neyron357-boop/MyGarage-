@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { db } from '../db/db';
 import { addDays, formatDate, formatDateTime, formatDocDate, nowIso } from '../domain/dates';
 import { discountPctLabel, spreadDiscount } from '../domain/discount';
+import { buyerName, invoiceBuyer } from '../domain/invoice';
 import { REQUIRED_SLOTS } from '../domain/inspection';
 import { checkLabel, lightLabel } from '../domain/quickLists';
 import { itemAmounts, itemTitle, lineName } from '../domain/items';
@@ -277,8 +278,8 @@ function CustomerBlock({ en, ar, party, vehicle }: { en: string; ar: string; par
   );
 }
 
-/** Customer of a quotation (the invoice keeps its own snapshot of the buyer). */
-const partyOf = (c: Customer) => ({ name: c.type === 'company' && c.companyName ? c.companyName : c.name, phone: c.phone, email: c.email, trn: c.trn, address: c.address });
+/** Customer of a quotation (the invoice keeps its own snapshot of the buyer — `invoiceBuyer`). */
+const partyOf = (c: Customer) => ({ name: buyerName(c), phone: c.phone, email: c.email, trn: c.trn, address: c.address });
 
 function QuotationDocument({ fam, settings, customer, vehicle, number, date, validUntil, rows, totals, note }: {
   fam: string;
@@ -445,7 +446,8 @@ export async function renderInvoice(invoiceId: string): Promise<Blob> {
               </>
             }
           />
-          <CustomerBlock en="BILL TO" ar={AR_LABEL.billTo} party={inv.buyer} vehicle={b.vehicle} />
+          {/* The buyer it was issued to; what that left blank — the job's customer now (added after the invoice). */}
+          <CustomerBlock en="BILL TO" ar={AR_LABEL.billTo} party={invoiceBuyer(inv.buyer, b.customer)} vehicle={b.vehicle} />
         </View>
         <ItemsTable rows={rows} />
         <Totals

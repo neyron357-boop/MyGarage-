@@ -130,7 +130,7 @@ export async function checkIn(input: CheckInInput): Promise<Order> {
  * the job, its car, its messages and claims go to them, and the documents follow their language. The
  * customer the job had is deleted when it was an empty one made at check-in (no name, no phone) and
  * nothing else is theirs. Payments and debts keep whom they were taken from (they never change); an
- * invoice already issued keeps its buyer.
+ * invoice already issued keeps its buyer — what that left blank shows the job's customer now (`invoiceBuyer`).
  */
 export async function setJobCustomer(orderId: string, customerId: string): Promise<void> {
   await db.transaction('rw', [db.orders, db.vehicles, db.ownerships, db.customers, db.messages, db.claims, db.payments, db.debts, db.expenses, db.incomes, db.events], async () => {

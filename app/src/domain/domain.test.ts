@@ -17,7 +17,7 @@ import {
 } from './items';
 import { canCloseUnpaid, checkTransition, isBackward, type StageContext } from './stages';
 import { flowStage, jobPhase, leftBoardAt, nothingToBill, stepToward, type FlowFacts } from './flow';
-import { activeInvoice, amountDue, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from './invoice';
+import { activeInvoice, amountDue, chooseInvoiceType, formatDocNumber, invoiceBuyer, invoiceLines, invoiceTotals } from './invoice';
 import { apportion, discountPctLabel, discountPrice, splitDiscount, spreadDiscount } from './discount';
 import { expectedCash, nonCashTotals } from './cash';
 import { computeReport } from './reports';
@@ -389,6 +389,28 @@ describe('invoices', () => {
     expect(chooseInvoiceType({ type: 'company', trn: '100000000000003' })).toBe('tax_invoice');
     expect(chooseInvoiceType({ type: 'company' })).toBe('simplified_tax_invoice');
     expect(chooseInvoiceType({ type: 'individual' })).toBe('simplified_tax_invoice');
+  });
+  it('bills the buyer it was issued to; what that left blank — the job’s customer now, the same person only', () => {
+    const now = { type: 'individual' as const, name: 'Sergey Ivanov', phone: '+971501234567', email: 'sergey@example.com', address: '' };
+    // Issued with no name and no phone: the customer added since, whole (not the TRN — that is another invoice).
+    const blank = { name: '' };
+    const withTrn = { ...now, trn: '100000000000003' };
+    expect(invoiceBuyer(blank, withTrn)).toEqual({ name: 'Sergey Ivanov', phone: '+971501234567', email: 'sergey@example.com' });
+    // A company goes by its name.
+    expect(invoiceBuyer(blank, { ...now, type: 'company', companyName: 'DESERT FALCON LLC' }).name).toBe('DESERT FALCON LLC');
+    // Only a phone then: the name typed since; only a name then: the phone typed since.
+    expect(invoiceBuyer({ name: '', phone: '+971501234567' }, now)).toMatchObject({ name: 'Sergey Ivanov', phone: '+971501234567' });
+    expect(invoiceBuyer({ name: 'sergey ivanov ' }, now)).toMatchObject({ name: 'sergey ivanov ', phone: '+971501234567' });
+    // Someone else now (the job given to another customer): the invoice keeps whom it billed, nothing mixed in.
+    const issued = { name: 'Musa Khan' };
+    expect(invoiceBuyer(issued, now)).toBe(issued);
+    const byPhone = { name: '', phone: '+971509999999' };
+    expect(invoiceBuyer(byPhone, now)).toBe(byPhone);
+    // Nothing to fill in (still no customer, or all there): the invoice's own buyer, the same object.
+    expect(invoiceBuyer(blank, { type: 'individual', name: '', phone: '' })).toBe(blank);
+    const full = { name: 'Sergey Ivanov', phone: '+971501234567', email: 'sergey@example.com' };
+    expect(invoiceBuyer(full, now)).toBe(full);
+    expect(invoiceBuyer(blank, undefined)).toBe(blank);
   });
   it('computes amount due against the active invoice', () => {
     const pay = (kind: Payment['kind'], amountFils: number): Payment => ({

@@ -1,4 +1,5 @@
 import { db } from '../db/db';
+import { invoiceBuyer } from '../domain/invoice';
 import { formatPlate } from '../domain/plates';
 import type { Media, MediaOwner, Vehicle } from '../domain/types';
 import { AppError } from './errors';
@@ -82,7 +83,14 @@ export async function quotationPdf(orderId: string): Promise<PdfFile> {
 export async function invoicePdf(invoiceId: string): Promise<PdfFile> {
   const inv = await db.invoices.get(invoiceId);
   if (!inv) throw new AppError('err.notFound');
-  return keep('invoice', invoiceId, documentFileName(inv.number, await carOf(inv.orderId)), async () => (await pdf()).renderInvoice(invoiceId));
+  const order = await db.orders.get(inv.orderId);
+  const filename = documentFileName(inv.number, order ? await db.vehicles.get(order.vehicleId) : undefined);
+  const make = async () => (await pdf()).renderInvoice(invoiceId);
+  // Issued with the buyer blank, it prints the job's customer as it is now (`invoiceBuyer`): made each time,
+  // not kept — the PDF kept before the customer was added (with no name) is not the one given any more.
+  const customer = order ? await db.customers.get(order.customerId) : undefined;
+  if (invoiceBuyer(inv.buyer, customer) !== inv.buyer) return { blob: await make(), filename };
+  return keep('invoice', invoiceId, filename, make);
 }
 
 export async function receiptPdf(paymentId: string): Promise<PdfFile> {
