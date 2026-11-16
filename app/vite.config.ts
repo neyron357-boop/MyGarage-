@@ -52,7 +52,7 @@ export default defineConfig(({ mode }) => {
           // Everything the app needs offline, including the fonts embedded into PDF documents.
           // (.woff duplicates of .woff2 are skipped: every supported browser reads woff2.)
           globPatterns: ['**/*.{js,mjs,css,html,woff2,ttf,png,svg,webmanifest}'],
-          // The VIN reader's engine and model (~7 MB, public/ocr) are not part of the install: they are kept the
+          // The VIN reader's engine and model (~16 MB, public/ocr) are not part of the install: they are kept the
           // first time a VIN is read, and from then on read offline.
           globIgnores: ['ocr/**'],
           runtimeCaching: [

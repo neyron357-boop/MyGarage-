@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkDigitOk, fixByCheckDigit, isVin, makeMatches, mulkiyaYear, pickVin, vinChars, vinCheckDigit, vinMaker, vinsInText, vinYear, voteVin } from './vin';
+import { checkDigitOk, fixByCheckDigit, isVin, makeMatches, mulkiyaYear, pickVin, solveVin, vinChars, vinCheckDigit, vinMaker, vinsInText, vinYear, voteVin, type VinRead } from './vin';
 
 const NOW = new Date('2026-11-15T10:00:00Z');
 /** The textbook VIN (its check digit is X). */
@@ -151,6 +151,19 @@ describe('the VIN out of all that was read', () => {
     expect([p.vin, p.sure, p.doubt]).toEqual([US, false, [3]]);
   });
 
+  it('a misreading read so again and again is offered before the VIN fitted from it (a VIN with no check digit)', () => {
+    // A Gulf Toyota's VIN, its 9th no check digit — read right every time; one look-alike swap (0 → D) would make it add up.
+    const plain = GCC;
+    const fitted = fixByCheckDigit(plain)!;
+    expect(fitted).toBeDefined();
+    const reads = [1, 2, 3, 4].flatMap(() => [
+      { vin: plain, source: 'plate' },
+      { vin: fitted, source: 'plate', from: plain },
+    ]);
+    const p = pickVin(reads, [], {}, NOW);
+    expect([p.vin, p.sure]).toEqual([plain, false]);
+  });
+
   it('a VIN fixed by its check digit needs a second photo, and shows where it was fixed', () => {
     const read = US.slice(0, 3) + '6' + US.slice(4);
     const alone = pickVin([{ vin: US, source: 'plate', from: read }], [], {}, NOW);
@@ -182,5 +195,65 @@ describe('the VIN out of all that was read', () => {
     expect(pickVin(twice(v), [2017, 2017], {}, NOW)).toMatchObject({ year: 2017, yearSure: false });
     // A VIN made for elsewhere (no check digit) says no year of its own.
     expect(pickVin([{ vin: GCC, source: 'a' }, { vin: GCC, source: 'b' }], [], {}, NOW)).toMatchObject({ sure: true, year: undefined });
+  });
+});
+
+describe('one VIN out of many imperfect readings (v0.25)', () => {
+  // The plate that asked for it: a Nissan's, white on black — one engine reads its 8 as B and a 5 as 6, the other its G as 6.
+  const VIN = 'JN8AY2NY8G9156675';
+  it('readings wrong in different places meet in the VIN whose check digit adds up', () => {
+    const reads = ['JNBAY2NYBG9166675', 'JNBAY2NYBG9166675', 'JNBAY2NY8G9156675', 'JN8AY2NY869156675', 'JN8AY2NY869156675', 'JN8AY2NYBG9156675'];
+    expect(reads).not.toContain(VIN);
+    // Laid over the reading nearest to them all.
+    expect(solveVin(reads)).toEqual({ vin: VIN, from: 'JN8AY2NYBG9156675' });
+  });
+
+  it('a reading of another line — upside down, the engine’s number — stays out of it', () => {
+    // As the plate was read: the line upside down (17 characters too, first by the alphabet), another line, and the VIN's.
+    const reads = ['GL99GL6DBANTAVENS', '59590GLLS5LTS50MPPC', 'NBAY2NYBG9166675', 'JNBAY2NY8G9166676', 'JNBAY2NYBG9156675', 'JN8AY2NY869156675', 'JN8AY2NYBG9156675', 'VK56123456A'];
+    expect(reads).not.toContain(VIN);
+    expect(solveVin(reads)?.vin).toBe(VIN);
+  });
+
+  it('a reading that dropped or doubled a character still votes for the rest', () => {
+    // "J" lost at the start; an "8" read twice in the middle.
+    expect(solveVin(['NBAY2NY8G9156675', 'JN8AY2NYB8G9156675', 'JNBAY2NY8G9156675', 'JN8AY2NY869156675'])?.vin).toBe(VIN);
+  });
+
+  it('nothing when no pick adds up, when two do as well as each other, or with a single reading', () => {
+    // The check digit never read right (always B, nothing else): no pick of what was read adds up.
+    expect(solveVin(['JN8AY2NYBG9156675', 'JN8AY2NYBG9156675', 'JNBAY2NYBG9156675'])).toBeUndefined();
+    expect(solveVin([VIN])).toBeUndefined();
+    expect(solveVin(['', 'SALE 2026', 'NISSAN MOTOR'])).toBeUndefined();
+    // Two picks that both add up, as well supported as each other: not decided here.
+    const a = 'JN8AY2NY8G9156675';
+    const b = 'JN8AY2NY8G9156613';
+    expect(checkDigitOk(b)).toBe(true);
+    expect(solveVin([a, b])).toBeUndefined();
+  });
+
+  it('readings that all say the same VIN, adding up: that VIN', () => {
+    expect(solveVin([VIN, VIN, 'JN8AY2NY8G9156676'])?.vin).toBe(VIN);
+  });
+
+  it('the VIN the readings met in is offered before one fitted from a single misreading', () => {
+    // As the dimmed plate was read: one misreading fitted to its check digit ("1NBAY…"), the met one — both add up only fitted.
+    const at = (vin: string, from?: string): VinRead => (from ? { vin, from, source: 'p' } : { vin, source: 'p' });
+    const reads = [
+      at('JNBAY2NYBG0166675'),
+      at('1NBAY2NY8G9166676'),
+      at('1NBAY2NY8G91G6676', '1NBAY2NY8G9166676'),
+      at('1NBAY2NYBG9166675'),
+      at('JN8AY2NY869156675'),
+      at('JN8AY2NY869156675'),
+      at('JN8AY2NY869156675'),
+      at('JNBAYZNY869156675'),
+      at(VIN, 'JNBAY2NYBG0166675'),
+    ];
+    expect(checkDigitOk('1NBAY2NY8G91G6676')).toBe(true);
+    const pick = pickVin(reads, [], {}, NOW);
+    expect(pick.vin).toBe(VIN);
+    // Met out of readings that each erred: to look at, not sure.
+    expect(pick.sure).toBe(false);
   });
 });

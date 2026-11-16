@@ -1,7 +1,8 @@
 import type { Line, Page, Worker as OcrWorker } from 'tesseract.js';
 import { db } from '../db/db';
 import type { Vehicle } from '../domain/types';
-import { checkDigitOk, fixByCheckDigit, mulkiyaYear, pickVin, VIN_CHARS, vinChars, vinsInText, voteVin, type VinPick, type VinRead } from '../domain/vin';
+import { fitCode39Row, readBarcodeRow, runsOf, vinOfBarcode } from '../domain/barcode';
+import { checkDigitOk, fixByCheckDigit, mulkiyaYear, pickVin, readingsNear, solveVin, VIN_CHARS, vinChars, vinsInText, vinsRead, voteVin, type VinPick, type VinRead } from '../domain/vin';
 import { mulkiyaOf, vinPhotoOf } from './cover';
 import { mediaBlob } from './media';
 
@@ -24,22 +25,45 @@ const BASE = () => new URL('ocr/', document.baseURI).href;
 
 let worker: Promise<OcrWorker> | undefined;
 let idle: number | undefined;
+/** The way the engine reads now: the newer one (a network over the whole line) or the older (each character by its shape). */
+type Way = 'lstm' | 'legacy';
+let way: Way = 'lstm';
 
-async function engine(): Promise<OcrWorker> {
+/**
+ * The engine, reading the way asked (v0.25: both ways are in the one engine and the one model file; changing over
+ * takes a moment, so a photo is read one way through, then — only if it must be — the other).
+ */
+async function engine(want: Way = 'lstm'): Promise<OcrWorker> {
   window.clearTimeout(idle);
   worker ??= (async () => {
     const { createWorker, OEM } = await import('tesseract.js');
+    way = 'lstm';
     return createWorker('eng', OEM.LSTM_ONLY, {
       workerPath: `${BASE()}worker.min.js`,
       corePath: BASE(),
-      langPath: `${BASE()}lang`,
+      // v0.25: the model with both ways of reading — at its own address and kept by the engine under its own name.
+      // A phone that read a VIN before keeps the older model (the newer way only) at `lang/` (the app's cache of
+      // these files) and under the engine's plain name (its own store): read from either, the older way would not
+      // start.
+      langPath: `${BASE()}lang-full`,
+      cachePath: 'mygarage-full',
       gzip: true,
+      legacyCore: true,
+      legacyLang: true,
     });
   })().catch((e) => {
     worker = undefined;
     throw e;
   });
-  return worker;
+  const w = await worker;
+  if (way !== want) {
+    const { OEM } = await import('tesseract.js');
+    // The older way's number is 0, and tesseract.js 7 takes a 0 for "not said" (`oem || currentOem`) and stays as it
+    // was — without a word. Said as text, it is passed on; the engine itself takes "0" for 0.
+    await w.reinitialize('eng', (want === 'legacy' ? String(OEM.TESSERACT_ONLY) : OEM.LSTM_ONLY) as never);
+    way = want;
+  }
+  return w;
 }
 
 /** The engine is let go a while after the last read (it holds ~100 MB; a phone needs it back). */
@@ -201,7 +225,7 @@ function snapshot(c: HTMLCanvasElement): string {
 const breathe = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /** Too small to hold a VIN anyone could read (a thumbnail, a blank): not read at all. */
-const tooSmall = (b: ImageBitmap) => Math.min(b.width, b.height) < 48 || b.width * b.height < 60_000;
+const tooSmall = (b: { width: number; height: number }) => Math.min(b.width, b.height) < 48 || b.width * b.height < 60_000;
 
 /* ---------------- Lines of text found by their outlines ---------------- */
 
@@ -223,7 +247,7 @@ interface TextLine {
  *     rows sharpest), split into its lines at the quiet rows between them, and each line into its pieces;
  *   - best first: dense, long (a VIN is 17 characters), not too thin.
  */
-function textLines(c: HTMLCanvasElement): TextLine[] {
+function bandLines(c: HTMLCanvasElement): TextLine[] {
   const W = c.width;
   const H = c.height;
   const n = W * H;
@@ -298,7 +322,53 @@ function textLines(c: HTMLCanvasElement): TextLine[] {
     }
     if (x1 - x0 >= 30 && y1 - y0 >= 5) groupLines(E, L, W, label, x0, y0, x1, y1, out);
   }
-  return out.filter((l) => l.w / l.h >= 4 && l.h >= 8 && l.score > 0).sort((a, b) => b.score - a.score);
+  return out.filter((l) => l.h >= 8 && l.score > 0).sort((a, b) => b.score - a.score);
+}
+
+/**
+ * The brightness along a line laid across a picture: `len` px through (`cx`, `cy`) at `deg`, two samples a pixel,
+ * each the mean of `thick` px either side across the line — bars are tall: along them the grain averages out and
+ * the bars stay.
+ */
+function rowAcross(Y: Float64Array, W: number, H: number, cx: number, cy: number, len: number, deg: number, thick: number): Float32Array {
+  const r = (deg * Math.PI) / 180;
+  const cs = Math.cos(r);
+  const sn = Math.sin(r);
+  const n = Math.max(8, Math.round(len * 2));
+  const t = Math.max(0, Math.round(thick));
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const u = (i - n / 2) / 2;
+    let sum = 0;
+    let cnt = 0;
+    for (let v = -t; v <= t; v++) {
+      const x = cx + u * cs - v * sn;
+      const y = cy + u * sn + v * cs;
+      if (x < 0 || y < 0 || x > W - 1 || y > H - 1) continue;
+      const x0 = Math.min(W - 2, Math.floor(x));
+      const y0 = Math.min(H - 2, Math.floor(y));
+      const fx = x - x0;
+      const fy = y - y0;
+      const k = y0 * W + x0;
+      sum += Y[k] * (1 - fx) * (1 - fy) + Y[k + 1] * fx * (1 - fy) + Y[k + W] * (1 - fx) * fy + Y[k + W + 1] * fx * fy;
+      cnt++;
+    }
+    // Off the picture: as light as paper (a quiet margin, not a bar).
+    out[i] = cnt ? sum / cnt : 255;
+  }
+  return out;
+}
+
+/** Does a row look like bars — many dark marks of much the same width (letters' strokes are of every width)? */
+function looksLikeBars(row: Float32Array): boolean {
+  const { widths, dark } = runsOf(row);
+  const marks = widths.filter((_, k) => (k % 2 === 0) === dark).slice(1, -1);
+  if (marks.length < 16) return false;
+  const sorted = [...marks].sort((a, b) => a - b);
+  const mid = sorted[sorted.length >> 1];
+  // Within a third of the middle one, or about its triple (a wide bar): nearly all of them.
+  const fit = marks.filter((w) => (w > mid * 0.6 && w < mid * 1.5) || (w > mid * 1.7 && w < mid * 4)).length;
+  return fit >= marks.length * 0.85;
 }
 
 /** One joined group of outlines: levelled by its own slope, split into its lines and their pieces (see `textLines`). */
@@ -408,6 +478,81 @@ function cutLine(src: HTMLCanvasElement, l: TextLine, f: number, px: number, fli
   g.translate(-l.cx * f, -l.cy * f);
   g.drawImage(src, 0, 0);
   return c;
+}
+
+/**
+ * A cut line with what is above and below it painted out in its ground's shade (v0.25): the line's own rows are the
+ * busy ones in the middle; past the quiet rows that end it stands a neighbour — the bars under a plate's VIN, the
+ * print above it — which a reading would take for more of the line (one engine reads nothing but garbage then).
+ */
+function banded(c: HTMLCanvasElement, light: boolean): HTMLCanvasElement {
+  const W = c.width;
+  const H = c.height;
+  const Y = luma(c);
+  const raw = new Float64Array(H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W - 1; x++) raw[y] += Math.abs(Y[y * W + x + 1] - Y[y * W + x]);
+  const busy = raw.map((v, y) => ((raw[y - 1] ?? v) + v + (raw[y + 1] ?? v)) / 3);
+  let peak = 0;
+  for (let y = Math.floor(H * 0.3); y < H * 0.7; y++) peak = Math.max(peak, busy[y]);
+  const mid = H >> 1;
+  let top = mid;
+  let bottom = mid;
+  while (top > 0 && busy[top - 1] >= peak * 0.3) top--;
+  while (bottom < H - 1 && busy[bottom + 1] >= peak * 0.3) bottom++;
+  // No quiet row found (the neighbour touches the line): the middle of the cut, where the line was found.
+  if (bottom - top > H * 0.8) (top = Math.round(H * 0.17)), (bottom = Math.round(H * 0.83));
+  const pad = Math.round(H * 0.06);
+  top = Math.max(0, top - pad);
+  bottom = Math.min(H - 1, bottom + pad);
+  // The ground's shade: the middle of the darker (or lighter) half of the line's own rows.
+  const own = Array.from(Y.subarray(top * W, (bottom + 1) * W)).sort((p, q) => p - q);
+  const ground = own[Math.floor(own.length * (light ? 0.25 : 0.75))] ?? 128;
+  const out = document.createElement('canvas');
+  out.width = W;
+  out.height = H;
+  const g = out.getContext('2d', { willReadFrequently: true })!;
+  g.drawImage(c, 0, 0);
+  g.fillStyle = `rgb(${ground},${ground},${ground})`;
+  g.fillRect(0, 0, W, top);
+  g.fillRect(0, bottom + 1, W, H - bottom - 1);
+  return out;
+}
+
+/** A picture at `k` of its size (letters a little smaller read better by one engine, larger by the other). */
+function sized(c: HTMLCanvasElement, k: number): HTMLCanvasElement {
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(c.width * k));
+  out.height = Math.max(1, Math.round(c.height * k));
+  const g = out.getContext('2d', { willReadFrequently: true })!;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(c, 0, 0, out.width, out.height);
+  return out;
+}
+
+/**
+ * Room around a line, in its own ground's shade — the middle shade of its top and bottom rows (a line cut to the
+ * quick reads worse; a step of shade where the cut ends reads as a stroke — an "F" before the VIN, a "1" after it).
+ */
+function margin(c: HTMLCanvasElement, by = 28): HTMLCanvasElement {
+  const W = c.width;
+  const H = c.height;
+  const Y = luma(c);
+  const edge = [...Y.subarray(0, W), ...Y.subarray((H - 1) * W, H * W)].sort((p, q) => p - q);
+  const ground = Math.round(edge[edge.length >> 1] ?? 190);
+  const out = document.createElement('canvas');
+  out.width = W + 2 * by;
+  out.height = H + by;
+  const g = out.getContext('2d', { willReadFrequently: true })!;
+  g.fillStyle = `rgb(${ground},${ground},${ground})`;
+  g.fillRect(0, 0, out.width, out.height);
+  g.drawImage(c, by, by >> 1);
+  return out;
+}
+
+/** The line in plain grey, its letters the darker (light ones turned over): shades as they are, nothing evened or cut to black and white. */
+function plain(c: HTMLCanvasElement, light: boolean): HTMLCanvasElement {
+  const Y = luma(c);
+  return paint(c, (i) => (light ? 255 - Y[i] : Y[i]));
 }
 
 /** The brightness of each point of a picture. */
@@ -577,15 +722,27 @@ function despeck(ink: Uint8Array, W: number, H: number, letter: number) {
 const MODES = { page: '11', line: '7', raw: '13', word: '8', block: '6' } as const;
 
 /**
+ * The characters a line is read in: a VIN's own — and O, Q and I, which a VIN never has but a reading sees (v0.25):
+ * forbidden, a zero that looks like an O came out as the next best letter, a D; allowed, it comes out an O and is
+ * taken for the zero it is (`vinChars`). And the marks around a number — a plate's stars, a date's strokes, a
+ * label's colon: read as marks they fall away or part the words; forced into letters they made up VINs ("Exp.:
+ * 12/03/2027" read as 17 characters).
+ */
+const MARKS = '*-.:/';
+const READ_CHARS = VIN_CHARS + 'OQI' + MARKS;
+
+/**
  * One reading: a whole page (sparse text: a card's fields lie apart), or VIN characters only — a line (or raw: a
  * second opinion on the same line), one word (a VIN alone on its line), a few lines together.
  */
 async function page(w: OcrWorker, image: HTMLCanvasElement, mode: keyof typeof MODES = 'page'): Promise<Page> {
   await w.setParameters({
     tessedit_pageseg_mode: MODES[mode] as never,
-    tessedit_char_whitelist: mode === 'page' ? '' : VIN_CHARS,
+    tessedit_char_whitelist: mode === 'page' ? '' : READ_CHARS,
     user_defined_dpi: '300',
-  });
+    // The older way prints its working (the statistics of each line) as errors into the console: nowhere instead.
+    debug_file: '/dev/null',
+  } as never);
   return (await w.recognize(image, {}, { text: true, blocks: true })).data;
 }
 
@@ -605,6 +762,26 @@ const vinCharsOne = (s: string) => {
   const u = s.toUpperCase();
   return u === 'O' || u === 'Q' ? '0' : u === 'I' ? '1' : /^[A-Z0-9]$/.test(u) ? u : '';
 };
+
+/** How surely a reading read: how sure it was of each VIN character, summed (a line upside down reads as many characters — all of them doubtful). */
+function sureness(p: Page): number {
+  let sum = 0;
+  for (const l of linesOf(p)) for (const wd of l.words) for (const sy of wd.symbols) if (vinCharsOne(sy.text)) sum += sy.confidence;
+  return sum;
+}
+
+/** How much a reading has the shape of a VIN: its last four characters digits (each counts), about 17 of them. */
+function vinShape(text: string): number {
+  const t = vinChars(text);
+  return [...t.slice(-4)].filter((c) => c >= '0' && c <= '9').length + (t.length >= 16 && t.length <= 18 ? 1 : 0);
+}
+
+/** May a reading of a line be a VIN's — about 17 characters in all, or a word of about 17 among others (its label before it)? */
+function maybeVin(text: string): boolean {
+  const words = text.toUpperCase().split(/\s+/).map(vinChars).filter(Boolean);
+  const all = words.join('').length;
+  return (all >= 12 && all <= 22) || words.some((w) => w.length >= 14 && w.length <= 20);
+}
 
 /** How much real reading a page holds: the letters of its confident words (the right way up reads the most). */
 function sense(p: Page): number {
@@ -675,6 +852,10 @@ async function readCardNow(blob: Blob): Promise<{ text: string; height: number }
   }
 }
 
+/** A look into a reading as it goes (tests, a photo that will not read): each step with what it saw. */
+export const readerTrace: { on?: (step: string, data: unknown) => void; /** Letters only (a test of the reading of lines). */ noBarcode?: boolean } = {};
+const trace = (step: string, data: unknown) => readerTrace.on?.(step, data);
+
 export interface PhotoRead {
   reads: VinRead[];
   years: number[];
@@ -692,20 +873,79 @@ export function readPhoto(blob: Blob, source: string, kind: 'plate' | 'card' = '
 }
 
 async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'): Promise<PhotoRead> {
-  const bmp = await createImageBitmap(blob);
-  if (tooSmall(bmp)) {
-    bmp.close();
+  const whole = await createImageBitmap(blob);
+  if (tooSmall(whole)) {
+    whole.close();
     return { reads: [], years: [], crops: {} };
   }
-  const w = await engine();
+  // What is read: the photo — or the part of it that holds all its lines (`closer`).
+  let bmp = whole;
   const reads: VinRead[] = [];
   const years: number[] = [];
   const cuts = new Map<string, HTMLCanvasElement>();
-  /** What a reading said; `line` — it read a line cut out (that cut is the VIN's picture), else a page drawn on `src`. */
+  /** Everything a reading of a line heard, as it heard it: imperfect readings still meet in one VIN (`solveVin`). */
+  const heard: string[] = [];
+  // The engine is asked for only when letters are read: a barcode that proves the VIN needs none of it.
+  let w!: OcrWorker;
+  // The pictures the stages share: the photo at reading size, and its bands found at a smaller one — each way up.
+  const scale = (max: number) => Math.min(1, max / Math.max(bmp.width, bmp.height));
+  let f = scale(1920) / scale(1200);
+  const fulls = new Map<Angle, HTMLCanvasElement>();
+  const full = (a: Angle) => fulls.get(a) ?? fulls.set(a, draw(bmp, a, 1920)).get(a)!;
+  const bandsBy = new Map<Angle, TextLine[]>();
+  const bands = (a: Angle) => bandsBy.get(a) ?? bandsBy.set(a, bandLines(draw(bmp, a, 1200))).get(a)!;
+  const use = (b: ImageBitmap) => {
+    bmp = b;
+    fulls.clear();
+    bandsBy.clear();
+    f = scale(1920) / scale(1200);
+  };
+
+  /**
+   * Looked at closer (v0.25): a plate that takes a small part of the photo is found small — its lines too thin to
+   * tell apart, its bars a blur. When everything that looks like a line (this way up and turned a quarter) lies in
+   * one small part of the photo, that part is read as the photo; the whole photo again only if it gave nothing.
+   */
+  const closer = async (): Promise<ImageBitmap | undefined> => {
+    const k = scale(1200);
+    const w0 = bmp.width * k;
+    const h0 = bmp.height * k;
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    const add = (ax: number, ay: number, bx: number, by: number) => {
+      x0 = Math.min(x0, ax);
+      y0 = Math.min(y0, ay);
+      x1 = Math.max(x1, bx);
+      y1 = Math.max(y1, by);
+    };
+    const lean = (l: TextLine) => (Math.abs(Math.sin((l.angle * Math.PI) / 180)) * l.w) / 2;
+    for (const l of bands(0)) add(l.cx - l.w / 2, l.cy - l.h / 2 - lean(l), l.cx + l.w / 2, l.cy + l.h / 2 + lean(l));
+    await breathe();
+    // Turned a quarter, a point of the photo lies at (its height − y, x).
+    for (const l of bands(90)) add(l.cy - l.h / 2 - lean(l), h0 - l.cx - l.w / 2, l.cy + l.h / 2 + lean(l), h0 - l.cx + l.w / 2);
+    if (!(x1 > x0 && y1 > y0)) return undefined;
+    const pad = 0.15 * Math.max(x1 - x0, y1 - y0);
+    x0 = Math.max(0, x0 - pad);
+    y0 = Math.max(0, y0 - pad);
+    x1 = Math.min(w0, x1 + pad);
+    y1 = Math.min(h0, y1 + pad);
+    const part = { x: Math.round(x0 / k), y: Math.round(y0 / k), w: Math.round((x1 - x0) / k), h: Math.round((y1 - y0) / k) };
+    trace('closer', { of: [bmp.width, bmp.height], part });
+    if (part.w * part.h > 0.36 * bmp.width * bmp.height || Math.max(part.w, part.h) < 200 || tooSmall({ width: part.w, height: part.h })) return undefined;
+    return createImageBitmap(bmp, part.x, part.y, part.w, part.h);
+  };
+
+  /** What a reading heard; `line` — it read a line cut out (that cut is the VIN's picture), else a page drawn on `src`. */
   const take = (p: Page, src: HTMLCanvasElement, line = false) => {
-    for (const vin of vinsInText(p.text)) {
-      reads.push({ vin, source, conf: charConfidence(p, vin) });
-      const fixed = fixByCheckDigit(vin);
+    if (line) for (const t of p.text.split(/\r?\n/)) if (vinChars(t).length >= 15) heard.push(t);
+    for (const { vin, cut: guess } of vinsRead(p.text)) {
+      reads.push(guess ? { vin, source, cut: true } : { vin, source, conf: charConfidence(p, vin) });
+      // A page read whole says it once too (its lines are read again below).
+      if (!line) heard.push(vin);
+      // Cut out of a longer word and then fitted to its check digit too: one liberty too many.
+      const fixed = guess ? undefined : fixByCheckDigit(vin);
       if (fixed) reads.push({ vin: fixed, source, from: vin });
       if (cuts.has(vin)) continue;
       const at = line ? undefined : linesOf(p).find((l) => vinChars(l.text).includes(vin));
@@ -717,15 +957,118 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
     const y = mulkiyaYear(p.text);
     if (y) years.push(y);
   };
-  // A VIN proves itself on a photo when it adds up and was read so twice (one lucky misreading may add up too).
+  // A VIN proves itself on a photo when it adds up and was read so twice (one lucky misreading may add up too) — or
+  // when the barcode and the letters say the same (`pickVin` judges the same way).
   const proven = () => {
-    const seen = new Set<string>();
+    const by = new Map<string, { plain: number; from: Set<string> }>();
     for (const r of reads) {
-      if (r.from || !checkDigitOk(r.vin)) continue;
-      if (seen.has(r.vin)) return true;
-      seen.add(r.vin);
+      const e = by.get(r.vin) ?? { plain: 0, from: new Set<string>() };
+      if (!r.from && !r.cut) e.plain++;
+      e.from.add(r.source);
+      by.set(r.vin, e);
     }
+    for (const [vin, e] of by) if ((checkDigitOk(vin) && e.plain >= 2) || e.from.size >= 2) return true;
     return false;
+  };
+
+  /**
+   * The photo's barcode (v0.25) — a VIN label or plate often carries one, and it is exact where letters are guessed.
+   * Every wide band found on the photo (this way up, then turned a quarter) is crossed by rows — along its own slope
+   * and a little off it, through its middle and beside it — and each row read by its widths (Code 39, Code 128); a
+   * band of bars that the widths do not tell (washed out by glare, a pixel and a half to a module) is read by
+   * fitting. Two rows read by widths are two readings; a fitted VIN is one the rows mostly agree on.
+   */
+  const byBarcode = async () => {
+    if (readerTrace.noBarcode) return;
+    const exact = new Map<string, number>();
+    const fitted = new Map<string, number>();
+    // Enough rows fitted the same VIN, and none another: the rest would only say it again (fitting is slow).
+    const settled = (m: Map<string, number>) => {
+      const [a = 0, b = 0] = [...m.values()].sort((p, q) => q - p);
+      return a >= 5 && b * 3 <= a;
+    };
+    let picture: HTMLCanvasElement | undefined;
+    for (const angle of [0, 90] as Angle[]) {
+      await breathe();
+      const src = full(angle);
+      const Y = luma(src);
+      const W = src.width;
+      const H = src.height;
+      // Rows laid across the whole photo, level and a little tilted: a barcode sharp enough to be read by its widths
+      // is read wherever it is (the bands below are found the way lines of letters are — crisp bars as tall as a
+      // label's are no line to that).
+      let swept = false;
+      for (const tilt of [0, -5, 5, -10, 10]) {
+        for (let k = 1; k <= 36; k++) {
+          const cy = (H * k) / 37;
+          for (const t of readBarcodeRow(rowAcross(Y, W, H, W / 2, cy, W * 1.03, tilt, 1.5))) {
+            const vin = vinOfBarcode(t);
+            if (!vin) continue;
+            exact.set(vin, (exact.get(vin) ?? 0) + 1);
+            swept = true;
+            picture ??= cutLine(src, { cx: W / 2 / f, cy: cy / f, w: (W * 0.94) / f, h: W / 14 / f, angle: tilt, score: 0 }, f, 56);
+          }
+        }
+        if (swept) break;
+        await breathe();
+      }
+      if (swept) break;
+      const wide = bands(angle)
+        .filter((l) => l.w / l.h >= 1.5 && l.w * f >= 120)
+        .sort((a, b) => b.w * b.h - a.w * a.h)
+        .slice(0, 8);
+      trace('bands', { angle, all: bands(angle).length, wide: wide.map((l) => ({ cx: Math.round(l.cx * f), cy: Math.round(l.cy * f), w: Math.round(l.w * f), h: Math.round(l.h * f), tilt: l.angle })) });
+      for (const l of wide) {
+        const h = l.h * f;
+        const r = (l.angle * Math.PI) / 180;
+        const row = (across: number, turn: number, thick: number) =>
+          rowAcross(Y, W, H, l.cx * f - across * h * Math.sin(r), l.cy * f + across * h * Math.cos(r), l.w * f * 1.25 + 80, l.angle + turn, thick);
+        const note = (into: Map<string, number>, texts: string[]) => {
+          let any = false;
+          for (const t of texts) {
+            const vin = vinOfBarcode(t);
+            if (!vin) continue;
+            into.set(vin, (into.get(vin) ?? 0) + 1);
+            any = true;
+          }
+          if (any) picture ??= cutLine(src, l, f, 56);
+          return any;
+        };
+        let read = false;
+        for (const across of [0, -0.3, 0.3]) for (const turn of [0, -1, 1, -0.5, 0.5, -1.5, 1.5]) if (note(exact, readBarcodeRow(row(across, turn, h * 0.1)))) read = true;
+        if (read) continue;
+        // Where across the band the bars are: a band found around the bars and the line printed under them has
+        // them off its middle.
+        const barred = [-0.35, -0.2, 0, 0.2, 0.35].filter((a) => looksLikeBars(row(a, 0, h * 0.12)));
+        if (!barred.length) continue;
+        const mid = barred[barred.length >> 1];
+        await breathe();
+        for (const across of [mid, mid - 0.1, mid + 0.1]) {
+          for (const turn of [0, -0.5, 0.5, -1, 1, -1.5, 1.5]) {
+            note(fitted, fitCode39Row(row(across, turn, h * 0.12)));
+            if (settled(fitted)) break;
+          }
+          if (settled(fitted)) break;
+        }
+        if (settled(fitted)) break;
+      }
+      if (exact.size || fitted.size) break;
+    }
+    const top = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1]);
+    const e = top(exact);
+    const ft = top(fitted);
+    trace('barcode', { exact: e, fitted: ft });
+    if (e.length && (e.length === 1 || e[0][1] >= 2 * e[1][1])) {
+      // Read by its widths: two rows are two readings of it (a barcode does not mistake a B for an 8).
+      reads.push({ vin: e[0][0], source: `${source}#barcode` });
+      if (e[0][1] >= 2) reads.push({ vin: e[0][0], source: `${source}#barcode/2` });
+      if (picture) cuts.set(e[0][0], picture);
+    } else if (ft.length && ft[0][1] >= 3 && (ft.length === 1 || ft[0][1] >= 3 * ft[1][1])) {
+      // Fitted, the same on most rows: read twice only with a check digit that adds up — else the letters must agree.
+      reads.push({ vin: ft[0][0], source: `${source}#barcode` });
+      if (checkDigitOk(ft[0][0])) reads.push({ vin: ft[0][0], source: `${source}#barcode` });
+      if (picture) cuts.set(ft[0][0], picture);
+    }
   };
 
   /** The photo read whole, the way a card is: turned the right way up, then its VIN-looking lines read again. */
@@ -745,14 +1088,15 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
     }
     // 2. The whole photo, right way up, as large as it is.
     await breathe();
-    const full = grey(draw(bmp, angle, 1920));
-    const whole = await page(w, full);
-    take(whole, full);
+    const whole = grey(draw(bmp, angle, 1920));
+    const first = await page(w, whole);
+    take(first, whole);
     // 3. Each VIN-looking line, levelled and enlarged, read as VIN characters only — several ways (a line, raw;
     //    grey, black on white; larger): one of them reading it right is enough for its check digit to show which.
     const again = async (p: Page, src: HTMLCanvasElement) => {
       for (const spot of vinLines(p)) {
         const cut = lineCut(src, spot);
+        if (kept.length < 4) kept.push({ cut, light: lightLetters(cut), chars: 17, shape: 5 });
         take(await page(w, cut, 'line'), cut, true);
         if (proven()) continue;
         take(await page(w, cut, 'raw'), cut, true);
@@ -763,91 +1107,158 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
         take(await page(w, large, 'line'), large, true);
       }
     };
-    await again(whole, full);
+    await again(first, whole);
     // 4. Nothing proved itself yet: the whole photo in black on white, and its lines.
     if (!proven()) {
       await breathe();
-      const p = await page(w, blackOnWhite(full));
-      take(p, full);
-      await again(p, full);
+      const p = await page(w, blackOnWhite(whole));
+      take(p, whole);
+      await again(p, whole);
     }
   };
 
+  /** The lines that read like a VIN, kept for a second opinion (the other engine): the cut, which way its letters are. */
+  const kept: { cut: HTMLCanvasElement; light: boolean; chars: number; shape: number }[] = [];
+
   /**
-   * The lines found by their outlines (`textLines`; the photo as it is and turned a quarter — a label is often shot
-   * sideways), best first. A first look at each, as one word of evened grey, this way up and (when that read no VIN)
-   * turned over: the way a VIN was read — or that read the most like one — is gone on with, several more ways
-   * (black and white by the light around or at once, light letters turned dark, a few lines together when the line
-   * is tall) until a VIN proves itself; a line that reads like nothing either way is not a VIN's.
+   * The lines found by their outlines (`bandLines`; the photo as it is and turned a quarter — a label is often shot
+   * sideways), best first. A first look at each, as a line of evened grey with what is above and below it painted
+   * out, this way up and turned over: the way that reads more surely (how sure the engine is of each character — an
+   * upside-down line reads as many characters, all of them doubtful) is gone on with, several more ways (black and
+   * white by the light around or at once, light letters turned dark, one word, a few lines together when the line is
+   * tall) until a VIN proves itself; a line that reads like nothing either way is not a VIN's.
    */
   const byLines = async () => {
-    const scale = (max: number) => Math.min(1, max / Math.max(bmp.width, bmp.height));
-    const f = scale(1920) / scale(1200);
     const found: { l: TextLine; angle: Angle }[] = [];
     for (const angle of [0, 90] as Angle[]) {
       await breathe();
-      for (const l of textLines(draw(bmp, angle, 1200))) found.push({ l, angle });
+      for (const l of bands(angle)) if (l.w / l.h >= 4) found.push({ l, angle });
     }
     found.sort((a, b) => b.l.score - a.l.score);
-    const srcs = new Map<Angle, HTMLCanvasElement>();
+    trace('lines', found.slice(0, 14).map(({ l, angle }) => ({ angle, cx: Math.round(l.cx), cy: Math.round(l.cy), w: Math.round(l.w), h: Math.round(l.h), tilt: l.angle, score: Math.round(l.score * 10) / 10 })));
     const px = 56;
-    for (const { l, angle } of found.slice(0, 6)) {
-      const src = srcs.get(angle) ?? draw(bmp, angle, 1920);
-      srcs.set(angle, src);
+    for (const { l, angle } of found.slice(0, 8)) {
+      const src = full(angle);
       const light = lightLetters(cutLine(src, l, f, px));
       const look = async (flip: boolean) => {
-        const cut = cutLine(src, l, f, px, flip);
+        const cut = banded(cutLine(src, l, f, px, flip), light);
         const before = reads.length;
-        const p = await page(w, evened(cut, light), 'word');
+        const p = await page(w, evened(cut, light), 'line');
+        trace('look', { flip, light, text: p.text.trim(), sure: Math.round(sureness(p)), cut: readerTrace.on ? cut.toDataURL('image/jpeg', 0.8) : undefined });
         take(p, cut, true);
-        return { flip, cut, vin: reads.length > before, chars: vinChars(p.text).length };
+        return { flip, cut, text: p.text, vin: reads.length > before, chars: vinChars(p.text).length, shape: vinShape(p.text), sure: sureness(p) };
       };
       const asIs = await look(false);
       if (proven()) return;
-      const over = asIs.vin ? undefined : await look(true);
+      // A long line read surely is a line of words, the right way up: not turned over, not read again.
+      const words = !asIs.vin && asIs.chars > 22 && asIs.sure / asIs.chars >= 75;
+      const over = asIs.vin || words ? undefined : await look(true);
       if (proven()) return;
-      const way = [asIs, over].find((x) => x?.vin) ?? [asIs, over].filter((x) => x && x.chars >= 12).sort((a, b) => b!.chars - a!.chars)[0];
-      if (!way) continue;
+      const ways = [asIs, over].filter((x): x is NonNullable<typeof x> => !!x);
+      // Which way up: a VIN ends in digits — read upside down it ends in letters and reads just as surely (its 5 an S,
+      // its 6 a 9), so the shape of what was read decides first, how surely it read only after.
+      const way = ways.find((x) => x.vin) ?? ways.filter((x) => x.chars >= 12).sort((a, b) => b.shape - a.shape || b.sure - a.sure)[0];
+      if (!way || (!way.vin && !maybeVin(way.text))) continue;
       const { cut, flip } = way;
+      kept.push({ cut, light, chars: way.chars, shape: way.shape });
       const tries: (() => Promise<Page>)[] = [
         () => page(w, inked(cut, light, px), 'line'),
+        () => page(w, evened(cut, light), 'word'),
         () => page(w, inkedAtOnce(cut, px), 'line'),
-        () => page(w, evened(cut, light), 'line'),
+        () => page(w, sized(evened(cut, light), 0.6), 'line'),
         () => page(w, inked(cut, !light, px), 'line'),
       ];
       if (l.w / l.h < 10) tries.push(() => page(w, inked(cutLine(src, l, f, px * 2, flip), light, px), 'block'));
       for (const read of tries) {
-        take(await read(), cut, true);
+        const p = await read();
+        trace('try', { text: p.text.trim() });
+        take(p, cut, true);
         if (proven()) return;
       }
     }
   };
 
-  try {
-    if (kind === 'plate') {
-      await byLines();
-    } else {
-      await byPage();
-      if (!proven()) await byLines();
+  /**
+   * A second opinion on the lines that read like a VIN (v0.25): the other engine — Tesseract's older one, which tells
+   * characters by their shapes one by one. It errs too, but elsewhere (the newer one reads this plate's 8 as B, the
+   * older its G as 6), so what one misreads the other usually has right, and the check digit shows which.
+   */
+  const secondOpinion = async () => {
+    const lines = kept.sort((a, b) => b.shape - a.shape || b.chars - a.chars).slice(0, 2);
+    if (!lines.length) return;
+    w = await engine('legacy');
+    for (const { cut, light } of lines) {
+      for (const k of [1, 0.8, 0.65, 0.5]) {
+        await breathe();
+        const p = await page(w, margin(sized(plain(cut, light), k)), 'line');
+        trace('second', { k, text: p.text.trim() });
+        take(p, cut, true);
+        if (proven()) return;
+      }
     }
-    // The readings voted into one, character by character, by how sure each was (domain/vin.ts `voteVin`).
+  };
+
+  let part: ImageBitmap | undefined;
+  try {
+    const read = async () => {
+      await byBarcode();
+      if (proven()) return;
+      w = await engine();
+      if (kind === 'plate') {
+        await byLines();
+        // A plate whose lines the outlines did not find: read whole, as a card is.
+        if (!proven() && !reads.some((r) => !r.source.includes('#'))) await byPage();
+      } else {
+        await byPage();
+        // The card read whole gave its VIN: its other lines are not gone over one by one.
+        if (!proven() && !reads.length) await byLines();
+      }
+    };
+    part = await closer();
+    if (part) use(part);
+    await read();
+    if (part && !reads.length) {
+      use(whole);
+      await read();
+    }
+    if (!proven()) await secondOpinion();
     if (!proven()) {
-      const voted = voteVin(reads.filter((r) => !r.from));
+      // The readings voted into one, character by character, by how sure each was (domain/vin.ts `voteVin`).
+      const mine = reads.filter((r) => !r.from && !r.source.includes('#'));
+      const voted = voteVin(mine);
       if (voted && !reads.some((r) => r.vin === voted)) {
         reads.push({ vin: voted, source });
         // Its picture: that of a reading it was voted from.
         const from = reads.find((r) => !r.from && cuts.has(r.vin) && [...r.vin].filter((c, i) => c !== voted[i]).length <= 4);
         if (from) cuts.set(voted, cuts.get(from.vin)!);
       }
+      // …and laid over each other: the one VIN that adds up out of what the readings heard, place by place.
+      const solved = solveVin(heard);
+      trace('solved', { heard, solved });
+      if (solved && !reads.some((r) => r.vin === solved.vin && !r.source.includes('#'))) {
+        reads.push({ vin: solved.vin, source, from: solved.from });
+        const pic = cuts.get(solved.from) ?? kept[0]?.cut;
+        if (pic && !cuts.has(solved.vin)) cuts.set(solved.vin, pic);
+      }
     }
   } finally {
-    bmp.close();
+    whole.close();
+    part?.close();
     rest();
   }
+  // A VIN that does not add up and that nothing else read nearly so is no VIN (v0.25): bars, a pattern, words upside
+  // down read once as 17 characters. One fitted to its check digit stands on the reading it was fitted from.
+  const stands = (r: VinRead) =>
+    r.source.includes('#') || (!r.from && checkDigitOk(r.vin)) || readingsNear(r.from ?? r.vin, heard) >= 2;
+  const stood = reads.filter(stands);
+  trace('dropped', reads.filter((r) => !stands(r)).map((r) => r.vin));
+  reads.length = 0;
+  reads.push(...stood);
   // One small picture per line cut (several VINs read off one line share it).
   const shots = new Map<HTMLCanvasElement, string>();
   const crops: Record<string, string> = {};
   for (const [vin, cut] of cuts) {
+    if (!reads.some((r) => r.vin === vin)) continue;
     if (!shots.has(cut)) shots.set(cut, snapshot(cut));
     crops[vin] = shots.get(cut)!;
   }
@@ -900,7 +1311,7 @@ export async function readCarVin(vehicleId: string): Promise<CarVinRead> {
   for (const id of queue) {
     // The Mulkiya's front only when its back (read before it) gave nothing.
     const back = mulkiya.mulkiya_back;
-    if (id === mulkiya.mulkiya && back && (reads.some((r) => r.source === back) || years.length)) break;
+    if (id === mulkiya.mulkiya && back && (reads.some((r) => r.source.startsWith(back)) || years.length)) break;
     const r = await readOnce(id, id === plate ? 'plate' : 'card');
     if (!r) continue;
     reads.push(...r.reads);

@@ -57,10 +57,12 @@ const plausible = (v: string) => isVin(v) && /[A-Z]/.test(v) && (v.match(/\d/g)?
 /**
  * Every VIN in a text read off a photo, each once: whole words of 17 characters, or a VIN split by spaces into a
  * few whole words; a word longer than 17 only at its start or its end (a label or a stray mark glued to it) —
- * never a window cut across words, which only makes up VINs that are not there.
+ * never a window cut across words, which only makes up VINs that are not there. `cut` — taken out of a longer
+ * word (v0.25): a guess at where the VIN begins, not a reading of it; a word two or three too long (a plate's
+ * stars read as a letter on each side) gives only a VIN that adds up — at its ends or in its middle.
  */
-export function vinsInText(text: string): string[] {
-  const out = new Set<string>();
+export function vinsRead(text: string): { vin: string; cut?: true }[] {
+  const out = new Map<string, { vin: string; cut?: true }>();
   for (const line of text.split(/\r?\n/)) {
     const words = line
       .toUpperCase()
@@ -71,16 +73,26 @@ export function vinsInText(text: string): string[] {
     for (let a = 0; a < words.length; a++) {
       const w = words[a];
       if (w.length > 17) {
-        for (const v of [w.slice(0, 17), w.slice(-17)]) if (plausible(v)) out.add(v);
+        // One character over: a mark glued at one end. More: a VIN only where it adds up (a tyre's or a part's
+        // long number holds a "VIN" at either end).
+        for (const v of [w.slice(0, 17), w.slice(-17)]) if (plausible(v) && (w.length === 18 || checkDigitOk(v)) && !out.has(v)) out.set(v, { vin: v, cut: true });
+        if (w.length <= 20)
+          for (let k = 1; k < w.length - 17; k++) {
+            const v = w.slice(k, k + 17);
+            if (plausible(v) && checkDigitOk(v) && !out.has(v)) out.set(v, { vin: v, cut: true });
+          }
         continue;
       }
       let joined = '';
       for (let b = a; b < words.length && b < a + 4 && joined.length < 17; b++) joined += words[b];
-      if (joined.length === 17 && plausible(joined)) out.add(joined);
+      // Read whole somewhere: no longer only a guess.
+      if (joined.length === 17 && plausible(joined)) out.set(joined, { vin: joined });
     }
   }
-  return [...out];
+  return [...out.values()];
 }
+
+export const vinsInText = (text: string): string[] => vinsRead(text).map((x) => x.vin);
 
 /**
  * The characters a reading mixes up most — each with what it may really have been (both are VIN characters). Kept
@@ -228,13 +240,15 @@ export function mulkiyaYear(text: string, now = new Date()): number | undefined 
 
 /**
  * One VIN read off one photo (`source` — the photo; `from` — as it was read, when its check digit made it right;
- * `conf` — how sure the reading was of each character, 0–100, when known).
+ * `conf` — how sure the reading was of each character, 0–100, when known; `cut` — taken out of a longer word:
+ * where it begins was guessed, so it is a VIN to look at, never one read plainly).
  */
 export interface VinRead {
   vin: string;
   source: string;
   from?: string;
   conf?: number[];
+  cut?: boolean;
 }
 
 export interface VinPick {
@@ -265,8 +279,8 @@ export function pickVin(reads: VinRead[], years: number[], car: { make?: string 
   for (const r of reads) {
     const e = by.get(r.vin) ?? { votes: 0, plain: 0, sources: new Set<string>() };
     e.votes++;
-    // Read as it is, not fitted to its check digit.
-    if (!r.from) e.plain++;
+    // Read as it is: not fitted to its check digit, not cut out of a longer word.
+    if (!r.from && !r.cut) e.plain++;
     e.sources.add(r.source);
     by.set(r.vin, e);
   }
@@ -276,10 +290,17 @@ export function pickVin(reads: VinRead[], years: number[], car: { make?: string 
     const fixed = !e.plain;
     const make = makeMatches(vin, car.make);
     const proven = make !== false && (check || e.sources.size >= 2);
-    // A VIN that adds up only once fitted (a look-alike swapped) still ranks above the misreading it was fitted from.
-    const score = e.votes + 4 * e.sources.size + (check ? 12 : adds ? 6 : 0) + (make === true ? 4 : make === false ? -8 : 0) - (fixed ? 2 : 0);
+    // A VIN that adds up only once fitted (a look-alike swapped) still ranks above the misreading it was fitted from —
+    // unless that was read so again and again (v0.25): a line read the same however its picture was prepared, by both
+    // engines, is read right, and its VIN one made for elsewhere, with no check digit (a Gulf Toyota's "JTMHV05J…").
+    const source = fixed ? Math.max(0, ...reads.filter((r) => r.vin === vin && r.from).map((r) => by.get(r.from!)?.plain ?? 0)) : 0;
+    const fitting = fixed ? 2 + 3 * Math.max(0, source - 1) : 0;
+    const score = e.votes + 4 * e.sources.size + (check ? 12 : adds ? 6 : 0) + (make === true ? 4 : make === false ? -8 : 0) - fitting;
     return { vin, e, check, make, proven, score };
   });
+  // …and above one the other reads are farther from (v0.25): of two that add up only once fitted, the one most reads
+  // are a character or two off (a misreading here and there) — not the one fitted from a single reading.
+  for (const x of scored) for (const [vin, e] of by) if (vin !== x.vin && apart(vin, x.vin) <= 2) x.score += e.votes;
   scored.sort((a, b) => b.score - a.score || a.vin.localeCompare(b.vin));
   const top = scored[0];
   // The Mulkiya's printed year: sure only when every read of it says the same, and more than one did.
@@ -309,4 +330,89 @@ export function pickVin(reads: VinRead[], years: number[], car: { make?: string 
   const yearSure =
     printed !== undefined ? (printedSure && (own === undefined || own === printed)) || (sure && own === printed) : sure && own !== undefined;
   return { vin: top.vin, year, sure, yearSure, why, maker: vinMaker(top.vin), makeOk: top.make, doubt: [...doubt].sort((a, b) => a - b) };
+}
+
+/** The fewest single-character changes between two strings, with where each character of `ref` went in `text` (−1 — nowhere). */
+function alignTo(ref: string, text: string): { cost: number; at: number[] } {
+  const n = ref.length;
+  const m = text.length;
+  const d: number[][] = Array.from({ length: n + 1 }, (_, i) => [i, ...new Array<number>(m).fill(0)]);
+  for (let j = 0; j <= m; j++) d[0][j] = j;
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (ref[i - 1] === text[j - 1] ? 0 : 1));
+  const at = new Array<number>(n).fill(-1);
+  let i = n;
+  let j = m;
+  while (i > 0 && j > 0) {
+    if (d[i][j] === d[i - 1][j - 1] + (ref[i - 1] === text[j - 1] ? 0 : 1)) (at[i - 1] = j - 1), i--, j--;
+    else if (d[i][j] === d[i - 1][j] + 1) i--;
+    else j--;
+  }
+  return { cost: d[n][m], at };
+}
+
+/**
+ * How many of the readings of lines say nearly this (v0.25; within `within` characters changed, dropped or added).
+ * A VIN's line reads much the same however its picture is prepared; a line that is not one — bars, a pattern,
+ * words upside down — reads differently every time, and what it once read as 17 characters is no VIN.
+ */
+export function readingsNear(vin: string, texts: string[], within = 3): number {
+  let n = 0;
+  for (const raw of texts) {
+    const t = vinChars(raw);
+    if (Math.abs(t.length - 17) <= within && alignTo(vin, t).cost <= within) n++;
+  }
+  return n;
+}
+
+/**
+ * One VIN out of many imperfect readings of the same line (v0.25) — two engines, several ways of preparing the
+ * picture, each wrong in a place or two but not the same ones: the readings are laid over the 17-character one that
+ * most of them are near (a dropped or doubled character does not shift the rest; a reading of another line — the
+ * engine's number, a line read upside down — is near nothing and stays out), every place keeps what was read there, and of all the
+ * ways to pick one character a place, the best-supported one whose check digit adds up is the VIN — if no other that
+ * adds up comes close. Every character of it was read by something; only their meeting in one VIN is new — so it is
+ * a VIN to look at (`from` — the commonest reading), proven only when something else says the same (a barcode,
+ * another photo).
+ */
+export function solveVin(texts: string[]): { vin: string; from: string } | undefined {
+  const all = texts.map(vinChars).filter((t) => t.length >= 15 && t.length <= 19);
+  const whole = all.filter((t) => t.length === 17);
+  if (all.length < 2 || !whole.length) return undefined;
+  // The reading the others are laid over: the one most of them are near, then the nearest to them all.
+  const near = [...new Set(whole)]
+    .map((ref) => {
+      const laid = all.map((t) => ({ t, a: alignTo(ref, t) })).filter((x) => x.a.cost <= 5);
+      return { ref, laid, cost: laid.reduce((sum, x) => sum + x.a.cost, 0) };
+    })
+    .sort((a, b) => b.laid.length - a.laid.length || a.cost - b.cost || a.ref.localeCompare(b.ref))[0];
+  const { ref, laid } = near;
+  const used = laid.length;
+  if (used < 2) return undefined;
+  const seen: Map<string, number>[] = Array.from({ length: 17 }, () => new Map());
+  for (const { t, a } of laid) a.at.forEach((j, i) => j >= 0 && seen[i].set(t[j], (seen[i].get(t[j]) ?? 0) + 1));
+  // What each place may be: what was read there, best supported first — at most three; the last four are digits.
+  const options = seen.map((m, i) =>
+    [...m.entries()]
+      .filter(([c]) => VIN_CHARS.includes(c) && (i < 13 || (c >= '0' && c <= '9')))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 3)
+      .map(([c, n]) => ({ c, w: Math.log((n + 0.5) / (used + 1.5)) })),
+  );
+  if (options.some((o) => !o.length)) return undefined;
+  let ways = 1;
+  for (const o of options) ways *= o.length;
+  if (ways > 20_000) return undefined;
+  const found: { vin: string; w: number }[] = [];
+  const walk = (i: number, vin: string, w: number) => {
+    if (i === 17) {
+      if (checkDigitOk(vin)) found.push({ vin, w });
+      return;
+    }
+    for (const o of options[i]) walk(i + 1, vin + o.c, w + o.w);
+  };
+  walk(0, '', 0);
+  found.sort((a, b) => b.w - a.w);
+  // The only one that adds up, or clearly better supported than the next.
+  if (!found.length || (found[1] && found[0].w - found[1].w < Math.log(2))) return undefined;
+  return { vin: found[0].vin, from: ref };
 }
