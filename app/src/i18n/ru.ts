@@ -114,6 +114,7 @@ export const ru = {
     notFound: 'Не найдено',
     phoneInvalid: 'Неверный номер телефона',
     nameRequired: 'Введите имя',
+    incomeCategoryKept: '«Прочий приход» остаётся всегда',
     plateExists: 'Машина с таким номером уже есть в базе',
     plateRequired: 'Введите номер машины',
     signedLocked: 'Документ подписан и не может быть изменён',
@@ -1129,7 +1130,9 @@ export const ru = {
     cat: { order: 'Оплата заказа', closing: 'Закрытие дня — расхождение' },
   },
   income: {
-    category: { service: 'Работа / ремонт', sales: 'Продажа', other: 'Прочий приход', debt: 'Оплата долга' },
+    category: { service: 'Работа / ремонт', sales: 'Продажа', other: 'Прочий приход', emil: 'Emil', debt: 'Оплата долга' },
+    newCategory: 'Новая категория',
+    categoryRemoved: 'Категория убрана: {{name}}',
   },
   cash: {
     lastClosed: 'Последнее закрытие: {{date}}',
@@ -1279,7 +1282,7 @@ export const ru = {
       staff: 'Механики и оклады',
       prices: 'Шаблоны работ для быстрой оценки',
       lists: 'Быстрые подсказки: жалобы, лампы, проверки',
-      categories: 'Категории расходов и месячные нормы',
+      categories: 'Категории прихода и расхода, месячные нормы',
       data: 'Резервная копия, демо-данные, удаление',
     },
     lists: {

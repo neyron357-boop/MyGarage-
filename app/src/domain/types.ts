@@ -695,16 +695,32 @@ export interface CashMovement {
 }
 
 /**
+ * A category of money in (v0.26, table `incomeCategories` — made like `ExpenseCategory`): «Работа / ремонт»
+ * (`service`), «Продажа» (`sales`), «Прочий приход» (`other`), «Emil» (`emil`) and the garage's own (`c_…`), each
+ * renamed or taken out of the sheet (`active: false` — entries that have it still show its name). A customer's debt
+ * paid (`debt`) is not one of them: it is a way of its own, always offered.
+ */
+export interface IncomeCategory {
+  id: string;
+  /** What an income keeps (`Income.category`). */
+  code: string;
+  nameRu: string;
+  nameEn: string;
+  active: boolean;
+  /** Its place among the chips (new ones last). */
+  position: number;
+}
+
+/**
  * Money received outside a job's invoice: a sold item ("Sales"), a small job done on the spot, other — or a
  * customer's debt paid ("debt": spread over their jobs as payments that carry this income's id; what is left over
  * stays an income of its own).
  */
-export type IncomeCategory = 'service' | 'sales' | 'other' | 'debt';
-
 export interface Income {
   id: string;
   date: string; // YYYY-MM-DD (Dubai)
-  category: IncomeCategory;
+  /** The code of its category (`IncomeCategory.code`), or 'debt'. */
+  category: string;
   amountFils: number; // gross
   method: PayMethod;
   /** What it was for: a job, or just the car / the customer. */

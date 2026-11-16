@@ -1,7 +1,7 @@
 import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
 import { buildLedger, type LedgerResult } from '../domain/ledger';
-import type { Expense, Income, IncomeCategory, PayMethod } from '../domain/types';
+import type { Expense, Income, PayMethod } from '../domain/types';
 import { placeInDay } from './cashDays';
 import { addDebtPayment } from './debts';
 import { AppError } from './errors';
@@ -54,7 +54,8 @@ async function resolveLinks(l: Links): Promise<Links> {
 
 export interface IncomeInput extends Links {
   date?: string;
-  category: IncomeCategory;
+  /** The code of an income category (`IncomeCategory.code`), or 'debt'. */
+  category: string;
   amountFils: number;
   method: PayMethod;
   note?: string;

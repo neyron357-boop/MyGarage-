@@ -116,6 +116,7 @@ export const en: typeof ru = {
     notFound: 'Not found',
     phoneInvalid: 'Invalid phone number',
     nameRequired: 'Enter a name',
+    incomeCategoryKept: '“Other income” always stays',
     plateExists: 'A car with this plate already exists',
     plateRequired: 'Enter the plate number',
     signedLocked: 'The document is signed and cannot be changed',
@@ -1131,7 +1132,9 @@ export const en: typeof ru = {
     cat: { order: 'Job payment', closing: 'Day closing — difference' },
   },
   income: {
-    category: { service: 'Work / repair', sales: 'Sale', other: 'Other income', debt: 'Debt payment' },
+    category: { service: 'Work / repair', sales: 'Sale', other: 'Other income', emil: 'Emil', debt: 'Debt payment' },
+    newCategory: 'New category',
+    categoryRemoved: 'Category removed: {{name}}',
   },
   cash: {
     lastClosed: 'Last closed: {{date}}',
@@ -1281,7 +1284,7 @@ export const en: typeof ru = {
       staff: 'Mechanics and salaries',
       prices: 'Job templates for quick estimates',
       lists: 'Quick picks: complaints, warning lights, checks',
-      categories: 'Expense categories and monthly limits',
+      categories: 'Income and expense categories, monthly limits',
       data: 'Backup, demo data, deletion',
     },
     lists: {

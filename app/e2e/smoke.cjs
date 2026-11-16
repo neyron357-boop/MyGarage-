@@ -2012,6 +2012,68 @@ async function launchBrowser() {
     }, job.invoiceId);
     if (got.buyer !== '' || !got.name || !got.phone) throw new Error('the customer added after the invoice: ' + JSON.stringify(got));
   });
+  await step('v0.26: income categories — «Emil» picked; one of its own added from the chips and picked at once; a hold takes one out («Отменить» brings it back), its entry keeps its name', async () => {
+    const top = () => page.getByRole('dialog').last();
+    const sheet = page.getByRole('dialog').first();
+    const addIn = () => front('button').filter({ hasText: /^Приход$/ }).first().click();
+    await page.goto(BASE + '#/money?tab=book');
+    // «Emil» — among the chips, picked for 120: its row in the book says «Emil».
+    await addIn();
+    await sheet.getByLabel('Сумма').fill('120');
+    await sheet.locator('button.chip[data-income="emil"]').filter({ hasText: 'Emil' }).click();
+    await sheet.locator('button.chip[data-income="emil"][data-active="true"]').waitFor();
+    await shot('38a-income-emil');
+    await sheet.getByRole('button', { name: /^Записать приход/ }).click();
+    await sheet.waitFor({ state: 'detached' });
+    await front('.list-row').filter({ hasText: 'Emil' }).filter({ hasText: '120,00' }).first().waitFor();
+    // «＋»: a category of its own by its name — picked at once.
+    await addIn();
+    await sheet.getByLabel('Сумма').fill('15');
+    await sheet.locator('button.chip[data-income-add]').click();
+    await top().getByText('Новая категория').waitFor();
+    await top().getByRole('textbox', { name: 'Название' }).fill('Чаевые');
+    await top().getByRole('button', { name: 'Добавить' }).click();
+    await sheet.locator('button.chip[data-active="true"]').filter({ hasText: 'Чаевые' }).waitFor();
+    await page.getByRole('dialog').filter({ hasText: 'Новая категория' }).waitFor({ state: 'detached' });
+    if ((await page.getByRole('dialog').count()) !== 1) throw new Error('the new category’s sheet took the income sheet with it');
+    await shot('38b-income-own');
+    await sheet.getByRole('button', { name: /^Записать приход/ }).click();
+    await sheet.waitFor({ state: 'detached' });
+    const row = front('.list-row').filter({ hasText: 'Чаевые' }).filter({ hasText: '15,00' }).first();
+    await row.waitFor();
+    // A hold on its chip (a right click, as on a PC): its name and «Удалить» — out of the chips; «Отменить» — back.
+    await addIn();
+    await sheet.locator('button.chip').filter({ hasText: 'Чаевые' }).click({ button: 'right' });
+    await top().locator('input[value="Чаевые"]').waitFor();
+    // The sheet slides up (a CSS transition that starts a moment after it is put in): the picture once it is up.
+    await page.waitForTimeout(500);
+    await shot('38c-income-held');
+    await top().getByRole('button', { name: 'Удалить' }).click();
+    await page.getByText('Категория убрана: Чаевые').waitFor();
+    await sheet.locator('button.chip').filter({ hasText: 'Чаевые' }).waitFor({ state: 'detached' });
+    if (!(await sheet.locator('button.chip[data-active="true"]').count())) throw new Error('no category picked after the one picked was taken out');
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await sheet.locator('button.chip').filter({ hasText: 'Чаевые' }).waitFor();
+    await closeModal();
+    await sheet.waitFor({ state: 'detached' });
+    // Taken out again: its entry keeps its name, in the book and in its sheet (picked there, though no longer offered).
+    await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { removeIncomeCategory } = await import('/src/services/incomeCategories.ts');
+      await removeIncomeCategory((await db.incomeCategories.filter((c) => c.nameRu === 'Чаевые').first()).id);
+    });
+    await row.click();
+    await sheet.locator('button.chip[data-active="true"]').filter({ hasText: 'Чаевые' }).waitFor();
+    await shot('38d-income-entry-removed-category');
+    await closeModal();
+    await sheet.waitFor({ state: 'detached' });
+    await row.waitFor();
+    // Settings → Categories: money in above the expenses, the one taken out greyed («не работает»).
+    await page.goto(BASE + '#/settings?tab=categories');
+    await front('.list-row').filter({ hasText: 'Emil' }).waitFor();
+    await front('.list-row').filter({ hasText: 'Чаевые' }).filter({ hasText: 'не работает' }).waitFor();
+    await shot('38e-settings-income-categories', true);
+  });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {
       const docs = await import('/src/services/documents.ts');

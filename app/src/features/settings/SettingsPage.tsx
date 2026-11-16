@@ -23,6 +23,7 @@ import {
 import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertTriangle,
+  IconArrowDownLeft,
   IconBuildingStore,
   IconCategory,
   IconCheck,
@@ -47,10 +48,12 @@ import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
 import { dubaiDate, formatDateTime } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
-import type { Employee, ExpenseCategory, JobTemplate, Settings, TemplateItem } from '../../domain/types';
+import { incomeCategoryName, KEPT_INCOME } from '../../domain/incomeCategories';
+import type { Employee, ExpenseCategory, IncomeCategory, JobTemplate, Settings, TemplateItem } from '../../domain/types';
 import { saveBackupFile, wipeAll } from '../../services/backup';
 import { RestoreModal } from './RestoreModal';
 import { loadDemoData } from '../../services/demo';
+import { addIncomeCategory, loadIncomeCategories, saveIncomeCategory } from '../../services/incomeCategories';
 import { blobToDataUrl } from '../../services/media';
 import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
 import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar, Tip, PersonAvatar } from '../../ui/components';
@@ -381,6 +384,8 @@ function CategoriesTab() {
   const [edit, setEdit] = useState<ExpenseCategory | null>(null);
   return (
     <Stack gap="md">
+      <IncomeCategoriesList />
+      <div className="group-title">{t('ledger.outs')}</div>
       <Text size="sm" c="dimmed">
         {t('settings.limitHint')}
       </Text>
@@ -417,6 +422,64 @@ function CategoriesTab() {
         )}
       </Modal>
     </Stack>
+  );
+}
+
+/**
+ * The categories of money in (v0.26), as the expense ones: a tap — its names in both languages and whether the income
+ * sheet offers it («Прочий приход» always); «Добавить» — a new one by its name. Taken out ones stay (entries keep them).
+ */
+function IncomeCategoriesList() {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const { run } = useAction();
+  const list = useLiveQuery(loadIncomeCategories, []);
+  const [edit, setEdit] = useState<IncomeCategory | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  return (
+    <>
+      <div className="group-title">{t('ledger.ins')}</div>
+      <List>
+        {list?.map((c) => (
+          <ListRow
+            key={c.id}
+            onClick={() => setEdit(c)}
+            chevron
+            left={
+              <ThemeIcon variant="light" color={c.active ? 'green' : 'gray'} size={38} radius="md">
+                <IconArrowDownLeft size={19} />
+              </ThemeIcon>
+            }
+            title={incomeCategoryName(c, lang)}
+            subtitle={c.active ? undefined : t('settings.inactive')}
+          />
+        ))}
+      </List>
+      <Button w="fit-content" variant="light" leftSection={<IconPlus size={18} />} onClick={() => (setName(''), setAdding(true))}>
+        {t('common.add')}
+      </Button>
+      <Modal opened={adding} onClose={() => setAdding(false)} title={t('income.newCategory')}>
+        <Stack>
+          <TextInput label={t('settings.name')} value={name} onChange={(e) => setName(e.currentTarget.value)} data-autofocus />
+          <Button disabled={!name.trim()} onClick={() => run(async () => { await addIncomeCategory(name); setAdding(false); }, 'common.saved')}>
+            {t('common.add')}
+          </Button>
+        </Stack>
+      </Modal>
+      <Modal opened={!!edit} onClose={() => setEdit(null)} title={t('expense.category')}>
+        {edit && (
+          <Stack>
+            <TextInput label="Русский" value={edit.nameRu} onChange={(e) => setEdit({ ...edit, nameRu: e.currentTarget.value })} />
+            <TextInput label="English" value={edit.nameEn} onChange={(e) => setEdit({ ...edit, nameEn: e.currentTarget.value })} />
+            <Switch label={t('settings.active')} checked={edit.active} disabled={edit.code === KEPT_INCOME} onChange={(e) => setEdit({ ...edit, active: e.currentTarget.checked })} />
+            <Button disabled={!edit.nameRu.trim() && !edit.nameEn.trim()} onClick={() => run(async () => { await saveIncomeCategory(edit); setEdit(null); }, 'common.saved')}>
+              {t('common.save')}
+            </Button>
+          </Stack>
+        )}
+      </Modal>
+    </>
   );
 }
 

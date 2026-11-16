@@ -15,6 +15,7 @@ import type {
   ExpenseCategory,
   Incident,
   Income,
+  IncomeCategory,
   Inspection,
   Invoice,
   ItemDecision,
@@ -70,6 +71,7 @@ export class GarageDB extends Dexie {
   expenses!: Table<Expense, string>;
   incomes!: Table<Income, string>;
   expenseCategories!: Table<ExpenseCategory, string>;
+  incomeCategories!: Table<IncomeCategory, string>;
   employees!: Table<Employee, string>;
   salaryPayments!: Table<SalaryPayment, string>;
   messages!: Table<MessageLog, string>;
@@ -134,6 +136,10 @@ export class GarageDB extends Dexie {
     this.version(5).stores({
       creditPayments: 'id, expenseId, date',
       payments: 'id, orderId, receivedAt, incomeId',
+    });
+    // v6: categories of money in (v0.26) — the four of the app (`ensureSeed` puts them in) and the garage's own.
+    this.version(6).stores({
+      incomeCategories: 'id, code',
     });
     installGuards(this);
   }

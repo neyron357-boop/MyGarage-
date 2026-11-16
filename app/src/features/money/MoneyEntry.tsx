@@ -1,28 +1,151 @@
 import { ActionIcon, Box, Button, Collapse, Group, Modal, SegmentedControl, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconBuildingBank, IconCar, IconCash, IconChevronDown, IconClockDollar, IconCreditCard, IconReceipt2, IconSearch, IconUser, IconX } from '@tabler/icons-react';
+import {
+  IconArrowDownLeft,
+  IconArrowUpRight,
+  IconBuildingBank,
+  IconCar,
+  IconCash,
+  IconChevronDown,
+  IconClockDollar,
+  IconCreditCard,
+  IconPlus,
+  IconReceipt2,
+  IconSearch,
+  IconTrash,
+  IconUser,
+  IconX,
+} from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate } from '../../domain/dates';
 import { allocate } from '../../domain/debts';
+import { incomeCategoryName, KEPT_INCOME, renamedIn } from '../../domain/incomeCategories';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import type { ExpenseMethod, IncomeCategory, Order } from '../../domain/types';
 import { netFromGross, vatOf } from '../../domain/vat';
 import { search, type SearchHit } from '../../services/customers';
 import { loadDebtors } from '../../services/debts';
+import { addIncomeCategory, loadIncomeCategories, removeIncomeCategory, restoreIncomeCategory, saveIncomeCategory } from '../../services/incomeCategories';
 import { addIncome, moneyOf, type Links } from '../../services/ledger';
 import { addExpense, categoryMonthSpent } from '../../services/money';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { Money, MoneyInput, PersonAvatar, PlateText, SelectCard } from '../../ui/components';
+import { Money, MoneyInput, PersonAvatar, PlateText, SelectCard, undoToast } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { SheetFor } from '../../ui/lazy';
+import { useLongPress } from '../../ui/longPress';
 
-/** What an income of its own can be (a debt paid is entered as one, but is not changed into another afterwards). */
-export const INCOME_CATEGORIES: IncomeCategory[] = ['service', 'sales', 'other'];
-const ENTRY_INCOME_CATEGORIES: IncomeCategory[] = [...INCOME_CATEGORIES, 'debt'];
+/** The garage's income categories, in their order — taken out ones too (their entries show their names). */
+export function useIncomeCategories(): IncomeCategory[] | undefined {
+  return useScreenLiveQuery(loadIncomeCategories, []);
+}
+
+/**
+ * The name of an income's category as the garage calls it now (one taken out too); a debt paid — and a code with no
+ * category (read before the categories are) — as the app says it.
+ */
+export function useIncomeLabel(list: IncomeCategory[] | undefined) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  return (code: string) => {
+    const c = list?.find((x) => x.code === code);
+    if (c) return incomeCategoryName(c, lang);
+    return t(`income.category.${code}`, { defaultValue: list ? t('income.category.other') : '' });
+  };
+}
+
+/**
+ * Income categories as chips (v0.26): a tap picks one; a hold (on a PC a right click) — its sheet: the name, «Удалить»
+ * with «Отменить» (taken out of the chips; entries that have it keep it); «＋» — a new one, picked at once. One taken
+ * out shows only where it is the one picked (an entry that has it). «Оплата долга» (`debt`) — a way of its own, last.
+ */
+export function IncomeChips({ value, onChange, debt }: { value: string; onChange: (code: string) => void; debt?: boolean }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const list = useIncomeCategories();
+  const [edit, setEdit] = useState<IncomeCategory | 'new' | null>(null);
+  const shown = (list ?? []).filter((c) => c.active || c.code === value);
+  return (
+    <>
+      <div className="chip-row wrap">
+        {shown.map((c) => (
+          <IncomeChip key={c.id} c={c} label={incomeCategoryName(c, lang)} on={value === c.code} onTap={() => onChange(c.code)} onHold={() => setEdit(c)} />
+        ))}
+        {debt && (
+          <button type="button" className="chip" data-active={value === 'debt'} data-income="debt" onClick={() => onChange('debt')}>
+            {t('income.category.debt')}
+          </button>
+        )}
+        <button type="button" className="chip" data-income-add aria-label={t('income.newCategory')} onClick={() => setEdit('new')}>
+          <IconPlus size={16} stroke={2.2} style={{ verticalAlign: -3 }} />
+        </button>
+      </div>
+      <SheetFor value={edit}>{(e, o) => <IncomeCategorySheet opened={o} category={e === 'new' ? undefined : e} onClose={() => setEdit(null)} onAdded={onChange} />}</SheetFor>
+    </>
+  );
+}
+
+function IncomeChip({ c, label, on, onTap, onHold }: { c: IncomeCategory; label: string; on: boolean; onTap: () => void; onHold: () => void }) {
+  const press = useLongPress(onHold);
+  return (
+    <button type="button" className="chip" data-active={on} data-income={c.code} {...press.handlers} onClick={() => !press.consumeClick() && onTap()}>
+      {label}
+    </button>
+  );
+}
+
+/** A new income category (picked at once), or one held: its name in this language, «Удалить» with «Отменить». */
+function IncomeCategorySheet({ opened, category, onClose, onAdded }: { opened: boolean; category?: IncomeCategory; onClose: () => void; onAdded: (code: string) => void }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const { run, busy } = useAction();
+  const was = category ? incomeCategoryName(category, lang) : '';
+  const [name, setName] = useState(was);
+  const save = () =>
+    name.trim() &&
+    run(async () => {
+      if (!category) onAdded((await addIncomeCategory(name)).code);
+      else if (name.trim() !== was) await saveIncomeCategory(renamedIn(category, name, lang));
+      haptic('light');
+      onClose();
+    });
+  const remove = () =>
+    category &&
+    run(async () => {
+      const removed = await removeIncomeCategory(category.id);
+      onClose();
+      haptic('light');
+      undoToast(t('income.categoryRemoved', { name: was }), t('common.undo'), () => void restoreIncomeCategory(removed));
+    });
+  return (
+    <Modal opened={opened} onClose={onClose} title={category ? t('expense.category') : t('income.newCategory')}>
+      <Stack gap="md">
+        <TextInput
+          aria-label={t('settings.name')}
+          placeholder={t('settings.name')}
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+          onKeyDown={(e) => e.key === 'Enter' && void save()}
+          data-autofocus={category ? undefined : true}
+          autoComplete="off"
+        />
+        <Button size="lg" loading={busy} disabled={!name.trim()} onClick={() => void save()}>
+          {category ? t('common.save') : t('common.add')}
+        </Button>
+        {category && category.code !== KEPT_INCOME && (
+          <Button variant="subtle" color="red" leftSection={<IconTrash size={18} />} loading={busy} onClick={() => void remove()}>
+            {t('common.delete')}
+          </Button>
+        )}
+      </Stack>
+    </Modal>
+  );
+}
+
 const OPEN_STAGES = new Set(['booked', 'intake', 'diagnostics', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check', 'ready']);
 
 /** Cash / Card / Bank transfer — and, for an expense, "On credit": nothing is paid yet, the garage owes it. */
@@ -313,6 +436,7 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
   const { t } = useTranslation();
   const lang = useLang();
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
+  const incomeLabel = useIncomeLabel(useIncomeCategories());
   const data = useLiveQuery(async () => {
     const value = link[by];
     if (!value) return undefined;
@@ -321,7 +445,7 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
   }, [link[by], by]);
   if (!data) return null;
   const rows = [
-    ...data.incomes.map((i) => ({ id: i.id, date: i.date, at: i.createdAt, in: true, amount: i.amountFils, title: t(`income.category.${i.category}`), note: i.note, method: i.method as ExpenseMethod, orderId: i.orderId })),
+    ...data.incomes.map((i) => ({ id: i.id, date: i.date, at: i.createdAt, in: true, amount: i.amountFils, title: incomeLabel(i.category), note: i.note, method: i.method as ExpenseMethod, orderId: i.orderId })),
     ...data.expenses.map((e) => {
       const c = data.cats.find((x) => x.id === e.categoryId);
       return { id: e.id, date: e.date, at: e.createdAt, in: false, amount: e.amountFils, title: c ? (lang === 'ru' ? c.nameRu : c.nameEn) : '', note: [e.vendor, e.note].filter(Boolean).join(' · '), method: e.method, orderId: e.orderId };
@@ -404,7 +528,8 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const [kind, setKindState] = useState<'in' | 'out'>('out');
   const [amount, setAmount] = useState<number>();
   const [method, setMethod] = useState<ExpenseMethod>('cash');
-  const [incomeCat, setIncomeCat] = useState<IncomeCategory>('service');
+  const [incomeCat, setIncomeCat] = useState('service');
+  const incomeCats = useIncomeCategories();
   const [expenseCat, setExpenseCat] = useState<string>();
   const [link, setLink] = useState<Links>({});
   const [debt, setDebt] = useState<DebtPick>({});
@@ -442,6 +567,11 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   useEffect(() => {
     if (!expenseCat && cats?.length) setExpenseCat(cats.find((c) => c.code === 'parts')?.id ?? cats[0].id);
   }, [cats, expenseCat]);
+  // The category picked was taken out of the chips (here, or before the sheet opened): the first one offered instead.
+  // One not in the list yet (just added — the list follows a moment later) stays.
+  useEffect(() => {
+    if (incomeCats?.some((c) => c.code === incomeCat && !c.active)) setIncomeCat(incomeCats.find((c) => c.active)?.code ?? 'other');
+  }, [incomeCats, incomeCat]);
   useEffect(() => {
     if (kind === 'out' && expenseCat) void categoryMonthSpent(expenseCat, date.slice(0, 7)).then(setSpent);
   }, [kind, expenseCat, date]);
@@ -491,19 +621,17 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           <Text size="sm" fw={500} mb={6}>
             {t('expense.category')}
           </Text>
-          <div className="chip-row wrap">
-            {kind === 'in'
-              ? ENTRY_INCOME_CATEGORIES.map((c) => (
-                  <button key={c} type="button" className="chip" data-active={incomeCat === c} data-income={c} onClick={() => setIncomeCat(c)}>
-                    {t(`income.category.${c}`)}
-                  </button>
-                ))
-              : (cats ?? []).map((c) => (
-                  <button key={c.id} type="button" className="chip" data-active={expenseCat === c.id} onClick={() => setExpenseCat(c.id)}>
-                    {lang === 'ru' ? c.nameRu : c.nameEn}
-                  </button>
-                ))}
-          </div>
+          {kind === 'in' ? (
+            <IncomeChips value={incomeCat} onChange={setIncomeCat} debt />
+          ) : (
+            <div className="chip-row wrap">
+              {(cats ?? []).map((c) => (
+                <button key={c.id} type="button" className="chip" data-active={expenseCat === c.id} onClick={() => setExpenseCat(c.id)}>
+                  {lang === 'ru' ? c.nameRu : c.nameEn}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {debtIn ? (
           <div>

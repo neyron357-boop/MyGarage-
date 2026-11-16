@@ -8,7 +8,7 @@ import { db } from '../../db/db';
 import { dayHeading, formatDate, monthKey, monthRange } from '../../domain/dates';
 import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
-import type { ExpenseCategory, IncomeCategory } from '../../domain/types';
+import type { ExpenseCategory } from '../../domain/types';
 import { companyDebtOf, debtPaymentParts } from '../../services/debts';
 import { removeEntry, restoreEntry, updateEntry, type EntryPatch } from '../../services/entries';
 import { loadLedger, setOpeningBalances, updateExpense, updateIncome, type Links } from '../../services/ledger';
@@ -18,7 +18,7 @@ import { DayPill, MonthField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { CreditSheet } from './Debts';
-import { EntrySheet, INCOME_CATEGORIES, LinkPicker, PursePicker, type EntryPreset } from './MoneyEntry';
+import { EntrySheet, IncomeChips, LinkPicker, PursePicker, useIncomeCategories, useIncomeLabel, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
 
@@ -28,9 +28,10 @@ type KindFilter = 'all' | 'in' | 'out';
 export function useCategoryLabel(cats: ExpenseCategory[] | undefined) {
   const { t } = useTranslation();
   const lang = useLang();
+  const income = useIncomeLabel(useIncomeCategories());
   return (e: LedgerEntry) => {
     if (e.source === 'payment') return t(e.category === 'refund' ? 'cashReason.refund' : e.category === 'prepayment' ? 'cashReason.prepayment' : 'ledger.cat.order');
-    if (e.source === 'income') return t(`income.category.${e.category}`);
+    if (e.source === 'income') return income(e.category);
     if (e.source === 'credit') return t('cashReason.credit_payment');
     if (e.source === 'closing') return t('ledger.cat.closing');
     if (e.source === 'movement') return t(`cashReason.${e.category}`);
@@ -236,15 +237,7 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
             {t('ledger.closingText', { actual: formatAed(entry.closing.actualFils), diff: formatAed(entry.closing.diffFils) })}
           </Text>
         )}
-        {relinkable && entry.source === 'income' && (
-          <div className="chip-row bleed">
-            {INCOME_CATEGORIES.map((c) => (
-              <button key={c} type="button" className="chip" data-active={entry.category === c} onClick={() => run(() => updateIncome(entry.id, { category: c as IncomeCategory }))}>
-                {t(`income.category.${c}`)}
-              </button>
-            ))}
-          </div>
-        )}
+        {relinkable && entry.source === 'income' && <IncomeChips value={entry.category} onChange={(category) => category !== entry.category && run(() => updateIncome(entry.id, { category }))} />}
         {relinkable && entry.source === 'expense' && (
           <div className="chip-row wrap">
             {(cats ?? []).filter((c) => c.active).map((c) => (

@@ -52,6 +52,7 @@ erDiagram
     expenses }o--o| cash_movements : ""
     salary_payments }o--o| cash_movements : ""
     expense_categories ||--o{ expenses : ""
+    income_categories ||--o{ incomes : "code"
     employees ||--o{ salary_payments : ""
     employees ||--o{ orders : "механик"
     cash_closings ||--o{ cash_movements : ""
@@ -397,7 +398,18 @@ erDiagram
 | `over_limit_comment` | обязателен при превышении нормы |
 | `voided_at` | запись отменена до v0.23 (не удалялась; для наличных — обратное движение кассы). С v0.23 запись удаляется или меняется (дата, сумма, способ, заметка) — раздел 4.3; такая пара в кассе удаляется вместе |
 
-**`incomes`** — приходы без инвойса (проданный товар, мелкая работа на месте, прочее): `date`, `category` (`service` · `sales` · `other` · `debt` — v0.20, оплата долга клиента, см. «Долги клиентов»), `amount_fils`, `method`, `order_id` / `vehicle_id` / `customer_id`, `note`, `voided_at`. Наличный приход пишется и в кассу.
+**`incomes`** — приходы без инвойса (проданный товар, мелкая работа на месте, прочее): `date`, `category` (код категории прихода — `service` · `sales` · `other` · `emil` · свои `c_…`, v0.26, см. `income_categories`; или `debt` — v0.20, оплата долга клиента, см. «Долги клиентов»), `amount_fils`, `method`, `order_id` / `vehicle_id` / `customer_id`, `note`, `voided_at`. Наличный приход пишется и в кассу.
+
+**`income_categories`** (v0.26, Dexie-схема v6, `incomeCategories: 'id, code'`) — категории прихода, как
+`expense_categories`: `code`, `name_ru`, `name_en`, `active`, `position` (место среди чипов). Стартовый набор
+(`ensureSeed`, и на старых установках — недостающие коды): «Работа / ремонт» (`service`), «Продажа» (`sales`), «Прочий
+приход» (`other`), «Emil» (`emil`, имя — одно на обоих языках). Свои — `addIncomeCategory` (код `c_…`, одно название на
+обоих языках; то же название — та же категория, убранная — снова активна). Не удаляются: «Удалить» — `active = false`
+(`removeIncomeCategory`, «Отменить» — `restoreIncomeCategory`); приход хранит код, поэтому у его записи название
+категории — как сейчас, и у убранной тоже. «Прочий приход» убрать нельзя. `debt` — не категория (особый путь
+`addDebtPayment`), в таблице его нет. Код без строки (копия до v0.26 до первого запуска) — подпись из i18n
+`income.category.*`. В Excel «Money Tracker» свои категории (и «Emil») выгружаются своим названием (`name_en`) и
+загружаются обратно по названию; `service` / `sales` / `other` / `debt` — как раньше.
 
 **`credit_payments`** (v0.20) — оплата расхода, взятого в кредит: `expense_id`, `method` (`cash` · `card` · `transfer`),
 `amount_fils`, `date`, `paid_at`, `note`, `voided_at`. Сам расход учтён один раз — когда взят (в отчётах, в

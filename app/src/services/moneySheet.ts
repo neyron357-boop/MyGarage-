@@ -2,6 +2,7 @@ import { db } from '../db/db';
 import { dubaiDate } from '../domain/dates';
 import type { LedgerEntry } from '../domain/ledger';
 import { buildMoneyWorkbook, readMoneyWorkbook, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
+import { incomeCategoryNamed } from '../domain/incomeCategories';
 import { formatPlate } from '../domain/plates';
 import type { ExpenseCategory, IncomeCategory } from '../domain/types';
 import { AppError } from './errors';
@@ -16,13 +17,18 @@ import { addExpense, categoryMonthSpent } from './money';
  */
 
 /** The sheet's category of a book entry. */
-function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>): string {
+function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>, incomeCats: Map<string, IncomeCategory>): string {
   switch (e.source) {
     case 'payment':
       return e.category === 'refund' ? 'Refund' : e.category === 'prepayment' ? 'Customer Deposit' : 'Repair Labor';
-    case 'income':
+    case 'income': {
       // A debt paid is money for repairs, as a job's payment is.
-      return e.category === 'sales' ? 'Sales' : e.category === 'service' || e.category === 'debt' ? 'Repair Labor' : 'Other';
+      if (e.category === 'sales') return 'Sales';
+      if (e.category === 'service' || e.category === 'debt') return 'Repair Labor';
+      // The garage's own (v0.26: «Emil») goes out by its name — and comes back in as it.
+      const c = e.category === 'other' ? undefined : incomeCats.get(e.category);
+      return c ? c.nameEn || c.nameRu : 'Other';
+    }
     case 'expense':
     case 'credit': {
       // A payment of a credit is the expense it pays off, on the day the money went.
@@ -38,8 +44,16 @@ function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>): stri
 
 /** The whole money book as the money sheet. */
 export async function moneySheetOfBook(): Promise<MoneySheet> {
-  const [book, cats, orders, vehicles, customers] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.orders.toArray(), db.vehicles.toArray(), db.customers.toArray()]);
+  const [book, cats, incomeCats, orders, vehicles, customers] = await Promise.all([
+    loadLedger(),
+    db.expenseCategories.toArray(),
+    db.incomeCategories.toArray(),
+    db.orders.toArray(),
+    db.vehicles.toArray(),
+    db.customers.toArray(),
+  ]);
   const catBy = new Map(cats.map((c) => [c.id, c]));
+  const incomeBy = new Map(incomeCats.map((c) => [c.code, c]));
   const orderBy = new Map(orders.map((o) => [o.id, o]));
   const carBy = new Map(vehicles.map((v) => [v.id, v]));
   const customerBy = new Map(customers.map((c) => [c.id, c]));
@@ -58,7 +72,7 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
       type: e.kind === 'in' ? 'Income' : 'Expense',
       amountFils: e.amountFils,
       payment: e.purse === 'cash' ? 'Cash' : 'Card',
-      category: sheetCategory(e, catBy),
+      category: sheetCategory(e, catBy, incomeBy),
       notes: [about, what].filter(Boolean).join(' — '),
     };
   });
@@ -73,8 +87,15 @@ export async function exportMoneySheet(): Promise<File> {
 
 /* ---------------- Import ---------------- */
 
-const incomeCategory = (c: string): IncomeCategory =>
-  /^(sales|parts sales)$/i.test(c) ? 'sales' : /^(repair labor|diagnostics|customer deposit|outsourced work)$/i.test(c) ? 'service' : 'other';
+/** The income category of a sheet's one: the sheet's own words, else one of the garage's by its name (v0.26), else none. */
+const incomeCategory = (c: string, list: IncomeCategory[]): string | undefined =>
+  /^(sales|parts sales)$/i.test(c)
+    ? 'sales'
+    : /^(repair labor|diagnostics|customer deposit|outsourced work)$/i.test(c)
+      ? 'service'
+      : /^other$/i.test(c)
+        ? 'other'
+        : incomeCategoryNamed(list, c)?.code;
 const expenseCode = (c: string): string =>
   /^parts purchases$/i.test(c)
     ? 'parts'
@@ -151,7 +172,7 @@ export async function planMoneyImport(bytes: Uint8Array): Promise<MoneyImportPla
 
 /** Add the plan's rows to the book (and its opening balances when the book has none). Returns how many. */
 export async function importMoneyPlan(plan: MoneyImportPlan): Promise<number> {
-  const cats = await db.expenseCategories.toArray();
+  const [cats, incomeCats] = await Promise.all([db.expenseCategories.toArray(), db.incomeCategories.toArray()]);
   const byCode = new Map(cats.map((c) => [c.code, c]));
   const other = byCode.get('other') ?? cats[0];
   if (plan.opening) await setOpeningBalances(plan.sheet.cashStartFils, plan.sheet.cardStartFils);
@@ -159,10 +180,10 @@ export async function importMoneyPlan(plan: MoneyImportPlan): Promise<number> {
   for (const r of plan.rows) {
     const method = r.payment === 'Card' ? 'card' : 'cash';
     if (r.type === 'Income') {
-      const category = incomeCategory(r.category);
+      const category = incomeCategory(r.category, incomeCats);
       // A category the app has no place for stays in the note.
-      const note = category === 'other' && r.category && !/^other$/i.test(r.category) ? [r.category, r.notes].filter(Boolean).join(': ') : r.notes;
-      await addIncome({ date: r.date, category, amountFils: r.amountFils, method, note });
+      const note = !category && r.category ? [r.category, r.notes].filter(Boolean).join(': ') : r.notes;
+      await addIncome({ date: r.date, category: category ?? 'other', amountFils: r.amountFils, method, note });
     } else {
       const cat = byCode.get(expenseCode(r.category)) ?? other;
       const note = cat === other && r.category && !/^other$/i.test(r.category) ? [r.category, r.notes].filter(Boolean).join(': ') : r.notes;

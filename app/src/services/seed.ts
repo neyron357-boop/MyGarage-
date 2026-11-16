@@ -1,5 +1,5 @@
 import { db, uid } from '../db/db';
-import type { ExpenseCategory, JobTemplate, RelatedRule, TemplateItem } from '../domain/types';
+import type { ExpenseCategory, IncomeCategory, JobTemplate, RelatedRule, TemplateItem } from '../domain/types';
 import { DEFAULT_SETTINGS, withGarageIdentity } from './settings';
 
 const aed = (n: number) => Math.round(n * 100);
@@ -110,13 +110,21 @@ const CATEGORIES: Omit<ExpenseCategory, 'id' | 'active'>[] = [
   { code: 'other', nameRu: 'Прочее', nameEn: 'Other', monthlyLimitFils: aed(500) },
 ];
 
+/** Categories of money in (v0.26): the app's three and «Emil» — a name, the same in both languages. */
+const INCOME_CATEGORIES: Omit<IncomeCategory, 'id' | 'active'>[] = [
+  { code: 'service', nameRu: 'Работа / ремонт', nameEn: 'Work / repair', position: 0 },
+  { code: 'sales', nameRu: 'Продажа', nameEn: 'Sale', position: 1 },
+  { code: 'other', nameRu: 'Прочий приход', nameEn: 'Other income', position: 2 },
+  { code: 'emil', nameRu: 'Emil', nameEn: 'Emil', position: 3 },
+];
+
 /** Placeholder names of the two starter mechanics (renamed by the manager in Settings → Staff). */
 export const PLACEHOLDER_STAFF = /^(Механик|Mechanic) \d$/;
 
 /** Create default reference data on first start. Safe to call repeatedly. */
 export async function ensureSeed(lang: 'ru' | 'en' = 'ru'): Promise<void> {
   const mechanic = lang === 'en' ? 'Mechanic' : 'Механик';
-  await db.transaction('rw', [db.settings, db.jobTemplates, db.relatedRules, db.expenseCategories, db.employees], async () => {
+  await db.transaction('rw', [db.settings, db.jobTemplates, db.relatedRules, db.expenseCategories, db.incomeCategories, db.employees], async () => {
     const current = await db.settings.get('main');
     if (!current) await db.settings.put({ ...DEFAULT_SETTINGS });
     else {
@@ -139,6 +147,10 @@ export async function ensureSeed(lang: 'ru' | 'en' = 'ru'): Promise<void> {
       const missing = CATEGORIES.filter((c) => !codes.has(c.code));
       if (missing.length) await db.expenseCategories.bulkAdd(missing.map((c) => ({ ...c, id: uid(), active: true })));
     }
+    // The app's income categories, to new installs and older ones alike (one taken out stays out: it is still there).
+    const incomeCodes = new Set((await db.incomeCategories.toArray()).map((c) => c.code));
+    const newIncome = INCOME_CATEGORIES.filter((c) => !incomeCodes.has(c.code));
+    if (newIncome.length) await db.incomeCategories.bulkAdd(newIncome.map((c) => ({ ...c, id: uid(), active: true })));
     if ((await db.employees.count()) === 0) {
       await db.employees.bulkAdd([
         { id: uid(), name: `${mechanic} 1`, role: 'mechanic', monthlySalaryFils: 0, active: true },
