@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emirateIn, pickPlate, platesInLine, type PlateGuess } from './uaePlate';
+import { emirateIn, emirateLike, pickPlate, platesInLine, type PlateGuess } from './uaePlate';
 
 const first = (text: string) => {
   const g = platesInLine(text)[0];
@@ -95,5 +95,18 @@ describe('readings voted into one plate', () => {
   it('nothing read — nothing picked', () => {
     expect(pickPlate([])).toBeUndefined();
     expect(pickPlate([{ guesses: [] }])).toBeUndefined();
+  });
+});
+
+describe('the emirate in a plate’s own lettering (v0.32)', () => {
+  it('a slip of a letter is still the emirate; another word is not', () => {
+    expect(emirateLike('DUBRI')).toBe('DXB');
+    expect(emirateLike('OUBAI')).toBe('DXB');
+    expect(emirateLike('DUBAL')).toBe('DXB');
+    expect(emirateLike('SHARIAH')).toBe('SHJ');
+    expect(emirateLike('ABU DHABL')).toBe('AUH');
+    expect(emirateLike('WR')).toBeUndefined();
+    expect(emirateLike('PATHFINDER')).toBeUndefined();
+    expect(emirateLike('DUBAI')).toBe('DXB');
   });
 });

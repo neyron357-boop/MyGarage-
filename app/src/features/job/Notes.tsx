@@ -12,6 +12,7 @@ import {
   IconPlayerStopFilled,
   IconPlus,
   IconTrash,
+  IconVideo,
   IconX,
 } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -19,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiDate, dubaiTime } from '../../domain/dates';
 import type { JobNote } from '../../domain/types';
 import { flatPeaks } from '../../domain/waveform';
-import { cachedMediaUrl, mediaUrl } from '../../services/media';
+import { cachedMediaUrl, mediaBlob, mediaUrl } from '../../services/media';
 import { addNote, removeNote, restoreNote, setNotePeaks, type RemovedNote } from '../../services/notes';
 import { copyText } from '../../ui/clipboard';
 import { MediaImage, StickyBar, undoToast } from '../../ui/components';
@@ -28,6 +29,7 @@ import { useAction, useLang } from '../../ui/hooks';
 import { useLongPress } from '../../ui/longPress';
 import { useAutoAnimate } from '../../ui/motion';
 import { PhotoViewer } from '../../ui/PhotoViewer';
+import { startVideo, VideoPlayer } from '../../ui/VideoPlayer';
 import { canRecord, clock, useRecorder } from '../../ui/recorder';
 import { peaksOfBlob, rateLabel, savedVoiceRate, saveVoiceRate, voicePeaks, VOICE_RATES, type VoiceRate } from '../../ui/voice';
 import { AppError } from '../../services/errors';
@@ -363,8 +365,14 @@ function VoiceNote({
 }
 
 /** A video note plays in its bubble (the phone's own player, full screen from its controls). */
-function NoteVideo({ id }: { id: string }) {
+/**
+ * A video note as the messengers show one (v0.32): its first frame, ▶ in the middle, how long in the corner; a tap — the
+ * player on the whole screen (ui/VideoPlayer.tsx), started in the tap itself (the iPhone plays sound only so).
+ */
+function NoteVideo({ id, onOpen }: { id: string; onOpen: (url: string) => void }) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState<string>();
+  const [len, setLen] = useState<number>();
   useEffect(() => {
     let alive = true;
     void mediaUrl(id).then((u) => alive && setUrl(u));
@@ -372,7 +380,22 @@ function NoteVideo({ id }: { id: string }) {
       alive = false;
     };
   }, [id]);
-  return url ? <video src={url} controls playsInline preload="metadata" /> : <span className="surface-soft" />;
+  if (!url) return <span className="surface-soft" />;
+  return (
+    <button type="button" className="note-video" aria-label={t('notes.video')} onClick={() => onOpen(url)}>
+      {/* "#t=": the iPhone shows a video's first frame only when told where to start. */}
+      <video src={`${url}#t=0.001`} muted playsInline preload="metadata" tabIndex={-1} aria-hidden onLoadedMetadata={(e) => setLen(e.currentTarget.duration)} />
+      <span className="note-video-play" aria-hidden>
+        <IconPlayerPlayFilled size={26} />
+      </span>
+      {len !== undefined && Number.isFinite(len) && (
+        <span className="note-video-len" aria-hidden>
+          <IconVideo size={14} stroke={2.2} />
+          {clock(len)}
+        </span>
+      )}
+    </button>
+  );
 }
 
 interface BubbleProps {
@@ -393,6 +416,8 @@ interface BubbleProps {
   onSeek: (n: JobNote, frac: number) => void;
   onRate: () => void;
   onPhoto: (n: JobNote) => void;
+  /** A video note tapped (its address, to start it in the tap). */
+  onVideo: (n: JobNote, url: string) => void;
   /** A long press: picking begins with this note. */
   onHold: (n: JobNote) => void;
   onPick: (n: JobNote) => void;
@@ -441,7 +466,7 @@ function Quote({ note, onGo }: { note: JobNote | 'gone'; onGo: (id: string) => v
  * One note as a message of one's own: on the right, the time in its corner. A swipe to the right answers it
  * (ui/swipeReply.ts); a long press begins picking notes (a tick on the left; a tap then picks or lets go).
  */
-const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, quote, picking, picked, onPlay, onSeek, onRate, onPhoto, onHold, onPick, onReply, onQuote }: BubbleProps) {
+const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, quote, picking, picked, onPlay, onSeek, onRate, onPhoto, onVideo, onHold, onPick, onReply, onQuote }: BubbleProps) {
   const { t } = useTranslation();
   const press = useLongPress(() => onHold(n));
   const swipe = useSwipeReply(() => onReply(n), !picking);
@@ -494,7 +519,12 @@ const Bubble = memo(function Bubble({ n, tail, gap, voice, rate, quote, picking,
                   <MediaImage id={n.mediaId!} card h="100%" w="100%" radius="0" />
                 </button>
               ) : (
-                <NoteVideo id={n.mediaId!} />
+                <NoteVideo
+                  id={n.mediaId!}
+                  onOpen={(url) => {
+                    if (!press.consumeClick()) onVideo(n, url);
+                  }}
+                />
               )}
               {time}
             </div>
@@ -757,6 +787,16 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
   const byId = new Map(sorted.map((n) => [n.id, n]));
   const player = usePlayer(sorted);
   const onPhoto = useCallback((n: JobNote) => setViewing(n.id), []);
+  // A video: started in the tap, then taken onto the player's screen.
+  const [film, setFilm] = useState<{ el: HTMLVideoElement; n: JobNote } | null>(null);
+  const onVideo = useCallback((n: JobNote, url: string) => setFilm({ el: startVideo(url), n }), []);
+  const filmFile = useCallback(async () => {
+    const id = film?.n.mediaId;
+    const b = id ? await mediaBlob(id) : undefined;
+    if (!b) return undefined;
+    const ext = /quicktime/.test(b.type) ? 'mov' : /webm/.test(b.type) ? 'webm' : 'mp4';
+    return new File([b], `video-${dubaiDate(film!.n.createdAt)}.${ext}`, { type: b.type || 'video/mp4' });
+  }, [film]);
   const toEnd = useChatScroll(fill, sorted.length);
   const animate = useAutoAnimate<HTMLDivElement>();
   const picking = !!picked;
@@ -859,6 +899,7 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
                     onSeek={player.seek}
                     onRate={player.cycleRate}
                     onPhoto={onPhoto}
+                    onVideo={onVideo}
                     onHold={onHold}
                     onPick={onPick}
                     onReply={onReply}
@@ -923,6 +964,7 @@ export function NotesChat({ orderId, notes, editable }: { orderId: string; notes
           </StickyBar>
         )
       )}
+      {film && <VideoPlayer video={film.el} file={filmFile} onClose={() => setFilm(null)} />}
       {viewing && (
         <PhotoViewer
           items={photos.map((n) => ({ id: n.mediaId!, title: n.text }))}

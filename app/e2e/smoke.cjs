@@ -624,9 +624,10 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Работа', exact: true }).click();
     await dlg.getByLabel('Что сделали').fill('RTA test fee');
     await dlg.getByLabel('Цена', { exact: true }).fill('100');
-    await dlg.getByText('Итого 105,00 AED, в т. ч. VAT 5,00').waitFor();
+    // v0.32: the line's money at a glance — what the customer pays, the VAT in it.
+    await dlg.locator('.line-sum [data-sum="total"]').filter({ hasText: '105,00' }).filter({ hasText: 'в т. ч. VAT 5,00' }).waitFor();
     await dlg.getByText('Без', { exact: true }).click();
-    await dlg.getByText('Итого 100,00 AED, без VAT').waitFor();
+    await dlg.locator('.line-sum [data-sum="total"]').filter({ hasText: '100,00' }).filter({ hasText: 'без VAT' }).waitFor();
     await shot('31a-line-no-vat');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('320,50').first().waitFor(); // 220.50 + 100 without VAT
@@ -1935,7 +1936,8 @@ async function launchBrowser() {
     await front('.list-row').filter({ hasText: job.title.toUpperCase() }).first().click();
     const line = page.getByRole('dialog').first();
     await line.getByText('Поставщик').first().waitFor();
-    await line.locator('[aria-label="Поставщик"] button.chip').last().click();
+    // v0.32: the search is the first chip.
+    await line.locator('[aria-label="Поставщик"] button.chip-find').click();
     // On top of the list, not under it.
     const add = top().locator('.list-row').first();
     await add.filter({ hasText: 'Новый поставщик' }).waitFor();
@@ -2311,7 +2313,7 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Поставщик и наличие' }).click();
     const dlg = page.getByRole('dialog');
     await dlg.getByText('Запчасти · 2').waitFor();
-    await dlg.locator('[aria-label="Поставщик"] button.chip').first().click();
+    await dlg.locator('[aria-label="Поставщик"] button.chip-supplier').first().click();
     await dlg.getByRole('radio', { name: 'Заказано' }).click();
     await shot('41b-parts-batch');
     await dlg.getByRole('button', { name: /^Применить · 2/ }).click();
@@ -2412,6 +2414,66 @@ async function launchBrowser() {
     });
     if (!/^Statement - .+\.pdf$/.test(papers.pdf[0]) || papers.pdf[2] < 2000) throw new Error('statement: ' + JSON.stringify(papers.pdf));
     if (typeof papers.zip === 'string' || !/\.zip$/.test(papers.zip[0]) || papers.zip[2] < 2000) throw new Error('zip: ' + JSON.stringify(papers.zip));
+  });
+  await step('v0.32: a video note as in a messenger — its first frame, ▶ and how long; a tap plays it on the whole screen, Back closes it; the cash card in named tiles', async () => {
+    // A short video (a second of a moving square), made by the browser itself.
+    const video = await page.evaluate(async () => {
+      const c = document.createElement('canvas');
+      c.width = 240;
+      c.height = 320;
+      const g = c.getContext('2d');
+      const rec = new MediaRecorder(c.captureStream(15), { mimeType: 'video/webm' });
+      const parts = [];
+      rec.ondataavailable = (e) => parts.push(e.data);
+      const done = new Promise((r) => (rec.onstop = r));
+      rec.start();
+      for (let i = 0; i < 20; i++) {
+        g.fillStyle = '#204060';
+        g.fillRect(0, 0, 240, 320);
+        g.fillStyle = '#f0c040';
+        g.fillRect(20 + i * 8, 120, 60, 60);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      rec.stop();
+      await done;
+      const b = new Blob(parts, { type: 'video/webm' });
+      return btoa(String.fromCharCode(...new Uint8Array(await b.arrayBuffer())));
+    });
+    const job = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const o = (await db.orders.toArray()).find((x) => !['closed', 'cancelled', 'delivered'].includes(x.stage));
+      return o?.id;
+    });
+    await page.goto(BASE + '#/orders/' + job + '?tab=notes');
+    await front('.notes-field').waitFor();
+    await front('input[data-note-media]').setInputFiles({ name: 'clip.webm', mimeType: 'video/webm', buffer: Buffer.from(video, 'base64') });
+    const bubble = front('.note-video').last();
+    await bubble.waitFor({ timeout: 20000 });
+    await bubble.locator('.note-video-play').waitFor();
+    await shot('43a-video-note');
+    await bubble.click();
+    const player = page.locator('.vp');
+    await player.waitFor();
+    // It plays at once: the place moves on.
+    await page.waitForFunction(() => (document.querySelector('.vp-video')?.currentTime ?? 0) > 0.2, null, { timeout: 8000 });
+    await shot('43b-video-player');
+    // The line dragged to its middle: the place follows.
+    const bar = await page.locator('.vp-bar').boundingBox();
+    await page.mouse.click(bar.x + bar.width / 2, bar.y + bar.height / 2);
+    await page.waitForFunction(() => {
+      const v = document.querySelector('.vp-video');
+      return v && v.duration && Math.abs(v.currentTime / v.duration - 0.5) < 0.25;
+    }, null, { timeout: 5000 }).catch(() => undefined);
+    await page.goBack();
+    await player.waitFor({ state: 'detached' });
+    if (!/tab=notes/.test(page.url())) throw new Error('Back from the player left the notes: ' + page.url());
+    // The cash card: the month in tiles, each named.
+    await page.goto(BASE + '#/money');
+    const tiles = front('.money-card .money-card-purse');
+    await tiles.first().waitFor();
+    if (!(await tiles.first().locator('.money-card-purse-name').innerText()).trim()) throw new Error('a purse tile without its name');
+    await front('.money-card-start').waitFor();
+    await shot('43c-cash-card');
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

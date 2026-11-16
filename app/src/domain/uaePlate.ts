@@ -41,6 +41,49 @@ export function emirateIn(text: string): Emirate | undefined {
   return EMIRATE_WORDS.find(([re]) => re.test(up))?.[1];
 }
 
+const NAMES: [string, Emirate][] = [
+  ['DUBAI', 'DXB'],
+  ['SHARJAH', 'SHJ'],
+  ['ABUDHABI', 'AUH'],
+  ['AJMAN', 'AJM'],
+  ['RASALKHAIMAH', 'RAK'],
+  ['UMMALQUWAIN', 'UAQ'],
+  ['FUJAIRAH', 'FUJ'],
+];
+
+/** How many letters apart two words are (insert, drop, change). */
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0];
+    d[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const keep = d[j];
+      d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = keep;
+    }
+  }
+  return d[b.length];
+}
+
+/**
+ * The emirate a plate's small word names (v0.32), a slip of a letter allowed (two in a long name): the word is in the
+ * plate's own lettering — Dubai's new plates read "DUBRI", "OUBAI". Read alone, as the word it is.
+ */
+export function emirateLike(text: string): Emirate | undefined {
+  const exact = emirateIn(text);
+  if (exact) return exact;
+  const words = text.toUpperCase().replace(/[^A-Z]+/g, ' ').trim().split(' ').filter(Boolean);
+  for (const w of [...words, words.join('')]) {
+    if (w.length < 4) continue;
+    for (const [name, e] of NAMES) {
+      const slips = name.length <= 5 ? 1 : 2;
+      if (Math.abs(w.length - name.length) <= slips && editDistance(w, name) <= slips) return e;
+    }
+  }
+  return undefined;
+}
+
 /** Letters a reading gives for digits (in a run that is mostly digits). */
 const AS_DIGIT: Record<string, string> = { O: '0', Q: '0', D: '0', U: '0', I: '1', L: '1', J: '1', S: '5', B: '8', Z: '2', G: '6' };
 

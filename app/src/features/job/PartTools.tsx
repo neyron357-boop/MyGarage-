@@ -1,5 +1,5 @@
 import { ActionIcon, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
-import { IconMinus, IconPlus, IconSearch, IconSend } from '@tabler/icons-react';
+import { IconCheck, IconMinus, IconPlus, IconSearch, IconSend } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -58,13 +58,16 @@ export function SupplierChips({ value, onChange, make, service, label }: { value
   if (picked && !shown.includes(picked)) shown.unshift(picked);
   return (
     <>
+      {/* v0.32: the search first — a tap, a name (or a number) typed, picked; a new one at the top of its list. Then the
+          picked one and the usual ones, each name cut to a chip's width. */}
       <div className="chip-row" ref={row} aria-label={label ?? t('job.supplier')}>
+        <button type="button" className="chip chip-find" onClick={() => setPicker(true)} aria-label={t('suppliers.all')}>
+          <IconSearch size={16} stroke={2.2} aria-hidden />
+          {t('suppliers.find')}
+        </button>
         {shown.map((s) => (
           <SupplierChip key={s.id} s={s} on={value === s.id} onTap={() => onChange(value === s.id ? undefined : s.id)} onHold={() => setCard(s)} />
         ))}
-        <button type="button" className="chip" onClick={() => setPicker(true)} aria-label={t('suppliers.all')}>
-          {list.length > shown.length ? t('suppliers.allN', { n: list.length }) : <IconPlus size={16} stroke={2.2} style={{ verticalAlign: -3 }} />}
-        </button>
       </div>
       <SupplierPicker opened={picker} onClose={() => setPicker(false)} list={list} service={service} make={make} onPick={(id) => (onChange(id), setPicker(false))} />
       <SheetFor value={card}>{(s, o) => <SupplierSheet opened={o} supplier={s} onClose={() => setCard(null)} />}</SheetFor>
@@ -75,8 +78,9 @@ export function SupplierChips({ value, onChange, make, service, label }: { value
 function SupplierChip({ s, on, onTap, onHold }: { s: Supplier; on: boolean; onTap: () => void; onHold: () => void }) {
   const press = useLongPress(onHold);
   return (
-    <button type="button" className="chip" data-active={on} data-supplier={s.id} {...press.handlers} onClick={() => !press.consumeClick() && onTap()}>
-      {s.name}
+    <button type="button" className="chip chip-supplier" data-active={on} data-supplier={s.id} title={s.name} {...press.handlers} onClick={() => !press.consumeClick() && onTap()}>
+      {on && <IconCheck size={15} stroke={2.6} aria-hidden />}
+      <span className="chip-name">{s.name}</span>
     </button>
   );
 }
@@ -101,7 +105,7 @@ function SupplierPicker({ opened, onClose, list, onPick, service, make }: { open
   return (
     <Modal opened={opened} onClose={onClose} title={service ? t('suppliers.pickContractor') : t('suppliers.pick')}>
       <Stack gap="md">
-        <TextInput aria-label={t('suppliers.search')} placeholder={t('suppliers.search')} leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} />
+        <TextInput aria-label={t('suppliers.search')} placeholder={t('suppliers.search')} leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} data-autofocus />
         <List>
           {!named && (
             <ListRow

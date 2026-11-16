@@ -25,7 +25,7 @@ import { itemAmounts, summarize } from '../../domain/items';
 import { jobSummary } from '../../domain/jobSummary';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
 import { partsToFind } from '../../services/flow';
-import { whatsappUrl } from '../../services/messages';
+import { openWhatsApp } from '../../services/messages';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
@@ -93,7 +93,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
   // To the left — the row's own action (to the archive, back on the board); to the right (v0.30) — the customer's
   // WhatsApp, when there is a number to write to.
   const wa = b.customer.whatsapp || b.customer.phone;
-  const openWa = () => window.open(whatsappUrl(wa, ''), '_blank', 'noopener');
+  const openWa = () => openWhatsApp(wa);
   const sw = useSwipeRow({ trailing: swipe ? { onCommit: () => swipe.onCommit() } : undefined, leading: wa ? { onCommit: openWa } : undefined }, 92);
   const swiping = !!swipe || !!wa;
   // A long press and a swipe on the same row: both see the finger.

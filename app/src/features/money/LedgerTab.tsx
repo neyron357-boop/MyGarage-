@@ -329,26 +329,28 @@ export function LedgerTab() {
       <Stack gap="sm" maw={560}>
         {/* The month the figures and the list below are for. */}
         <MonthField value={month} onChange={setMonth} />
-        {/* The cash, as a bank's card: on the left its balance and where it started (a tap — the opening
-            balances); on the right the month's money in and out, cash and card, the purse's icon and the sign
-            for words (v0.22: the separate month block is gone). The card keeps no balance — its money is only
+        {/* The cash, as a bank's card (v0.32, redrawn): its name and where it started (a pill — a tap on the card opens
+            the opening balances), the balance large; under it the month in tiles, each named — cash, card, past the
+            cash box (when the month has it) — money in over money out. The card keeps no balance — its money is only
             operations, in the list below (the user's call, v0.17). */}
         <div className="money-card" data-purse="cash">
           <UnstyledButton className="money-card-main tap amount-cell" onClick={() => setOpening(true)} aria-label={`${t('ledger.cashBalance')}: ${formatAed(book.cash, lang)} · ${t('ledger.opening')}`}>
-            <div className="money-card-label">
-              <IconCash size={18} stroke={2} aria-hidden />
-              {t('ledger.cashBalance')}
+            <div className="money-card-head">
+              <span className="money-card-label">
+                <IconCash size={18} stroke={2} aria-hidden />
+                {t('ledger.cashBalance')}
+              </span>
+              <span className="money-card-start">
+                {t('ledger.start')} {formatAed(book.cashStartFils, lang, false)}
+                <IconPencil size={12} stroke={2.2} aria-hidden />
+              </span>
             </div>
-            <Text fz={28} lh={1.1} mt={8}>
+            <div className="money-card-balance">
               <Money fils={book.cash} display roll />
-            </Text>
-            <div className="money-card-foot">
-              {t('ledger.start')} {formatAed(book.cashStartFils)}
-              <IconPencil size={12} aria-hidden />
             </div>
           </UnstyledButton>
           <div className="money-card-month">
-            {/* Money past the cash box (v0.27: paid with the owner's own, taken by the owner) — a row of its own, when the month has it. */}
+            {/* Money past the cash box (v0.27: paid with the owner's own, taken by the owner) — a tile of its own, when the month has it. */}
             {(['cash', 'card', 'outside'] as const).filter((p) => p !== 'outside' || totals.outside.inFils || totals.outside.outFils).map((p) => (
               <div
                 key={p}
@@ -359,12 +361,15 @@ export function LedgerTab() {
                 data-out={totals[p].outFils}
                 aria-label={`${p === 'outside' ? t('ledger.outside') : t(`payment.method.${p}`)}: ${t('ledger.in')} ${formatAed(totals[p].inFils, lang)}, ${t('ledger.out')} ${formatAed(totals[p].outFils, lang)}`}
               >
-                {p === 'cash' ? <IconCash size={16} stroke={2} aria-hidden /> : p === 'outside' ? <IconUserDollar size={16} stroke={2} aria-hidden /> : <IconCreditCard size={16} stroke={2} aria-hidden />}
-                <span data-zero={totals[p].inFils === 0 || undefined}>
+                <span className="money-card-purse-name">
+                  {p === 'cash' ? <IconCash size={14} stroke={2.2} aria-hidden /> : p === 'outside' ? <IconUserDollar size={14} stroke={2.2} aria-hidden /> : <IconCreditCard size={14} stroke={2.2} aria-hidden />}
+                  {p === 'outside' ? t('ledger.outside') : t(`payment.method.${p}`)}
+                </span>
+                <span className="money-card-in" data-zero={totals[p].inFils === 0 || undefined}>
                   <Money fils={totals[p].inFils} signed roll />
                 </span>
                 {/* 0 − x, not −x: a minus zero would be written as «−0,00». */}
-                <span data-zero={totals[p].outFils === 0 || undefined}>
+                <span className="money-card-out" data-zero={totals[p].outFils === 0 || undefined}>
                   <Money fils={0 - totals[p].outFils} roll />
                 </span>
               </div>

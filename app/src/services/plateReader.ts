@@ -1,5 +1,6 @@
 import type { Emirate } from '../domain/types';
 import { emirateIn, pickPlate, platesInLine, type PlateGuess, type PlateVote } from '../domain/uaePlate';
+import { readByGlyphs } from './plateGlyphRead';
 import { banded, bandLines, breathe, cutLine, draw, engine, evened, exclusive, grey, inked, lightLetters, page, rest, tooSmall, type TextLine } from './vinReader';
 
 /*
@@ -9,6 +10,9 @@ import { banded, bandLines, breathe, cutLine, draw, engine, evened, exclusive, g
  * levelled, its neighbours painted out, evened against glare and read two ways; a line read the same twice is the plate
  * (domain/uaePlate.ts votes). The emirate's word, small beside the number, is read from the plate's surroundings once
  * the number is found. Nothing sure — the whole photo is read as sparse text, then the other engine has a look.
+ * v0.32: first of all, the plate by its characters (services/plateGlyphRead.ts — the number as the row of the largest even
+ * marks, read for digits only; the code beside it for letters only; the emirate's small word); the lines' way is for
+ * what that way left unsure.
  */
 
 export interface PlateFound {
@@ -141,6 +145,17 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
       const p = pickPlate(votes);
       return !!p && p.sure && p.agree >= 2;
     };
+    // By its characters (v0.32): each of its readings a vote — a number read the same twice is two; its code, read alone
+    // for letters, outweighs a code guessed out of a line of text.
+    const glyphs = await readByGlyphs(look, src, plateTrace.on ? trace : undefined);
+    trace('glyphs', glyphs && { number: glyphs.number, sure: glyphs.sure, code: glyphs.code, codeSure: glyphs.codeSure, emirate: glyphs.emirate });
+    if (glyphs) {
+      const b = glyphs.numberBox;
+      const line: TextLine = { cx: (b.x0 + b.x1 + 1) / 2, cy: (b.y0 + b.y1 + 1) / 2, w: b.x1 - b.x0 + 1, h: glyphs.row.h, angle: glyphs.row.angle, score: glyphs.row.score };
+      const guess = { emirate: glyphs.emirate, code: glyphs.code, number: glyphs.number, score: 3 + (glyphs.code ? 4 : 0) };
+      votes.push({ guesses: [guess], confidence: glyphs.sure ? 90 : 60, emirate: glyphs.emirate, line });
+      if (glyphs.sure) votes.push({ guesses: [glyphs.codeSure ? guess : { ...guess, code: '' }], confidence: 90, emirate: glyphs.emirate, line });
+    }
     let w = await engine();
 
     // A line read as found — and, found tilted, also level: a plate's small words beside its number (ABU DHABI) can
@@ -164,10 +179,11 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
       }
     };
 
-    for (const l of lines) {
-      await readLine(l, ['evened', 'inked']);
-      if (settled()) break;
-    }
+    if (!settled())
+      for (const l of lines) {
+        await readLine(l, ['evened', 'inked']);
+        if (settled()) break;
+      }
     // Nothing sure from the lines: the whole photo as sparse text (the plate may be a line the outlines missed).
     if (!pickPlate(votes)?.sure) {
       await breathe();

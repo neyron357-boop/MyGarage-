@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
 import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
-import { itemAmounts, itemTitle, lineName } from '../../domain/items';
+import { itemAmounts, itemCostPaid, itemTitle, lineName } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '../../domain/types';
@@ -14,7 +14,7 @@ import { syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
-import { FormRow, MoneyInput, RowGroup } from '../../ui/components';
+import { FormRow, Money, MoneyInput, RowGroup } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang } from '../../ui/hooks';
 import { PhotoStrip } from '../../ui/PhotoStrip';
@@ -275,6 +275,24 @@ export function LineSheet({
         ? t('item.vatTotalNone', { total: formatAed(lineTotal.gross, uiLang) })
         : t('item.vatTotal', { total: formatAed(lineTotal.gross, uiLang), vat: formatAed(lineTotal.vat, uiLang, false) })
       : undefined;
+  const out = lineKind === 'labor' && !!outsource;
+  // The line's money at a glance (v0.32): what the customer pays, the VAT in it; a part — what it costs us with VAT and
+  // what stays; work outside — what we pay them and what stays.
+  const sum = (() => {
+    if (!lineTotal || own) return undefined;
+    const vatNote = mode === 'none' ? t('qi.sumNoVat') : t('qi.sumVat', { vat: formatAed(lineTotal.vat, uiLang, false) });
+    const cells: { key: string; label: string; fils: number; note?: string; tone?: 'good' | 'bad' }[] = [{ key: 'total', label: t('qi.sumClient'), fils: lineTotal.gross, note: vatNote }];
+    if (kind === 'part' && cost !== undefined) {
+      const same = !!item && cost === item.costPriceFils && (qty || 1) === item.qty;
+      const paid = itemCostPaid({ kind: 'part', costPriceFils: cost, qty: qty || 1, vatRateBp: priced.vatRateBp, purchaseVatFils: same ? item?.purchaseVatFils : undefined });
+      cells.push({ key: 'cost', label: t('qi.sumCost'), fils: paid });
+      cells.push({ key: 'margin', label: t('qi.sumMargin'), fils: lineTotal.gross - paid, tone: lineTotal.gross >= paid ? 'good' : 'bad' });
+    } else if (out && cost !== undefined) {
+      cells.push({ key: 'cost', label: t('outsource.cost'), fils: cost });
+      cells.push({ key: 'margin', label: t('qi.sumLeft'), fils: lineTotal.gross - cost, tone: lineTotal.gross >= cost ? 'good' : 'bad' });
+    }
+    return { cells, label: totalNote };
+  })();
   const nameLabel = service ? t('qi.serviceName') : kind === 'labor' ? t('qi.workName') : t('qi.partName');
   /** An offer taken: its seller and cost on the line, the price from the cost with the garage's markup. */
   const takeOffer = (o: PartOffer) => {
@@ -300,7 +318,6 @@ export function LineSheet({
       orderId: b.order.id,
       photos: kept,
     });
-  const out = lineKind === 'labor' && !!outsource;
   return (
     <Modal opened={opened} onClose={onClose} title={item ? t(service ? 'job.addService' : kind === 'labor' ? 'job.addWork' : 'job.addPart') : service ? t('qi.addService') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
@@ -385,7 +402,7 @@ export function LineSheet({
 
         {/* How much: rows as in the iPhone's settings — the label on the left, the value on the right. */}
         {!own && (
-          <RowGroup mt={0} note={totalNote}>
+          <RowGroup mt={0}>
             {kind === 'part' && (
               <FormRow label={t('qi.qty')}>
                 <QtyStepper value={qty} onChange={setQty} label={t('qi.qty')} />
@@ -416,6 +433,19 @@ export function LineSheet({
               />
             </FormRow>
           </RowGroup>
+        )}
+        {sum && lineTotal && lineTotal.gross !== 0 && (
+          <div className="line-sum" role="group" aria-label={sum.label} data-cells={sum.cells.length}>
+            {sum.cells.map((c) => (
+              <div key={c.key} className="line-sum-cell" data-sum={c.key} data-tone={c.tone}>
+                <span className="line-sum-label">{c.label}</span>
+                <span className="line-sum-value">
+                  <Money fils={c.fils} signed={c.key === 'margin'} roll />
+                </span>
+                {c.note && <span className="line-sum-note">{c.note}</span>}
+              </div>
+            ))}
+          </div>
         )}
 
         {kind === 'part' && !own && (

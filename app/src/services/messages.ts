@@ -13,6 +13,21 @@ export function whatsappUrl(phone: string, text: string): string {
   return `https://wa.me/${phoneDigits(normalizePhone(phone) ?? phone)}?text=${encodeURIComponent(text)}`;
 }
 
+/** The chat in the WhatsApp app itself (its own link, not the web page that sends on to it). */
+export function whatsappAppUrl(phone: string, text: string): string {
+  return `whatsapp://send?phone=${phoneDigits(normalizePhone(phone) ?? phone)}&text=${encodeURIComponent(text)}`;
+}
+
+/**
+ * A chat opened by a gesture that is no tap — a card swiped right (v0.32). The iPhone lets a page open a window only
+ * in a tap, never where a swipe ends: on a phone the WhatsApp app is opened by its own link instead (a step of the page,
+ * which needs no tap); on a PC — the web page, in a window, as before.
+ */
+export function openWhatsApp(phone: string, text = ''): void {
+  if (window.matchMedia?.('(pointer: coarse)').matches) window.location.href = whatsappAppUrl(phone, text);
+  else window.open(whatsappUrl(phone, text), '_blank', 'noopener');
+}
+
 export function telegramUrl(text: string): string {
   return `https://t.me/share/url?url=${encodeURIComponent(' ')}&text=${encodeURIComponent(text)}`;
 }

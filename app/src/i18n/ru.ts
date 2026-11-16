@@ -868,6 +868,12 @@ export const ru = {
     closedUnpaid: 'Заказ закрыт без оплаты',
   },
   qi: {
+    sumClient: 'Клиенту',
+    sumVat: 'в т. ч. VAT {{vat}}',
+    sumNoVat: 'без VAT',
+    sumCost: 'Закупка с VAT',
+    sumMargin: 'Наценка',
+    sumLeft: 'Остаётся',
     partNo: 'Номер',
     work: 'Работы',
     parts: 'Запчасти',
@@ -1509,6 +1515,8 @@ export const ru = {
     removedN: 'Удалено заметок: {{n}}',
     gone: 'Заметка удалена',
     video: 'Видео',
+    soundOn: 'Включить звук',
+    soundOff: 'Выключить звук',
   },
   offer: {
     oem: 'Оригинал',
@@ -1543,7 +1551,7 @@ export const ru = {
   },
   suppliers: {
     all: 'Все поставщики',
-    allN: 'Все · {{n}}',
+    find: 'Найти',
     pick: 'Поставщик',
     pickContractor: 'Кто делает',
     search: 'Имя, марка, что продают',

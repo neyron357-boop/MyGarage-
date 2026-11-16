@@ -870,6 +870,12 @@ export const en: typeof ru = {
     closedUnpaid: 'Closed without payment',
   },
   qi: {
+    sumClient: 'Customer pays',
+    sumVat: 'incl. VAT {{vat}}',
+    sumNoVat: 'no VAT',
+    sumCost: 'Cost with VAT',
+    sumMargin: 'Margin',
+    sumLeft: 'Left',
     partNo: 'Part no.',
     work: 'Labour',
     parts: 'Parts',
@@ -1511,6 +1517,8 @@ export const en: typeof ru = {
     removedN: 'Notes deleted: {{n}}',
     gone: 'Note deleted',
     video: 'Video',
+    soundOn: 'Sound on',
+    soundOff: 'Sound off',
   },
   offer: {
     oem: 'Original',
@@ -1545,7 +1553,7 @@ export const en: typeof ru = {
   },
   suppliers: {
     all: 'All suppliers',
-    allN: 'All · {{n}}',
+    find: 'Find',
     pick: 'Supplier',
     pickContractor: 'Who does it',
     search: 'Name, make, what they sell',

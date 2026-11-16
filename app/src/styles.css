@@ -1400,91 +1400,133 @@ html.kb .tab-bar-wrap {
 .money-card {
   position: relative;
   overflow: hidden;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
   border-radius: var(--radius-group);
   color: #fff;
-  background: linear-gradient(140deg, var(--mc-a) 0%, var(--mc-b) 100%);
-  box-shadow: 0 16px 30px -20px var(--mc-b), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  background: linear-gradient(150deg, var(--mc-a) 0%, var(--mc-b) 100%);
+  box-shadow: 0 18px 32px -22px var(--mc-b), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .money-card[data-purse='cash'] {
-  --mc-a: var(--mantine-color-green-7);
+  --mc-a: var(--mantine-color-green-6);
   --mc-b: var(--mantine-color-green-9);
 }
-/* The shine stays out past the corner: the month's figures sit there now. */
+/* A soft light from the top right, as on a card held to the light. */
 .money-card::after {
   content: '';
   position: absolute;
-  top: -100px;
-  right: -90px;
-  width: 170px;
-  height: 170px;
+  top: -120px;
+  right: -80px;
+  width: 260px;
+  height: 260px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 70%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 68%);
   pointer-events: none;
 }
 .money-card-main {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 6px;
   min-width: 0;
-  padding: 16px;
-  border-radius: var(--radius-group);
+  margin: -6px;
+  padding: 6px;
+  border-radius: 16px;
   color: inherit;
   text-align: start;
 }
 .money-card-main:focus-visible {
   outline-offset: -3px;
 }
-.money-card-month {
-  position: relative;
-  z-index: 1;
+.money-card-head {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 16px 16px 16px 0;
-}
-.money-card-purse {
-  display: grid;
-  grid-template-columns: 18px auto;
-  column-gap: 6px;
-  justify-items: end;
-  font-size: 15px;
-  line-height: 1.3;
-}
-.money-card-purse > svg {
-  grid-row: span 2;
-  justify-self: start;
-  margin-top: 2px;
-  opacity: 0.8;
-}
-.money-card-purse .money {
-  white-space: nowrap;
-}
-.money-card-purse [data-zero] {
-  opacity: 0.6;
-}
-.money-card .money .cur {
-  color: rgba(255, 255, 255, 0.78);
 }
 .money-card-label {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
-  opacity: 0.95;
 }
-.money-card-foot {
+/* Where the cash started: a small pill (the card is the button that opens it). */
+.money-card-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.money-card-balance {
+  font-size: 36px;
+  line-height: 1.05;
+}
+.money-card .money .frac {
+  opacity: 0.85;
+}
+.money-card .money .cur {
+  color: rgba(255, 255, 255, 0.78);
+}
+/* The month: a tile per purse, its name over money in and money out. */
+.money-card-month {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+}
+.money-card-purse {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.money-card-purse-name {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-bottom: 4px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  opacity: 0.82;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.money-card-purse-name > svg {
+  flex-shrink: 0;
+}
+.money-card-in,
+.money-card-out {
+  font-size: 15px;
+  line-height: 1.3;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.money-card-out {
+  font-size: 14px;
   opacity: 0.8;
+}
+.money-card-purse .money .cur {
+  display: none;
+}
+.money-card-purse [data-zero] {
+  opacity: 0.5;
 }
 /* The accent's swatches (Appearance): round, the chosen one ringed with a gap, like the iPhone's pickers. */
 .accent-swatches {
@@ -3258,6 +3300,81 @@ html.kb .tab-bar-wrap {
 .chip[data-active='true'] > svg:first-child {
   color: inherit;
 }
+/* A line's money at a glance (v0.32): two or three figures side by side, each named over it — what stays in green. */
+.line-sum {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 1px;
+  margin-top: -10px;
+  overflow: hidden;
+  border-radius: var(--radius-group);
+  background: var(--app-hairline);
+}
+.line-sum-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--app-card);
+}
+.line-sum-label {
+  font-size: 13px;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.line-sum-value {
+  font-size: 19px;
+  font-weight: 700;
+  font-family: var(--font-rounded);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.line-sum-value .money .cur {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+  margin-left: 3px;
+}
+.line-sum-cell[data-tone='good'] .line-sum-value {
+  color: var(--mantine-color-green-7);
+}
+.line-sum-cell[data-tone='bad'] .line-sum-value {
+  color: var(--mantine-color-red-7);
+}
+.line-sum-note {
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A supplier's chips (v0.32): the search first, in the accent; a name cut to a chip's width (the whole on a hold). */
+.chip.chip-find {
+  background: var(--mantine-color-cobalt-light);
+  color: var(--mantine-color-cobalt-6);
+  font-weight: 600;
+}
+.chip.chip-find > svg:first-child {
+  color: inherit;
+}
+.chip.chip-supplier {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(220px, 62vw);
+}
+.chip.chip-supplier > svg:first-child {
+  flex-shrink: 0;
+  margin: 0 5px 0 -3px;
+}
+.chip-supplier .chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* Room for a job's step pill while it is read (search, visits). */
 .phase-pill-space {
   display: inline-block;
@@ -4740,10 +4857,211 @@ html.kb .screen-bottom > .sticky-bar {
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
-/* A video's own controls are at its bottom: the time goes up. */
-.note-media[data-kind='video'] .note-time {
-  top: 8px;
-  bottom: auto;
+/* A video note (v0.32): its first frame, ▶ in the middle on dark glass, how long in the bottom-left corner. */
+.note-video {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: #000;
+  cursor: pointer;
+}
+.note-video video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.note-video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding-left: 3px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  transition: transform 340ms var(--spring);
+}
+.note-video:active .note-video-play {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+.note-video-len {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* The player (ui/VideoPlayer.tsx): the video on black, the bars over it, fading away while it plays. */
+.vp {
+  --pull: 0px;
+  position: fixed;
+  inset: 0;
+  z-index: 410;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  color: #fff;
+  background: rgba(0, 0, 0, calc(1 - min(var(--pull), 300px) / 600px));
+  -webkit-user-select: none;
+  user-select: none;
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+.vp button {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.vp-top,
+.vp-bottom {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  transition: opacity var(--dur-2) ease;
+}
+.vp-top {
+  justify-content: space-between;
+  min-height: 60px;
+}
+.vp-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vp-bottom {
+  padding: 10px 14px 18px;
+}
+.vp[data-chrome='false'] .vp-top,
+.vp[data-chrome='false'] .vp-bottom,
+.vp[data-chrome='false'] .vp-big {
+  opacity: 0;
+  pointer-events: none;
+}
+.vp-stage {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  transform: translateY(var(--pull));
+}
+.vp[data-pulling] .vp-stage {
+  transition: none;
+}
+.vp:not([data-pulling]) .vp-stage {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.vp-video {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.vp-big {
+  grid-area: 1 / 1;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16) inset;
+  cursor: pointer;
+  transition: opacity var(--dur-2) ease, transform 340ms var(--spring);
+}
+.vp-big:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+/* Playing, the big button leaves the picture clear (the bars' own ▶ stays). */
+.vp[data-playing] .vp-big {
+  opacity: 0;
+  pointer-events: none;
+}
+.vp-time {
+  flex-shrink: 0;
+  min-width: 34px;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.vp-bar {
+  position: relative;
+  flex: 1;
+  height: 32px;
+  cursor: pointer;
+  touch-action: none;
+}
+.vp-track,
+.vp-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+}
+.vp-track {
+  background: rgba(255, 255, 255, 0.28);
+}
+.vp-fill {
+  background: #fff;
+  transform-origin: left center;
+  transform: scaleX(var(--p, 0));
+}
+.vp-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transform: translateX(calc(var(--p, 0) * (100cqw)));
+}
+.vp-bar {
+  container-type: inline-size;
+}
+.vp[data-scrubbing] .vp-thumb {
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
 }
 /* A voice message, as in WhatsApp: play · the bars of the recording with the dot at the place · the speed while
    it is the one playing (a microphone otherwise); under the bars how long (how far), the time in the corner.
