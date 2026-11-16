@@ -3,19 +3,20 @@ import { formatAed, parseAed, roundFils } from './money';
 import { enteredFromNet, enteredPrice, fromGross, fromNet, lineAmounts, netFromEntered, netFromGross, priceFromEntered, rateFor, switchVatMode, vatModeOf, vatOf } from './vat';
 import { formatPlate, plateMatches, plateSearchKey } from './plates';
 import { formatPhone, normalizePhone, phoneDigits } from './phone';
-import { dayHeading, dubaiDate, formatDate, formatDateTime } from './dates';
+import { dayHeading, dayShort, dubaiDate, formatDate, formatDateTime } from './dates';
 import {
   canMarkDone,
   decisionPatch,
   isAwaitingClient,
   isAwaitingDisassembly,
   itemAmounts,
+  itemCostPaid,
   noCallLimitRemaining,
   resolveBlockB,
   summarize,
 } from './items';
 import { canCloseUnpaid, checkTransition, isBackward, type StageContext } from './stages';
-import { flowStage, jobPhase, nothingToBill, stepToward, type FlowFacts } from './flow';
+import { flowStage, jobPhase, leftBoardAt, nothingToBill, stepToward, type FlowFacts } from './flow';
 import { activeInvoice, amountDue, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals } from './invoice';
 import { apportion, discountPctLabel, discountPrice, splitDiscount, spreadDiscount } from './discount';
 import { expectedCash, nonCashTotals } from './cash';
@@ -169,9 +170,23 @@ describe('dates (Dubai time)', () => {
     expect(dayHeading('2026-10-02', 'ru', now).text).toBe('2 октября');
     expect(dayHeading('2025-12-30', 'ru', now).text).toBe('30/12/2025');
   });
+  it('a day on a row (the archive): words for today and yesterday, the year only when it is another', () => {
+    const now = '2026-11-14T08:00:00.000Z';
+    expect(dayShort('2026-11-13T21:00:00.000Z', now)).toEqual({ word: 'today', text: '' }); // 01:00 in Dubai
+    expect(dayShort('2026-11-13T19:00:00.000Z', now)).toEqual({ word: 'yesterday', text: '' });
+    expect(dayShort('2026-11-02T10:00:00.000Z', now)).toEqual({ text: '02/11' });
+    expect(dayShort('2025-12-30T10:00:00.000Z', now)).toEqual({ text: '30/12/2025' });
+  });
 });
 
 describe('items and approvals', () => {
+  it('a line costs as paid: price × qty plus the seller’s VAT when entered, none assumed', () => {
+    expect(itemCostPaid({ costPriceFils: 6000, qty: 2, purchaseVatFils: 600 })).toBe(12600);
+    expect(itemCostPaid({ costPriceFils: 35000, qty: 1 })).toBe(35000);
+    expect(itemCostPaid({ costPriceFils: 1233, qty: 4.5, purchaseVatFils: 277 })).toBe(5549 + 277);
+    expect(itemCostPaid({ qty: 1 })).toBe(0);
+  });
+
   it('summarizes blocks A/B/C into fixed / max / recommended', () => {
     const items = [
       item({ block: 'A', unitPriceFils: 40000, approvalState: 'pending' }),
@@ -486,7 +501,7 @@ describe('cash', () => {
 });
 
 describe('reports', () => {
-  it('computes revenue, costs, VAT and profit for a period', () => {
+  it('computes revenue, costs and profit for a period, every sum with VAT', () => {
     const inv: Invoice = {
       id: 'inv1',
       number: 'INV-1',
@@ -544,14 +559,15 @@ describe('reports', () => {
     });
     expect(r.ordersReceived).toBe(1);
     expect(r.ordersDelivered).toBe(1);
-    expect(r.revenueNet).toBe(30000);
-    expect(r.laborNet).toBe(20000);
-    expect(r.partsNet).toBe(10000);
-    expect(r.partsCostNet).toBe(6000);
-    expect(r.expensesNet).toBe(10000);
-    expect(r.grossProfit).toBe(30000 - 6000 - 10000);
-    expect(r.vatOutput).toBe(1500);
-    expect(r.vatInput).toBe(300 + 500);
+    expect(r.revenueGross).toBe(31500);
+    expect(r.laborGross).toBe(21000);
+    expect(r.partsGross).toBe(10500);
+    expect(r.laborGross + r.partsGross + r.otherGross).toBe(r.revenueGross);
+    // The part as bought (with the seller's VAT), the rent as on its receipt.
+    expect(r.partsCostGross).toBe(6000 + 300);
+    expect(r.expensesGross).toBe(10500);
+    expect(r.expensesByCategory).toEqual([{ categoryId: 'rent', gross: 10500 }]);
+    expect(r.grossProfit).toBe(31500 - 6300 - 10500);
     expect(r.payments.card).toBe(31500);
     expect(r.cashDiffFils).toBe(-500);
     expect(r.averageTicketGross).toBe(31500);
@@ -586,5 +602,17 @@ describe('daylight in Dubai (the Auto theme)', () => {
     expect(isDaytime(new Date('2026-12-21T14:00:00Z'))).toBe(false);
     expect(isDaytime(new Date('2026-11-11T22:00:00Z'))).toBe(false); // 02:00 at night
     expect(isDaytime(new Date('2026-11-11T08:00:00Z'))).toBe(true); // noon
+  });
+});
+
+describe('the archive', () => {
+  it('dates a job by the day it left the board', () => {
+    const o = { stageChangedAt: '2026-11-10T10:00:00.000Z', archivedAt: '2026-11-08T10:00:00.000Z' };
+    // Handed over on credit on the 5th, paid and closed on the 10th: the day it left.
+    expect(leftBoardAt({ ...o, stage: 'closed', deliveredAt: '2026-11-05T10:00:00.000Z', closedAt: '2026-11-10T10:00:00.000Z' })).toBe('2026-11-05T10:00:00.000Z');
+    expect(leftBoardAt({ ...o, stage: 'closed', closedAt: '2026-11-09T10:00:00.000Z' })).toBe('2026-11-09T10:00:00.000Z');
+    expect(leftBoardAt({ ...o, stage: 'cancelled' })).toBe(o.stageChangedAt);
+    // Still open, taken off by hand.
+    expect(leftBoardAt({ ...o, stage: 'in_progress' })).toBe(o.archivedAt);
   });
 });

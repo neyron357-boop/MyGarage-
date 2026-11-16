@@ -7,6 +7,7 @@ import {
   IconChartBar,
   IconInfoCircle,
   IconLayoutKanban,
+  IconNotes,
   IconPackage,
   IconPlus,
   IconSearch,
@@ -26,6 +27,7 @@ import { VehiclePage } from './features/customers/VehiclePage';
 import { MoneyPage } from './features/money/MoneyPage';
 import { JobPage } from './features/job/JobPage';
 import { MorePage } from './features/more/MorePage';
+import { GarageNotesPage } from './features/more/GarageNotes';
 import { NewOrderPage } from './features/orders/NewOrderPage';
 import { PartsPage } from './features/parts/PartsPage';
 import { ReportsPage } from './features/reports/ReportsPage';
@@ -68,6 +70,7 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/reports" element={<ReportsPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/more" element={<MorePage />} />
+      <Route path="/notes" element={<GarageNotesPage />} />
       <Route path="*" element={<BoardPage />} />
     </Routes>
   );
@@ -121,6 +124,7 @@ const NAV_GROUPS = [
       { to: '/customers', icon: IconUsers, key: 'nav.customers' },
       { to: '/parts', icon: IconPackage, key: 'nav.parts' },
       { to: '/parts?tab=suppliers', icon: IconTruck, key: 'nav.suppliers' },
+      { to: '/notes', icon: IconNotes, key: 'notes.title' },
     ],
   },
   {

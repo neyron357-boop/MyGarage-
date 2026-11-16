@@ -43,7 +43,7 @@ describe('document helpers', () => {
 });
 
 describe('documents', () => {
-  it('render the tax invoice, quotation, receipt and check-in report', async () => {
+  it('render the tax invoice, quotation, receipt, check-in report and the owner’s report', async () => {
     const dbm = await import('../db/db');
     const { ensureSeed } = await import('../services/seed');
     const { createCustomer, createVehicle } = await import('../services/customers');
@@ -78,5 +78,12 @@ describe('documents', () => {
     await pdfOk(await docs.renderInvoice(inv.id));
     await pdfOk(await docs.renderReceipt((await dbm.db.payments.toArray())[0].id));
     await pdfOk(await docs.renderInspection((await getOrCreateInspection(o.id, 'intake')).id));
+    // The owner's report: every sum with VAT, the parts of the revenue add up to it.
+    const { computeReport } = await import('../domain/reports');
+    const all = { orders: await dbm.db.orders.toArray(), invoices: await dbm.db.invoices.toArray(), items: await dbm.db.items.toArray(), payments: await dbm.db.payments.toArray() };
+    const r = computeReport({ from: '2000-01-01', to: '2100-01-01', ...all, expenses: [], closings: [], incomes: [] });
+    expect(r.revenueGross).toBe(first.totalFils - credit.totalFils + inv.totalFils);
+    expect(r.laborGross + r.partsGross + r.otherGross).toBe(r.revenueGross);
+    await pdfOk(await docs.renderReport(r, '2026-11-01', '2026-11-30', 'en', await dbm.db.expenseCategories.toArray()));
   }, 60_000);
 });

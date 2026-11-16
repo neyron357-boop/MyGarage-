@@ -37,6 +37,14 @@ export function itemAmounts(item: OrderItem): Amounts {
   return fromNet(signed(roundFils(item.qty * item.unitPriceFils)), item.vatRateBp);
 }
 
+/**
+ * What a line cost the garage, as paid: the purchase price × qty plus the seller's VAT when it was
+ * entered. The seller's rate is not kept, so no VAT is assumed (used parts are often bought without it).
+ */
+export function itemCostPaid(item: Pick<OrderItem, 'costPriceFils' | 'purchaseVatFils' | 'qty'>): number {
+  return roundFils((item.costPriceFils ?? 0) * item.qty) + (item.purchaseVatFils ?? 0);
+}
+
 /** Net line amount. */
 export function itemNet(item: OrderItem): number {
   return itemAmounts(item).net;

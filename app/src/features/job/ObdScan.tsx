@@ -7,11 +7,12 @@ import { formatDateTime } from '../../domain/dates';
 import type { ObdScan, Vehicle } from '../../domain/types';
 import { openPdf } from '../../services/documents';
 import { mediaBlob } from '../../services/media';
-import { importObdReport } from '../../services/obd';
+import { importObdReport, removeObdScan, restoreObdScan } from '../../services/obd';
 import { pdfTextItems } from '../../services/pdfText';
-import { List, ListRow } from '../../ui/components';
+import { List, ListRow, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction } from '../../ui/hooks';
+import { SheetFor } from '../../ui/lazy';
 
 /** The colour of a code's state: on now — red, came and went — orange, stored only — grey. */
 export const obdColor = (state: string) => (/current|active|confirmed|permanent/i.test(state) ? 'red' : /pending|passed and failed|intermittent/i.test(state) ? 'orange' : 'gray');
@@ -53,36 +54,51 @@ export function useObdImport(orderId: string): { input: ReactNode; pick: () => v
   return { input, pick: () => ref.current?.click() };
 }
 
-/** The latest scan on the job card: its codes as small coloured pills; a tap shows them in full. */
-export function ObdLine({ scans }: { scans: ObdScan[] }) {
+/**
+ * The latest scan on the job card: its codes as small coloured pills; a tap shows them in full, and on a
+ * job still open the sheet can delete the report («Отменить» right after). Rendered with no scan too: the
+ * sheet of a scan just deleted still slides out.
+ */
+export function ObdLine({ orderId, scans, open }: { orderId: string; scans: ObdScan[]; open: boolean }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const { run } = useAction();
+  const [shown, setShown] = useState<ObdScan | null>(null);
   const scan = scans[scans.length - 1];
+  const remove = (s: ObdScan) => {
+    setShown(null);
+    void run(async () => {
+      const removed = await removeObdScan(orderId, s.id);
+      haptic('light');
+      undoToast(t('obd.removed'), t('common.undo'), () => void restoreObdScan(removed));
+    });
+  };
   return (
     <>
-      <UnstyledButton className="job-line job-obd" mt="sm" onClick={() => setOpen(true)} aria-label={t('obd.title')}>
-        <IconEngine size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 3 }} aria-hidden />
-        <Group gap={6}>
-          {scan.codes.length ? (
-            scan.codes.map((c) => (
-              <Badge key={c.full} color={obdColor(c.state)} variant="light" radius="sm" size="md" style={{ textTransform: 'none' }}>
-                {c.code}
-              </Badge>
-            ))
-          ) : (
-            <Text size="sm" c="green.7">
-              {t('obd.noCodes')}
-            </Text>
-          )}
-        </Group>
-      </UnstyledButton>
-      <ObdSheet scan={scan} opened={open} onClose={() => setOpen(false)} />
+      {scan && (
+        <UnstyledButton className="job-line job-obd" mt="sm" onClick={() => setShown(scan)} aria-label={t('obd.title')}>
+          <IconEngine size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 3 }} aria-hidden />
+          <Group gap={6}>
+            {scan.codes.length ? (
+              scan.codes.map((c) => (
+                <Badge key={c.full} color={obdColor(c.state)} variant="light" radius="sm" size="md" style={{ textTransform: 'none' }}>
+                  {c.code}
+                </Badge>
+              ))
+            ) : (
+              <Text size="sm" c="green.7">
+                {t('obd.noCodes')}
+              </Text>
+            )}
+          </Group>
+        </UnstyledButton>
+      )}
+      <SheetFor value={shown}>{(s, o) => <ObdSheet scan={s} opened={o} onClose={() => setShown(null)} onDelete={open ? () => remove(s) : undefined} />}</SheetFor>
     </>
   );
 }
 
-/** A scan in full: every code with what it means, its state and module; the odometer; the PDF. */
-function ObdSheet({ scan, opened, onClose }: { scan: ObdScan; opened: boolean; onClose: () => void }) {
+/** A scan in full: every code with what it means, its state and module; the odometer; the PDF; «Удалить». */
+function ObdSheet({ scan, opened, onClose, onDelete }: { scan: ObdScan; opened: boolean; onClose: () => void; onDelete?: () => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [pdf, setPdf] = useState<Blob>();
@@ -123,6 +139,11 @@ function ObdSheet({ scan, opened, onClose }: { scan: ObdScan; opened: boolean; o
         {scan.mediaId && (
           <Button variant="light" leftSection={<IconFileTypePdf size={18} />} loading={busy || !pdf} onClick={() => pdf && void run(() => openPdf({ blob: pdf, filename: 'OBD report.pdf' }))}>
             PDF
+          </Button>
+        )}
+        {onDelete && (
+          <Button variant="subtle" color="red" onClick={onDelete}>
+            {t('common.delete')}
           </Button>
         )}
       </Stack>

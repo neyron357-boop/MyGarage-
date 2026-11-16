@@ -6,7 +6,8 @@ import type { Customer, EstimateVersion, Order, SnapshotItem, Vehicle } from '..
 import { addItem } from './estimate';
 import { approveAll } from './flow';
 import { mechanicText, optionsText, partRequestText, reportText, simpleMessage, tidy, versionMessage } from './messages';
-import { addNote, removeNote, restoreNote } from './notes';
+import { addNote, garageNoteCount, garageNotes, GARAGE_NOTES, removeNote, restoreNote } from './notes';
+import { exportBackup, importBackup } from './backup';
 import { checkIn, deleteJob, loadOrderBundle, restoreJob, updateOrder } from './orders';
 import { importSuppliers, payOutsource, setOutsource, setProcurement, setReceivedQty, setReturnTerms } from './parts';
 import { ensureSeed } from './seed';
@@ -44,6 +45,32 @@ describe('job notes', () => {
     await restoreJob(gone);
     b = (await loadOrderBundle(o.id))!;
     expect(b.notes).toHaveLength(2);
+  });
+
+  it('the workshop’s own notes: no job, never a job’s, kept through a deleted job and a backup', async () => {
+    const o = await job();
+    const stamps = async () => (await db.orders.toArray()).map((x) => [x.id, x.updatedAt]);
+    const before = await stamps();
+    const g1 = await addNote(GARAGE_NOTES, { text: 'Buy printer paper' });
+    const g2 = await addNote(GARAGE_NOTES, { photo: new Blob(['p'], { type: 'image/jpeg' }), replyTo: g1.id });
+    // A workshop note moves no job up the board: no order is touched.
+    expect(await stamps()).toEqual(before);
+    // A job's own note does (so the check above can fail).
+    await addNote(o.id, { text: 'Pads 2 mm' });
+    expect(await stamps()).not.toEqual(before);
+    expect((await garageNotes()).map((n) => n.id)).toEqual([g1.id, g2.id]);
+    expect(await garageNoteCount()).toBe(2);
+    expect((await loadOrderBundle(o.id))!.notes.map((n) => n.text)).toEqual(['Pads 2 mm']);
+    await deleteJob(o.id);
+    expect(await garageNoteCount()).toBe(2);
+    const file = await exportBackup();
+    await db.notes.clear();
+    await importBackup(file);
+    // The restore puts a fresh database in place: open it again, as the app does after its reload.
+    setDb(new GarageDB(db.name));
+    await db.open();
+    expect((await garageNotes()).map((n) => [n.text, n.replyTo])).toEqual([['Buy printer paper', undefined], [undefined, g1.id]]);
+    expect((await db.media.get(g2.mediaId!))?.ownerId).toBe(g2.id);
   });
 
   it('a video from the phone is a note of its own ("+" in the notes chat)', async () => {
@@ -121,7 +148,7 @@ describe('paid to the owner (the manager took no money)', () => {
     const { bundleAmountDue } = await import('./orders');
     expect(bundleAmountDue(b)).toBe(0);
     // The garage's revenue all the same (let go — it would be cut).
-    expect(jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: [] }).revenue).toBe(doc.subtotalFils);
+    expect(jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: [] }).revenue).toBe(doc.totalFils);
     expect(jobProfit({ order: { waived: { at: '', fils: doc.totalFils } }, items: b.items, invoices: b.invoices, expenses: [] }).revenue).toBe(0);
   });
 });

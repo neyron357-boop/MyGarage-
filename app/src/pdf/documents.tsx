@@ -527,19 +527,17 @@ export async function renderReport(r: Report, from: string, to: string, lang: La
         <Header settings={settings} title={t('report.title')} ar={AR_TITLE.report} sub={`${formatDate(from)} – ${formatDate(to)}`} />
         {row(t('report.received'), String(r.ordersReceived))}
         {row(t('report.delivered'), String(r.ordersDelivered))}
+        {/* Every sum with VAT, as on the screen (v0.22); the parts of the revenue indented by no-break spaces
+            (a plain space at the start of a block is eaten by the engine). */}
         {row(t('report.revenueGross'), a(r.revenueGross), true)}
-        {row(t('report.revenueNet'), a(r.revenueNet))}
-        {row(`  ${t('item.kind.labor')}`, a(r.laborNet))}
-        {row(`  ${t('item.kind.part')}`, a(r.partsNet))}
-        {row(`  ${t('report.other')}`, a(r.otherNet))}
-        {row(t('report.partsCost'), a(r.partsCostNet))}
+        {row(`\u00a0\u00a0\u00a0${t('item.kind.labor')}`, a(r.laborGross))}
+        {row(`\u00a0\u00a0\u00a0${t('item.kind.part')}`, a(r.partsGross))}
+        {row(`\u00a0\u00a0\u00a0${t('report.other')}`, a(r.otherGross))}
         {r.otherIncome > 0 && row(t('report.otherIncome'), a(r.otherIncome))}
-        {row(t('report.expensesNet'), a(r.expensesNet))}
+        {row(t('report.partsCost'), a(r.partsCostGross))}
+        {row(t('report.expenses'), a(r.expensesGross))}
         {row(t('report.grossProfit'), a(r.grossProfit), true)}
         {row(t('report.avgTicket'), a(r.averageTicketGross))}
-        {row(t('report.vatOutput'), a(r.vatOutput))}
-        {row(t('report.vatInput'), a(r.vatInput))}
-        {row(t('report.vatPayable'), a(r.vatOutput - r.vatInput), true)}
         {row(t('payment.method.cash'), a(r.payments.cash))}
         {row(t('payment.method.card'), a(r.payments.card))}
         {row(t('payment.method.transfer'), a(r.payments.transfer))}

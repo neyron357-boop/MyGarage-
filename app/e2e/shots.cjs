@@ -91,7 +91,23 @@ async function launchBrowser() {
     await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /Долги|Debts/ }).click();
     await settle(600);
     await shot(`${prefix}-01c-board-debts`);
+    // v0.22: the archive — small rows with their date.
+    await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /Архив|Archive/ }).click();
+    await settle(700);
+    await shot(`${prefix}-01d-board-archive`);
     await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /^(Все|All)/ }).click();
+    // v0.22: «Вид» — the sheet, and the board in «Компактно» (then back to large cards for the rest of the tour).
+    await page.locator('.screen[data-role="top"]').getByRole('button', { name: /^(Вид|View)$/ }).click();
+    await settle(700);
+    await shot(`${prefix}-01e-board-view`);
+    await page.getByRole('dialog').locator('.mantine-SegmentedControl-label', { hasText: /Компактно|Compact/ }).click();
+    await page.locator('.mantine-Modal-close').first().click();
+    await settle(600);
+    await shot(`${prefix}-01f-board-compact`);
+    // (A hash of the same page is no reload: the view in memory would stay.)
+    await page.evaluate(() => localStorage.removeItem('mygarage.board'));
+    await page.reload();
+    await settle(900);
     // A job with lines (not an appointment): its screen, its sheets.
     await page.locator('.screen[data-role="top"] .job-row').filter({ hasText: /Цена|Ждём|В работе|Price|Waiting|In work/ }).first().click();
     await settle(900);
@@ -153,10 +169,29 @@ async function launchBrowser() {
     await settle(700);
     await shot(`${prefix}-06d-cash-entry`);
     await closeSheet();
+    await go('#/reports');
+    await shot(`${prefix}-06f-reports`);
+    await shot(`${prefix}-06g-reports-scrolled`, { scroll: 600 });
     await go('#/more');
     await shot(`${prefix}-07-more`);
+    // v0.22: the workshop's own notes (one written in the first tour).
+    if (prefix === 'phone-light') {
+      await page.evaluate(async () => {
+        const { addNote, GARAGE_NOTES } = await import('/src/services/notes.ts');
+        await addNote(GARAGE_NOTES, { text: 'Купить бумагу для принтера' });
+        await addNote(GARAGE_NOTES, { text: 'Поменять лампочку в офисе' });
+      });
+    }
+    await go('#/notes', 900);
+    await shot(`${prefix}-07b-notes`);
     await go('#/settings');
     await shot(`${prefix}-08-settings`);
+    // v0.22: Data — what deletes everything folded under «Сброс».
+    await go('#/settings?tab=data');
+    await shot(`${prefix}-08b-settings-data`, { scroll: 4000 });
+    await page.locator('.screen[data-role="top"] .list-row').filter({ hasText: /^(Сброс|Reset)$/ }).click();
+    await settle(600);
+    await shot(`${prefix}-08c-settings-reset`, { scroll: 4000 });
     await go('#/customers');
     await shot(`${prefix}-09-customers`);
 
@@ -181,9 +216,38 @@ async function launchBrowser() {
   await dp.goto(BASE + '#/');
   await dp.waitForTimeout(1200);
   await dp.screenshot({ path: `${OUT}/desktop-01-board.png` });
+  // v0.22: the board compact («Вид»), then back as it was.
+  await dp.getByRole('button', { name: /^(Вид|View)$/ }).click();
+  await dp.waitForTimeout(700);
+  await dp.screenshot({ path: `${OUT}/desktop-01b-board-view.png` });
+  await dp.getByRole('dialog').locator('.mantine-SegmentedControl-label', { hasText: /Компактно|Compact/ }).click();
+  await dp.locator('.mantine-Modal-close').first().click();
+  await dp.waitForTimeout(700);
+  await dp.screenshot({ path: `${OUT}/desktop-01c-board-compact.png` });
+  await dp.evaluate(() => localStorage.removeItem('mygarage.board'));
+  await dp.reload();
+  await dp.waitForTimeout(900);
+  await dp.getByRole('button', { name: /^Архив/ }).click();
+  await dp.waitForTimeout(900);
+  await dp.screenshot({ path: `${OUT}/desktop-01d-board-archive.png` });
   await dp.goto(BASE + '#/money');
   await dp.waitForTimeout(900);
   await dp.screenshot({ path: `${OUT}/desktop-02-money.png` });
+  await dp.goto(BASE + '#/reports');
+  await dp.waitForTimeout(900);
+  await dp.screenshot({ path: `${OUT}/desktop-06-reports.png` });
+  await dp.evaluate(async () => {
+    const { addNote, GARAGE_NOTES } = await import('/src/services/notes.ts');
+    await addNote(GARAGE_NOTES, { text: 'Купить бумагу для принтера' });
+  });
+  await dp.goto(BASE + '#/notes');
+  await dp.waitForTimeout(900);
+  await dp.screenshot({ path: `${OUT}/desktop-07-notes.png` });
+  await dp.goto(BASE + '#/settings?tab=data');
+  await dp.waitForTimeout(900);
+  await dp.locator('.list-row').filter({ hasText: /^Сброс$/ }).click();
+  await dp.waitForTimeout(600);
+  await dp.screenshot({ path: `${OUT}/desktop-08-settings-reset.png`, fullPage: true });
   // A movement of the cash box, opened.
   await dp.goto(BASE + '#/money?tab=cash');
   await dp.waitForTimeout(900);

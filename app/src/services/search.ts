@@ -64,7 +64,8 @@ export async function loadJobIndex(lang: Lang): Promise<JobDoc<JobHitData>[]> {
     const complaints = new Set([order.complaint, ...ins.map((x) => x.complaint ?? '')].map((s) => s.trim()).filter(Boolean));
     for (const c of complaints) fields.push(field('complaint', c));
     if (order.cancelReason?.trim()) fields.push(field('complaint', order.cancelReason.trim()));
-    const codes = [...new Set(ins.flatMap((x) => x.obdCodes))];
+    // The act's codes and the scanner reports' own (v0.22: a report without an open act was not found).
+    const codes = [...new Set([...ins.flatMap((x) => x.obdCodes), ...(order.obdScans ?? []).flatMap((s) => s.codes.map((c) => c.code))])];
     if (codes.length) fields.push(field('code', codes.join(', ')));
     for (const x of ins) {
       for (const m of marksBy.get(x.id) ?? []) if (m.note?.trim()) fields.push(field('damage', m.note.trim()));

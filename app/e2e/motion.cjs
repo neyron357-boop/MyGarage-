@@ -335,7 +335,8 @@ const check = (name, ok, detail) => {
 
   // 10. Horizontal overflow: nothing wider than the screen on the main screens.
   const wide = [];
-  for (const h of ['#/', '#/search?q=' + encodeURIComponent('масло'), '#/money', '#/more', '#/customers', '#/settings', '#/orders/new', orderHash, orderHash + '?tab=work']) {
+  // (v0.22: the money book's cash card with the month, the report, the workshop's notes, the Data tab.)
+  for (const h of ['#/', '#/search?q=' + encodeURIComponent('масло'), '#/money', '#/money?tab=book', '#/reports', '#/more', '#/notes', '#/customers', '#/settings', '#/settings?tab=data', '#/orders/new', orderHash, orderHash + '?tab=work']) {
     await page.goto(BASE + h);
     await page.waitForTimeout(700);
     const w = await page.evaluate(() => {

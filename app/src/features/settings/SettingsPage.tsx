@@ -58,8 +58,9 @@ import { formatBytes, insecureContext, requestPersistence, useBackupAge, useStor
 import { useAction, useLang, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
 import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
+import { LazySheet } from '../../ui/lazy';
 import { ListsTab } from './ListsTab';
-import { EaglecartImportCard } from './EaglecartImport';
+import { EaglecartImportCard, EaglecartUndoRow } from './EaglecartImport';
 
 function Card({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
   return (
@@ -486,6 +487,9 @@ function DataTab() {
   const [wipe, setWipe] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  // What deletes everything is folded under one row at the very end, closed each time the tab opens:
+  // the red rows come only after a deliberate tap, below the finger, never under it.
+  const [reset, setReset] = useState(false);
   return (
     <Stack gap="md">
       {counts && (
@@ -543,21 +547,43 @@ function DataTab() {
           </Button>
         </Card>
       )}
-      <Card title={t('settings.wipe')} description={t('settings.wipeHint')}>
-        <Button color="red" variant="light" leftSection={<IconTrash size={18} />} onClick={() => setWipe(true)}>
-          {t('settings.wipe')}
-        </Button>
-      </Card>
+      <List animate className="reset-list">
+        <ListRow
+          left={
+            <span className="row-icon" style={{ background: 'var(--mantine-color-gray-6)' }}>
+              <IconTrash size={19} stroke={2} />
+            </span>
+          }
+          title={t('settings.reset')}
+          onClick={() => setReset((o) => !o)}
+          handlers={{ 'aria-expanded': reset }}
+          chevron
+        />
+        {reset && <EaglecartUndoRow />}
+        {reset && <ListRow left={<span className="row-icon" aria-hidden />} title={<span className="danger-text">{t('settings.wipe')}</span>} onClick={() => setWipe(true)} />}
+      </List>
       <RestoreModal file={restoreFile} onClose={() => setRestoreFile(null)} title={t('settings.restoreTitle')} confirmLabel={t('settings.restore')} text={t('settings.restoreText')} />
-      <Modal opened={wipe} onClose={() => setWipe(false)} title={t('settings.wipe')}>
-        <Text size="sm" mb="sm">
-          {t('settings.wipeConfirm')}
-        </Text>
-        <TextInput value={confirmText} onChange={(e) => setConfirmText(e.currentTarget.value)} placeholder="DELETE" autoCapitalize="characters" />
-        <Button mt="md" color="red" fullWidth disabled={confirmText.trim().toUpperCase() !== 'DELETE'} onClick={() => run(async () => { await wipeAll(); window.location.reload(); })}>
-          {t('common.delete')}
-        </Button>
-      </Modal>
+      <LazySheet opened={wipe}>
+        {(o) => (
+          <Modal
+            opened={o}
+            onClose={() => {
+              setWipe(false);
+              // Typed once, it must be typed again: a reopened sheet never starts with «Удалить» on.
+              setConfirmText('');
+            }}
+            title={t('settings.wipe')}
+          >
+            <Text size="sm" mb="sm">
+              {t('settings.wipeConfirm')}
+            </Text>
+            <TextInput value={confirmText} onChange={(e) => setConfirmText(e.currentTarget.value)} placeholder="DELETE" autoCapitalize="characters" />
+            <Button mt="md" color="red" fullWidth disabled={confirmText.trim().toUpperCase() !== 'DELETE'} onClick={() => run(async () => { await wipeAll(); window.location.reload(); })}>
+              {t('common.delete')}
+            </Button>
+          </Modal>
+        )}
+      </LazySheet>
     </Stack>
   );
 }

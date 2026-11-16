@@ -103,3 +103,14 @@ export function lastChange(j: {
   j.notes?.forEach((n) => see(n.createdAt));
   return last;
 }
+
+/**
+ * The day a job left the board — the archive's date: a closed one — the day the car was handed over (one that
+ * left on credit keeps that day, not the day it was paid off), a cancelled one — the day it was cancelled, one
+ * still open — the day it was taken off by hand.
+ */
+export function leftBoardAt(o: Pick<Order, 'stage' | 'deliveredAt' | 'closedAt' | 'archivedAt' | 'stageChangedAt'>): string {
+  if (o.stage === 'closed') return o.deliveredAt ?? o.closedAt ?? o.stageChangedAt;
+  if (o.stage === 'cancelled') return o.stageChangedAt;
+  return o.archivedAt ?? o.stageChangedAt;
+}

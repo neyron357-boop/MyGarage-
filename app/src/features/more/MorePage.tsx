@@ -1,5 +1,5 @@
 import { Box, Image, Text } from '@mantine/core';
-import { IconCash, IconChartBar, IconChevronRight, IconCloudDownload, IconDevices, IconPackage, IconSettings, IconShieldCheck, IconTool, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import { IconCash, IconChartBar, IconChevronRight, IconCloudDownload, IconDevices, IconNotes, IconPackage, IconSettings, IconShieldCheck, IconTool, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -8,12 +8,15 @@ import { AppearanceRows } from '../../ui/Appearance';
 import { List, ListRow, PageHeader } from '../../ui/components';
 import { useScreenLiveQuery } from '../../ui/hooks';
 import { getSettings } from '../../services/settings';
+import { garageNoteCount } from '../../services/notes';
 import { useBackupAge } from '../../ui/device';
 import { SetupChecklist } from '../board/BoardNotices';
 import { TransferSheet } from './Transfer';
 
 /** Row icons on squircles of the iOS palette (iOS Settings). */
 const LINKS: { to: string; icon: Icon; label: string; hint: string; color: string }[] = [
+  // The workshop's own notes (v0.22), yellow as the iPhone's Notes; a job's notes stay on the job.
+  { to: '/notes', icon: IconNotes, label: 'notes.title', hint: 'more.notesHint', color: 'yellow' },
   { to: '/customers', icon: IconUsers, label: 'nav.customers', hint: 'more.customersHint', color: 'blue' },
   { to: '/parts', icon: IconPackage, label: 'nav.parts', hint: 'more.partsHint', color: 'orange' },
   { to: '/parts?tab=suppliers', icon: IconTruck, label: 'nav.suppliers', hint: 'more.suppliersHint', color: 'cyan' },
@@ -50,6 +53,7 @@ export function MorePage() {
   const navigate = useNavigate();
   const backup = useBackupAge();
   const [transfer, setTransfer] = useState(false);
+  const noteCount = useScreenLiveQuery(garageNoteCount, []);
   return (
     <>
       <PageHeader title={t('nav.more')} />
@@ -65,6 +69,13 @@ export function MorePage() {
               </span>
             }
             title={t(l.label)}
+            right={
+              l.to === '/notes' && noteCount ? (
+                <Text c="dimmed" className="tnum" aria-hidden>
+                  {noteCount}
+                </Text>
+              ) : undefined
+            }
             onClick={() => navigate(l.to)}
             chevron
           />

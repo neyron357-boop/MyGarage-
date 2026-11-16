@@ -1,4 +1,4 @@
-import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { Box, Button, Group, Modal, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCreditCard, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -304,57 +304,60 @@ export function LedgerTab() {
 
   return (
     <Stack gap="lg">
-      {/* The cash, as a bank's card: its balance and where it started. The card keeps no balance — its money is
-          only operations, in the list below (the user's call, v0.17). */}
-      <UnstyledButton className="money-card tap amount-cell" data-purse="cash" p="md" onClick={() => setOpening(true)} aria-label={t('ledger.opening')}>
-        <div className="money-card-label">
-          <IconCash size={18} stroke={2} aria-hidden />
-          {t('ledger.cashBalance')}
+      <Stack gap="sm" maw={560}>
+        {/* The month the figures and the list below are for. */}
+        <MonthField value={month} onChange={setMonth} />
+        {/* The cash, as a bank's card: on the left its balance and where it started (a tap — the opening
+            balances); on the right the month's money in and out, cash and card, the purse's icon and the sign
+            for words (v0.22: the separate month block is gone). The card keeps no balance — its money is only
+            operations, in the list below (the user's call, v0.17). */}
+        <div className="money-card" data-purse="cash">
+          <UnstyledButton className="money-card-main tap amount-cell" onClick={() => setOpening(true)} aria-label={`${t('ledger.cashBalance')}: ${formatAed(book.cash, lang)} · ${t('ledger.opening')}`}>
+            <div className="money-card-label">
+              <IconCash size={18} stroke={2} aria-hidden />
+              {t('ledger.cashBalance')}
+            </div>
+            <Text fz={28} lh={1.1} mt={8}>
+              <Money fils={book.cash} display roll />
+            </Text>
+            <div className="money-card-foot">
+              {t('ledger.start')} {formatAed(book.cashStartFils)}
+              <IconPencil size={12} aria-hidden />
+            </div>
+          </UnstyledButton>
+          <div className="money-card-month">
+            {(['cash', 'card'] as const).map((p) => (
+              <div
+                key={p}
+                className="money-card-purse"
+                role="group"
+                data-month-purse={p}
+                data-in={totals[p].inFils}
+                data-out={totals[p].outFils}
+                aria-label={`${t(`payment.method.${p}`)}: ${t('ledger.in')} ${formatAed(totals[p].inFils, lang)}, ${t('ledger.out')} ${formatAed(totals[p].outFils, lang)}`}
+              >
+                {p === 'cash' ? <IconCash size={16} stroke={2} aria-hidden /> : <IconCreditCard size={16} stroke={2} aria-hidden />}
+                <span data-zero={totals[p].inFils === 0 || undefined}>
+                  <Money fils={totals[p].inFils} signed roll />
+                </span>
+                {/* 0 − x, not −x: a minus zero would be written as «−0,00». */}
+                <span data-zero={totals[p].outFils === 0 || undefined}>
+                  <Money fils={0 - totals[p].outFils} roll />
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-        <Text fz={28} lh={1.1} mt={8}>
-          <Money fils={book.cash} display roll />
-        </Text>
-        <div className="money-card-foot">
-          {t('ledger.start')} {formatAed(book.cashStartFils)}
-          <IconPencil size={12} aria-hidden />
-        </div>
-      </UnstyledButton>
 
-      <Group gap="sm" grow>
-        <Button size="md" color="green" variant="light" leftSection={<IconArrowDownLeft size={20} />} onClick={() => setSheet({ kind: 'in' })}>
-          {t('ledger.in')}
-        </Button>
-        <Button size="md" color="red" variant="light" leftSection={<IconArrowUpRight size={20} />} onClick={() => setSheet({ kind: 'out' })}>
-          {t('ledger.out')}
-        </Button>
-      </Group>
-
-      <Box className="surface" p="md">
-        <Box mb="sm">
-          <MonthField value={month} onChange={setMonth} />
-        </Box>
-        <SimpleGrid cols={2} spacing="md" verticalSpacing="sm">
-          {(['cash', 'card'] as const).map((p) => (
-            <Stack key={p} gap={4}>
-              <Text size="sm" fw={600}>
-                {t(`payment.method.${p}`)}
-              </Text>
-              <Group justify="space-between" wrap="nowrap">
-                <Text size="xs" c="dimmed">
-                  {t('ledger.in')}
-                </Text>
-                <Money fils={totals[p].inFils} c="green.7" size="sm" roll />
-              </Group>
-              <Group justify="space-between" wrap="nowrap">
-                <Text size="xs" c="dimmed">
-                  {t('ledger.out')}
-                </Text>
-                <Money fils={totals[p].outFils} c="red.7" size="sm" roll />
-              </Group>
-            </Stack>
-          ))}
-        </SimpleGrid>
-      </Box>
+        <Group gap="sm" grow>
+          <Button size="md" color="green" variant="light" leftSection={<IconArrowDownLeft size={20} />} onClick={() => setSheet({ kind: 'in' })}>
+            {t('ledger.in')}
+          </Button>
+          <Button size="md" color="red" variant="light" leftSection={<IconArrowUpRight size={20} />} onClick={() => setSheet({ kind: 'out' })}>
+            {t('ledger.out')}
+          </Button>
+        </Group>
+      </Stack>
 
       {/* One row of filters — income or expenses, cash or card (a second tap takes one off) — and the search. */}
       <Stack gap="xs" maw={560}>

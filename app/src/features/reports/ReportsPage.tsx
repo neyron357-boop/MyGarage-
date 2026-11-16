@@ -162,7 +162,7 @@ export function ReportsPage() {
       `payments-${f}-${tt}.csv`,
     );
   };
-  const empty = r.revenueGross === 0 && r.expensesNet === 0 && r.ordersReceived === 0;
+  const empty = r.revenueGross === 0 && r.expensesGross === 0 && r.ordersReceived === 0;
   return (
     <>
       <PageHeader title={t('report.title')} subtitle={`${formatDate(f)} – ${formatDate(tt)}`} />
@@ -190,41 +190,34 @@ export function ReportsPage() {
               <Box className="surface" p="md">
                 <SegmentedBar
                   parts={[
-                    { key: 'labor', label: t('item.kind.labor'), value: r.laborNet, color: 'var(--viz-1)' },
-                    { key: 'parts', label: t('item.kind.part'), value: r.partsNet, color: 'var(--viz-2)' },
-                    { key: 'other', label: t('report.other'), value: r.otherNet, color: 'var(--viz-3)' },
+                    { key: 'labor', label: t('item.kind.labor'), value: r.laborGross, color: 'var(--viz-1)' },
+                    { key: 'parts', label: t('item.kind.part'), value: r.partsGross, color: 'var(--viz-2)' },
+                    { key: 'other', label: t('report.other'), value: r.otherGross, color: 'var(--viz-3)' },
                   ]}
                 />
               </Box>
             </Section>
             <Section title={t('report.pnl')} description={t('report.pnlHint')} mt={0}>
               <List>
-                <ListRow title={t('report.revenueNet')} right={<Money fils={r.revenueNet} size="sm" />} />
+                <ListRow title={t('report.revenueGross')} right={<Money fils={r.revenueGross} size="sm" />} />
                 {r.otherIncome > 0 && <ListRow title={`+ ${t('report.otherIncome')}`} right={<Money fils={r.otherIncome} size="sm" />} />}
-                <ListRow title={`− ${t('report.partsCost')}`} right={<Money fils={r.partsCostNet} size="sm" />} />
-                <ListRow title={`− ${t('report.expensesNet')}`} right={<Money fils={r.expensesNet} size="sm" />} />
+                <ListRow title={`− ${t('report.partsCost')}`} right={<Money fils={r.partsCostGross} size="sm" />} />
+                <ListRow title={`− ${t('report.expenses')}`} right={<Money fils={r.expensesGross} size="sm" />} />
                 <ListRow title={<Text fw={800} size="sm">{t('report.grossProfit')}</Text>} right={<Money fils={r.grossProfit} size="sm" fw={800} c={r.grossProfit >= 0 ? 'green' : 'red'} />} />
               </List>
             </Section>
           </SimpleGrid>
-          <Section title={t('expense.byCategory')} description={t('report.expensesHint')}>
-            <Box className="surface" p="md">
-              {r.expensesByCategory.length === 0 ? (
-                <Text size="sm" c="dimmed">
-                  {t('report.noExpenses')}
-                </Text>
-              ) : (
-                <HBars rows={r.expensesByCategory.map((c) => ({ key: c.categoryId, label: catName(c.categoryId), value: c.gross, hint: `${catName(c.categoryId)}: ${formatAed(c.gross, lang)} · VAT ${formatAed(c.vat, lang)}` }))} />
-              )}
-            </Box>
-          </Section>
           <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="xl">
-            <Section title={t('report.vatTitle')} description={t('report.note')} mt={0}>
-              <List>
-                <ListRow title={t('report.vatOutput')} right={<Money fils={r.vatOutput} size="sm" />} />
-                <ListRow title={t('report.vatInput')} right={<Money fils={r.vatInput} size="sm" />} />
-                <ListRow title={<Text fw={800} size="sm">{t('report.vatPayable')}</Text>} right={<Money fils={r.vatOutput - r.vatInput} size="sm" fw={800} />} />
-              </List>
+            <Section title={t('expense.byCategory')} description={t('report.expensesHint')} mt={0}>
+              <Box className="surface" p="md">
+                {r.expensesByCategory.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    {t('report.noExpenses')}
+                  </Text>
+                ) : (
+                  <HBars rows={r.expensesByCategory.map((c) => ({ key: c.categoryId, label: catName(c.categoryId), value: c.gross }))} />
+                )}
+              </Box>
             </Section>
             <Section title={t('report.paymentsTitle')} mt={0}>
               <List>

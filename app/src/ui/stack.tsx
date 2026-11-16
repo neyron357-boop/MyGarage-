@@ -206,6 +206,7 @@ export function useScreenTitle() {
         [/^\/search$/, t('nav.search')],
         [/^\/money$/, t('nav.money')],
         [/^\/more$/, t('nav.more')],
+        [/^\/notes$/, t('notes.title')],
         [/^\/customers$/, t('nav.customers')],
         [/^\/parts$/, t('nav.parts')],
         [/^\/reports$/, t('nav.reports')],

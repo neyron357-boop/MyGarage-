@@ -202,3 +202,16 @@ export function monthRange(month: string): [string, string] {
 export function inRange(day: string, from: string, to: string): boolean {
   return day >= from && day <= to;
 }
+
+/**
+ * A day on a row of a list (the archive): today and yesterday by word ('' — the screen says them in its
+ * language), a day of this year as "14/11", an older one in full, "14/11/2025".
+ */
+export function dayShort(iso: string, now: string = nowIso()): { word?: 'today' | 'yesterday'; text: string } {
+  const day = dubaiDate(iso);
+  const diff = daysBetween(day, dubaiDate(now));
+  if (diff === 0) return { word: 'today', text: '' };
+  if (diff === 1) return { word: 'yesterday', text: '' };
+  const full = formatDate(day);
+  return { text: day.slice(0, 4) === dubaiDate(now).slice(0, 4) ? full.slice(0, 5) : full };
+}

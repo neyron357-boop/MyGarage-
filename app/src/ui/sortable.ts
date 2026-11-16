@@ -34,7 +34,8 @@ interface Drag {
   raf: number;
 }
 
-const scrollerOf = (el: HTMLElement): HTMLElement | null => el.closest<HTMLElement>('.screen-scroll');
+// The screen's own scroll, or a sheet's (rows moved in a sheet — the board's tabs in «Вид»).
+const scrollerOf = (el: HTMLElement): HTMLElement | null => el.closest<HTMLElement>('.screen-scroll, .mantine-Modal-content');
 const scrollTop = (s: HTMLElement | null) => (s ? s.scrollTop : window.scrollY);
 
 function rowsOf(grip: HTMLElement): { rows: HTMLElement[]; ids: string[] } | null {

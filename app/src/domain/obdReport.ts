@@ -151,3 +151,43 @@ export function parseObdReport(items: TextItem[]): ObdReport {
 /** The odometer in kilometres (the act counts km). */
 export const odometerKm = (o: { value: number; unit: 'km' | 'mi' } | undefined): number | undefined =>
   o ? (o.unit === 'mi' ? Math.round(o.value * 1.609344) : o.value) : undefined;
+
+/** The check-in act as far as a scan touches it. */
+export interface ActObd {
+  id: string;
+  obdCodes: string[];
+  obdNoCodes?: boolean;
+  mileageKm?: number;
+}
+
+/** A scan as far as the act is concerned. */
+export interface ScanForAct {
+  codes: { code: string }[];
+  odometer?: { value: number; unit: 'km' | 'mi' };
+  intoAct?: { id: string; codes: string[]; mileageKm?: number; noCodesBefore?: boolean };
+}
+
+/**
+ * The open check-in act once a scan is deleted: the codes the scan brought leave it unless another scan
+ * of the job has them too; the mileage it filled leaves (another scan's reading takes its place, or none);
+ * "no codes" is back as it was before. A scan that recorded its share (`intoAct`) takes back exactly that,
+ * and nothing from an act it did not go into; an older one, whatever matches its codes and reading.
+ * Undefined — the act stays as it is.
+ */
+export function actWithoutScan(act: ActObd, gone: ScanForAct, rest: ScanForAct[]): Omit<ActObd, 'id'> | undefined {
+  const into = gone.intoAct;
+  if (into && into.id !== act.id) return undefined;
+  const kept = new Set(rest.flatMap((s) => s.codes.map((c) => c.code)));
+  const brought = new Set(into ? into.codes : gone.codes.map((c) => c.code));
+  const obdCodes = act.obdCodes.filter((c) => kept.has(c) || !brought.has(c));
+  const km = into ? into.mileageKm : odometerKm(gone.odometer);
+  let mileageKm = act.mileageKm;
+  if (km !== undefined && act.mileageKm === km) {
+    mileageKm = undefined;
+    for (const s of rest) mileageKm = odometerKm(s.odometer) ?? mileageKm;
+  }
+  let obdNoCodes = act.obdNoCodes;
+  if (!obdCodes.length && act.obdCodes.length) obdNoCodes = into ? into.noCodesBefore : undefined;
+  if (obdCodes.length === act.obdCodes.length && mileageKm === act.mileageKm && obdNoCodes === act.obdNoCodes) return undefined;
+  return { obdCodes, obdNoCodes, mileageKm };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { odometerKm, parseObdReport } from './obdReport';
+import { actWithoutScan, odometerKm, parseObdReport } from './obdReport';
 import { OBD_REPORT_ITEMS } from './obdReport.testdata';
 
 const ITEMS = OBD_REPORT_ITEMS;
@@ -28,5 +28,35 @@ describe('a scanner report (OBD)', () => {
     ]);
     expect(r.vehicle.vin).toBe('JTDBR32E720012345');
     expect(r.codes.map((c) => [c.code, c.description])).toEqual([['P0301', 'Cylinder 1 Misfire Detected'], ['B1000', 'ECU malfunction']]);
+  });
+});
+
+describe('the open act once a scan is deleted', () => {
+  const codes = (...c: string[]) => c.map((code) => ({ code }));
+  const km = (value: number) => ({ value, unit: 'km' as const });
+
+  it('takes back exactly what the scan recorded', () => {
+    const act = { id: 'a', obdCodes: ['P0300', 'P0430', 'P0700'], obdNoCodes: false, mileageKm: 1000 };
+    const gone = { codes: codes('P0430', 'P0700', 'P0300'), odometer: km(1000), intoAct: { id: 'a', codes: ['P0430', 'P0700'], mileageKm: 1000, noCodesBefore: false } };
+    expect(actWithoutScan(act, gone, [])).toEqual({ obdCodes: ['P0300'], obdNoCodes: false, mileageKm: undefined });
+  });
+
+  it('keeps codes another scan has, and that scan’s reading takes the mileage', () => {
+    const act = { id: 'a', obdCodes: ['P0430', 'P0700'], obdNoCodes: false, mileageKm: 1000 };
+    const gone = { codes: codes('P0430', 'P0700'), odometer: km(1000), intoAct: { id: 'a', codes: ['P0430', 'P0700'], mileageKm: 1000 } };
+    const rest = [{ codes: codes('P0700'), odometer: km(1200) }];
+    expect(actWithoutScan(act, gone, rest)).toEqual({ obdCodes: ['P0700'], obdNoCodes: false, mileageKm: 1200 });
+  });
+
+  it('puts «no codes» back as it was, and leaves an act the scan did not go into', () => {
+    const act = { id: 'a', obdCodes: ['P0430'], obdNoCodes: false };
+    expect(actWithoutScan(act, { codes: codes('P0430'), intoAct: { id: 'a', codes: ['P0430'], noCodesBefore: true } }, [])).toEqual({ obdCodes: [], obdNoCodes: true, mileageKm: undefined });
+    expect(actWithoutScan(act, { codes: codes('P0430'), intoAct: { id: 'b', codes: ['P0430'] } }, [])).toBeUndefined();
+  });
+
+  it('an older scan (no record): its codes and its reading', () => {
+    const act = { id: 'a', obdCodes: ['P0430'], obdNoCodes: false, mileageKm: 1609 };
+    expect(actWithoutScan(act, { codes: codes('P0430'), odometer: { value: 1000, unit: 'mi' } }, [])).toEqual({ obdCodes: [], obdNoCodes: undefined, mileageKm: undefined });
+    expect(actWithoutScan(act, { codes: codes('P0171') }, [])).toBeUndefined();
   });
 });

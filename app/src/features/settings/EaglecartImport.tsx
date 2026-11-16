@@ -17,7 +17,7 @@ import {
 } from '../../services/eaglecart';
 import { haptic } from '../../ui/haptics';
 import { ConfirmModal, List, ListRow } from '../../ui/components';
-import { useAction, useErrorText, useLang } from '../../ui/hooks';
+import { useAction, useErrorText, useLang, useScreenLiveQuery } from '../../ui/hooks';
 
 /** Jobs started in the last two days before the export that were not delivered may still be in the garage. */
 const recentSince = (d: EaglecartExport) => addDays(d.exportedAt, -2);
@@ -35,7 +35,6 @@ export function EaglecartImportCard() {
   const [error, setError] = useState<string>();
   const [continueRecent, setContinueRecent] = useState(true);
   const [preview, setPreview] = useState<ImportPlan['stats'] | null>(null);
-  const [undo, setUndo] = useState(false);
   const inApp = useLiveQuery(eaglecartImported, []);
 
   useEffect(() => {
@@ -148,13 +147,23 @@ export function EaglecartImportCard() {
             </Button>
           )}
         </FileButton>
-        {!!inApp?.orders && (
-          <Button variant="subtle" color="red" onClick={() => setUndo(true)}>
-            {t('ec.undo')}
-          </Button>
-        )}
       </Group>
+    </Box>
+  );
+}
 
+/**
+ * Settings → Data → «Сброс»: take out what came over from Eaglecart (only while some of it is here). The
+ * sheet stays mounted when the row goes, so it slides out after the jobs are gone.
+ */
+export function EaglecartUndoRow() {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  const [undo, setUndo] = useState(false);
+  const inApp = useScreenLiveQuery(eaglecartImported, []);
+  return (
+    <>
+      {!!inApp?.orders && <ListRow left={<span className="row-icon" aria-hidden />} title={<span className="danger-text">{t('ec.undo')}</span>} onClick={() => setUndo(true)} />}
       <ConfirmModal
         opened={undo}
         onClose={() => setUndo(false)}
@@ -170,7 +179,7 @@ export function EaglecartImportCard() {
       >
         <Text size="sm">{t('ec.undoText')}</Text>
       </ConfirmModal>
-    </Box>
+    </>
   );
 }
 

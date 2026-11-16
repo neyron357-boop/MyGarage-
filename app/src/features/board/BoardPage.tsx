@@ -1,22 +1,25 @@
-import { Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
-import { IconArchive, IconArrowBackUp, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
+import { ActionIcon, Badge, Box, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dayLong } from '../../domain/dates';
-import { lastChange, type Phase } from '../../domain/flow';
+import { lastChange, leftBoardAt, type Phase } from '../../domain/flow';
 import { coverIndex } from '../../services/cover';
 import { loadDebtors } from '../../services/debts';
 import { archiveJob, phaseOf } from '../../services/flow';
 import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
-import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast } from '../../ui/components';
+import { useBoardView, type BoardTab } from '../../ui/boardView';
+import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast, type TabItem } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { LazySheet } from '../../ui/lazy';
 import { checkForUpdate } from '../../ui/pwa';
 import { usePullRefresh } from '../../ui/pullRefresh';
 import { PHASE_META, usePhaseGlow } from '../job/phase';
 import { DebtorList } from '../money/Debts';
 import { InsecureWarning } from './BoardNotices';
+import { BoardViewSheet } from './BoardViewSheet';
 import { JobRow, type RowSwipe } from './JobRow';
 import { TodayList } from './TodayList';
 
@@ -53,12 +56,13 @@ async function loadBoard(showArchive: boolean) {
 }
 
 /**
- * The archive's second part: the latest closed jobs of the app (not the history carried over). A job closed with
- * money still due is not there — it is under "Debts" until it is paid, then back here as any other.
+ * The archive's second part: the latest closed jobs of the app (not the history carried over), the newest by the
+ * day they left the board (`leftBoardAt` — the date on their row). A job closed with money still due is not
+ * there — it is under "Debts" until it is paid, then back here as any other.
  */
 async function loadClosed() {
   const orders = (await db.orders.filter((o) => (o.stage === 'closed' || o.stage === 'cancelled') && !o.imported?.history).toArray())
-    .sort((a, b) => (b.closedAt ?? b.updatedAt).localeCompare(a.closedAt ?? a.updatedAt))
+    .sort((a, b) => leftBoardAt(b).localeCompare(leftBoardAt(a)))
     .slice(0, 60);
   return ((await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[]).filter((b) => !(bundleAmountDue(b) > 0));
 }
@@ -70,6 +74,7 @@ async function loadClosed() {
 const STEPS: Phase[] = ['look', 'price', 'wait', 'work', 'pay', 'out', 'booked'];
 type Filter = 'all' | 'archive' | 'debts' | Phase;
 type Job = { b: OrderBundle; phase: Phase };
+const isStep = (k: string): k is Phase => (STEPS as string[]).includes(k);
 
 /** Fades the edge of a horizontal scroller where more content is hidden. */
 function useEdgeFade() {
@@ -93,11 +98,14 @@ function useEdgeFade() {
   return ref;
 }
 
-/** PC board: one lane per step; empty steps fold into thin strips so busy lanes get the width. */
-function Kanban({ jobs, covers, swipe, tick }: { jobs: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe; tick: number }) {
+/**
+ * PC board: one lane per step, in the order of the board's tabs («Вид»); empty steps fold into thin strips so busy
+ * lanes get the width. A step hidden from the phone's strip keeps its lane — a lane holds cars.
+ */
+function Kanban({ jobs, covers, swipe, tick, order, compact }: { jobs: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe; tick: number; order: BoardTab[]; compact: boolean }) {
   const { t } = useTranslation();
   const ref = useEdgeFade();
-  const lanes = STEPS.map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
+  const lanes = (order.filter((k) => isStep(k)) as Phase[]).map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
   const cols = lanes.map((l) => (l.list.length ? 'minmax(280px, 1fr)' : '46px')).join(' ');
   return (
     <div className="kanban edge-fade" ref={ref} style={{ gridTemplateColumns: cols, gridAutoFlow: 'initial' }}>
@@ -126,9 +134,9 @@ function Kanban({ jobs, covers, swipe, tick }: { jobs: Job[]; covers?: Map<strin
                 {list.length}
               </Badge>
             </Group>
-            <List animate className="board-cards">
+            <List animate className={compact ? 'mini-list' : 'board-cards'}>
               {list.map((j) => (
-                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} />
+                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} variant={compact ? 'row' : 'card'} />
               ))}
             </List>
           </div>
@@ -149,6 +157,10 @@ export function BoardPage() {
   const { run } = useAction();
   const mobile = usePhone();
   const [filter, setFilter] = useState<Filter>('all');
+  // How the board looks on this device: large cards or rows, the tabs' order and the steps left out («Вид»).
+  const view = useBoardView();
+  const [viewOpen, setViewOpen] = useState(false);
+  const compact = view.size === 'compact';
   // Pull to refresh (the phone): the board read again, and a new version of the app looked for — it shows
   // its "Update" bar when there is one.
   const [refresh, setRefresh] = useState(0);
@@ -164,17 +176,28 @@ export function BoardPage() {
   const data = live ?? lastBoard;
   // Every five minutes the rows' "how long" moves on (a row is not rendered again otherwise).
   const tick = Math.floor(Date.now() / 300_000);
+  // The freshest first: the job something last happened on is on top.
+  const fresh = (x: Job, y: Job) => lastChange(y.b).localeCompare(lastChange(x.b));
+  const all: Job[] = (data?.bundles ?? []).map((b) => ({ b, phase: phaseOf(b) })).filter((j) => STEPS.includes(j.phase));
+  const jobs = all.filter((j) => !j.b.order.archivedAt).sort(fresh);
+  // The archive: the jobs taken off by hand, the latest taken off first.
+  const archived = all.filter((j) => !!j.b.order.archivedAt).sort((x, y) => leftBoardAt(y.b.order).localeCompare(leftBoardAt(x.b.order)));
+  const count = (p: Phase) => jobs.filter((j) => j.phase === p).length;
+  // A step is a tab while it has cars and is not left out («Вид»); the one picked counts only while it is a tab.
+  const hidden = new Set<string>(view.hidden);
+  const stepShown = (p: Phase) => count(p) > 0 && !hidden.has(p);
+  const phaseFilter = isStep(filter) && stepShown(filter) ? filter : undefined;
+  // Its last car gone, or the step left out: the board is back on «Все» (and stays there when a car comes).
+  const lost = !!data && isStep(filter) && !phaseFilter;
+  useEffect(() => {
+    if (lost) setFilter('all');
+  }, [lost]);
   // A step picked: the screen glows in its colours, as a job on that step does (debts — in red).
   const glowRef = useRef<HTMLSpanElement>(null);
-  usePhaseGlow(glowRef, debtsTab ? 'debt' : filter !== 'all' && filter !== 'archive' ? filter : undefined);
+  usePhaseGlow(glowRef, debtsTab ? 'debt' : phaseFilter);
   if (!data) return <PageSkeleton />;
   const { bundles, covers } = data;
   const closed = live?.closed;
-  // The freshest first: the job something last happened on is on top.
-  const fresh = (x: Job, y: Job) => lastChange(y.b).localeCompare(lastChange(x.b));
-  const all: Job[] = bundles.map((b) => ({ b, phase: phaseOf(b) })).filter((j) => STEPS.includes(j.phase));
-  const jobs = all.filter((j) => !j.b.order.archivedAt).sort(fresh);
-  const archived = all.filter((j) => !!j.b.order.archivedAt).sort(fresh);
   const done: Job[] = (closed ?? []).map((b) => ({ b, phase: phaseOf(b) }));
 
   // A swipe left: off the board (with Undo), or — in the archive — back on it.
@@ -197,6 +220,26 @@ export function BoardPage() {
 
   const dateLabel = dayLong(new Date(), lang);
   const owing = debtors?.length ?? 0;
+  // «Вид»: a round glass button in the head (phone), after «Долги» and «Архив» (PC).
+  const viewButton = (
+    <ActionIcon variant="default" size={40} radius="xl" aria-label={t('board.view')} onClick={() => setViewOpen(true)}>
+      <IconAdjustmentsHorizontal size={22} stroke={2} />
+    </ActionIcon>
+  );
+  const pcButtons = {
+    debts: (
+      <Button key="debts" variant={debtsTab ? 'filled' : 'default'} color={debtsTab ? 'red' : undefined} leftSection={<IconUserDollar size={18} />} onClick={() => setFilter(debtsTab ? 'all' : 'debts')}>
+        {t('board.tabDebts')}
+        {owing > 0 ? ` · ${owing}` : ''}
+      </Button>
+    ),
+    archive: (
+      <Button key="archive" variant={archive ? 'filled' : 'default'} leftSection={<IconArchive size={18} />} onClick={() => setFilter(archive ? 'all' : 'archive')}>
+        {t('board.archive')}
+        {archived.length > 0 ? ` · ${archived.length}` : ''}
+      </Button>
+    ),
+  };
   const header = (
     <>
       {pull}
@@ -204,35 +247,42 @@ export function BoardPage() {
         eyebrow={dateLabel}
         title={t('board.title')}
         right={
-          !mobile && (
+          mobile ? (
+            viewButton
+          ) : (
             <Group gap="xs" wrap="nowrap">
-              <Button variant={debtsTab ? 'filled' : 'default'} color={debtsTab ? 'red' : undefined} leftSection={<IconUserDollar size={18} />} onClick={() => setFilter(debtsTab ? 'all' : 'debts')}>
-                {t('board.tabDebts')}
-                {owing > 0 ? ` · ${owing}` : ''}
-              </Button>
-              <Button variant={archive ? 'filled' : 'default'} leftSection={<IconArchive size={18} />} onClick={() => setFilter(archive ? 'all' : 'archive')}>
-                {t('board.archive')}
-                {archived.length > 0 ? ` · ${archived.length}` : ''}
-              </Button>
+              {view.order.filter((k): k is 'debts' | 'archive' => k === 'debts' || k === 'archive').map((k) => pcButtons[k])}
+              {viewButton}
             </Group>
           )
         }
       />
+      <LazySheet opened={viewOpen}>{(o) => <BoardViewSheet opened={o} onClose={() => setViewOpen(false)} />}</LazySheet>
     </>
   );
 
   const debtList = !debtors ? <PageSkeleton /> : debtors.length ? <DebtorList debtors={debtors} /> : <EmptyState icon={IconUserDollar} title={t('debt.none')} />;
 
+  // The archive (v0.22): smaller rows with their date — on top the jobs taken off the board by hand (a swipe
+  // puts one back), under them the closed ones; each part the latest first.
   const archiveList =
     archived.length + done.length > 0 ? (
-      <List className="board-cards">
-        {archived.map((j) => (
-          <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={back(j.b)} />
-        ))}
-        {done.map((j) => (
-          <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} />
-        ))}
-      </List>
+      <Stack gap="lg">
+        {archived.length > 0 && (
+          <List animate className="mini-list">
+            {archived.map((j) => (
+              <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={back(j.b)} variant="row" dated />
+            ))}
+          </List>
+        )}
+        {done.length > 0 && (
+          <List animate className="mini-list">
+            {done.map((j) => (
+              <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} variant="row" dated />
+            ))}
+          </List>
+        )}
+      </Stack>
     ) : closed ? (
       <EmptyState icon={IconArchive} title={t('board.archiveEmpty')} />
     ) : (
@@ -276,9 +326,15 @@ export function BoardPage() {
       </>
     );
 
-  const count = (p: Phase) => jobs.filter((j) => j.phase === p).length;
-  const phaseFilter = filter !== 'all' && filter !== 'archive' && filter !== 'debts' && count(filter) > 0 ? filter : undefined;
   const shown = phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs;
+  // The strip in the order of «Вид»: «Все», the steps that have cars and are not left out, «Долги», «Архив».
+  const tabItem = (k: BoardTab): TabItem | null => {
+    if (k === 'all') return { value: 'all', label: t('board.all'), count: jobs.length };
+    if (k === 'debts') return { value: 'debts', label: t('board.tabDebts'), count: owing || undefined, color: PHASE_META.debt.color, icon: IconUserDollar };
+    if (k === 'archive') return { value: 'archive', label: t('board.archive'), count: archived.length || undefined };
+    return isStep(k) && stepShown(k) ? { value: k, label: t(`job.phase.${k}`), count: count(k), color: PHASE_META[k].color, icon: PHASE_META[k].icon } : null;
+  };
+  const tabs = view.order.map(tabItem).filter((x): x is TabItem => !!x);
   return (
     <>
       <span ref={glowRef} hidden />
@@ -287,24 +343,16 @@ export function BoardPage() {
       {!archive && !debtsTab && <TodayList bundles={bundles} />}
       {mobile ? (
         <>
-          <ScrollTabs
-            value={archive ? 'archive' : debtsTab ? 'debts' : phaseFilter ?? 'all'}
-            onChange={(v) => setFilter(v as Filter)}
-            items={[
-              { value: 'all', label: t('board.all'), count: jobs.length },
-              ...STEPS.filter((p) => count(p) > 0).map((p) => ({ value: p, label: t(`job.phase.${p}`), count: count(p), color: PHASE_META[p].color, icon: PHASE_META[p].icon })),
-              { value: 'debts', label: t('board.tabDebts'), count: owing || undefined, color: PHASE_META.debt.color, icon: IconUserDollar },
-              { value: 'archive', label: t('board.archive'), count: archived.length || undefined },
-            ]}
-          />
+          {/* A long press on a tab opens «Вид» — where the tabs are dragged into another order. */}
+          <ScrollTabs value={archive ? 'archive' : debtsTab ? 'debts' : phaseFilter ?? 'all'} onChange={(v) => setFilter(v as Filter)} onHold={() => setViewOpen(true)} items={tabs} />
           {debtsTab ? (
             debtList
           ) : archive ? (
             archiveList
           ) : shown.length ? (
-            <List animate className="board-cards">
+            <List animate className={compact ? 'mini-list' : 'board-cards'}>
               {shown.map((j) => (
-                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={toArchive(j.b)} />
+                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={toArchive(j.b)} variant={compact ? 'row' : 'card'} />
               ))}
             </List>
           ) : (
@@ -316,7 +364,7 @@ export function BoardPage() {
       ) : archive ? (
         <Box maw={720}>{archiveList}</Box>
       ) : (
-        <Kanban jobs={jobs} covers={covers} swipe={toArchive} tick={tick} />
+        <Kanban jobs={jobs} covers={covers} swipe={toArchive} tick={tick} order={view.order} compact={compact} />
       )}
     </>
   );

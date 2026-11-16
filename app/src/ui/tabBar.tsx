@@ -14,7 +14,7 @@ const TABS: { to: string; icon: Icon; key: string }[] = [
   { to: '/money', icon: IconCashBanknoteFilled, key: 'nav.money' },
   { to: '/more', icon: IconDotsFilled, key: 'nav.more' },
 ];
-const MORE_PATHS = ['/more', '/customers', '/vehicles', '/parts', '/reports', '/settings'];
+const MORE_PATHS = ['/more', '/notes', '/customers', '/vehicles', '/parts', '/reports', '/settings'];
 
 /** The tab a screen belongs to: its own root, or the tab it was opened from (a job, a customer). */
 function tabOf(pathname: string): string | undefined {

@@ -757,7 +757,7 @@ export function JobPage() {
       }
     />
   ) : null;
-  // What the job earns (without VAT, less parts, work outside, expenses) — once some cost is known.
+  // What the job earns (with VAT: the total less parts as bought, work outside, expenses) — once some cost is known.
   const profit = jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: expenses ?? [] });
   const profitRow = profit.known ? (
     <ListRow
@@ -1002,7 +1002,7 @@ export function JobPage() {
           </UnstyledButton>
         )}
         <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
-        {!!b.order.obdScans?.length && <ObdLine scans={b.order.obdScans} />}
+        <ObdLine orderId={b.order.id} scans={b.order.obdScans ?? []} open={open} />
         {/* One flow of chips: when the car was promised, who does the job (one or several — each chip on or
             off by itself), the car's VIN photo. Wrapping, not scrolling — every chip stays in sight, one tap away. */}
         <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>

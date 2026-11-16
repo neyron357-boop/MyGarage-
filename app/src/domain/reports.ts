@@ -1,6 +1,12 @@
 import { dubaiDate, inRange } from './dates';
-import { roundFils } from './money';
+import { itemCostPaid } from './items';
 import type { CashClosing, Expense, Income, Invoice, Order, OrderItem, Payment } from './types';
+
+/*
+ * The owner's report for a period. Every sum is with VAT (v0.22, the user's decision): money as it is
+ * received and paid — invoice totals, parts as bought (cost × qty + the seller's VAT when entered),
+ * expenses as on the receipt. VAT is not taken out or shown here; the accountant's CSV keeps it apart.
+ */
 
 export interface ReportInput {
   from: string; // YYYY-MM-DD inclusive (Dubai)
@@ -18,21 +24,20 @@ export interface ReportInput {
 export interface Report {
   ordersReceived: number;
   ordersDelivered: number;
-  revenueNet: number;
-  revenueVat: number;
+  /** Invoices of the period with VAT, credit notes less. */
   revenueGross: number;
-  laborNet: number;
-  partsNet: number;
-  otherNet: number;
-  partsCostNet: number;
-  expensesNet: number;
-  expensesVat: number;
-  expensesByCategory: { categoryId: string; gross: number; vat: number }[];
+  /** The same by line: work, parts, the rest (fees, discounts) — they add up to `revenueGross`. */
+  laborGross: number;
+  partsGross: number;
+  otherGross: number;
+  /** Parts of the jobs invoiced in the period, as bought (`itemCostPaid`). */
+  partsCostGross: number;
+  /** Expenses dated in the period, as paid. */
+  expensesGross: number;
+  expensesByCategory: { categoryId: string; gross: number }[];
   /** Received without an invoice (gross, as received). */
   otherIncome: number;
   grossProfit: number;
-  vatOutput: number;
-  vatInput: number;
   payments: { cash: number; card: number; transfer: number };
   cashDiffFils: number;
   averageTicketGross: number;
@@ -47,20 +52,15 @@ export function computeReport(input: ReportInput): Report {
   const r: Report = {
     ordersReceived: input.orders.filter((o) => inPeriod(o.arrivedAt)).length,
     ordersDelivered: input.orders.filter((o) => inPeriod(o.deliveredAt)).length,
-    revenueNet: 0,
-    revenueVat: 0,
     revenueGross: 0,
-    laborNet: 0,
-    partsNet: 0,
-    otherNet: 0,
-    partsCostNet: 0,
-    expensesNet: 0,
-    expensesVat: 0,
+    laborGross: 0,
+    partsGross: 0,
+    otherGross: 0,
+    partsCostGross: 0,
+    expensesGross: 0,
     expensesByCategory: [],
     otherIncome: 0,
     grossProfit: 0,
-    vatOutput: 0,
-    vatInput: 0,
     payments: { cash: 0, card: 0, transfer: 0 },
     cashDiffFils: 0,
     averageTicketGross: 0,
@@ -74,13 +74,11 @@ export function computeReport(input: ReportInput): Report {
     if (sign > 0) {
       salesCount += 1;
     }
-    r.revenueNet += sign * inv.subtotalFils;
-    r.revenueVat += sign * inv.vatFils;
     r.revenueGross += sign * inv.totalFils;
     for (const l of inv.lines) {
-      if (l.kind === 'labor') r.laborNet += sign * l.net;
-      else if (l.kind === 'part') r.partsNet += sign * l.net;
-      else r.otherNet += sign * l.net;
+      if (l.kind === 'labor') r.laborGross += sign * l.gross;
+      else if (l.kind === 'part') r.partsGross += sign * l.gross;
+      else r.otherGross += sign * l.gross;
     }
   }
 
@@ -93,29 +91,16 @@ export function computeReport(input: ReportInput): Report {
   for (const it of input.items) {
     if (!activeOrders.has(it.orderId)) continue;
     if (it.kind !== 'part' || it.approvalState !== 'approved' || it.customerSupplied) continue;
-    r.partsCostNet += roundFils((it.costPriceFils ?? 0) * it.qty);
+    r.partsCostGross += itemCostPaid(it);
   }
 
-  // Input VAT on parts received in the period.
-  for (const it of input.items) {
-    if (it.kind === 'part' && inPeriod(it.receivedAt)) r.vatInput += it.purchaseVatFils ?? 0;
-  }
-
-  const byCat = new Map<string, { gross: number; vat: number }>();
+  const byCat = new Map<string, number>();
   for (const e of input.expenses) {
     if (e.voidedAt || !inRange(e.date, from, to)) continue;
-    r.expensesNet += e.amountFils - e.vatFils;
-    r.expensesVat += e.vatFils;
-    const c = byCat.get(e.categoryId) ?? { gross: 0, vat: 0 };
-    c.gross += e.amountFils;
-    c.vat += e.vatFils;
-    byCat.set(e.categoryId, c);
+    r.expensesGross += e.amountFils;
+    byCat.set(e.categoryId, (byCat.get(e.categoryId) ?? 0) + e.amountFils);
   }
-  r.expensesByCategory = [...byCat.entries()]
-    .map(([categoryId, v]) => ({ categoryId, ...v }))
-    .sort((a, b) => b.gross - a.gross);
-  r.vatInput += r.expensesVat;
-  r.vatOutput = r.revenueVat;
+  r.expensesByCategory = [...byCat.entries()].map(([categoryId, gross]) => ({ categoryId, gross })).sort((a, b) => b.gross - a.gross);
 
   for (const p of input.payments) {
     if (!inPeriod(p.receivedAt)) continue;
@@ -127,7 +112,7 @@ export function computeReport(input: ReportInput): Report {
   for (const p of input.payments) if (p.incomeId) toJobs.set(p.incomeId, (toJobs.get(p.incomeId) ?? 0) + (p.kind === 'refund' ? -p.amountFils : p.amountFils));
   for (const i of input.incomes ?? []) if (!i.voidedAt && inRange(i.date, from, to)) r.otherIncome += i.category === 'debt' ? Math.max(0, i.amountFils - (toJobs.get(i.id) ?? 0)) : i.amountFils;
 
-  r.grossProfit = r.revenueNet + r.otherIncome - r.partsCostNet - r.expensesNet;
+  r.grossProfit = r.revenueGross + r.otherIncome - r.partsCostGross - r.expensesGross;
   r.averageTicketGross = salesCount ? Math.round(r.revenueGross / salesCount) : 0;
   return r;
 }

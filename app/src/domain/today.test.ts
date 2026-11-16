@@ -113,18 +113,21 @@ describe('Today list', () => {
 
 describe('profit of a job', () => {
   const inv = (subtotal: number, total: number): Invoice => ({ id: 'i', number: 'INV-1', type: 'simplified_tax_invoice', orderId: 'o1', issuedAt: NOW, seller: { name: '' }, buyer: { name: '' }, lines: [], subtotalFils: subtotal, vatFils: total - subtotal, totalFils: total, currency: 'AED', status: 'issued' });
-  it('revenue without VAT minus parts, work outside and expenses', () => {
+  it('revenue with VAT minus parts as bought, work outside and expenses as paid', () => {
     const items = [
       item({ kind: 'labor', unitPriceFils: 20000 }),
       item({ kind: 'part', unitPriceFils: 10000, qty: 2, costPriceFils: 6000 }),
       item({ kind: 'labor', unitPriceFils: 30000, costPriceFils: 15000, outsource: { state: 'back', expenseId: 'e1' } }),
       item({ kind: 'part', customerSupplied: true, costPriceFils: 9999 }),
     ];
-    const p = jobProfit({ order: {}, items, invoices: [], expenses: [{ id: 'e1', amountFils: 15000, vatFils: 0 }, { id: 'e2', amountFils: 2100, vatFils: 100 }] });
-    expect(p).toEqual({ revenue: 70000, parts: 12000, outside: 15000, expenses: 2000, profit: 41000, known: true });
-    // With the invoice its net total counts; what was let go comes off.
+    const p = jobProfit({ order: {}, items, invoices: [], expenses: [{ id: 'e1', amountFils: 15000 }, { id: 'e2', amountFils: 2100 }] });
+    expect(p).toEqual({ revenue: 73500, parts: 12000, outside: 15000, expenses: 2100, profit: 44400, known: true });
+    // The seller's VAT, when entered, is part of what the parts cost.
+    const withVat = items.map((i) => (i.kind === 'part' && !i.customerSupplied ? { ...i, purchaseVatFils: 600 } : i));
+    expect(jobProfit({ order: {}, items: withVat, invoices: [], expenses: [] })).toMatchObject({ parts: 12600, profit: 73500 - 12600 - 15000 });
+    // With the invoice its total counts; what was let go comes off.
     const q = jobProfit({ order: { waived: { at: NOW, fils: 10500 } }, items, invoices: [inv(70000, 73500)], expenses: [] });
-    expect(q.revenue).toBe(60000);
+    expect(q.revenue).toBe(63000);
     expect(jobProfit({ order: {}, items: [item({ kind: 'labor' })], invoices: [], expenses: [] }).known).toBe(false);
   });
 });

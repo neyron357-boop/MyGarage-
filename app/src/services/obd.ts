@@ -1,9 +1,9 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
-import { odometerKm, parseObdReport, type ObdReport, type TextItem } from '../domain/obdReport';
+import { actWithoutScan, odometerKm, parseObdReport, type ActObd, type ObdReport, type TextItem } from '../domain/obdReport';
 import type { ObdScan, Vehicle } from '../domain/types';
 import { AppError } from './errors';
-import { addMedia } from './media';
+import { addMedia, putBackMedia, takeMedia, type RemovedMedia } from './media';
 import { logEvent } from './orders';
 
 /*
@@ -55,6 +55,14 @@ export async function importObdReport(orderId: string, pdf: Blob, items: TextIte
   const intake = await db.inspections.where('orderId').equals(orderId).filter((i) => i.kind === 'intake' && !i.locked).first();
   const km = odometerKm(v.odometer);
 
+  if (intake) {
+    // What goes into the act, kept on the scan: deleting the scan takes back just this.
+    const fills = km !== undefined && intake.mileageKm === undefined;
+    scan.intoAct = { id: intake.id, codes: [...new Set(report.codes.map((c) => c.code))].filter((c) => !intake.obdCodes.includes(c)) };
+    if (fills) scan.intoAct.mileageKm = km;
+    if (intake.obdNoCodes !== undefined) scan.intoAct.noCodesBefore = intake.obdNoCodes;
+  }
+
   await db.transaction('rw', [db.orders, db.vehicles, db.inspections, db.events], async () => {
     await db.orders.update(orderId, { obdScans: [...(order.obdScans ?? []), scan], updatedAt: nowIso() });
     if (Object.keys(patch).length) await db.vehicles.update(vehicle.id, patch);
@@ -69,4 +77,58 @@ export async function importObdReport(orderId: string, pdf: Blob, items: TextIte
     await logEvent(orderId, 'obd_imported', { codes: report.codes.map((c) => c.code).join(', '), filled: Object.keys(patch).join(', ') });
   });
   return { scan, filled: Object.keys(patch) as (keyof Vehicle)[], vinMismatch };
+}
+
+/** A deleted scan with everything it took along — to put it back ("Undo"). */
+export interface RemovedObdScan {
+  orderId: string;
+  scan: ObdScan;
+  pdf?: RemovedMedia;
+  /** The open check-in act before the delete and as the delete left it. */
+  act?: { before: ActObd; after: Omit<ActObd, 'id'> };
+}
+
+/**
+ * Deletes a scanner report from a job that is still open: the scan, its PDF and what it put into a
+ * check-in act still open (`actWithoutScan`). A signed act keeps its own copy, the car's card keeps what it
+ * got. Not in the journal: "Undo" puts it all back as it was (as a removed note or line).
+ */
+export async function removeObdScan(orderId: string, scanId: string): Promise<RemovedObdScan> {
+  return db.transaction('rw', [db.orders, db.inspections, db.media, db.mediaBlobs], async () => {
+    const order = await db.orders.get(orderId);
+    const scan = order?.obdScans?.find((s) => s.id === scanId);
+    if (!order || !scan) throw new AppError('err.notFound');
+    if (order.stage === 'closed' || order.stage === 'cancelled') throw new AppError('stageErr.notAllowed');
+    const rest = (order.obdScans ?? []).filter((s) => s.id !== scanId);
+    const pdf = scan.mediaId ? await takeMedia(scan.mediaId) : undefined;
+    // The act the import fills (above); a signed one is never written.
+    const intake = await db.inspections.where('orderId').equals(orderId).filter((i) => i.kind === 'intake' && !i.locked).first();
+    const before: ActObd | undefined = intake && { id: intake.id, obdCodes: intake.obdCodes, obdNoCodes: intake.obdNoCodes, mileageKm: intake.mileageKm };
+    const after = before && actWithoutScan(before, scan, rest);
+    if (before && after) await db.inspections.update(before.id, after);
+    await db.orders.update(orderId, { obdScans: rest });
+    return { orderId, scan, pdf, act: before && after ? { before, after } : undefined };
+  });
+}
+
+/** "Undo" of `removeObdScan`: the scan in its place, its PDF, and the act as it was (codes added since stay). */
+export async function restoreObdScan(r: RemovedObdScan): Promise<void> {
+  await db.transaction('rw', [db.orders, db.inspections, db.media, db.mediaBlobs], async () => {
+    const order = await db.orders.get(r.orderId);
+    if (!order) return;
+    if (r.pdf) await putBackMedia(r.pdf);
+    const scans = order.obdScans ?? [];
+    if (!scans.some((s) => s.id === r.scan.id)) {
+      await db.orders.update(r.orderId, { obdScans: [...scans, r.scan].sort((a, b) => a.importedAt.localeCompare(b.importedAt)) });
+    }
+    const act = r.act && (await db.inspections.get(r.act.before.id));
+    if (!r.act || !act || act.locked) return;
+    const obdCodes = [...new Set([...r.act.before.obdCodes, ...act.obdCodes])];
+    await db.inspections.update(act.id, {
+      obdCodes,
+      obdNoCodes: obdCodes.length ? (act.obdCodes.length ? act.obdNoCodes : r.act.before.obdNoCodes) : r.act.before.obdNoCodes,
+      // The mileage back only if nobody wrote another since.
+      mileageKm: act.mileageKm === r.act.after.mileageKm ? r.act.before.mileageKm : act.mileageKm,
+    });
+  });
 }

@@ -307,6 +307,11 @@ async function launchBrowser() {
     await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).filter({ hasText: '750,00' }).waitFor();
     // Money in as a debt payment with nobody picked: in the cash, no debt touched.
     await page.goto(BASE + '#/money?tab=book');
+    // v0.22: the month's money in and out sit on the cash card (no month block); the month row above the card.
+    const cashIn = async () => Number(await front('.money-card [data-month-purse="cash"]').getAttribute('data-in'));
+    const in0 = await cashIn();
+    if (await front('.surface .month-field').count()) throw new Error('the month block is still there');
+    if ((await front('.month-field').boundingBox()).y >= (await front('.money-card').boundingBox()).y) throw new Error('the month row is not above the cash card');
     before = await cashNow();
     await front('button').filter({ hasText: /^Приход$/ }).first().click();
     await dlg.getByLabel('Сумма').fill('100');
@@ -314,6 +319,10 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: /^Записать приход/ }).click();
     await dlg.waitFor({ state: 'hidden' });
     if ((await cashNow()) - before !== 10000) throw new Error('money in with no customer: the cash moved by ' + ((await cashNow()) - before));
+    await page.waitForFunction(
+      (want) => Number(document.querySelector('.screen[data-role="top"] .money-card [data-month-purse="cash"]')?.getAttribute('data-in')) === want,
+      in0 + 10000,
+    );
     // The garage on credit: 1 000 of parts, nothing paid — the cash stays, the company owes 1 000.
     before = await cashNow();
     await front('button').filter({ hasText: /^Расход$/ }).first().click();
@@ -748,6 +757,21 @@ async function launchBrowser() {
     });
     if (!car || car[0] !== '1GKFLTE30BX000001' || car[1] !== 2011) throw new Error('the car card did not get the report data: ' + JSON.stringify(car));
   });
+  await step('v0.22: the scanner report deleted from its sheet, with its PDF; «Отменить» brings both back', async () => {
+    const obdPdfs = () => page.evaluate(async () => (await import('/src/db/db.ts')).db.media.filter((m) => m.slot === 'obd_report').count());
+    const pdfs = await obdPdfs();
+    await page.getByRole('button', { name: 'Сканер' }).first().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Удалить', exact: true }).click();
+    await page.getByText('Отчёт сканера удалён').first().waitFor();
+    await front('.job-obd').waitFor({ state: 'detached' });
+    if ((await obdPdfs()) !== pdfs - 1) throw new Error('the report’s PDF stayed');
+    await page.getByRole('button', { name: 'Отменить' }).last().click();
+    await front('.job-obd').waitFor();
+    if ((await obdPdfs()) !== pdfs) throw new Error('«Отменить» did not bring the PDF back');
+    // The car's card keeps what the report gave it.
+    const vin = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.vehicles.toArray()).find((x) => x.plateSearch.endsWith('31415'))?.vin);
+    if (vin !== '1GKFLTE30BX000001') throw new Error('the car lost its VIN: ' + vin);
+  });
   await step('v0.12: a customer already in the base, picked on the job', async () => {
     // The car came without a name: typing one that is in the base offers that customer; a tap — the job is theirs.
     await page.getByRole('button', { name: 'Клиент', exact: true }).click();
@@ -971,6 +995,13 @@ async function launchBrowser() {
     await page.getByRole('tab', { name: /Архив/ }).click();
     const back = page.locator('.job-row', { hasText: '31415' }).first();
     await back.waitFor();
+    // v0.22: the archive's rows are small and dated — no 2 : 1 cards there; the job just taken off is «Сегодня».
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll('.screen[data-role="top"] .job-mini')].map((r) => ({ h: Math.round(r.getBoundingClientRect().height), d: r.querySelector('.job-mini-date')?.textContent?.trim() ?? '' })),
+    );
+    if (!rows.length || rows.some((r) => r.h > 88 || !/^(Сегодня|Вчера|\d{2}\/\d{2}(\/\d{4})?)$/.test(r.d))) throw new Error('archive rows: ' + JSON.stringify(rows));
+    if (await front('.job-card').count()) throw new Error('a large card in the archive');
+    await back.locator('.job-mini-date', { hasText: 'Сегодня' }).waitFor();
     await shot('02c-archive');
     await swipeLeft(back);
     await page.getByText('Заказ снова на доске').first().waitFor();
@@ -1336,9 +1367,9 @@ async function launchBrowser() {
     await dlg.getByText(/^Оплачено/).waitFor();
     await shot('34e-outside-paid');
     await page.locator('.mantine-Modal-close').first().click();
-    // The profit (blurred until tapped): 390 + 500 net − 300 − 300.
+    // The profit (blurred until tapped), with VAT since v0.22: 934.50 (409.50 + 525.00) − 300 − 300.
     await page.locator('.list-row', { hasText: 'Прибыль' }).click();
-    await page.locator('.profit-amount[data-shown="true"]').getByText('290,00').waitFor();
+    await page.locator('.profit-amount[data-shown="true"]').getByText('334,50').waitFor();
     // Two mechanics on the job (v0.17.2): each chip on by itself; the task goes to both.
     const crewChips = front('.job-foot button.chip:not(.due-chip):not(.vin-chip)');
     const names = await crewChips.allTextContents();
@@ -1609,6 +1640,134 @@ async function launchBrowser() {
     await page.locator('.mantine-Modal-close').first().click();
     await page.goto(BASE + '#/settings?tab=rules');
     await shot('28-settings', true);
+  });
+  await step('v0.22: the report counts every sum with VAT — no VAT section, the profit from the totals', async () => {
+    await page.goto(BASE + '#/reports');
+    await page.getByText('Валовая прибыль').first().waitFor();
+    if (await page.getByText(/VAT с продаж|VAT в покупках|VAT к уплате|без VAT/).count()) throw new Error('the report still takes VAT apart');
+    const fils = (s) => Math.round(Number(s.replace(/[^\d,−-]/g, '').replace('−', '-').replace(',', '.')) * 100);
+    const kpi = fils(await front('.kpi').filter({ hasText: 'Выручка с VAT' }).locator('.money').first().textContent());
+    const rows = await front('.list')
+      .filter({ hasText: 'Валовая прибыль' })
+      .locator('.list-row')
+      .evaluateAll((els) => els.map((e) => [e.querySelector('.title')?.textContent ?? '', e.querySelector('.money')?.textContent ?? '']));
+    const val = (name) => {
+      const r = rows.find(([t]) => t.includes(name));
+      return r ? fils(r[1]) : 0;
+    };
+    const [rev, other, parts, spent, profit] = ['Выручка с VAT', 'Прочие приходы', 'Себестоимость запчастей', 'Расходы', 'Валовая прибыль'].map(val);
+    if (rev !== kpi || profit !== rev + other - parts - spent) throw new Error('report rows: ' + JSON.stringify(rows));
+    // The month's invoices with VAT, credit notes less — counted here on their own.
+    const want = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { dubaiDate } = await import('/src/domain/dates.ts');
+      const today = dubaiDate(new Date().toISOString());
+      const from = today.slice(0, 8) + '01';
+      return (await db.invoices.toArray()).filter((i) => dubaiDate(i.issuedAt) >= from && dubaiDate(i.issuedAt) <= today).reduce((s, i) => s + (i.type === 'credit_note' ? -1 : 1) * i.totalFils, 0);
+    });
+    if (kpi !== want) throw new Error(`revenue ${kpi}, the month's invoices ${want}`);
+  });
+  await step('v0.22: «Удалить все данные» and «Убрать перенесённое» folded under «Сброс»', async () => {
+    // A job as if carried over from Eaglecart: «Убрать перенесённое» has something to take.
+    const id = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const o = (await db.orders.toArray()).find((x) => x.stage === 'closed');
+      await db.orders.update(o.id, { imported: { system: 'eaglecart', jobId: 'e2e', jobNo: 'E2E-1', status: 'Delivered' } });
+      return o.id;
+    });
+    await page.goto(BASE + '#/settings?tab=data');
+    const reset = front('.list-row').filter({ hasText: /^Сброс$/ });
+    await reset.waitFor();
+    for (const word of ['Удалить все данные', 'Убрать перенесённое']) if ((await front('.list-row').filter({ hasText: word }).count()) + (await front('button').filter({ hasText: word }).count())) throw new Error(`«${word}» is in sight before «Сброс»`);
+    await shot('28b-settings-data');
+    await reset.click();
+    await front('.list-row').filter({ hasText: 'Убрать перенесённое' }).waitFor();
+    await shot('28c-settings-reset');
+    await front('.list-row').filter({ hasText: 'Удалить все данные' }).click();
+    const d = page.getByRole('dialog', { name: 'Удалить все данные' });
+    const del = d.getByRole('button', { name: 'Удалить', exact: true });
+    await del.waitFor();
+    if (!(await del.isDisabled())) throw new Error('«Удалить» on before DELETE is typed');
+    await d.getByPlaceholder('DELETE').fill('DELETE');
+    if (await del.isDisabled()) throw new Error('«Удалить» stays off with DELETE typed');
+    await closeModal();
+    await d.waitFor({ state: 'hidden' });
+    await front('.list-row').filter({ hasText: 'Удалить все данные' }).click();
+    await del.waitFor();
+    if (!(await del.isDisabled())) throw new Error('the sheet opened again with «Удалить» on');
+    await closeModal();
+    await d.waitFor({ state: 'hidden' });
+    await page.evaluate(async (id) => (await import('/src/db/db.ts')).db.orders.update(id, { imported: undefined }), id);
+  });
+  await step('v0.22: the workshop’s own notes — «Ещё» → «Заметки», the same chat, no job', async () => {
+    await page.goto(BASE + '#/more');
+    await front('.list-row').filter({ hasText: /^Заметки/ }).first().click();
+    await page.waitForFunction(() => location.hash === '#/notes');
+    await page.getByLabel('Заметка').fill('Купить бумагу для принтера');
+    await front('[aria-label="Добавить"]').click();
+    await front('.note-bubble').filter({ hasText: 'Купить бумагу для принтера' }).waitFor();
+    await shot('36-garage-notes');
+    const kept = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.notes.where('orderId').equals('').toArray()).map((n) => n.text));
+    if (JSON.stringify(kept) !== JSON.stringify(['Купить бумагу для принтера'])) throw new Error('workshop notes: ' + JSON.stringify(kept));
+    // Its count on the row in «Ещё»; no job shows it.
+    await page.goto(BASE + '#/more');
+    await front('.list-row').filter({ hasText: /^Заметки1$/ }).waitFor();
+    const onJobs = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.notes.toArray()).filter((n) => n.orderId && n.text === 'Купить бумагу для принтера').length);
+    if (onJobs) throw new Error('the workshop note went to a job');
+  });
+  await step('v0.22: «Вид» — the board compact, its tabs dragged into another order, a step left out, kept on the device', async () => {
+    await page.goto(BASE + '#/');
+    await front('.job-card').first().waitFor();
+    // The strip's tabs by name (their counts come in as the board and the debtors are read).
+    const strip = async () => (await front('.scroll-tabs > button').allInnerTexts()).map((x) => x.replace(/\s*\d+$/, '').trim());
+    const before = await strip();
+    // The first step on the strip (it has cars): left out below.
+    const step1 = before[1];
+    // A long press on a tab opens «Вид».
+    await front('.scroll-tabs > button').first().evaluate(async (el) => {
+      const r = el.getBoundingClientRect();
+      const touch = () => new Touch({ identifier: 7, target: el, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+      el.dispatchEvent(new TouchEvent('touchstart', { touches: [touch()], changedTouches: [touch()], bubbles: true, cancelable: true }));
+      await new Promise((ok) => setTimeout(ok, 600));
+      el.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch()], bubbles: true, cancelable: true }));
+    });
+    const v = page.getByRole('dialog', { name: 'Вид' });
+    await v.waitFor();
+    await closeModal();
+    await v.waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: 'Вид' }).click();
+    await v.waitFor();
+    await v.locator('.mantine-SegmentedControl-label', { hasText: 'Компактно' }).click();
+    await v.getByRole('radio', { name: 'Компактно', checked: true }).waitFor({ state: 'attached' });
+    await v.locator('.list-row').filter({ hasText: step1 }).locator('.mantine-Switch-track').click();
+    await v.locator('.list-row').filter({ hasText: step1 }).getByRole('switch', { checked: false }).waitFor({ state: 'attached' });
+    // «Архив» moved up to right after «Все» by its grip (its keys; the finger's drag of a grip — motion §16).
+    for (let i = 0; i < 8; i++) {
+      await v.locator('[data-sort-id="archive"]').press('ArrowUp');
+      await page.waitForTimeout(80);
+    }
+    await shot('02d-board-view');
+    await closeModal();
+    await v.waitFor({ state: 'hidden' });
+    const check = async (when) => {
+      const now = await strip();
+      if (now[1] !== 'Архив' || now.includes(step1)) throw new Error(`${when}: the strip is ${JSON.stringify(now)}`);
+      await front('.job-mini').first().waitFor();
+      if (await front('.job-card').count()) throw new Error(`${when}: large cards on a compact board`);
+    };
+    await check('after «Вид»');
+    await shot('02e-board-compact');
+    await page.reload();
+    await front('.job-mini').first().waitFor();
+    await check('after a reload');
+    const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mygarage.board') ?? '{}'));
+    if (kept.size !== 'compact' || kept.order?.[1] !== 'archive' || kept.hidden?.length !== 1) throw new Error('kept on the device: ' + JSON.stringify(kept));
+    // Back as it was, for the steps after this one.
+    await page.evaluate(() => localStorage.removeItem('mygarage.board'));
+    await page.reload();
+    await front('.job-card').first().waitFor();
+    const after = await strip();
+    if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the strip did not come back: ${JSON.stringify(after)}, before ${JSON.stringify(before)}`);
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

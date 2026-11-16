@@ -171,7 +171,7 @@ describe('the garage on credit', () => {
     expect((await db.cashMovements.filter((m) => m.reason === 'credit_payment').toArray()).length).toBe(1);
     // The expense is counted once — 1 000, not 1 300.
     const [orders, invoices, items, expenses, payments, closings, incomes] = await Promise.all([db.orders.toArray(), db.invoices.toArray(), db.items.toArray(), db.expenses.toArray(), db.payments.toArray(), db.cashClosings.toArray(), db.incomes.toArray()]);
-    expect(computeReport({ from: '2000-01-01', to: '2100-01-01', orders, invoices, items, expenses, payments, closings, incomes }).expensesNet).toBe(100_000);
+    expect(computeReport({ from: '2000-01-01', to: '2100-01-01', orders, invoices, items, expenses, payments, closings, incomes }).expensesGross).toBe(100_000);
     // The money sheet: the payment is the expense it pays off.
     expect((await moneySheetOfBook()).rows.map((r) => [r.type, r.category, r.amountFils, r.notes])).toEqual([['Expense', 'Parts Purchases', 30_000, 'Credit paid: Al Futtaim Parts']]);
 

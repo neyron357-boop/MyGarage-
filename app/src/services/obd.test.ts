@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { OBD_REPORT_ITEMS } from '../domain/obdReport.testdata';
 import { getOrCreateInspection } from './inspections';
-import { importObdReport } from './obd';
+import { importObdReport, removeObdScan, restoreObdScan } from './obd';
 import { checkIn, loadOrderBundle } from './orders';
 import { ensureSeed } from './seed';
 
@@ -35,6 +35,51 @@ describe('a scanner report read into a job', () => {
     expect(again.vinMismatch).toBe('1GKFLTE30BX000001');
     expect((await db.vehicles.get(b.vehicle.id))!.vin).toBe('JTDBR32E720012345');
     expect((await db.orders.get(o.id))!.obdScans).toHaveLength(2);
+  });
+
+  it('deletes a report with its PDF and what it put into the open act; «Undo» puts it all back', async () => {
+    const o = await checkIn({ plate: { emirate: 'DXB', code: 'A', number: '77777' }, make: 'GMC', model: 'Terrain', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+    const act = await getOrCreateInspection(o.id, 'intake');
+    await db.inspections.update(act.id, { obdCodes: ['P0300'], obdNoCodes: false });
+    const { scan } = await importObdReport(o.id, pdf(), OBD_REPORT_ITEMS);
+    expect(scan.intoAct).toMatchObject({ id: act.id, mileageKm: 243951, noCodesBefore: false });
+    expect(scan.intoAct!.codes).not.toContain('P0300');
+    const vin = (await loadOrderBundle(o.id))!.vehicle.vin;
+
+    const removed = await removeObdScan(o.id, scan.id);
+    let b = (await loadOrderBundle(o.id))!;
+    expect(b.order.obdScans).toEqual([]);
+    expect(await db.media.get(scan.mediaId!)).toBeUndefined();
+    expect(await db.mediaBlobs.get(scan.mediaId!)).toBeUndefined();
+    // The act keeps what was there before the report; the car keeps what it got.
+    expect(b.intake!.obdCodes).toEqual(['P0300']);
+    expect(b.intake!.mileageKm).toBeUndefined();
+    expect(b.vehicle.vin).toBe(vin);
+
+    await restoreObdScan(removed);
+    await restoreObdScan(removed); // twice — still once
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.order.obdScans!.map((s) => s.id)).toEqual([scan.id]);
+    expect((await db.media.get(scan.mediaId!))!.kind).toBe('pdf');
+    expect(b.intake!.obdCodes).toEqual(['P0300', ...scan.codes.map((c) => c.code)]);
+    expect(b.intake!.mileageKm).toBe(243951);
+  });
+
+  it('leaves a signed act and a closed job alone', async () => {
+    const o = await checkIn({ plate: { emirate: 'DXB', code: 'A', number: '88888' }, make: 'GMC', model: 'Terrain', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+    const act = await getOrCreateInspection(o.id, 'intake');
+    const { scan } = await importObdReport(o.id, pdf(), OBD_REPORT_ITEMS);
+    await db.inspections.update(act.id, { locked: true });
+    await removeObdScan(o.id, scan.id);
+    const b = (await loadOrderBundle(o.id))!;
+    expect(b.order.obdScans).toEqual([]);
+    expect(b.intake!.obdCodes).toContain('P0430');
+    expect(b.intake!.mileageKm).toBe(243951);
+
+    const again = await importObdReport(o.id, pdf(), OBD_REPORT_ITEMS);
+    await db.orders.update(o.id, { stage: 'closed' });
+    await expect(removeObdScan(o.id, again.scan.id)).rejects.toThrow();
+    expect((await db.orders.get(o.id))!.obdScans).toHaveLength(1);
   });
 
   it('refuses a PDF that is not a scanner report', async () => {

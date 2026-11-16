@@ -134,6 +134,16 @@ export interface ObdScan {
   vin?: string;
   /** The report itself (PDF in media). */
   mediaId?: string;
+  /** What the import put into the check-in act still open then (v0.22), so deleting the scan takes back just that. */
+  intoAct?: ObdIntoAct;
+}
+
+/** A scan's share of a check-in act: codes it added, the mileage it filled, whether the act said "no codes" before. */
+export interface ObdIntoAct {
+  id: string;
+  codes: string[];
+  mileageKm?: number;
+  noCodesBefore?: boolean;
 }
 
 export interface ImportedFrom {
@@ -213,6 +223,7 @@ export interface Order {
  */
 export interface JobNote {
   id: string;
+  /** The job; '' — the workshop's own note (`GARAGE_NOTES`, «Ещё» → «Заметки», v0.22). */
   orderId: string;
   kind: 'text' | 'photo' | 'video' | 'voice';
   text?: string;

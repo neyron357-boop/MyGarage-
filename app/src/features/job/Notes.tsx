@@ -742,6 +742,7 @@ function Composer({
  * The job's "Notes" tab: a chat with oneself — everything to remember about the car and the job, typed,
  * photographed, filmed or said. The newest at the bottom, by day. A swipe to the right on a note answers it; a
  * long press begins picking notes — several at once: answer the one, copy their words, delete them (with Undo).
+ * The same chat holds the workshop's own notes (`orderId` = `GARAGE_NOTES`, `GarageNotesPage`).
  */
 export function NotesChat({ orderId, notes, editable }: { orderId: string; notes: JobNote[]; editable: boolean }) {
   const { t } = useTranslation();

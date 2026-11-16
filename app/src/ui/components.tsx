@@ -34,6 +34,7 @@ import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
 import { cachedCardUrl, cachedMediaUrl, cardUrl, mediaUrl } from '../services/media';
 import { LazySheet } from './lazy';
+import { useLongPress } from './longPress';
 import { actionStart, tapSettled } from './tapGuard';
 import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
@@ -838,10 +839,26 @@ export interface TabItem {
  * new one (like the thumb of a segmented control), in the tab's own colour when it has one; the active
  * tab is always scrolled into view.
  */
-export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: string; onChange: (v: string) => void; items: TabItem[]; mb?: string }) {
+export function ScrollTabs({
+  value,
+  onChange,
+  items,
+  mb = 'md',
+  onHold,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  items: TabItem[];
+  mb?: string;
+  /** A long press on a tab (right click on a PC) — the board opens its «Вид» there; the tap after it is not a tap. */
+  onHold?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const pill = useRef<HTMLSpanElement>(null);
   const ready = useRef(false);
+  const hold = useLongPress(() => onHold?.());
+  // Tabs in another order (the board's «Вид»): the pill goes to where its tab is now.
+  const order = items.map((it) => it.value).join('|');
   useEffect(() => {
     const root = ref.current;
     const el = root?.querySelector<HTMLElement>('[data-active="true"]');
@@ -875,9 +892,9 @@ export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: strin
       root.scrollTo({ left: Math.max(0, left - 24), behavior: 'smooth' });
     }
     return () => ro.disconnect();
-  }, [value, items.length]);
+  }, [value, order]);
   return (
-    <Box mb={mb} className="scroll-tabs" role="tablist" ref={ref}>
+    <Box mb={mb} className="scroll-tabs" role="tablist" ref={ref} {...(onHold ? hold.handlers : {})}>
       <span className="scroll-tabs-pill" ref={pill} aria-hidden />
       {items.map((it) => (
         <button
@@ -887,7 +904,10 @@ export function ScrollTabs({ value, onChange, items, mb = 'md' }: { value: strin
           data-active={it.value === value}
           data-tint={it.color}
           aria-selected={it.value === value}
-          onClick={() => onChange(it.value)}
+          onClick={() => {
+            if (onHold && hold.consumeClick()) return;
+            onChange(it.value);
+          }}
           style={it.color ? ({ '--c': `var(--mantine-color-${it.color}-light-color)`, '--cf': `var(--mantine-color-${it.color}-filled)` } as React.CSSProperties) : undefined}
         >
           {it.icon && <it.icon size={16} stroke={2.3} className="tab-icon" aria-hidden />}

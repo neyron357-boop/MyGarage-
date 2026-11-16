@@ -113,7 +113,7 @@ describe('money book', () => {
     await voidExpense(e.id);
     const r = computeReport({ from: '2026-07-01', to: '2026-07-31', orders: [], invoices: [], items: [], expenses: await db.expenses.toArray(), payments: [], closings: [], incomes: [i] });
     expect(r.otherIncome).toBe(1000);
-    expect(r.expensesNet).toBe(0);
+    expect(r.expensesGross).toBe(0);
     expect(r.grossProfit).toBe(1000);
   });
 });

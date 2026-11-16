@@ -8,7 +8,19 @@ import { addMedia } from './media';
  * A job's notes, a chat with oneself: what the mechanic found, what was checked, what the customer was
  * promised — a few words, a photo, a video or a voice message. They are the manager's own: not on any
  * document, can be removed.
+ *
+ * The workshop's own notes (v0.22: a bulb to change in the office, paper for the printer) are the same notes
+ * with no job — `orderId` is `GARAGE_NOTES` (''), still in the `orderId` index; no job ever has that id, so a
+ * job's notes, its deletion and its board place never see them.
  */
+export const GARAGE_NOTES = '';
+
+/** The workshop's own notes, oldest first (`GarageNotesPage`). */
+export const garageNotes = () => db.notes.where('orderId').equals(GARAGE_NOTES).sortBy('createdAt');
+
+/** How many workshop notes there are (the «Заметки» row in «Ещё»). */
+export const garageNoteCount = () => db.notes.where('orderId').equals(GARAGE_NOTES).count();
+
 export async function addNote(orderId: string, input: { text?: string; photo?: Blob; video?: Blob; voice?: Blob; seconds?: number; peaks?: number[]; replyTo?: string }): Promise<JobNote> {
   const text = input.text?.trim();
   if (!text && !input.photo && !input.video && !input.voice) throw new AppError('err.emptyNote');
@@ -24,7 +36,8 @@ export async function addNote(orderId: string, input: { text?: string; photo?: B
   else if (input.photo) note.mediaId = (await addMedia({ ownerType: 'note', ownerId: id, slot: 'photo', file: input.photo })).id;
   await db.transaction('rw', db.notes, db.orders, async () => {
     await db.notes.add(note);
-    await db.orders.update(orderId, { updatedAt: note.createdAt });
+    // A job's note puts the job first on the board; the workshop's has no job.
+    if (orderId !== GARAGE_NOTES) await db.orders.update(orderId, { updatedAt: note.createdAt });
   });
   return note;
 }

@@ -3,11 +3,11 @@ import { IconBuildingFactory2, IconCar, IconCash, IconClock, IconExternalLink, I
 import { memo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { dueShort, hoursBetween, nowIso, shortDuration } from '../../domain/dates';
+import { dayShort, dueShort, hoursBetween, nowIso, shortDuration } from '../../domain/dates';
 import type { Phase } from '../../domain/flow';
-import { liveLines } from '../../domain/flow';
+import { leftBoardAt, liveLines } from '../../domain/flow';
 import { activeInvoice } from '../../domain/invoice';
-import { itemAmounts } from '../../domain/items';
+import { itemAmounts, summarize } from '../../domain/items';
 import { partsToFind } from '../../services/flow';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
@@ -25,6 +25,12 @@ export function jobAmount(b: OrderBundle): number {
   return liveLines(b.items).reduce((s, i) => s + itemAmounts(i).gross, 0);
 }
 
+/** What a job came to: its invoice (with VAT), or the lines the customer agreed to — a closed or cancelled job in the archive. */
+export function jobTotal(b: OrderBundle): number {
+  if (b.order.stage === 'cancelled') return 0;
+  return activeInvoice(b.invoices)?.totalFils ?? summarize(b.items).approvedGross;
+}
+
 /** What a swipe left (and the long-press menu) does with the row: to the archive, or back to the board. */
 export interface RowSwipe {
   label: string;
@@ -33,16 +39,33 @@ export interface RowSwipe {
   onCommit: () => void;
 }
 
-type RowProps = { b: OrderBundle; phase: Phase; cover?: string; swipe?: RowSwipe; /** Changes every few minutes: "how long" and "late" move on. */ tick?: number };
+type RowProps = {
+  b: OrderBundle;
+  phase: Phase;
+  cover?: string;
+  swipe?: RowSwipe;
+  /** Changes every few minutes: "how long" and "late" move on. */
+  tick?: number;
+  /**
+   * `card` — the photo is the card (2 : 1); `row` — a row of a list with a small photo (v0.22): the board in
+   * «Компактно», and always the archive.
+   */
+  variant?: 'card' | 'row';
+  /** A row of the archive: the day the job left the board instead of its step and time. */
+  dated?: boolean;
+};
 
 /**
  * A row renders again only when its job changed (the board keeps the same bundle for a job that did
  * not — `loadBoard`), its photo or step did, or the clock moved on: the board refreshing, the stack
  * moving, a swipe on another row leave it alone.
  */
-export const JobRow = memo(JobRowView, (a, z) => a.b === z.b && a.phase === z.phase && a.cover === z.cover && a.tick === z.tick && a.swipe?.label === z.swipe?.label);
+export const JobRow = memo(
+  JobRowView,
+  (a, z) => a.b === z.b && a.phase === z.phase && a.cover === z.cover && a.tick === z.tick && a.swipe?.label === z.swipe?.label && a.variant === z.variant && a.dated === z.dated,
+);
 
-function JobRowView({ b, phase, cover, swipe }: RowProps) {
+function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProps) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
@@ -103,15 +126,69 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
       <span aria-label={`${t('job.due')}: ${dueText}`}>{dueText}</span>
     </span>
   ) : null;
-  const vars = { '--c': `var(--mantine-color-${tone}-6)`, '--c-deep': `var(--mantine-color-${tone}-filled)` } as CSSProperties;
+  const vars = {
+    '--c': `var(--mantine-color-${tone}-6)`,
+    '--c-deep': `var(--mantine-color-${tone}-filled)`,
+    '--c-soft': `var(--mantine-color-${tone}-light)`,
+    '--c-ink': `var(--mantine-color-${tone}-light-color)`,
+  } as CSSProperties;
+  const row = variant === 'row';
+  // The archive's row: the day the job left the board, and what it came to (a closed one owes nothing).
+  const ended = phase === 'closed' || phase === 'cancelled';
+  const day = dated ? dayShort(leftBoardAt(b.order)) : undefined;
+  const dayText = day ? (day.word ? t(`common.${day.word}`) : day.text) : '';
+  const rowAmount = dated && ended ? jobTotal(b) : amount;
+  // On the small photo: the step of a job still open (taken off by hand), a cancelled one's cross; a closed one — nothing.
+  const badge = dated && phase !== 'closed' ? PHASE_META[phase] : undefined;
+  const face = row ? (
+    <>
+      <span className="job-mini-pic">
+        <span className="car-thumb">
+          {cover ? <MediaImage id={cover} h={56} w={56} radius="0" /> : <IconCar size={28} stroke={1.6} aria-hidden />}
+        </span>
+        {badge && (
+          <span className="job-mini-badge" style={{ background: `var(--mantine-color-${badge.color}-filled)` }} title={t(`job.phase.${phase}`)}>
+            <badge.icon size={12} stroke={2.6} aria-label={t(`job.phase.${phase}`)} />
+          </span>
+        )}
+      </span>
+      <span className="job-mini-body">
+        <span className="job-mini-line">
+          <span className="job-mini-name">{name}</span>
+          {dated ? (
+            <span className="job-mini-date tnum">{dayText}</span>
+          ) : (
+            <>
+              {marks.length > 0 && <span className="job-mini-marks">{marks.map(mark)}</span>}
+              <span className="job-mini-step tnum" title={stepText}>
+                <m.icon size={13} stroke={2.4} aria-hidden />
+                {/* In a narrow row (a lane of the PC board, which names its step) only the symbol and the time. */}
+                <span className="job-mini-step-name">{t(`job.phase.${phase}`)} · </span>
+                {booked ? dueShort(booked, lang) : shortDuration(hours, lang)}
+              </span>
+            </>
+          )}
+        </span>
+        <span className="job-mini-line">
+          <PlateText plate={b.vehicle.plate} size="xs" />
+          {!dated && dueChip}
+          {rowAmount > 0 && (
+            <span className="job-mini-amount">
+              <Money fils={rowAmount} fw={650} />
+            </span>
+          )}
+        </span>
+      </span>
+    </>
+  ) : null;
   return (
     <>
       <div
-        className="job-row job-card swipe-row"
+        className={row ? 'job-row job-mini swipe-row' : 'job-row job-card swipe-row'}
         // Every card the same size (the user's call, v0.17.3): a job without the car's photo has the same 2 : 1
-        // card, with the car drawn on a dark ground in its place.
-        data-photo
-        data-art={cover ? undefined : true}
+        // card, with the car drawn on a dark ground in its place. A row (compact, the archive) — all rows one size.
+        data-photo={row ? undefined : true}
+        data-art={row || cover ? undefined : true}
         {...touch}
         style={swipe ? { ...vars, ...sw.style } : vars}
         data-swiping={sw.dragging || undefined}
@@ -143,34 +220,40 @@ function JobRowView({ b, phase, cover, swipe }: RowProps) {
           }}
         >
           {/* The photo is the card (or, without one, the car drawn in its place): the step on it, the car and its
-              money at its foot over a soft shade. */}
-          {cover ? (
-            <MediaImage id={cover} card h="100%" w="100%" radius="0" />
+              money at its foot over a soft shade. A row: the photo small on the left, the same facts beside it. */}
+          {row ? (
+            face
           ) : (
-            <span className="job-card-art" aria-hidden>
-              <IconCar size={120} stroke={1.1} />
-            </span>
-          )}
-          <span className="job-card-shade" aria-hidden />
-          <span className="job-card-top">
-            <span className="job-card-step tnum">
-              <m.icon size={15} stroke={2.4} aria-hidden />
-              {stepText}
-            </span>
-            {marks.length > 0 && <span className="job-card-marks">{marks.map(mark)}</span>}
-          </span>
-          <span className="job-card-foot">
-            <span className="job-card-name">{name}</span>
-            <span className="job-card-meta">
-              <PlateText plate={b.vehicle.plate} size="sm" />
-              {dueChip}
-              {amount > 0 && (
-                <span className="job-card-amount">
-                  <Money fils={amount} fw={700} />
+            <>
+              {cover ? (
+                <MediaImage id={cover} card h="100%" w="100%" radius="0" />
+              ) : (
+                <span className="job-card-art" aria-hidden>
+                  <IconCar size={120} stroke={1.1} />
                 </span>
               )}
-            </span>
-          </span>
+              <span className="job-card-shade" aria-hidden />
+              <span className="job-card-top">
+                <span className="job-card-step tnum">
+                  <m.icon size={15} stroke={2.4} aria-hidden />
+                  {stepText}
+                </span>
+                {marks.length > 0 && <span className="job-card-marks">{marks.map(mark)}</span>}
+              </span>
+              <span className="job-card-foot">
+                <span className="job-card-name">{name}</span>
+                <span className="job-card-meta">
+                  <PlateText plate={b.vehicle.plate} size="sm" />
+                  {dueChip}
+                  {amount > 0 && (
+                    <span className="job-card-amount">
+                      <Money fils={amount} fw={700} />
+                    </span>
+                  )}
+                </span>
+              </span>
+            </>
+          )}
         </button>
       </div>
       {/* The row's actions (long press), a sheet like the iPhone's context menu. */}
