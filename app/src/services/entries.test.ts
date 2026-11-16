@@ -465,3 +465,65 @@ describe('after the review: «Отменить» over a newer change, the day an
     expect((await db.cashClosings.get(c.id))!.cardTotalFils).toBe(0);
   });
 });
+
+describe('the second review (v0.23.1)', () => {
+  it('a closing comes back only after the closing it came after: the one before it deleted since — it stays gone', async () => {
+    await addIncome({ category: 'sales', amountFils: 1_000, method: 'cash' });
+    const a = await closeCashDay(101_000);
+    await addIncome({ category: 'sales', amountFils: 500, method: 'cash' });
+    const b = await closeCashDay(101_500);
+    const c = await closeCashDay(101_500);
+    const rc = await removeEntry({ source: 'closing', id: c.id });
+    await removeEntry({ source: 'closing', id: b.id });
+    await restoreEntry(rc);
+    expect(await db.cashClosings.get(c.id)).toBeUndefined();
+    expect((await db.cashClosings.toArray()).map((x) => x.id)).toEqual([a.id]);
+    expect(await cash()).toBe(101_500);
+    // The first one deleted and «Отменить»: back as it was.
+    const rb2 = await removeEntry({ source: 'closing', id: a.id });
+    expect(await cash()).toBe(101_500);
+    await restoreEntry(rb2);
+    expect(await db.cashClosings.get(a.id)).toBeTruthy();
+    expect(await cash()).toBe(101_500);
+  });
+
+  it('«Отменить» does not bring back a payment of a credit its debt no longer takes', async () => {
+    const e = await addExpense({ date: dubaiDate(), categoryId: await cat('parts'), amountFils: 10_000, vatFils: 0, method: 'credit' });
+    const p = await payCredit(e.id, { amountFils: 6_000, method: 'cash' });
+    const r = await removeEntry({ source: 'credit', id: p.id });
+    await payCredit(e.id, { amountFils: 10_000, method: 'cash' });
+    await restoreEntry(r);
+    expect((await db.creditPayments.toArray()).map((x) => x.amountFils)).toEqual([10_000]);
+    expect((await companyDebtOf(e.id))!.leftFils).toBe(0);
+    expect(await cash()).toBe(90_000);
+    // Changed to a paid way meanwhile: no payment of a credit comes back to it.
+    const e2 = await addExpense({ date: dubaiDate(), categoryId: await cat('parts'), amountFils: 4_000, vatFils: 0, method: 'credit' });
+    const p2 = await payCredit(e2.id, { amountFils: 4_000, method: 'cash' });
+    const r2 = await removeEntry({ source: 'credit', id: p2.id });
+    await updateEntry({ source: 'expense', id: e2.id }, { method: 'cash' });
+    await restoreEntry(r2);
+    expect(await db.creditPayments.where('expenseId').equals(e2.id).count()).toBe(0);
+    expect(await cash()).toBe(86_000);
+  });
+
+  it('the payment that closed a job deleted: a debt again — «Выдана», on the board; «Отменить» closes it again', async () => {
+    const o = await invoicedJob(600);
+    await leaveOnDebt(o.id, { amountFils: 60_000, dueDate: '2026-12-01', signature: signature() });
+    const p = await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 60_000 });
+    expect((await loadOrderBundle(o.id))!.order.stage).toBe('closed');
+    const removed = await removeEntry({ source: 'payment', id: p.id });
+    expect((await loadOrderBundle(o.id))!.order.stage).toBe('delivered');
+    expect((await db.debts.where('orderId').equals(o.id).first())!.status).toBe('open');
+    await restoreEntry(removed);
+    expect((await loadOrderBundle(o.id))!.order.stage).toBe('closed');
+    expect((await db.debts.where('orderId').equals(o.id).first())!.status).toBe('paid');
+    // A sum typed wrong (3 500 for 350): closed, then owing — «Выдана» again.
+    await updateEntry({ source: 'payment', id: p.id }, { amountFils: 50_000 });
+    expect((await loadOrderBundle(o.id))!.order.stage).toBe('delivered');
+  });
+
+  it('no day after today', async () => {
+    const i = await addIncome({ category: 'sales', amountFils: 1_000, method: 'cash' });
+    await expect(updateEntry({ source: 'income', id: i.id }, { date: shiftDay(dubaiDate(), 1) })).rejects.toMatchObject({ code: 'err.futureDate' });
+  });
+});

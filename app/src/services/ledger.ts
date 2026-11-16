@@ -2,7 +2,7 @@ import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
 import { buildLedger, type LedgerResult } from '../domain/ledger';
 import type { Expense, Income, IncomeCategory, PayMethod } from '../domain/types';
-import { momentOf, placeInDay } from './cashDays';
+import { placeInDay } from './cashDays';
 import { addDebtPayment } from './debts';
 import { AppError } from './errors';
 import { getSettings, saveSettings } from './settings';
@@ -87,7 +87,7 @@ export async function addIncome(input: IncomeInput): Promise<Income> {
     }
   });
   // Taken on a day already counted: into that day's closing (the count had this money already).
-  if (income.method === 'cash' && income.date !== dubaiDate(now)) await placeInDay(momentOf(income.date, now), movementId);
+  if (income.method === 'cash' && income.date !== dubaiDate(now)) await placeInDay(income.date, now, movementId);
   return income;
 }
 

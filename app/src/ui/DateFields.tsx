@@ -41,9 +41,10 @@ export function DateTimeField({ label, value, onChange, description, disabled, p
 }
 
 /** Calendar date; stores YYYY-MM-DD. */
-export function DateField({ label, value, onChange, description, required }: { label: ReactNode; value?: string; onChange: (day: string) => void; description?: ReactNode; required?: boolean }) {
+export function DateField({ label, value, onChange, description, required, maxDate }: { label: ReactNode; value?: string; onChange: (day: string) => void; description?: ReactNode; required?: boolean; /** No day after this one (YYYY-MM-DD). */ maxDate?: string }) {
   return (
     <DatePickerInput
+      maxDate={maxDate ? fromDay(maxDate) ?? undefined : undefined}
       label={label}
       description={description}
       required={required}

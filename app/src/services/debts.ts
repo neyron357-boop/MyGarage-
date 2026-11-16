@@ -4,7 +4,7 @@ import { allocate, creditLeft, groupDebts, isCustomerDebt, orderDue, type DebtJo
 import { activeInvoice, formatDocNumber } from '../domain/invoice';
 import type { CreditPayment, Customer, Expense, Income, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
 import { AppError } from './errors';
-import { momentOf, placeInDay } from './cashDays';
+import { placeInDay } from './cashDays';
 import { settleIfPaid } from './money';
 import { logEvent } from './orders';
 
@@ -135,6 +135,7 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
         amountFils: part.amountFils,
         receiptNumber: formatDocNumber('RC', receiptYear(), n),
         receivedAt,
+        typedAt: now,
         incomeId: income.id,
       };
       await db.payments.add(p);
@@ -142,10 +143,7 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
     }
   });
   // Taken on a day already counted: the cash into that day's closing; its jobs' card payments in that day's card total.
-  if (date !== dubaiDate()) {
-    await placeInDay(momentOf(date, now), income.method === 'cash' ? movementId : undefined);
-    if (parts.length) await placeInDay(receivedAt);
-  }
+  if (date !== dubaiDate(now)) await placeInDay(date, now, income.method === 'cash' ? movementId : undefined);
   for (const part of parts) await settleIfPaid(part.orderId);
   return { income, parts, restFils };
 }
@@ -223,7 +221,7 @@ export async function payCredit(expenseId: string, input: { amountFils: number; 
     return p;
   });
   // Paid on a day already counted (v0.23: the day is picked): into that day's closing — the count had it gone already.
-  if (paid.method === 'cash' && paid.date !== dubaiDate(now)) await placeInDay(momentOf(paid.date, now), movementId);
+  if (paid.method === 'cash' && paid.date !== dubaiDate(now)) await placeInDay(paid.date, now, movementId);
   return paid;
 }
 

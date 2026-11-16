@@ -4,7 +4,7 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { buildMoneyWorkbook, excelSerial, fromExcelSerial, readMoneyWorkbook, sheetBalances, type MoneySheet } from '../domain/moneySheet';
 import { unzip } from '../domain/zip';
 import { addIncome, loadLedger, setOpeningBalances } from './ledger';
-import { addExpense } from './money';
+import { addExpense, closeCashDay } from './money';
 import { importMoneyPlan, moneySheetOfBook, planMoneyImport } from './moneySheet';
 import { ensureSeed } from './seed';
 
@@ -29,6 +29,26 @@ const SHEET: MoneySheet = {
     { date: '2026-07-09', type: 'Expense', amountFils: 1000, payment: 'Cash', category: 'Groceries', notes: 'food' },
   ],
 };
+
+describe('the money sheet and day closings (v0.23.1)', () => {
+  it('a day closing’s difference does not take the row that explains it; the difference rows the app wrote are left out', async () => {
+    await setOpeningBalances(100_000, 0);
+    // The day was counted 20 short: a parts purchase never typed.
+    await closeCashDay(98_000, 'short 20');
+    const today = (await loadLedger()).entries.find((e) => e.source === 'closing')!.date;
+    const sheet: MoneySheet = {
+      cashStartFils: 100_000,
+      cardStartFils: 0,
+      rows: [
+        { date: today, type: 'Expense', amountFils: 2_000, payment: 'Cash', category: 'Parts Purchases', notes: 'bolts' },
+        { date: today, type: 'Expense', amountFils: 2_000, payment: 'Cash', category: 'Other', notes: 'Day closing difference' },
+      ],
+    };
+    const plan = await planMoneyImport(buildMoneyWorkbook(sheet));
+    expect(plan.rows.map((r) => r.notes)).toEqual(['bolts']);
+    expect(plan.existing).toBe(1);
+  });
+});
 
 describe('the money sheet (Money Tracker workbook)', () => {
   it('is written as the original workbook and read back as it was', async () => {

@@ -74,9 +74,11 @@ export function readVin(vehicleId: string, t: T, opts: { manual?: boolean } = {}
       const said = `${t('vinRead.filled')}: ${r.filled.map((k) => (k === 'vin' ? r.vin : r.year)).join(' · ')}`;
       if (r.filled.length) haptic('success');
       // What went in, with "Undo" — or, when something else waits to be looked at, "Open" (the sheet changes both).
-      if (r.filled.length && look) undoToast(`${said} · ${t('vinRead.check')}`, t('vinRead.look'), open);
-      else if (r.filled.length) undoToast(said, t('common.undo'), () => void setCarVin(vehicleId, r.before));
-      else if (look) undoToast(t(r.differs.vin || r.differs.year ? 'vinRead.differs' : 'vinRead.check'), t('vinRead.look'), open);
+      // Read in the background (seconds): it waits its turn behind an undo the user may still want (v0.23.1).
+      const later = { replace: false };
+      if (r.filled.length && look) undoToast(`${said} · ${t('vinRead.check')}`, t('vinRead.look'), open, later);
+      else if (r.filled.length) undoToast(said, t('common.undo'), () => void setCarVin(vehicleId, r.before), later);
+      else if (look) undoToast(t(r.differs.vin || r.differs.year ? 'vinRead.differs' : 'vinRead.check'), t('vinRead.look'), open, later);
       else if (opts.manual) notifications.show({ color: r.vin ? 'green' : 'orange', message: t(r.vin ? 'vinRead.same' : 'vinRead.none') });
     } catch (e) {
       console.error(e);

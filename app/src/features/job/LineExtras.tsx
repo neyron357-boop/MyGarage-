@@ -104,6 +104,8 @@ export function OutsourceActions({ item, make }: { item: OrderItem; make?: strin
   const [paying, setPaying] = useState(false);
   const [cost, setCost] = useState<number | undefined>(item.costPriceFils);
   useEffect(() => setCost(item.costPriceFils), [item.costPriceFils]);
+  // Paid: what the expense that paid it says (v0.23.1 — changed in Money, it is the truth; the cost follows it).
+  const paidBy = useLiveQuery(async () => (item.outsource?.expenseId ? ((await db.expenses.get(item.outsource.expenseId)) ?? null) : null), [item.outsource?.expenseId]);
   const o = item.outsource;
   if (!o)
     return (
@@ -131,7 +133,7 @@ export function OutsourceActions({ item, make }: { item: OrderItem; make?: strin
           <SupplierChips service make={make} value={o.supplierId} onChange={(s) => void run(() => setOutsource(item.id, { ...o, supplierId: s }))} label={t('outsource.who')} />
         </div>
         <FormRow label={t('outsource.cost')}>
-          <MoneyInput label={undefined} ariaLabel={t('outsource.cost')} value={cost} onChange={setCost} />
+          <MoneyInput label={undefined} ariaLabel={t('outsource.cost')} value={cost} onChange={setCost} readOnly={!!o.expenseId} />
         </FormRow>
         {o.state !== 'back' && (
           <div className="ios-row">
@@ -152,7 +154,7 @@ export function OutsourceActions({ item, make }: { item: OrderItem; make?: strin
       {o.expenseId ? (
         <Text mt="sm" size="sm" c="green.7" fw={600}>
           <IconCheck size={16} stroke={2.6} style={{ verticalAlign: -3, marginRight: 4 }} aria-hidden />
-          {t('outsource.paid', { amount: formatAed(amount, lang) })}
+          {t('outsource.paid', { amount: formatAed(paidBy?.amountFils ?? amount, lang) })}
         </Text>
       ) : (
         amount > 0 &&

@@ -117,12 +117,19 @@ export async function planMoneyImport(bytes: Uint8Array): Promise<MoneyImportPla
   const key = (date: string, out: boolean, card: boolean, fils: number) => `${date}|${out ? 'o' : 'i'}|${card ? 'k' : 'c'}|${fils}`;
   const have = new Map<string, number>();
   for (const e of book.entries) {
+    // A closing's difference would take the row that explains it (an expense never typed) — v0.23.1.
+    if (e.source === 'closing') continue;
     const k = key(e.date, e.kind === 'out', e.purse === 'card', e.amountFils);
     have.set(k, (have.get(k) ?? 0) + 1);
   }
   const rows: MoneyRow[] = [];
   let existing = 0;
   for (const r of read.rows) {
+    // A day closing's difference as the app writes it out: not an operation — the book keeps its closings.
+    if (r.notes?.includes('Day closing difference')) {
+      existing++;
+      continue;
+    }
     const k = key(r.date, r.type === 'Expense', r.payment === 'Card', r.amountFils);
     const n = have.get(k) ?? 0;
     if (n > 0) {

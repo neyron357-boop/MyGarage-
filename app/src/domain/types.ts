@@ -596,6 +596,11 @@ export interface Payment {
   receiptNumber: string;
   receivedAt: string;
   /**
+   * When it was typed in (v0.23.1). Typed for an earlier day, or moved to one, it is counted by that day's closing
+   * (services/cashDays.ts); one from before — at the moment it was received.
+   */
+  typedAt?: string;
+  /**
    * Received within an income (a "debt payment" taken at once and spread over the customer's jobs, v0.20): its
    * money is that income's — no cash movement of its own, not a line of the money book.
    */

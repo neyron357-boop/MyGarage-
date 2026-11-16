@@ -130,6 +130,7 @@ export const en: typeof ru = {
     creditOver: 'More than is left to pay',
     creditPaid: 'Delete the payments of this debt first',
     belowPaid: 'More than this has been paid already',
+    futureDate: 'The date cannot be after today',
     debtPaymentAmount: "A debt payment keeps its amount: delete it and take it again",
     invoiceExists: 'An invoice is already issued. Use a credit note to correct it',
     nothingToInvoice: 'No approved items to invoice',

@@ -1,13 +1,14 @@
 import { db, uid } from '../db/db';
-import { onDubaiDay } from '../domain/dates';
+import { dubaiDate, nowIso, onDubaiDay } from '../domain/dates';
 import { isCustomerDebt, orderDue } from '../domain/debts';
 import { amountDue } from '../domain/invoice';
 import { summarize } from '../domain/items';
 import type { LedgerSource } from '../domain/ledger';
 import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Media, PayMethod, Payment } from '../domain/types';
-import { closingAt, momentOf, recountClosing } from './cashDays';
+import { closingFor, closingOfPayment, recountClosing } from './cashDays';
 import { AppError } from './errors';
 import { settleIfPaid } from './money';
+import { logEvent } from './orders';
 
 /*
  * Every operation of the money book can be deleted, and its date, sum, way and note changed (v0.23 — the user's call:
@@ -57,6 +58,8 @@ export interface RemovedEntry {
   closedAt: Record<string, string>;
   /** The closings there were right after it (a closing it deleted comes back only into that same row). */
   closingsLeft: string[];
+  /** The closing each deleted closing came after (none — the first): it comes back only after that one. */
+  after: Record<string, string | undefined>;
   /** The closings whose figures it changed and the jobs whose payments went: worked out again after "Undo". */
   closings: string[];
   orders: string[];
@@ -70,6 +73,7 @@ class Touch {
   readonly changed: Change[] = [];
   readonly closings = new Set<string>();
   readonly orders = new Set<string>();
+  readonly after: Record<string, string | undefined> = {};
 
   async drop(t: Kept, rec: Rec) {
     let m = this.gone.get(t);
@@ -96,7 +100,7 @@ class Touch {
     const left = await db.cashClosings.toArray();
     const closedAt = Object.fromEntries(left.map((c) => [c.id, c.closedAt]));
     for (const c of (gone.cashClosings ?? []) as CashClosing[]) closedAt[c.id] = c.closedAt;
-    return { gone, changed: this.changed, closedAt, closingsLeft: left.map((c) => c.id), closings: [...this.closings], orders: [...this.orders] };
+    return { gone, changed: this.changed, closedAt, closingsLeft: left.map((c) => c.id), after: this.after, closings: [...this.closings], orders: [...this.orders] };
   }
 }
 
@@ -126,7 +130,7 @@ async function takeMovements(t: Touch, list: CashMovement[]) {
 async function takePayment(t: Touch, p: Payment) {
   t.orders.add(p.orderId);
   // A card payment was in the card total of the day that counted it.
-  await t.dayOf(await closingAt(p.receivedAt));
+  await t.dayOf(await closingOfPayment(p));
   await t.drop('payments', p);
   await takeMediaOf(t, p.id);
   await takeMovements(t, await movementsOf('paymentId', p.id));
@@ -163,7 +167,9 @@ async function takeExpense(t: Touch, e: Expense) {
 
 /** A closing deleted: its movements go to the next closing (that one counted them), or back to the open cash box. */
 async function takeClosing(t: Touch, c: CashClosing) {
-  const next = (await db.cashClosings.toArray()).filter((x) => x.closedAt > c.closedAt).sort((a, b) => a.closedAt.localeCompare(b.closedAt))[0];
+  const all = (await db.cashClosings.toArray()).sort((a, b) => a.closedAt.localeCompare(b.closedAt));
+  const next = all.find((x) => x.closedAt > c.closedAt);
+  t.after[c.id] = all.filter((x) => x.closedAt < c.closedAt).at(-1)?.id;
   await t.drop('cashClosings', c);
   for (const m of await db.cashMovements.where('closingId').equals(c.id).toArray()) await t.change('cashMovements', m, { closingId: next?.id });
   if (next) {
@@ -217,8 +223,9 @@ async function takeRef(t: Touch, ref: EntryRef): Promise<void> {
 }
 
 /**
- * Jobs whose payments changed: one closed without payment lets go of what is unpaid now; one gone that owes again has
- * its signed debt open again. (One paid in full now is settled after the transaction — `settleIfPaid`.)
+ * Jobs whose payments changed: one closed without payment lets go of what is unpaid now; one gone that owes again is
+ * a debt again — its signed debt open again, and a closed one back to «Выдана» (the board's «Долг», «Сегодня», «Оплата»
+ * on the job). (One paid in full now is settled after the transaction — `settleIfPaid`: closed again.)
  */
 async function resettle(orderIds: Iterable<string>) {
   for (const id of orderIds) {
@@ -235,7 +242,13 @@ async function resettle(orderIds: Iterable<string>) {
       if (unpaid !== order.waived.fils) await db.orders.update(id, { waived: { ...order.waived, fils: unpaid } });
       continue;
     }
-    if (!isCustomerDebt(order, orderDue(order, items, invoices, payments)) || debts.some((d) => d.status === 'open')) continue;
+    if (!isCustomerDebt(order, orderDue(order, items, invoices, payments))) continue;
+    if (order.stage === 'closed') {
+      const now = nowIso();
+      await db.orders.update(id, { stage: 'delivered', stageChangedAt: now, updatedAt: now });
+      await logEvent(id, 'stage', { from: 'closed', to: 'delivered', reason: 'payment' });
+    }
+    if (debts.some((d) => d.status === 'open')) continue;
     const paid = debts.filter((d) => d.status === 'paid').sort((a, b) => b.signedAt.localeCompare(a.signedAt))[0];
     if (paid) await db.debts.update(paid.id, { status: 'open' });
   }
@@ -300,16 +313,29 @@ export async function restoreEntry(r: RemovedEntry): Promise<void> {
       return !!rec && Object.keys(c.after).every((f) => same(rec[f], c.after[f]));
     };
     // A closing deleted comes back only into the row of closings it left — each starts where the one before ended:
-    // none made after it since, its next one still starting where it was left (else the book and the cash box part).
+    // after the same closing as before, still ending where it starts; none made after it since; its next one still
+    // starting where it was left (else the book and the cash box part).
     const skip = new Set<Change>();
+    const cashStart = (await db.settings.get('main'))?.cashStartFils ?? 0;
     for (const c of [...back.get('cashClosings')!.values()] as CashClosing[]) {
-      const later = (await db.cashClosings.toArray()).filter((x) => x.closedAt > c.closedAt);
+      const all = await db.cashClosings.toArray();
+      const later = all.filter((x) => x.closedAt > c.closedAt);
+      const before = all.filter((x) => x.closedAt < c.closedAt).sort((a, b) => a.closedAt.localeCompare(b.closedAt)).at(-1);
       const starts = r.changed.filter((x) => x.of === c.id);
-      let ok = later.every((x) => r.closingsLeft.includes(x.id));
+      let ok = later.every((x) => r.closingsLeft.includes(x.id)) && before?.id === r.after?.[c.id] && (before ? before.actualFils : cashStart) === c.openingFils;
       for (const x of starts) if (!(await unchanged(x))) ok = false;
       if (ok) continue;
       back.get('cashClosings')!.delete(c.id);
       for (const x of r.changed) if (x.of === c.id || (x.table === 'cashMovements' && x.before.closingId === c.id)) skip.add(x);
+    }
+    // A payment of a credit only while its debt still takes it: on credit, and no more paid than it is.
+    const paidOf = new Map<string, number>();
+    for (const c of ([...back.get('creditPayments')!.values()] as CreditPayment[]).sort((a, b) => a.paidAt.localeCompare(b.paidAt))) {
+      const e = (back.get('expenses')!.get(c.expenseId) as Expense | undefined) ?? (await db.expenses.get(c.expenseId));
+      if (!paidOf.has(c.expenseId)) paidOf.set(c.expenseId, (await db.creditPayments.where('expenseId').equals(c.expenseId).toArray()).filter((x) => !x.voidedAt && !back.get('creditPayments')!.has(x.id)).reduce((s, x) => s + x.amountFils, 0));
+      const sum = paidOf.get(c.expenseId)! + (c.voidedAt ? 0 : c.amountFils);
+      if (!e || e.voidedAt || e.method !== 'credit' || sum > e.amountFils) back.get('creditPayments')!.delete(c.id);
+      else paidOf.set(c.expenseId, sum);
     }
     // Children whose parent is gone for good stay gone (a payment of a debt payment deleted since, …) — until none drop.
     for (let dropped = true; dropped; ) {
@@ -334,11 +360,11 @@ export async function restoreEntry(r: RemovedEntry): Promise<void> {
     }
     // A movement's closing deleted since: its movements went to the next closing (or the open cash box) — so does it.
     const counts = [...(await db.cashClosings.toArray()), ...(back.get('cashClosings')!.values() as Iterable<CashClosing>)];
+    const madeSince = counts.filter((c) => !r.closingsLeft.includes(c.id) && !back.get('cashClosings')!.has(c.id)).sort((a, b) => a.closedAt.localeCompare(b.closedAt))[0];
     for (const m of [...back.get('cashMovements')!.values()] as CashMovement[]) {
-      // Open when it went, and the day counted since: into the closing made after it — that count had it already.
+      // Open when it went: a closing made since took all the open cash box — so it takes this one (as if it had stayed).
       if (!m.closingId) {
-        const closingId = await closingAt(m.at);
-        if (closingId) back.get('cashMovements')!.set(m.id, { ...m, closingId } as Rec);
+        if (madeSince) back.get('cashMovements')!.set(m.id, { ...m, closingId: madeSince.id } as Rec);
         continue;
       }
       if (await there('cashClosings', m.closingId)) continue;
@@ -356,7 +382,7 @@ export async function restoreEntry(r: RemovedEntry): Promise<void> {
     for (const c of back.get('cashClosings')!.keys()) closings.add(c);
     for (const p of back.get('payments')!.values() as Iterable<Payment>) {
       orders.add(p.orderId);
-      const day = await closingAt(p.receivedAt);
+      const day = await closingOfPayment(p);
       if (day) closings.add(day);
     }
     await followUp(closings, orders);
@@ -388,7 +414,7 @@ async function syncCash(
   key: LinkKey,
   id: string,
   want: Omit<CashMovement, 'id'> | null,
-  opts: { becameCash: boolean; moment: string; dayMoved: boolean; placeByAt?: boolean },
+  opts: { becameCash: boolean; day: string; typedAt: string; dayMoved: boolean; placeByAt?: boolean },
 ) {
   const had = await movementsOf(key, id);
   if (!want) {
@@ -401,7 +427,7 @@ async function syncCash(
   const m = had[0];
   if (!m) {
     if (!opts.becameCash) return;
-    const closingId = await closingAt(opts.moment);
+    const closingId = await closingFor(opts.day, opts.typedAt);
     await db.cashMovements.add({ ...want, id: uid(), closingId });
     await t.dayOf(closingId);
     return;
@@ -409,7 +435,7 @@ async function syncCash(
   const next: Partial<CashMovement> = { amountFils: want.amountFils, direction: want.direction, note: want.note };
   if (opts.placeByAt) next.at = want.at;
   if (opts.dayMoved) {
-    const closingId = await closingAt(opts.moment);
+    const closingId = await closingFor(opts.day, opts.typedAt);
     if (closingId !== m.closingId) next.closingId = closingId;
     await t.dayOf(closingId);
   }
@@ -420,6 +446,20 @@ async function syncCash(
 const nameOf = (c?: { type: string; companyName?: string; name: string }) => (c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) : '');
 
 /**
+ * A job payment moved to another day: the same time of day on it (today — not later than now) — and, moved to today,
+ * typed now (counted by the next count); moved to an earlier day — counted by that day's count (services/cashDays.ts).
+ */
+function movedPayment(p: Pick<Payment, 'receivedAt' | 'typedAt'>, day: string): Pick<Payment, 'receivedAt' | 'typedAt'> {
+  if (day === dubaiDate(p.receivedAt)) return { receivedAt: p.receivedAt, typedAt: p.typedAt };
+  const now = nowIso();
+  if (day >= dubaiDate(now)) {
+    const at = onDubaiDay(p.receivedAt, day);
+    return { receivedAt: at < now ? at : now, typedAt: now };
+  }
+  return { receivedAt: onDubaiDay(p.receivedAt, day), typedAt: p.typedAt ?? p.receivedAt };
+}
+
+/**
  * Change an operation: its date, sum, way of payment, note — whatever it is (a job's payment, money in or out, a payment
  * of a credit, a movement of the cash box). Its cash movement follows; a job paid or owing again settles as it does
  * after a payment. A debt payment keeps its sum (its jobs were paid from it: delete it and take it again), and a
@@ -428,6 +468,7 @@ const nameOf = (c?: { type: string; companyName?: string; name: string }) => (c 
 export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<void> {
   if (patch.amountFils !== undefined && !(patch.amountFils > 0)) throw new AppError('err.amountRequired');
   if (patch.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(patch.date)) throw new AppError('err.notFound');
+  if (patch.date !== undefined && patch.date > dubaiDate()) throw new AppError('err.futureDate');
   const t = new Touch();
   await db.transaction('rw', db.tables, async () => {
     const gone = () => new AppError('err.notFound');
@@ -449,7 +490,8 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
         await db.expenses.update(e.id, { date, amountFils, vatFils, method, note });
         await syncCash(t, 'expenseId', e.id, method === 'cash' ? { at: e.createdAt, direction: 'out', amountFils, reason: 'expense', expenseId: e.id, note: e.vendor ?? note } : null, {
           becameCash: e.method !== 'cash',
-          moment: momentOf(date, e.createdAt),
+          day: date,
+          typedAt: e.createdAt,
           dayMoved: date !== e.date,
         });
         for (const s of await db.salaryPayments.filter((s) => s.expenseId === e.id).toArray()) {
@@ -480,14 +522,14 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
           'incomeId',
           i.id,
           method === 'cash' ? { at: i.createdAt, direction: 'in', amountFils, reason, incomeId: i.id, orderId: i.orderId, note: debt ? [who, note].filter(Boolean).join(' · ') || undefined : note } : null,
-          { becameCash: i.method !== 'cash', moment: momentOf(date, i.createdAt), dayMoved: date !== i.date },
+          { becameCash: i.method !== 'cash', day: date, typedAt: i.createdAt, dayMoved: date !== i.date },
         );
         // Its jobs were paid on its day and by its way (a card one — in the card total of the day that counted it).
         for (const p of debt ? await db.payments.where('incomeId').equals(i.id).toArray() : []) {
-          const receivedAt = date === i.date ? p.receivedAt : onDubaiDay(p.receivedAt, date);
-          await t.dayOf(await closingAt(p.receivedAt));
-          await t.dayOf(await closingAt(receivedAt));
-          await db.payments.update(p.id, { method, receivedAt });
+          const moved = date === i.date ? { receivedAt: p.receivedAt, typedAt: p.typedAt } : movedPayment(p, date);
+          await t.dayOf(await closingOfPayment(p));
+          await t.dayOf(await closingOfPayment(moved));
+          await db.payments.update(p.id, { method, ...moved });
         }
         break;
       }
@@ -497,18 +539,20 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
         if (!p || p.incomeId || patch.method === 'credit') throw gone();
         const method = (patch.method as PayMethod | undefined) ?? p.method;
         const amountFils = patch.amountFils ?? p.amountFils;
-        const receivedAt = patch.date ? onDubaiDay(p.receivedAt, patch.date) : p.receivedAt;
+        const moved = patch.date ? movedPayment(p, patch.date) : { receivedAt: p.receivedAt, typedAt: p.typedAt };
+        const receivedAt = moved.receivedAt;
         const reference = patch.note !== undefined ? clean(patch.note) : p.reference;
-        await db.payments.update(p.id, { method, amountFils, receivedAt, reference });
+        await db.payments.update(p.id, { method, amountFils, ...moved, reference });
         const reason = p.kind === 'refund' ? 'refund' : p.kind === 'prepayment' ? 'prepayment' : 'order_payment';
         await syncCash(t, 'paymentId', p.id, method === 'cash' ? { at: receivedAt, direction: p.kind === 'refund' ? 'out' : 'in', amountFils, reason, orderId: p.orderId, paymentId: p.id } : null, {
           becameCash: p.method !== 'cash',
-          moment: receivedAt,
+          day: dubaiDate(receivedAt),
+          typedAt: moved.typedAt ?? receivedAt,
           dayMoved: receivedAt !== p.receivedAt,
           placeByAt: true,
         });
-        await t.dayOf(await closingAt(p.receivedAt));
-        await t.dayOf(await closingAt(receivedAt));
+        await t.dayOf(await closingOfPayment(p));
+        await t.dayOf(await closingOfPayment(moved));
         t.orders.add(p.orderId);
         break;
       }
@@ -530,7 +574,7 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
           'creditPaymentId',
           c.id,
           method === 'cash' ? { at: c.paidAt, direction: 'out', amountFils, reason: 'credit_payment', creditPaymentId: c.id, orderId: e.orderId, note: [e.vendor, note ?? e.note].filter(Boolean).join(' · ') || undefined } : null,
-          { becameCash: c.method !== 'cash', moment: momentOf(date, c.paidAt), dayMoved: date !== c.date },
+          { becameCash: c.method !== 'cash', day: date, typedAt: c.paidAt, dayMoved: date !== c.date },
         );
         break;
       }
@@ -541,10 +585,13 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
         const amountFils = patch.amountFils ?? m.amountFils;
         const note = patch.note !== undefined ? clean(patch.note) : m.note;
         if (!note && (m.reason === 'other' || m.reason === 'adjustment' || m.reason === 'collection')) throw new AppError('err.reasonRequired');
-        const at = patch.date ? onDubaiDay(m.at, patch.date) : m.at;
+        // Moved: the same time of day (today — not later than now); counted by that day's count.
+        const now = nowIso();
+        const moved = patch.date && patch.date !== dubaiDate(m.at) ? onDubaiDay(m.at, patch.date) : m.at;
+        const at = moved > now ? now : moved;
         const next: Partial<CashMovement> = { amountFils, at, note };
         if (at !== m.at) {
-          const closingId = await closingAt(at);
+          const closingId = await closingFor(dubaiDate(at), m.at);
           if (closingId !== m.closingId) next.closingId = closingId;
           await t.dayOf(closingId);
         }

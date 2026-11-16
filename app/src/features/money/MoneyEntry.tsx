@@ -538,7 +538,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
         </UnstyledButton>
         <Collapse in={more}>
           <Stack gap="sm">
-            <DateField label={t('common.date')} value={date} onChange={setDate} />
+            <DateField label={t('common.date')} value={date} onChange={setDate} maxDate={dubaiDate()} />
             {kind === 'out' && (
               <>
                 <TextInput label={t('expense.vendor')} value={vendor} onChange={(e) => setVendor(e.currentTarget.value)} />

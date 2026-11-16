@@ -68,7 +68,7 @@ function CashTab() {
     const lines = withEntries(st.lines, book.entries).reverse();
     return { st, lines, cats, photos: await proofIndex(lines.map((l) => l.entry.id)) };
   }, []);
-  const closings = useScreenLiveQuery(() => db.cashClosings.orderBy('date').reverse().limit(30).toArray(), []);
+  const closings = useScreenLiveQuery(async () => (await db.cashClosings.toArray()).sort((a, b) => b.closedAt.localeCompare(a.closedAt)).slice(0, 30), []);
   const label = useCategoryLabel(data?.cats);
   const [opened, setOpened] = useState<string | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -164,7 +164,7 @@ function CashTab() {
             {closings.map((c) => (
               <ListRow
                 key={c.id}
-                title={formatDate(c.date)}
+                title={closings.filter((x) => x.date === c.date).length > 1 ? formatDateTime(c.closedAt) : formatDate(c.date)}
                 subtitle={`${t('cash.expected')} ${formatAed(c.expectedFils)} · ${t('cash.actual')} ${formatAed(c.actualFils)} · ${t('payment.method.card')} ${formatAed(c.cardTotalFils)}${c.comment ? ` · ${c.comment}` : ''}`}
                 right={c.diffFils !== 0 ? <Badge color="red">{formatAed(c.diffFils)}</Badge> : <Badge color="green">OK</Badge>}
               />
