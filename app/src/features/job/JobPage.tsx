@@ -37,6 +37,8 @@ import {
   IconUser,
   IconUserDollar,
   IconUserPlus,
+  IconTruckDelivery,
+  IconUserCheck,
   IconUserX,
   type Icon,
 } from '@tabler/icons-react';
@@ -76,6 +78,9 @@ import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, useScreenLiveQuery } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
+import { OwnerCheckSheet } from './OwnerCheck';
+import { PartThumb } from './PartThumb';
+import { PartsBatchSheet } from './PartsBatch';
 import { scrollToTop, useStackBack } from '../../ui/stack';
 import { useStuck } from '../../ui/sticky';
 import { useTabSwipe } from '../../ui/tabSwipe';
@@ -144,6 +149,7 @@ const TILE_COLOR: Record<string, string> = {
   quote: 'grape',
   select: 'teal',
   amend: 'grape',
+  owner: 'green',
 };
 
 /** What can be added under a job's lines, each in its own colour: work, a part, a service (done by others). */
@@ -500,6 +506,10 @@ export function JobPage() {
   const [dueOpen, setDueOpen] = useState(false);
   // The profit is the manager's: hidden (blurred) until tapped, in case the customer sees the screen.
   const [profitShown, setProfitShown] = useState(false);
+  // The job for the owner to check (v0.29): its picture — parts bought and sold, from whom, the profit.
+  const [ownerOpen, setOwnerOpen] = useState(false);
+  // The parts picked when it opened (they stay its parts while it slides away).
+  const [batch, setBatch] = useState<OrderItem[] | null>(null);
   // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
   const obd = useObdImport(id ?? '');
   const expenses = useScreenLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
@@ -670,6 +680,12 @@ export function JobPage() {
           ) : (
             <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />
           )
+        ) : i.kind === 'part' ? (
+          // A part: its photo beside its state (v0.29) — a place for one, a tap away.
+          <Group gap={8} wrap="nowrap">
+            <LineMark item={i} />
+            <PartThumb item={i} editable={editable} />
+          </Group>
         ) : (
           <LineMark item={i} />
         )
@@ -677,7 +693,7 @@ export function JobPage() {
       title={
         <Text span inherit td={i.approvalState === 'declined' ? 'line-through' : undefined} c={i.approvalState === 'declined' ? 'dimmed' : undefined}>
           {itemTitle(i, docLang) || '—'}
-          {!!i.mediaIds?.length && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
+          {!!i.mediaIds?.length && i.kind !== 'part' && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
         </Text>
       }
       subtitle={dots([
@@ -789,6 +805,7 @@ export function JobPage() {
   if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
   // On credit and without payment are ways to settle the job: in the payment sheet ("Pay"), not here.
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
+  if (live.some((i) => i.kind !== 'discount')) tiles.push({ key: 'owner', icon: IconUserCheck, onClick: () => setOwnerOpen(true) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
   if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
@@ -879,6 +896,8 @@ export function JobPage() {
   // customer was told are confirmed first — they stay in the history as cancelled.
   const pickedLines = picked ? lines.filter((i) => picked.has(i.id) && canPick(i)) : [];
   const allPicked = pickedLines.length > 0 && pickedLines.length === lines.filter(canPick).length;
+  // The picked parts (v0.29): one supplier for them, where they stand — all at once.
+  const pickedParts = pickedLines.filter((i) => i.kind === 'part' && !i.customerSupplied);
   const removePicked = () =>
     run(async () => {
       const removed = await removeLines(pickedLines.map((i) => i.id));
@@ -897,6 +916,11 @@ export function JobPage() {
         <Button variant="default" onClick={() => setPicked(allPicked ? new Set() : new Set(lines.filter(canPick).map((i) => i.id)))} style={{ flex: '0 0 auto' }}>
           {allPicked ? t('job.pickNone') : t('job.pickAll')}
         </Button>
+        {pickedParts.length > 0 && (
+          <ActionIcon size={44} radius="xl" variant="default" aria-label={t('job.setParts')} onClick={() => setBatch(pickedParts)} style={{ flex: '0 0 auto' }}>
+            <IconTruckDelivery size={21} stroke={1.9} />
+          </ActionIcon>
+        )}
         <Button
           color="red"
           loading={busy}
@@ -1099,6 +1123,7 @@ export function JobPage() {
             <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
               {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
               {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
+              {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
             </AddBar>
           )}
           {editable && phase === 'booked' && lines.length > 0 && (
@@ -1176,6 +1201,23 @@ export function JobPage() {
         )}
       </LazySheet>
       {obd.input}
+      <SheetFor value={batch}>
+        {(parts, o) => (
+          <PartsBatchSheet
+            parts={parts}
+            vehicle={b.vehicle}
+            opened={o}
+            onClose={() => setBatch(null)}
+            onDone={() => {
+              setBatch(null);
+              setPicked(null);
+            }}
+          />
+        )}
+      </SheetFor>
+      <LazySheet opened={ownerOpen}>
+        {(o) => <OwnerCheckSheet b={b} expenses={expenses ?? []} docLang={docLang} opened={o} onClose={() => setOwnerOpen(false)} />}
+      </LazySheet>
       <LazySheet opened={complaintOpen}>
         {(o) => (
           <ComplaintSheet b={b} opened={o} onClose={() => setComplaintOpen(false)} />

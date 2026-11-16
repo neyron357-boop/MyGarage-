@@ -606,7 +606,8 @@ async function launchBrowser() {
     await page.locator('.viewer').waitFor({ state: 'detached' });
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
-    await page.locator('.list-row').filter({ hasText: 'Фильтр салона' }).locator('svg[aria-label="Фото"]').waitFor();
+    // A part shows its photo itself beside its name (v0.29).
+    await page.locator('.list-row').filter({ hasText: 'Фильтр салона' }).locator('.part-thumb:not([data-empty]) img').waitFor();
     // The parts by name only, in one tap (for a parts seller).
     await page.getByRole('button', { name: 'Скопировать запчасти' }).click();
     await page.getByText('Запчасти скопированы').first().waitFor();
@@ -2211,6 +2212,73 @@ async function launchBrowser() {
     await page.locator('.quick-layer[data-mode="sticky"]').waitFor();
     await page.locator('[data-quick="note"]').click();
     await page.waitForURL(/#\/notes/);
+  });
+  await step('v0.29: a part’s photo beside its name; parts picked set at once (supplier, state); the job’s picture for the owner', async () => {
+    const job = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      for (const o of await db.orders.toArray()) {
+        if (['closed', 'cancelled', 'delivered', 'ready'].includes(o.stage)) continue;
+        if (await db.invoices.where('orderId').equals(o.id).count()) continue;
+        const items = await db.items.where('orderId').equals(o.id).toArray();
+        if (items.filter((i) => i.kind === 'part' && !i.customerSupplied && ['draft', 'pending', 'approved'].includes(i.approvalState)).length >= 2) return o.id;
+      }
+      return null;
+    });
+    if (!job) throw new Error('no open job with two parts');
+    await page.goto(BASE + '#/orders/' + job);
+    await front('.part-thumb').first().waitFor();
+    // An empty thumb: a tap — the camera; the photo goes on the line (its sheet does not open).
+    const thumb = front('.part-thumb[data-empty]').first();
+    await thumb.scrollIntoViewIfNeeded();
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), thumb.click()]);
+    await chooser.setFiles(FIXTURE);
+    await front('.part-thumb:not([data-empty]) img').first().waitFor();
+    await page.waitForTimeout(300);
+    if (await page.getByRole('dialog').count()) throw new Error('the thumb opened the line’s sheet');
+    await front('.part-thumb:not([data-empty])').first().click();
+    await page.locator('.viewer').waitFor();
+    await shot('41a-part-photo');
+    await page.keyboard.press('Escape');
+    await page.locator('.viewer').waitFor({ state: 'detached' });
+    // Two parts picked (a hold — a right click on a PC), one supplier and «Заказано» for both.
+    const names = (await front('.list-row:has(.part-thumb) .title').allInnerTexts()).map((x) => x.trim().split('\n')[0]);
+    await page.waitForTimeout(400);
+    await front('.list-row').filter({ hasText: names[0] }).first().locator('.body').click({ button: 'right' });
+    await page.waitForTimeout(400);
+    await front('.list-row').filter({ hasText: names[1] }).first().locator('.body').click();
+    await page.getByRole('button', { name: 'Поставщик и наличие' }).click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByText('Запчасти · 2').waitFor();
+    await dlg.locator('[aria-label="Поставщик"] button.chip').first().click();
+    await dlg.getByRole('radio', { name: 'Заказано' }).click();
+    await shot('41b-parts-batch');
+    await dlg.getByRole('button', { name: /^Применить · 2/ }).click();
+    await dlg.waitFor({ state: 'detached' });
+    const set = await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      const parts = (await db.items.where('orderId').equals(id).toArray()).filter((i) => i.kind === 'part' && !i.customerSupplied && i.supplierId && i.procurementStatus === 'ordered');
+      return parts.length;
+    }, job);
+    if (set < 2) throw new Error('parts set at once: ' + set);
+    // «…» → «Владельцу»: the picture, then «Отправить» (a download on a PC).
+    await page.waitForTimeout(400);
+    await front('[aria-label="Ещё"]').first().click();
+    await page.getByRole('dialog').getByText('Владельцу').click();
+    await page.locator('img[data-owner-check]').waitFor({ timeout: 15000 });
+    const size = await page.locator('img[data-owner-check]').evaluate((img) => [img.naturalWidth, img.naturalHeight]);
+    if (size[0] !== 1080 || size[1] < 900) throw new Error('the picture is ' + size.join('×'));
+    await shot('41c-owner-check');
+    // The phone's share sheet (a PC's too, in Chrome): what it is handed is the picture.
+    await page.evaluate(() => {
+      window.__shared = null;
+      navigator.canShare = () => true;
+      navigator.share = async (d) => void (window.__shared = d.files.map((f) => [f.name, f.type]));
+    });
+    await page.getByRole('button', { name: 'Отправить' }).click();
+    const shared = await page.waitForFunction(() => window.__shared).then((h) => h.jsonValue());
+    if (shared.length !== 1 || shared[0][1] !== 'image/jpeg' || !/\.jpg$/.test(shared[0][0])) throw new Error('shared ' + JSON.stringify(shared));
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

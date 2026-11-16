@@ -207,3 +207,19 @@ export async function closeReturn(id: string, cashRefund: boolean): Promise<void
     }
   });
 }
+
+/**
+ * Several parts at once (v0.29 — picked on the job): one supplier for all of them, and/or where they stand (to find,
+ * ordered, here). Lines that are no part, or the customer's own, are left as they are. Returns how many took it.
+ */
+export async function setPartsBatch(ids: string[], u: { supplierId?: string; status?: ProcurementStatus }): Promise<number> {
+  let n = 0;
+  for (const id of ids) {
+    const item = await db.items.get(id);
+    if (!item || item.kind !== 'part' || item.customerSupplied) continue;
+    if (u.supplierId !== undefined && u.supplierId !== item.supplierId) await db.items.update(id, { supplierId: u.supplierId || undefined });
+    if (u.status && u.status !== item.procurementStatus) await setProcurement(id, { status: u.status });
+    n++;
+  }
+  return n;
+}

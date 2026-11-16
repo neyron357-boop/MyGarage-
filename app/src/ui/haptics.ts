@@ -157,6 +157,7 @@ const TAPPABLE = [
   'button.quick-item',
   'button.car-shot-img',
   'button.car-shot-x',
+  'button.part-thumb',
   'button.suggest',
   'button.swipe-btn',
   'button.search-cancel',
