@@ -1,10 +1,11 @@
 import { db, nextNumber, uid } from '../db/db';
 import { cashTotals, nonCashTotals } from '../domain/cash';
-import { dubaiDate, monthKey, nowIso } from '../domain/dates';
+import { dubaiDate, monthKey, nowIso, onDubaiDay } from '../domain/dates';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, paidNet } from '../domain/invoice';
 import { formatAed } from '../domain/money';
 import type { CashClosing, CashMovement, CashReason, Debt, Expense, ExpenseMethod, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
+import { momentOf, placeInDay } from './cashDays';
 import { setDiscount } from './discount';
 import { AppError } from './errors';
 import { recordDecisions, sendVersion, setDone } from './estimate';
@@ -19,13 +20,17 @@ export interface PaymentInput {
   method: PayMethod;
   amountFils: number;
   reference?: string;
+  /** The day it was paid (YYYY-MM-DD, Dubai) — today when not said; an earlier day keeps the time it was typed at. */
+  date?: string;
 }
 
 export async function addPayment(orderId: string, input: PaymentInput): Promise<Payment> {
   const order = await db.orders.get(orderId);
   if (!order) throw new AppError('err.notFound');
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
-  const now = nowIso();
+  const earlier = !!input.date && input.date !== dubaiDate();
+  const now = earlier ? onDubaiDay(nowIso(), input.date!) : nowIso();
+  const movementId = uid();
   const payment = await db.transaction('rw', [db.payments, db.counters, db.cashMovements, db.events], async () => {
     const n = await nextNumber(`receipt-${year()}`);
     const p: Payment = {
@@ -42,7 +47,7 @@ export async function addPayment(orderId: string, input: PaymentInput): Promise<
     await db.payments.add(p);
     if (p.method === 'cash') {
       await db.cashMovements.add({
-        id: uid(),
+        id: movementId,
         at: now,
         direction: p.kind === 'refund' ? 'out' : 'in',
         amountFils: p.amountFils,
@@ -54,6 +59,8 @@ export async function addPayment(orderId: string, input: PaymentInput): Promise<
     await logEvent(orderId, 'payment', { kind: p.kind, method: p.method, amount: p.amountFils, receipt: p.receiptNumber });
     return p;
   });
+  // Paid on a day already counted: into that day's closing (the count had this money already).
+  if (earlier) await placeInDay(now, payment.method === 'cash' ? movementId : undefined);
   await settleIfPaid(orderId);
   return payment;
 }
@@ -220,10 +227,11 @@ export async function addCashMovement(input: { direction: 'in' | 'out'; amountFi
 export async function cashState() {
   const [open, closings, settings] = await Promise.all([
     db.cashMovements.filter((m) => !m.closingId).sortBy('at'),
-    db.cashClosings.orderBy('date').toArray(),
+    db.cashClosings.toArray(),
     db.settings.get('main'),
   ]);
-  const last = closings[closings.length - 1];
+  // The last count by the moment it was made: two closings of one day are not told apart by their date.
+  const last = closings.sort((a, b) => a.closedAt.localeCompare(b.closedAt))[closings.length - 1];
   // Before the first closing the cash box starts from the book's opening cash ("Cash Start").
   const opening = last?.actualFils ?? settings?.cashStartFils ?? 0;
   const t = cashTotals(open);
@@ -337,12 +345,15 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
     overLimitComment: input.overLimitComment?.trim() || undefined,
     createdAt: nowIso(),
   };
+  const movementId = uid();
   await db.transaction('rw', db.expenses, db.cashMovements, async () => {
     await db.expenses.add(e);
     if (e.method === 'cash') {
-      await db.cashMovements.add({ id: uid(), at: e.createdAt, direction: 'out', amountFils: e.amountFils, reason: 'expense', expenseId: e.id, note: e.vendor ?? e.note });
+      await db.cashMovements.add({ id: movementId, at: e.createdAt, direction: 'out', amountFils: e.amountFils, reason: 'expense', expenseId: e.id, note: e.vendor ?? e.note });
     }
   });
+  // Spent on a day already counted: into that day's closing (the count had this money gone already).
+  if (e.method === 'cash' && e.date !== dubaiDate(e.createdAt)) await placeInDay(momentOf(e.date, e.createdAt), movementId);
   return e;
 }
 

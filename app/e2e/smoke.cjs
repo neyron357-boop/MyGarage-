@@ -1769,6 +1769,139 @@ async function launchBrowser() {
     const after = await strip();
     if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the strip did not come back: ${JSON.stringify(after)}, before ${JSON.stringify(before)}`);
   });
+  await step('v0.23: any money operation is deleted («Отменить» brings it back) or changed — its day, sum and way; a debt deleted; paid on an earlier day', async () => {
+    const dlg = page.getByRole('dialog');
+    const cashNow = () => page.evaluate(async () => (await (await import('/src/services/money.ts')).cashState()).expected);
+    const undo = () => page.locator('.mantine-Notification-root').filter({ hasText: 'Отменить' }).last().getByText('Отменить').click();
+    // A day of this month up to today, in the calendar a day pill opens (yesterday; the 1st stays the 1st).
+    const today = await page.evaluate(async () => (await import('/src/domain/dates.ts')).dubaiDate());
+    const day = Math.max(1, Number(today.slice(8)) - 1);
+    const dayIso = `${today.slice(0, 8)}${String(day).padStart(2, '0')}`;
+    const dayShown = `${dayIso.slice(8)}/${dayIso.slice(5, 7)}/${dayIso.slice(0, 4)}`;
+    const pickDay = async (scope) => {
+      await scope.locator('button.day-pill-input').click();
+      await page.locator('button.mantine-DatePickerInput-day:not([data-outside])').filter({ hasText: new RegExp(`^${day}$`) }).first().click();
+    };
+    // An open cash box for this step: the day an earlier step closed is deleted — a closing is an operation too (an
+    // operation typed for a counted day goes into that day's closing, not into the open cash box). The book and the
+    // cash box still agree.
+    const agree = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { removeEntry } = await import('/src/services/entries.ts');
+      const { loadLedger } = await import('/src/services/ledger.ts');
+      const { cashState } = await import('/src/services/money.ts');
+      for (const c of await db.cashClosings.toArray()) await removeEntry({ source: 'closing', id: c.id });
+      return [(await loadLedger()).cash, (await cashState()).expected, await db.cashClosings.count()];
+    });
+    if (agree[0] !== agree[1] || agree[2] !== 0) throw new Error('the closings deleted: book, cash box, closings ' + JSON.stringify(agree));
+    // The user's case (16/11): a recovery of 180 typed in cash and cancelled before v0.23 — a pair in the cash box.
+    await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { addExpense } = await import('/src/services/money.ts');
+      const { voidExpense } = await import('/src/services/legacyVoid.ts');
+      const parts = (await db.expenseCategories.where('code').equals('parts').first()).id;
+      const e = await addExpense({ date: '2026-11-07', categoryId: parts, amountFils: 18000, vatFils: 0, method: 'cash', note: 'E2E RECOVERY' });
+      await voidExpense(e.id);
+      await addExpense({ date: '2026-11-11', categoryId: parts, amountFils: 18000, vatFils: 0, vendor: 'E2E AHMAD', method: 'cash', note: 'E2E RECOVERY' });
+    });
+    let before = await cashNow();
+    await page.goto(BASE + '#/money?tab=cash');
+    const pair = front('.list-row').filter({ hasText: 'E2E RECOVERY' }).filter({ hasNotText: 'AHMAD' });
+    await pair.nth(1).waitFor();
+    if ((await pair.count()) !== 2) throw new Error('the cancelled pair: ' + (await pair.count()) + ' rows');
+    // Its reversal opened: no sum or day to change — only «Удалить»; both rows go, the cash stays.
+    await pair.filter({ hasText: 'Корректировка' }).click();
+    await dlg.getByRole('button', { name: 'Удалить' }).waitFor();
+    if (await dlg.getByLabel('Изменить сумму').count()) throw new Error('a cancelled pair offers a new sum');
+    if (await dlg.locator('button.day-pill-input').count()) throw new Error('a cancelled pair offers a new day');
+    await shot('23a-cancelled-pair');
+    await dlg.getByRole('button', { name: 'Удалить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    await pair.first().waitFor({ state: 'detached' });
+    if ((await cashNow()) !== before) throw new Error('the cancelled pair deleted moved the cash');
+    await undo();
+    await pair.nth(1).waitFor();
+    await pair.filter({ hasText: 'Корректировка' }).click();
+    await dlg.getByRole('button', { name: 'Удалить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    await pair.first().waitFor({ state: 'detached' });
+    // The cash expense was really on credit: its way changed in its sheet — the row leaves the cash box, the cash is back.
+    await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().click();
+    await dlg.locator('button.day-pill-input').waitFor();
+    await shot('23b-operation');
+    await dlg.getByRole('radio', { name: 'В кредит' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    if ((await cashNow()) - before !== 18000) throw new Error('cash → credit: the cash moved by ' + ((await cashNow()) - before));
+    await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().waitFor({ state: 'detached' });
+    // 10 of it paid in cash on an earlier day; the payment opened — its sum made 20; the debt deleted, and back.
+    before = await cashNow();
+    await page.goto(BASE + '#/money?tab=debts');
+    await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().click();
+    await dlg.getByLabel('Сумма').fill('10');
+    await pickDay(dlg);
+    await dlg.locator('button.day-pill-input').filter({ hasText: day === Number(today.slice(8)) ? 'Сегодня' : /Вчера|\d\d\/\d\d/ }).waitFor();
+    await dlg.getByRole('button', { name: /^Оплатить/ }).click();
+    await dlg.locator('[data-credit-left="17000"]').waitFor();
+    const paid = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      return (await db.creditPayments.toArray()).map((c) => c.date);
+    });
+    if (!paid.includes(dayIso)) throw new Error('the credit paid on ' + dayIso + ': ' + JSON.stringify(paid));
+    if (before - (await cashNow()) !== 1000) throw new Error('10 paid: the cash moved by ' + (before - (await cashNow())));
+    await dlg.locator('.list-row').filter({ hasText: dayShown }).first().click();
+    const op = page.getByRole('dialog').filter({ hasText: 'Оплата кредита' });
+    await op.getByLabel('Изменить сумму').click();
+    await op.getByLabel('Изменить сумму').fill('20');
+    await op.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.locator('[data-credit-left="16000"]').waitFor();
+    await shot('23c-credit-payment');
+    await page.locator('.mantine-Modal-close').last().click();
+    await op.waitFor({ state: 'detached' });
+    before = await cashNow();
+    await dlg.getByRole('button', { name: 'Удалить долг' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    if ((await cashNow()) - before !== 2000) throw new Error('the debt deleted: the cash moved by ' + ((await cashNow()) - before));
+    await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().waitFor({ state: 'detached' });
+    await undo();
+    await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().waitFor();
+    if ((await cashNow()) !== before) throw new Error('the debt back: the cash is not as it was');
+    // A job paid on an earlier day; then its payment — a new sum, deleted, back.
+    const jobId = await page.evaluate(async () => {
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { approveAll } = await import('/src/services/flow.ts');
+      const { quickInvoice } = await import('/src/services/money.ts');
+      const o = await checkIn({ plate: { emirate: 'DXB', code: 'P', number: '23230' }, make: 'Nissan', model: 'Patrol', name: 'Pay Day', phone: '050 111 2323', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Repair', unitPriceFils: 30000, vatRateBp: 0 });
+      await approveAll(o.id);
+      await quickInvoice(o.id);
+      return o.id;
+    });
+    const jobDue = () => page.evaluate(async (id) => { const m = await import('/src/services/orders.ts'); return m.bundleAmountDue(await m.loadOrderBundle(id)); }, jobId);
+    await page.goto(BASE + '#/orders/' + jobId);
+    await front('button').filter({ hasText: /^Оплата/ }).first().click();
+    await pickDay(dlg);
+    await shot('23d-pay-job');
+    await dlg.getByRole('button', { name: /^Провести/ }).click();
+    await dlg.waitFor({ state: 'detached' });
+    const at = await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      const { dubaiDate } = await import('/src/domain/dates.ts');
+      return (await db.payments.where('orderId').equals(id).toArray()).map((p) => dubaiDate(p.receivedAt));
+    }, jobId);
+    if (at.join() !== dayIso) throw new Error('the job paid on ' + dayIso + ': ' + at.join());
+    await page.goto(BASE + '#/money?tab=book&month=' + dayIso.slice(0, 7));
+    await front('.list-row').filter({ hasText: 'Оплата заказа' }).filter({ hasText: 'Pay Day' }).first().click();
+    await dlg.getByLabel('Изменить сумму').click();
+    await dlg.getByLabel('Изменить сумму').fill('200');
+    await dlg.getByLabel('Изменить сумму').press('Enter');
+    await page.waitForFunction(async (id) => { const m = await import('/src/services/orders.ts'); return m.bundleAmountDue(await m.loadOrderBundle(id)) === 10000; }, jobId);
+    await dlg.getByRole('button', { name: 'Удалить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    if ((await jobDue()) !== 30000) throw new Error('the payment deleted: the job owes ' + (await jobDue()));
+    await undo();
+    await page.waitForFunction(async (id) => { const m = await import('/src/services/orders.ts'); return m.bundleAmountDue(await m.loadOrderBundle(id)) === 10000; }, jobId);
+  });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {
       const docs = await import('/src/services/documents.ts');

@@ -142,7 +142,7 @@ export class GarageDB extends Dexie {
 type Guarded = { name: string; hook: Table['hook'] };
 
 /**
- * Database-level protection of evidence and money records (docs/04, section 4.3).
+ * Database-level protection of evidence records (docs/04, section 4.3) — money is not among them since v0.23.
  * `allowed` lists the only fields that may still change; `isLocked` decides when the rule applies.
  */
 function guard<T>(table: Table<T, string>, allowed: string[], isLocked: (obj: T) => boolean = () => true) {
@@ -194,18 +194,12 @@ function installGuards(db: GarageDB) {
   guard(db.versions, ['status', 'answeredAt']);
   guard(db.decisions, []);
   guard(db.invoices, ['status']);
-  guard(db.payments, []);
-  guard(db.creditPayments, ['voidedAt']);
-  guard(db.cashMovements, ['closingId']);
-  guard(db.cashClosings, []);
   guard(db.debts, ['status']);
   guard(db.events, [], (e) => !purgeable.has(e.id));
   guard(db.addenda, []);
-  // Money book entries: what they were for can be corrected, the money itself (amount, method, date)
-  // cannot; a wrong entry is cancelled (voidedAt), never deleted.
-  const links = ['note', 'orderId', 'vehicleId', 'customerId', 'voidedAt'];
-  guard(db.expenses, [...links, 'categoryId', 'vendor', 'overLimitComment', 'receiptMediaId']);
-  guard(db.incomes, [...links, 'category']);
+  // Money (payments, income, expenses, payments of credits, the cash box and its closings) is not guarded since
+  // v0.23 — the user's call: any operation can be deleted or changed. Only through services/entries.ts, which takes
+  // an operation whole and keeps the cash box and the book in step.
 }
 
 export let db = new GarageDB();

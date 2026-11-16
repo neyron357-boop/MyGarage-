@@ -14,7 +14,7 @@ import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { Money, MoneyInput, SelectCard } from '../../ui/components';
-import { DateField } from '../../ui/DateFields';
+import { DateField, DayPill } from '../../ui/DateFields';
 import { useAction } from '../../ui/hooks';
 import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
 
@@ -55,6 +55,8 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
     (initialKind ?? 'payment') === 'payment' ? (due > 0 ? due : undefined) : initialKind === 'prepayment' && partsGross > 0 && !b.payments.length ? partsGross : undefined,
   );
   const [reference, setReference] = useState('');
+  // The day it was paid: today, or an earlier one (v0.23 — a payment typed in a day late).
+  const [date, setDate] = useState(dubaiDate());
   const [dueDate, setDueDate] = useState(dubaiDate(addDays(nowIso(), 7)));
   const [owner, setOwner] = useState(true);
   const sig = useRef<SignatureHandle>(null);
@@ -79,7 +81,7 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
       }, 'payment.closedUnpaid');
     return run(
       async () => {
-        await addPayment(b.order.id, { kind, method: settle as PayMethod, amountFils: amount ?? 0, reference });
+        await addPayment(b.order.id, { kind, method: settle as PayMethod, amountFils: amount ?? 0, reference, date });
         if (full) {
           haptic('success');
           celebrate(t('payment.paidFull'));
@@ -124,6 +126,11 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
               <WayCard key={m} way={m} active={settle === m} onClick={() => setWay(m)} />
             ))}
           </SimpleGrid>
+        )}
+        {PAY_METHODS.includes(settle as PayMethod) && (
+          <Group gap="xs">
+            <DayPill value={date} onChange={setDate} />
+          </Group>
         )}
         {(settle === 'card' || settle === 'transfer') && <TextInput label={t('payment.reference')} value={reference} onChange={(e) => setReference(e.currentTarget.value)} />}
         {settle === 'debt' && (

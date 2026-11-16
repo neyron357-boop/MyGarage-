@@ -1,6 +1,6 @@
-import { Box, Button, Group, Modal, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Modal, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCreditCard, IconLock, IconPaperclip, IconPencil } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCheck, IconCreditCard, IconLock, IconPaperclip, IconPencil, IconTrash } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -9,14 +9,16 @@ import { dayHeading, formatDate, monthKey, monthRange } from '../../domain/dates
 import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory, IncomeCategory } from '../../domain/types';
-import { companyDebtOf, debtPaymentParts, voidCreditPayment } from '../../services/debts';
-import { loadLedger, setOpeningBalances, updateExpense, updateIncome, voidExpense, voidIncome, type Links } from '../../services/ledger';
+import { companyDebtOf, debtPaymentParts } from '../../services/debts';
+import { removeEntry, restoreEntry, updateEntry, type EntryPatch } from '../../services/entries';
+import { loadLedger, setOpeningBalances, updateExpense, updateIncome, type Links } from '../../services/ledger';
 import { proofIndex } from '../../services/proofs';
-import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateLine, PlateText, SearchField } from '../../ui/components';
-import { MonthField } from '../../ui/DateFields';
+import { EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateLine, PlateText, SearchField, undoToast } from '../../ui/components';
+import { DayPill, MonthField } from '../../ui/DateFields';
+import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { CreditSheet } from './Debts';
-import { EntrySheet, INCOME_CATEGORIES, LinkPicker, type EntryPreset } from './MoneyEntry';
+import { EntrySheet, INCOME_CATEGORIES, LinkPicker, PursePicker, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
 
@@ -132,41 +134,100 @@ function CreditLeft({ expenseId }: { expenseId: string }) {
   );
 }
 
+/** A new sum for an operation: typed over the old one, saved with the check (or Enter); the same sum — nothing. */
+function AmountEdit({ fils, onSave, onCancel }: { fils: number; onSave: (fils: number) => void; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState<number | undefined>(fils);
+  const save = () => (value && value !== fils ? onSave(value) : onCancel());
+  return (
+    <Group gap="sm" wrap="nowrap" className="rise-enter" style={{ flex: 1 }} onKeyDown={(e) => e.key === 'Enter' && save()}>
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <MoneyInput label={undefined} ariaLabel={t('ledger.changeAmount')} value={value} onChange={setValue} autoFocus />
+      </Box>
+      <ActionIcon size={44} radius="xl" variant="filled" disabled={!value} aria-label={t('common.save')} onClick={save}>
+        <IconCheck size={22} />
+      </ActionIcon>
+    </Group>
+  );
+}
+
 /**
- * An entry opened from the book, the cash box or the expenses: what it was for can be corrected, money in or out
- * takes proofs (photos); a mistaken entry is cancelled. Opened for a value — `SheetFor`, so it slides out.
- * A debt payment shows the jobs it went to (they keep it: its customer and kind stay); an expense on credit — what
- * is still owed and the way to pay it; a payment of a credit can only be cancelled.
+ * An operation opened from the book, the cash box, the expenses or a debt — any of them (v0.23, the user's call): its sum
+ * (a tap — a new one), its day (a tap — the calendar), its way (cash, card, transfer; an expense — on credit too), what
+ * it was for, a note and proofs; «Удалить» takes it whole, with «Отменить» right after (services/entries.ts). A cancelled
+ * operation (a pair the old «Отменить запись» left in the cash box) and a day closing are only deleted; a debt payment
+ * keeps its sum and customer (it was spread over the jobs) — its day and way change. Opened for a value — `SheetFor`.
  */
 export function EntryDetails({ entry, label, onClose, cats, opened = true }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[]; opened?: boolean }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
   const { run, busy } = useAction();
-  const [voiding, setVoiding] = useState(false);
+  // The note saves on its own (on leaving the field): «Удалить» tapped right after it is not held up by that save.
+  const noteSave = useAction();
+  const [pricing, setPricing] = useState(false);
+  const ref = { source: entry.source, id: entry.id };
   const debt = entry.source === 'income' && entry.category === 'debt';
-  const editable = (entry.source === 'income' && !debt) || entry.source === 'expense';
-  const cancellable = editable || debt || entry.source === 'credit';
+  const live = !entry.cancelled && entry.source !== 'closing';
+  // What it was for (category, job, car, customer) — money in or out of its own; a debt payment keeps its customer.
+  const relinkable = live && ((entry.source === 'income' && !debt) || entry.source === 'expense');
+  const amountable = live && !debt;
+  const wayable = live && entry.source !== 'movement';
+  const noteable = live && entry.source !== 'credit';
   // An expense shows its vendor with the note; only the note itself is edited here.
   const typed = (entry.source === 'expense' ? entry.expenseNote : entry.note) ?? '';
   const [note, setNote] = useState(typed);
+  const signedFils = entry.kind === 'in' ? entry.amountFils : -entry.amountFils;
+  const change = (patch: EntryPatch) => run(() => updateEntry(ref, patch), 'common.saved');
   const relink = (l: Links) =>
     run(() => (entry.source === 'income' ? updateIncome(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId }) : updateExpense(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId })));
+  const remove = () =>
+    run(async () => {
+      const removed = await removeEntry(ref);
+      onClose();
+      haptic('light');
+      undoToast(t('ledger.removed'), t('common.undo'), () => void restoreEntry(removed));
+    });
   return (
     <Modal opened={opened} onClose={onClose} title={entry.vendor ? `${label} · ${entry.vendor}` : label}>
       <Stack gap="md">
-        <Group justify="space-between" align="baseline">
-          <Text fz={28} c={entry.kind === 'in' ? 'green.7' : undefined}>
-            <Money fils={entry.kind === 'in' ? entry.amountFils : -entry.amountFils} display signed />
-          </Text>
-          <Text size="sm" c="dimmed">
-            {formatDate(entry.date)} · {entry.method ? t(`payment.method.${entry.method}`) : t('payment.method.cash')}
-          </Text>
+        <Group justify="space-between" align="center" wrap="nowrap" gap="sm" mih={44}>
+          {pricing ? (
+            <AmountEdit
+              fils={entry.amountFils}
+              onCancel={() => setPricing(false)}
+              onSave={(amountFils) =>
+                run(async () => {
+                  await updateEntry(ref, { amountFils });
+                  haptic('light');
+                  setPricing(false);
+                })
+              }
+            />
+          ) : amountable ? (
+            <UnstyledButton className="tap price-tap" aria-label={t('ledger.changeAmount')} onClick={() => setPricing(true)}>
+              <Text span fz={28} lh={1.1} c={entry.kind === 'in' ? 'green.7' : undefined}>
+                <Money fils={signedFils} display signed roll />
+              </Text>
+              <IconPencil size={18} stroke={1.8} color="var(--app-label-3)" aria-hidden />
+            </UnstyledButton>
+          ) : (
+            <Text fz={28} lh={1.1} c={entry.kind === 'in' ? 'green.7' : undefined}>
+              <Money fils={signedFils} display signed />
+            </Text>
+          )}
+          {!pricing &&
+            (live ? (
+              <DayPill value={entry.date} onChange={(date) => change({ date })} />
+            ) : (
+              <Text size="sm" c="dimmed">
+                {formatDate(entry.date)}
+              </Text>
+            ))}
         </Group>
-        {(entry.source === 'expense' || entry.source === 'credit') && (entry.method === 'card' || entry.method === 'transfer') && (
-          <Text size="xs" c="dimmed">
-            {t('ledger.cardOutHint')}
-          </Text>
+        {wayable && (
+          // A job's refund leaves the card account (no "it does not reduce the card" note under it): passed as money in.
+          <PursePicker value={entry.method ?? 'cash'} onChange={(method) => method !== entry.method && change({ method })} kind={entry.source === 'payment' ? 'in' : entry.kind} credit={entry.source === 'expense'} />
         )}
         {entry.source === 'expense' && entry.method === 'credit' && <CreditLeft expenseId={entry.id} />}
         {debt && <DebtParts entry={entry} />}
@@ -175,7 +236,7 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
             {t('ledger.closingText', { actual: formatAed(entry.closing.actualFils), diff: formatAed(entry.closing.diffFils) })}
           </Text>
         )}
-        {editable && entry.source === 'income' && (
+        {relinkable && entry.source === 'income' && (
           <div className="chip-row bleed">
             {INCOME_CATEGORIES.map((c) => (
               <button key={c} type="button" className="chip" data-active={entry.category === c} onClick={() => run(() => updateIncome(entry.id, { category: c as IncomeCategory }))}>
@@ -184,7 +245,7 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
             ))}
           </div>
         )}
-        {editable && entry.source === 'expense' && (
+        {relinkable && entry.source === 'expense' && (
           <div className="chip-row wrap">
             {(cats ?? []).filter((c) => c.active).map((c) => (
               <button key={c.id} type="button" className="chip" data-active={entry.category === c.id} onClick={() => run(() => updateExpense(entry.id, { categoryId: c.id }))}>
@@ -193,16 +254,9 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
             ))}
           </div>
         )}
-        {editable ? (
-          <>
-            <LinkPicker value={{ orderId: entry.orderId, vehicleId: entry.vehicleId, customerId: entry.customerId }} onChange={relink} />
-            <TextInput
-              label={t('ledger.note')}
-              value={note}
-              onChange={(e) => setNote(e.currentTarget.value)}
-              onBlur={() => note !== typed && run(() => (entry.source === 'income' ? updateIncome(entry.id, { note }) : updateExpense(entry.id, { note })))}
-            />
-          </>
+        {relinkable && <LinkPicker value={{ orderId: entry.orderId, vehicleId: entry.vehicleId, customerId: entry.customerId }} onChange={relink} />}
+        {noteable ? (
+          <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} onBlur={() => note !== typed && noteSave.run(() => updateEntry(ref, { note }))} />
         ) : (
           entry.note && <Text size="sm">{entry.note}</Text>
         )}
@@ -215,36 +269,11 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
           ) : (
             <span />
           )}
-          {cancellable && (
-            <Button variant="subtle" color="red" loading={busy} onClick={() => setVoiding(true)}>
-              {t('ledger.void')}
-            </Button>
-          )}
+          <Button variant="subtle" color="red" loading={busy} leftSection={<IconTrash size={18} />} onClick={() => void remove()}>
+            {t('common.delete')}
+          </Button>
         </Group>
-        {!editable && entry.source === 'payment' && (
-          <Text size="xs" c="dimmed">
-            {t('ledger.paymentHint')}
-          </Text>
-        )}
       </Stack>
-      <ConfirmModal
-        opened={voiding}
-        onClose={() => setVoiding(false)}
-        title={t('ledger.voidTitle')}
-        confirmLabel={t('ledger.void')}
-        color="red"
-        onConfirm={() =>
-          run(async () => {
-            if (entry.source === 'income') await voidIncome(entry.id);
-            else if (entry.source === 'credit') await voidCreditPayment(entry.id);
-            else await voidExpense(entry.id);
-            onClose();
-            return true;
-          }, 'ledger.voided')
-        }
-      >
-        <Text size="sm">{t(entry.purse === 'cash' ? 'ledger.voidTextCash' : 'ledger.voidText')}</Text>
-      </ConfirmModal>
     </Modal>
   );
 }

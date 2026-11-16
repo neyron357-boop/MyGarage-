@@ -1,5 +1,5 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconCash, IconClockDollar, IconUserDollar } from '@tabler/icons-react';
+import { IconCash, IconClockDollar, IconTrash, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,15 +7,19 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate } from '../../domain/dates';
 import type { Debtor } from '../../domain/debts';
+import { creditEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { formatPlate } from '../../domain/plates';
-import type { CreditPayment, Customer, ExpenseCategory, PayMethod } from '../../domain/types';
-import { companyDebtOf, loadCompanyDebts, loadDebtors, payCredit, voidCreditPayment, type CompanyDebt } from '../../services/debts';
-import { ConfirmModal, EmptyState, Kpi, List, ListRow, Money, MoneyInput, PageSkeleton, PersonAvatar, PlateLine } from '../../ui/components';
+import type { Customer, ExpenseCategory, PayMethod } from '../../domain/types';
+import { companyDebtOf, loadCompanyDebts, loadDebtors, payCredit, type CompanyDebt } from '../../services/debts';
+import { removeEntry, restoreEntry } from '../../services/entries';
+import { EmptyState, Kpi, List, ListRow, Money, MoneyInput, PageSkeleton, PersonAvatar, PlateLine, undoToast } from '../../ui/components';
+import { DayPill } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
+import { EntryDetails } from './LedgerTab';
 import { EntrySheet, PursePicker, type EntryPreset } from './MoneyEntry';
 
 /*
@@ -142,8 +146,10 @@ export function CompanyDebtList({ list, cats, onOpen }: { list: CompanyDebt[]; c
 }
 
 /**
- * An expense on credit, opened: what is left to pay and what was paid; pay all of it or a part — the money goes
- * now, by the way it is paid (cash: out of the cash box). A payment made by mistake is cancelled from its row.
+ * An expense on credit, opened: what is left to pay and what was paid; pay all of it or a part, on the day it was paid
+ * (v0.23: an earlier day too) — the money goes by the way it is paid (cash: out of the cash box). A payment opens as an
+ * operation of the book (its day, sum and way change; it can be deleted); «Удалить» deletes the debt itself, with what
+ * was paid towards it — «Отменить» right after.
  */
 export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string; opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
@@ -152,7 +158,8 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
   const catName = useCategoryName(data?.cats);
   const [amount, setAmount] = useState<number>();
   const [method, setMethod] = useState<PayMethod>('cash');
-  const [cancel, setCancel] = useState<CreditPayment | null>(null);
+  const [date, setDate] = useState(dubaiDate());
+  const [shown, setShown] = useState<string | null>(null);
   const left = data?.d?.leftFils;
   // The whole remainder is offered (a part is typed over it); after a payment — what is left now.
   useEffect(() => {
@@ -160,6 +167,15 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
   }, [left]);
   const d = data?.d;
   const title = d ? [catName(d.expense.categoryId), d.expense.vendor].filter(Boolean).join(' · ') : t('debt.company');
+  const payment = d && shown ? d.paid.find((p) => p.id === shown) : undefined;
+  const entry = d && payment ? { ...creditEntry(payment, d.expense), cashAfter: 0, cardAfter: 0 } : undefined;
+  const remove = () =>
+    run(async () => {
+      const removed = await removeEntry({ source: 'expense', id: expenseId });
+      onClose();
+      haptic('light');
+      undoToast(t('debt.removed'), t('common.undo'), () => void restoreEntry(removed));
+    });
   return (
     <Modal opened={opened} onClose={onClose} title={title}>
       {!data ? (
@@ -188,7 +204,8 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
                 {d.paid.map((p) => (
                   <ListRow
                     key={p.id}
-                    onClick={() => setCancel(p)}
+                    chevron
+                    onClick={() => setShown(p.id)}
                     title={formatDate(p.date)}
                     subtitle={[t(`payment.method.${p.method}`), p.note ?? ''].filter(Boolean).join(' · ')}
                     right={<Money fils={-p.amountFils} size="sm" />}
@@ -200,6 +217,9 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
           {d.leftFils > 0 ? (
             <>
               <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} big />
+              <Group gap="xs">
+                <DayPill value={date} onChange={setDate} />
+              </Group>
               <PursePicker value={method} onChange={(m) => setMethod(m === 'credit' ? 'cash' : m)} kind="out" />
               <Button
                 size="lg"
@@ -209,7 +229,7 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
                 disabled={!amount || amount > d.leftFils}
                 onClick={() =>
                   run(async () => {
-                    await payCredit(expenseId, { amountFils: amount ?? 0, method });
+                    await payCredit(expenseId, { amountFils: amount ?? 0, method, date });
                     haptic('success');
                   }, 'debt.paid')
                 }
@@ -223,24 +243,14 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
               {t('debt.paidOff')}
             </Text>
           )}
+          <Group justify="flex-end">
+            <Button variant="subtle" color="red" loading={busy} leftSection={<IconTrash size={18} />} onClick={() => void remove()}>
+              {t('debt.delete')}
+            </Button>
+          </Group>
         </Stack>
       )}
-      <ConfirmModal
-        opened={!!cancel}
-        onClose={() => setCancel(null)}
-        title={t('debt.cancelPaymentTitle')}
-        confirmLabel={t('debt.cancelPayment')}
-        color="red"
-        onConfirm={() =>
-          run(async () => {
-            if (cancel) await voidCreditPayment(cancel.id);
-            setCancel(null);
-            return true;
-          }, 'debt.cancelled')
-        }
-      >
-        <Text size="sm">{t(cancel?.method === 'cash' ? 'ledger.voidTextCash' : 'ledger.voidText')}</Text>
-      </ConfirmModal>
+      <SheetFor value={entry}>{(e, o) => <EntryDetails opened={o} entry={e} label={t('cashReason.credit_payment')} cats={data?.cats} onClose={() => setShown(null)} />}</SheetFor>
     </Modal>
   );
 }

@@ -4,7 +4,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { IconCalendar, IconCalendarTime, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { monthKey } from '../domain/dates';
+import { dubaiDate, formatDate, monthKey, shiftDay } from '../domain/dates';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const toDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -53,6 +53,37 @@ export function DateField({ label, value, onChange, description, required }: { l
       dropdownType={useDropdown()}
       leftSection={<IconCalendar size={18} />}
       size="md"
+    />
+  );
+}
+
+/**
+ * An operation's day as a pill (v0.23): a tap opens the calendar (on the phone — a sheet), the day picked is saved at
+ * once. Today and yesterday by word; no day after today.
+ */
+export function DayPill({ value, onChange, label }: { value: string; onChange: (day: string) => void; label?: string }) {
+  const { t } = useTranslation();
+  const dropdownType = useDropdown();
+  const today = dubaiDate();
+  const word = value === today ? t('common.today') : value === shiftDay(today, -1) ? t('common.yesterday') : formatDate(value);
+  return (
+    <DatePickerInput
+      aria-label={label ?? t('common.date')}
+      value={fromDay(value)}
+      onChange={(d) => {
+        if (d && toDay(d) !== value) onChange(toDay(d));
+      }}
+      valueFormatter={() => word}
+      maxDate={fromDay(today) ?? undefined}
+      dropdownType={dropdownType}
+      variant="unstyled"
+      leftSection={<IconCalendar size={17} stroke={2} />}
+      leftSectionPointerEvents="none"
+      classNames={{ root: 'day-pill', input: 'day-pill-input', section: 'day-pill-icon' }}
+      // The size of a chip's words (a field's 17 pt on a touch screen is for typing; this is a button).
+      styles={{ input: { fontSize: 15 } }}
+      size="md"
+      data-day={value}
     />
   );
 }

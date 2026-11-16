@@ -37,7 +37,9 @@ export function jobProfit(input: {
   const counted = live.filter((i) => i.kind !== 'discount' && !i.customerSupplied);
   const parts = counted.filter((i) => i.kind === 'part').reduce((s, i) => s + itemCostPaid(i), 0);
   const outsideLines = counted.filter((i) => i.kind !== 'part' && i.outsource);
-  const outside = outsideLines.reduce((s, i) => s + itemCostPaid(i), 0);
+  // Work outside already paid: what the expense that paid it says (changed in the book — v0.23 — it is still the truth).
+  const paidBy = (i: OrderItem) => (i.outsource?.expenseId ? input.expenses.find((e) => e.id === i.outsource!.expenseId && !e.voidedAt) : undefined);
+  const outside = outsideLines.reduce((s, i) => s + (paidBy(i)?.amountFils ?? itemCostPaid(i)), 0);
   const paidOutside = new Set(outsideLines.map((i) => i.outsource?.expenseId).filter(Boolean));
   const expenses = input.expenses.filter((e) => !e.voidedAt && !paidOutside.has(e.id)).reduce((s, e) => s + e.amountFils, 0);
   const known = counted.some((i) => i.costPriceFils !== undefined) || expenses > 0;

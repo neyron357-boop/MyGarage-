@@ -47,6 +47,9 @@ import { createPortal } from 'react-dom';
 
 /** A toast with an "Undo" button (for deletions that can be reverted). */
 export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => void) {
+  // Only the last action can be undone, at once (v0.23): one toast at a time otherwise queues it behind the one before
+  // — whose «Отменить» would undo an older action over a newer one.
+  notifications.clean();
   const id = `undo-${Date.now()}`;
   notifications.show({
     id,

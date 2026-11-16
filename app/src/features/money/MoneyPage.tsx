@@ -239,9 +239,11 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
     const owed = new Map(credits.map((c) => [c.expense.id, c.leftFils]));
     return { list, cats, photos, owed, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
   }, [month]);
+  // The open one is read by itself: moved to another month (v0.23), it stays open and follows; deleted — it closes.
+  const opened = useScreenLiveQuery(async () => (shown ? ((await db.expenses.get(shown)) ?? null) : null), [shown]);
   const label = useCategoryLabel(data?.cats);
   if (!data) return <PageSkeleton />;
-  const expense = shown ? data.list.find((e) => e.id === shown) : undefined;
+  const expense = opened && opened.id === shown && !opened.voidedAt ? opened : undefined;
   const entry = expense ? { ...expenseEntry(expense), cashAfter: 0, cardAfter: 0 } : undefined;
   const byCat = (id: string) => data.list.filter((e) => e.categoryId === id).reduce((s, e) => s + e.amountFils, 0);
   const total = data.list.reduce((s, e) => s + e.amountFils, 0);

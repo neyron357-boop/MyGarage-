@@ -1,10 +1,11 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { db, GarageDB, ImmutableError, setDb, uid } from '../db/db';
+import { db, GarageDB, setDb, uid } from '../db/db';
 import { expenseEntry, periodTotals } from '../domain/ledger';
 import { computeReport } from '../domain/reports';
 import { createCustomer, createVehicle } from './customers';
-import { addIncome, loadLedger, moneyOf, setOpeningBalances, updateExpense, voidExpense, voidIncome } from './ledger';
+import { addIncome, loadLedger, moneyOf, setOpeningBalances, updateExpense } from './ledger';
+import { voidExpense, voidIncome } from './legacyVoid';
 import { addExpense, addPayment, cashState, closeCashDay } from './money';
 import { createOrder } from './orders';
 import { ensureSeed } from './seed';
@@ -70,7 +71,7 @@ describe('money book', () => {
     expect((await moneyOf({ orderId: o.id })).expenses.map((x) => x.id)).toEqual([e.id]);
   });
 
-  it('a mistaken entry is cancelled, not deleted; the cash still adds up', async () => {
+  it('an entry cancelled before v0.23 leaves the book; the cash still adds up', async () => {
     await setOpeningBalances(10000, 0);
     const i = await addIncome({ category: 'sales', amountFils: 5000, method: 'cash', note: 'oil' });
     const e = await addExpense({ date: '2026-07-12', categoryId: await cat('consumables'), amountFils: 2000, vatFils: 0, method: 'cash' });
@@ -83,9 +84,6 @@ describe('money book', () => {
     expect(book.entries).toHaveLength(0);
     expect((await cashState()).expected).toBe(10000);
     expect(await db.expenses.get(e.id)).toMatchObject({ voidedAt: expect.any(String) });
-    // The money of an entry cannot be changed, what it was for can.
-    await expect(db.expenses.update(e.id, { amountFils: 1 })).rejects.toBeInstanceOf(ImmutableError);
-    await expect(db.expenses.delete(e.id)).rejects.toBeInstanceOf(ImmutableError);
     await updateExpense(e.id, { note: 'gloves' });
     expect((await db.expenses.get(e.id))!.note).toBe('gloves');
   });

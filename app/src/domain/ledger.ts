@@ -45,6 +45,11 @@ export interface LedgerEntry {
   receiptMediaId?: string;
   /** Day closing: counted cash and the difference. */
   closing?: { actualFils: number; diffFils: number };
+  /**
+   * A cash movement of a cancelled operation (its own, or the reversal the old «Отменить запись» left): the book leaves
+   * it out, the cash box shows it; it is only deleted — with its operation, the pair at once (services/entries.ts).
+   */
+  cancelled?: boolean;
   /** Balances after this entry. */
   cashAfter: number;
   cardAfter: number;
@@ -164,7 +169,7 @@ export function withEntries<T extends { m: CashMovement; after: number }>(lines:
   const byRef = new Map(entries.map((e) => [`${e.source} ${e.id}`, e]));
   return lines.map((l) => {
     const r = entryRefOf(l.m);
-    return { ...l, entry: byRef.get(`${r.source} ${r.id}`) ?? { ...movementEntry(l.m), cashAfter: l.after, cardAfter: 0 } };
+    return { ...l, entry: byRef.get(`${r.source} ${r.id}`) ?? { ...movementEntry(l.m), cancelled: r.source !== 'movement' || undefined, cashAfter: l.after, cardAfter: 0 } };
   });
 }
 

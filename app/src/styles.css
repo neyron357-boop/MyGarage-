@@ -733,10 +733,11 @@ html.kb .tab-bar-wrap {
     overflow: visible;
   }
   .stage-btn,
-  .search-clear {
+  .search-clear,
+  .day-pill-input {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -922,6 +923,35 @@ html.kb .tab-bar-wrap {
   margin-block: -8px;
   border-radius: 12px;
   color: inherit;
+}
+
+/* An operation's day, changed in place (v0.23, `DayPill`): a pill like a chip in the accent — a tap, the calendar. */
+.day-pill {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.day-pill button.day-pill-input {
+  height: 36px;
+  min-height: 36px;
+  padding-block: 0;
+  padding-inline: 34px 14px;
+  border-radius: 999px;
+  background: var(--app-fill);
+  color: var(--mantine-color-cobalt-6);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 36px;
+  white-space: nowrap;
+  transition: transform 340ms var(--spring);
+}
+.day-pill button.day-pill-input:active {
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
+.day-pill .day-pill-icon {
+  width: 34px;
+  padding-left: 4px;
+  color: var(--mantine-color-cobalt-6);
 }
 
 /* ---------- Typography helpers ---------- */

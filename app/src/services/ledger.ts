@@ -2,7 +2,8 @@ import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
 import { buildLedger, type LedgerResult } from '../domain/ledger';
 import type { Expense, Income, IncomeCategory, PayMethod } from '../domain/types';
-import { addDebtPayment, voidDebtPayment } from './debts';
+import { momentOf, placeInDay } from './cashDays';
+import { addDebtPayment } from './debts';
 import { AppError } from './errors';
 import { getSettings, saveSettings } from './settings';
 
@@ -78,12 +79,15 @@ export async function addIncome(input: IncomeInput): Promise<Income> {
     note: input.note?.trim() || undefined,
     createdAt: now,
   };
+  const movementId = uid();
   await db.transaction('rw', db.incomes, db.cashMovements, async () => {
     await db.incomes.add(income);
     if (income.method === 'cash') {
-      await db.cashMovements.add({ id: uid(), at: now, direction: 'in', amountFils: income.amountFils, reason: 'income', incomeId: income.id, orderId: income.orderId, note: income.note });
+      await db.cashMovements.add({ id: movementId, at: now, direction: 'in', amountFils: income.amountFils, reason: 'income', incomeId: income.id, orderId: income.orderId, note: income.note });
     }
   });
+  // Taken on a day already counted: into that day's closing (the count had this money already).
+  if (income.method === 'cash' && income.date !== dubaiDate(now)) await placeInDay(momentOf(income.date, now), movementId);
   return income;
 }
 
@@ -110,38 +114,6 @@ export async function updateExpense(id: string, patch: Partial<Pick<Expense, 'ca
   if ('note' in patch) clean.note = patch.note?.trim() || undefined;
   if ('vendor' in patch) clean.vendor = patch.vendor?.trim() || undefined;
   await db.expenses.update(id, clean);
-}
-
-/**
- * Cancel an entry made by mistake. Nothing is deleted: the entry is marked cancelled and leaves the
- * book; if it was cash, the cash book gets the opposite movement, so the cash in the box still adds up.
- */
-export async function voidIncome(id: string): Promise<void> {
-  // A debt payment gives back to each job what it paid on it.
-  if ((await db.incomes.get(id))?.category === 'debt') return voidDebtPayment(id);
-  await db.transaction('rw', db.incomes, db.cashMovements, async () => {
-    const i = await db.incomes.get(id);
-    if (!i || i.voidedAt) return;
-    const now = nowIso();
-    await db.incomes.update(id, { voidedAt: now });
-    if (i.method === 'cash') {
-      await db.cashMovements.add({ id: uid(), at: now, direction: 'out', amountFils: i.amountFils, reason: 'adjustment', incomeId: id, note: i.note });
-    }
-  });
-}
-
-export async function voidExpense(id: string): Promise<void> {
-  await db.transaction('rw', db.expenses, db.cashMovements, db.creditPayments, async () => {
-    const e = await db.expenses.get(id);
-    if (!e || e.voidedAt) return;
-    // On credit with money already paid towards it: those payments are cancelled first (each moved money).
-    if (e.method === 'credit' && (await db.creditPayments.where('expenseId').equals(id).toArray()).some((p) => !p.voidedAt)) throw new AppError('err.creditPaid');
-    const now = nowIso();
-    await db.expenses.update(id, { voidedAt: now });
-    if (e.method === 'cash') {
-      await db.cashMovements.add({ id: uid(), at: now, direction: 'in', amountFils: e.amountFils, reason: 'adjustment', expenseId: id, note: e.vendor ?? e.note });
-    }
-  });
 }
 
 /** Income and expenses of one job, car or customer (cancelled ones left out). */

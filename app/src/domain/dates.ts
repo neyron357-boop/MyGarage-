@@ -100,6 +100,15 @@ export function dubaiTime(iso: string): string {
   return `${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
 }
 
+/**
+ * The same moment of the day in Dubai, on another day: an operation moved to another date keeps its time (and so
+ * its place among that day's operations).
+ */
+export function onDubaiDay(iso: string, day: string): string {
+  const clock = new Date(new Date(iso).getTime() + 4 * 3600_000).toISOString().slice(10, 23);
+  return new Date(`${day}${clock}+04:00`).toISOString();
+}
+
 /** A moment in Dubai (UTC+4 all year — no daylight saving): a day and a time. */
 export function dubaiAt(day: string, hour: number, minute = 0): string {
   return new Date(`${day}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+04:00`).toISOString();

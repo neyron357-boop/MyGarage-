@@ -285,7 +285,6 @@ describe('cash and expenses', () => {
     expect(c.diffFils).toBe(-100);
     expect((await cashState()).opening).toBe(st.expected - 100);
     expect((await cashState()).movements).toHaveLength(0);
-    await expect(db.cashClosings.update(c.id, { actualFils: 0 })).rejects.toBeInstanceOf(ImmutableError);
   });
 
   it('asks for a comment when the monthly limit is exceeded', async () => {

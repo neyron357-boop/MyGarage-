@@ -4,6 +4,7 @@ import { allocate, creditLeft, groupDebts, isCustomerDebt, orderDue, type DebtJo
 import { activeInvoice, formatDocNumber } from '../domain/invoice';
 import type { CreditPayment, Customer, Expense, Income, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
 import { AppError } from './errors';
+import { momentOf, placeInDay } from './cashDays';
 import { settleIfPaid } from './money';
 import { logEvent } from './orders';
 
@@ -117,10 +118,11 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
     note: input.note?.trim() || undefined,
     createdAt: now,
   };
+  const movementId = uid();
   await db.transaction('rw', [db.incomes, db.cashMovements, db.payments, db.counters, db.events], async () => {
     await db.incomes.add(income);
     if (income.method === 'cash') {
-      await db.cashMovements.add({ id: uid(), at: now, direction: 'in', amountFils: income.amountFils, reason: 'debt_payment', incomeId: income.id, note: [who, income.note].filter(Boolean).join(' · ') || undefined });
+      await db.cashMovements.add({ id: movementId, at: now, direction: 'in', amountFils: income.amountFils, reason: 'debt_payment', incomeId: income.id, note: [who, income.note].filter(Boolean).join(' · ') || undefined });
     }
     for (const part of parts) {
       const n = await nextNumber(`receipt-${receiptYear()}`);
@@ -139,6 +141,11 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
       await logEvent(part.orderId, 'payment', { kind: p.kind, method: p.method, amount: p.amountFils, receipt: p.receiptNumber, debt: true });
     }
   });
+  // Taken on a day already counted: the cash into that day's closing; its jobs' card payments in that day's card total.
+  if (date !== dubaiDate()) {
+    await placeInDay(momentOf(date, now), income.method === 'cash' ? movementId : undefined);
+    if (parts.length) await placeInDay(receivedAt);
+  }
   for (const part of parts) await settleIfPaid(part.orderId);
   return { income, parts, restFils };
 }
@@ -148,48 +155,6 @@ export async function debtPaymentParts(incomeId: string): Promise<DebtShare[]> {
   const by = new Map<string, number>();
   for (const p of await db.payments.where('incomeId').equals(incomeId).toArray()) by.set(p.orderId, (by.get(p.orderId) ?? 0) + (p.kind === 'refund' ? -p.amountFils : p.amountFils));
   return [...by.entries()].filter(([, amountFils]) => amountFils > 0).map(([orderId, amountFils]) => ({ orderId, amountFils }));
-}
-
-/**
- * A "debt payment" entered by mistake. Nothing is deleted: the income is marked cancelled (cash — the opposite
- * movement in the cash book), and each job gets back what it was paid — a refund that carries the same income's
- * id, so the job owes it again. A debt signed for the job is open again.
- */
-export async function voidDebtPayment(incomeId: string): Promise<void> {
-  const touched = new Set<string>();
-  await db.transaction('rw', [db.incomes, db.cashMovements, db.payments, db.orders, db.counters, db.events], async () => {
-    const i = await db.incomes.get(incomeId);
-    if (!i || i.voidedAt) return;
-    const now = nowIso();
-    await db.incomes.update(incomeId, { voidedAt: now });
-    if (i.method === 'cash') await db.cashMovements.add({ id: uid(), at: now, direction: 'out', amountFils: i.amountFils, reason: 'adjustment', incomeId, note: i.note });
-    for (const part of await debtPaymentParts(incomeId)) {
-      const order = await db.orders.get(part.orderId);
-      if (!order) continue;
-      const n = await nextNumber(`receipt-${receiptYear()}`);
-      const p: Payment = {
-        id: uid(),
-        orderId: part.orderId,
-        customerId: order.customerId,
-        kind: 'refund',
-        method: i.method,
-        amountFils: part.amountFils,
-        receiptNumber: formatDocNumber('RC', receiptYear(), n),
-        receivedAt: now,
-        incomeId,
-      };
-      await db.payments.add(p);
-      await logEvent(part.orderId, 'payment', { kind: p.kind, method: p.method, amount: p.amountFils, receipt: p.receiptNumber, debt: true, cancelled: true });
-      touched.add(part.orderId);
-    }
-  });
-  if (!touched.size) return;
-  const owing = new Set((await loadDebtJobs()).map((d) => d.order.id));
-  for (const orderId of touched) {
-    if (!owing.has(orderId)) continue;
-    const paid = (await db.debts.where('orderId').equals(orderId).toArray()).filter((d) => d.status === 'paid').sort((a, b) => b.signedAt.localeCompare(a.signedAt))[0];
-    if (paid) await db.debts.update(paid.id, { status: 'open' });
-  }
 }
 
 /* ---------------- The garage's own debts: expenses taken on credit ---------------- */
@@ -244,7 +209,8 @@ export async function loadCompanyDebts(): Promise<CompanyDebt[]> {
 export async function payCredit(expenseId: string, input: { amountFils: number; method: PayMethod; date?: string; note?: string }): Promise<CreditPayment> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
   const now = nowIso();
-  return db.transaction('rw', db.expenses, db.creditPayments, db.cashMovements, async () => {
+  const movementId = uid();
+  const paid = await db.transaction('rw', db.expenses, db.creditPayments, db.cashMovements, async () => {
     const debt = await companyDebtOf(expenseId);
     if (!debt) throw new AppError('err.notFound');
     if (input.amountFils > debt.leftFils) throw new AppError('err.creditOver');
@@ -252,21 +218,13 @@ export async function payCredit(expenseId: string, input: { amountFils: number; 
     await db.creditPayments.add(p);
     if (p.method === 'cash') {
       const e = debt.expense;
-      await db.cashMovements.add({ id: uid(), at: now, direction: 'out', amountFils: p.amountFils, reason: 'credit_payment', creditPaymentId: p.id, orderId: e.orderId, note: [e.vendor, p.note ?? e.note].filter(Boolean).join(' · ') || undefined });
+      await db.cashMovements.add({ id: movementId, at: now, direction: 'out', amountFils: p.amountFils, reason: 'credit_payment', creditPaymentId: p.id, orderId: e.orderId, note: [e.vendor, p.note ?? e.note].filter(Boolean).join(' · ') || undefined });
     }
     return p;
   });
-}
-
-/** A payment of a credit entered by mistake: marked cancelled (cash — the opposite movement), the debt is owed again. */
-export async function voidCreditPayment(id: string): Promise<void> {
-  await db.transaction('rw', db.creditPayments, db.cashMovements, async () => {
-    const p = await db.creditPayments.get(id);
-    if (!p || p.voidedAt) return;
-    const now = nowIso();
-    await db.creditPayments.update(id, { voidedAt: now });
-    if (p.method === 'cash') await db.cashMovements.add({ id: uid(), at: now, direction: 'in', amountFils: p.amountFils, reason: 'adjustment', creditPaymentId: id, note: p.note });
-  });
+  // Paid on a day already counted (v0.23: the day is picked): into that day's closing — the count had it gone already.
+  if (paid.method === 'cash' && paid.date !== dubaiDate(now)) await placeInDay(momentOf(paid.date, now), movementId);
+  return paid;
 }
 
 export type { DebtJob, Debtor };
