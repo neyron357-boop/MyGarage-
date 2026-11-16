@@ -2074,6 +2074,40 @@ async function launchBrowser() {
     await front('.list-row').filter({ hasText: 'Чаевые' }).filter({ hasText: 'не работает' }).waitFor();
     await shot('38e-settings-income-categories', true);
   });
+  await step('v0.27: money past the cash box — an expense «Не из кассы» (the owner’s own), money in «Владельцу»: the cash stays, a line of its own', async () => {
+    const sheet = page.getByRole('dialog').first();
+    const cashNow = () => page.evaluate(async () => (await (await import('/src/services/money.ts')).cashState()).expected);
+    await page.goto(BASE + '#/money?tab=book');
+    const before = await cashNow();
+    // The expense: paid with other money — not a debt, not the cash box.
+    await front('button').filter({ hasText: /^Расход$/ }).first().click();
+    await sheet.getByLabel('Сумма').fill('70');
+    await sheet.getByRole('radio', { name: 'Не из кассы' }).click();
+    await sheet.locator('button.chip[data-way="outside"][data-active="true"]').waitFor();
+    await shot('39a-expense-outside');
+    await sheet.getByRole('button', { name: /^Записать расход/ }).click();
+    await sheet.waitFor({ state: 'detached' });
+    // Money in the owner took himself.
+    await front('button').filter({ hasText: /^Приход$/ }).first().click();
+    await sheet.getByLabel('Сумма').fill('50');
+    await sheet.getByRole('radio', { name: 'Владельцу' }).click();
+    await sheet.getByRole('button', { name: /^Записать приход/ }).click();
+    await sheet.waitFor({ state: 'detached' });
+    if ((await cashNow()) !== before) throw new Error('money past the cash box moved the cash by ' + ((await cashNow()) - before));
+    // In the book: lines of their own, the month's row of them on the card, a filter.
+    await front('.list-row').filter({ hasText: 'Не из кассы' }).filter({ hasText: '70,00' }).first().waitFor();
+    await front('.list-row').filter({ hasText: 'Владельцу' }).filter({ hasText: '50,00' }).first().waitFor();
+    const row = front('.money-card [data-month-purse="outside"]');
+    await row.waitFor();
+    if ((await row.getAttribute('data-in')) !== '5000' || (await row.getAttribute('data-out')) !== '7000') throw new Error('the month past the cash box: ' + (await row.getAttribute('data-in')) + ' / ' + (await row.getAttribute('data-out')));
+    await front('button.chip[data-purse="outside"]').click();
+    await front('.list-row').filter({ hasText: 'Наличные' }).first().waitFor({ state: 'detached' });
+    await shot('39b-book-outside');
+    await front('button.chip[data-purse="outside"]').click();
+    // Not a company debt.
+    const owed = await page.evaluate(async () => (await (await import('/src/services/debts.ts')).loadCompanyDebts()).filter((d) => d.expense.amountFils === 7000).length);
+    if (owed) throw new Error('an expense paid with other money became a debt');
+  });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {
       const docs = await import('/src/services/documents.ts');

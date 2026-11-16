@@ -228,6 +228,7 @@ export function ReportsPage() {
                 <ListRow title={t('payment.method.cash')} right={<Money fils={r.payments.cash} size="sm" />} />
                 <ListRow title={t('payment.method.card')} right={<Money fils={r.payments.card} size="sm" />} />
                 <ListRow title={t('payment.method.transfer')} right={<Money fils={r.payments.transfer} size="sm" />} />
+                {r.payments.outside !== 0 && <ListRow title={t('payment.method.outside')} right={<Money fils={r.payments.outside} size="sm" />} />}
                 <ListRow title={t('report.cashDiff')} right={<Money fils={r.cashDiffFils} size="sm" c={r.cashDiffFils ? 'red' : undefined} />} />
               </List>
             </Section>

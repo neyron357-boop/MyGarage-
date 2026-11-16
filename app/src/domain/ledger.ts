@@ -3,7 +3,8 @@ import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, 
 
 /*
  * The money book, kept the way the garage keeps its money sheet:
- * - two purses: cash and card (a bank transfer goes with the card);
+ * - two purses: cash and card (a bank transfer goes with the card); money that went past both (`outside`, v0.27: paid
+ *   with the owner's own money, taken by the owner himself) is a line of its own purse — in no balance;
  * - cash balance = cash start + cash in − cash out (+ the difference found at a day closing);
  * - card balance = card start + card in; money spent by card is tracked ("Card Out") but does NOT
  *   reduce the card balance (it is paid from elsewhere and settled separately).
@@ -13,8 +14,8 @@ import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, 
  * one line, the income; the jobs' payments it was spread into are not lines of their own.
  */
 
-export type Purse = 'cash' | 'card';
-export const purseOf = (m: ExpenseMethod): Purse => (m === 'cash' ? 'cash' : 'card');
+export type Purse = 'cash' | 'card' | 'outside';
+export const purseOf = (m: ExpenseMethod): Purse => (m === 'cash' ? 'cash' : m === 'outside' ? 'outside' : 'card');
 
 export type LedgerSource = 'payment' | 'income' | 'expense' | 'credit' | 'movement' | 'closing';
 
@@ -256,7 +257,9 @@ export function buildLedger(input: LedgerInput): LedgerResult {
     // A day closing adds its difference, so the balance follows the counted cash. (Not a reset to the
     // counted amount: an entry typed later with an earlier date must still count.)
     if (r.purse === 'cash') cash += r.kind === 'in' ? r.amountFils : -r.amountFils;
-    else if (r.kind === 'in') card += r.amountFils;
+    else if (r.purse === 'outside') {
+      // past the cash box and the card: no balance moves
+    } else if (r.kind === 'in') card += r.amountFils;
     else if (r.category === 'refund') card -= r.amountFils; // money given back to a customer leaves the card account
     // other card spending: tracked, the card balance stays
     return { ...r, cashAfter: cash, cardAfter: card };
@@ -266,7 +269,7 @@ export function buildLedger(input: LedgerInput): LedgerResult {
 
 /** In / out of each purse over a period (YYYY-MM-DD, inclusive); a closing difference counts as in or out. */
 export function periodTotals(entries: LedgerEntry[], from: string, to: string): Record<Purse, PurseTotals> {
-  const t: Record<Purse, PurseTotals> = { cash: { inFils: 0, outFils: 0 }, card: { inFils: 0, outFils: 0 } };
+  const t: Record<Purse, PurseTotals> = { cash: { inFils: 0, outFils: 0 }, card: { inFils: 0, outFils: 0 }, outside: { inFils: 0, outFils: 0 } };
   for (const e of entries) {
     if (!inRange(e.date, from, to)) continue;
     if (e.kind === 'in') t[e.purse].inFils += e.amountFils;

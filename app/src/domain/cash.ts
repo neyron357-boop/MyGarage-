@@ -15,11 +15,11 @@ export function expectedCash(openingFils: number, movements: CashMovement[]): nu
   return openingFils + t.inFils - t.outFils;
 }
 
-/** Non-cash payments by method (refunds subtract). */
+/** Card and transfer payments (refunds subtract); cash is in the cash box, money the owner took (`outside`) is in neither. */
 export function nonCashTotals(payments: Payment[]): { card: number; transfer: number } {
   const out = { card: 0, transfer: 0 };
   for (const p of payments) {
-    if (p.method === 'cash') continue;
+    if (p.method === 'cash' || p.method === 'outside') continue;
     out[p.method] += p.kind === 'refund' ? -p.amountFils : p.amountFils;
   }
   return out;

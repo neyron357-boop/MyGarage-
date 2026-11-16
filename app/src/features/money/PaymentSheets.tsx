@@ -1,5 +1,5 @@
 import { Button, Group, Modal, SegmentedControl, SimpleGrid, Stack, Text, TextInput } from '@mantine/core';
-import { IconBuildingBank, IconCash, IconCashOff, IconCreditCard, IconSignature, type Icon } from '@tabler/icons-react';
+import { IconBuildingBank, IconCash, IconCashOff, IconCreditCard, IconSignature, IconUserDollar, type Icon } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, dubaiDate, nowIso } from '../../domain/dates';
@@ -24,7 +24,7 @@ import { SignatureBox, type SignatureHandle } from '../../ui/SignatureBox';
  * (`closeUnpaid`: paid to the garage's owner, or no money at all).
  */
 type Way = PayMethod | 'debt' | 'unpaid';
-const WAY_ICON: Record<Way, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, debt: IconSignature, unpaid: IconCashOff };
+const WAY_ICON: Record<Way, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, outside: IconUserDollar, debt: IconSignature, unpaid: IconCashOff };
 const PAY_METHODS: PayMethod[] = ['cash', 'card', 'transfer'];
 
 function WayCard({ way, active, onClick }: { way: Way; active: boolean; onClick: () => void }) {

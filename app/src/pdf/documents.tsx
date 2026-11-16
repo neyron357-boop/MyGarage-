@@ -238,7 +238,7 @@ export async function renderInspection(inspectionId: string): Promise<Blob> {
 
 /* ---------------- Quotation and tax invoice, as the garage's own documents ---------------- */
 
-const METHOD_EN: Record<PayMethod, string> = { cash: 'Cash', card: 'Card', transfer: 'Bank transfer' };
+const METHOD_EN: Record<PayMethod, string> = { cash: 'Cash', card: 'Card', transfer: 'Bank transfer', outside: 'Paid to the owner' };
 
 /** "CC 78728", "5 / 87920" (a number code, as Abu Dhabi plates were written there). */
 const plateText = (v: Vehicle) => {
@@ -543,6 +543,7 @@ export async function renderReport(r: Report, from: string, to: string, lang: La
         {row(t('payment.method.cash'), a(r.payments.cash))}
         {row(t('payment.method.card'), a(r.payments.card))}
         {row(t('payment.method.transfer'), a(r.payments.transfer))}
+        {r.payments.outside !== 0 && row(t('payment.method.outside'), a(r.payments.outside))}
         {row(t('report.cashDiff'), a(r.cashDiffFils))}
         <Text style={s.h2}>{t('expense.byCategory')}</Text>
         {r.expensesByCategory.map((c) => {

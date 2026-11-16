@@ -47,7 +47,7 @@ describe('money book', () => {
       [720, 1150],
     ]);
     const t = periodTotals(book.entries, '2026-07-01', '2026-07-31');
-    expect(t).toEqual({ cash: { inFils: 91500, outFils: 28000 }, card: { inFils: 115000, outFils: 1300 } });
+    expect(t).toEqual({ cash: { inFils: 91500, outFils: 28000 }, card: { inFils: 115000, outFils: 1300 }, outside: { inFils: 0, outFils: 0 } });
     // The cash box agrees with the book.
     expect((await cashState()).expected).toBe(72000);
     // The parts expense is linked to the car and, through it, to its owner.

@@ -38,7 +38,7 @@ export interface Report {
   /** Received without an invoice (gross, as received). */
   otherIncome: number;
   grossProfit: number;
-  payments: { cash: number; card: number; transfer: number };
+  payments: { cash: number; card: number; transfer: number; outside: number };
   cashDiffFils: number;
   averageTicketGross: number;
 }
@@ -61,7 +61,7 @@ export function computeReport(input: ReportInput): Report {
     expensesByCategory: [],
     otherIncome: 0,
     grossProfit: 0,
-    payments: { cash: 0, card: 0, transfer: 0 },
+    payments: { cash: 0, card: 0, transfer: 0, outside: 0 },
     cashDiffFils: 0,
     averageTicketGross: 0,
   };

@@ -13,8 +13,10 @@ import {
   IconSearch,
   IconTrash,
   IconUser,
+  IconUserDollar,
   IconX,
 } from '@tabler/icons-react';
+import type { TFunction } from 'i18next';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -148,12 +150,22 @@ function IncomeCategorySheet({ opened, category, onClose, onAdded }: { opened: b
 
 const OPEN_STAGES = new Set(['booked', 'intake', 'diagnostics', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'quality_check', 'ready']);
 
-/** Cash / Card / Bank transfer — and, for an expense, "On credit": nothing is paid yet, the garage owes it. */
-const PURSE_ICON = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, credit: IconClockDollar };
+/**
+ * Cash / Card / Bank transfer — for an expense also "On credit" (nothing is paid yet, the garage owes it) — and, v0.27,
+ * money past the cash box (`outside`): an expense paid with other money — «Не из кассы» (the owner's own; not a debt),
+ * money in the owner took — «Владельцу».
+ */
+export const PURSE_ICON: Record<ExpenseMethod, typeof IconCash> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, credit: IconClockDollar, outside: IconUserDollar };
+
+/** How a way is said: money out past the cash box is «Не из кассы», money in — «Владельцу». */
+export function wayLabel(t: TFunction, m: ExpenseMethod, kind: 'in' | 'out'): string {
+  if (m === 'outside') return kind === 'out' ? t('ledger.outsideOut') : t('payment.method.outside');
+  return t(`payment.method.${m}`);
+}
 
 export function PursePicker({ value, onChange, kind, credit }: { value: ExpenseMethod; onChange: (m: ExpenseMethod) => void; kind: 'in' | 'out'; /** "On credit" offered too (a new expense). */ credit?: boolean }) {
   const { t } = useTranslation();
-  const ways: ExpenseMethod[] = credit ? ['cash', 'card', 'transfer', 'credit'] : ['cash', 'card', 'transfer'];
+  const ways: ExpenseMethod[] = credit ? ['cash', 'card', 'transfer', 'credit', 'outside'] : ['cash', 'card', 'transfer', 'outside'];
   return (
     <Stack gap={4}>
       <div className="chip-row wrap" role="radiogroup">
@@ -162,7 +174,7 @@ export function PursePicker({ value, onChange, kind, credit }: { value: ExpenseM
           return (
             <button key={m} type="button" className="chip" role="radio" aria-checked={value === m} data-active={value === m} data-way={m} onClick={() => onChange(m)}>
               <I size={17} stroke={2} aria-hidden />
-              {m === 'transfer' ? t('ledger.transferFull') : t(`payment.method.${m}`)}
+              {m === 'transfer' ? t('ledger.transferFull') : wayLabel(t, m, kind)}
             </button>
           );
         })}
@@ -474,7 +486,7 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
                   {r.note ? `${r.title} · ${r.note}` : r.title}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  {formatDate(r.date)} · {t(`payment.method.${r.method}`)}
+                  {formatDate(r.date)} · {wayLabel(t, r.method, r.in ? 'in' : 'out')}
                   {by !== 'orderId' && r.orderId && data.orders.get(r.orderId) ? ` · №${data.orders.get(r.orderId)!.number}` : ''}
                 </Text>
               </Box>

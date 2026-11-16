@@ -20,7 +20,7 @@ import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { EntryDetails } from './LedgerTab';
-import { EntrySheet, PursePicker, type EntryPreset } from './MoneyEntry';
+import { EntrySheet, PursePicker, wayLabel, type EntryPreset } from './MoneyEntry';
 
 /*
  * Who owes whom (v0.20): the customers' debts as one card per customer — the board's "Debts" and "Money → Debts"
@@ -207,7 +207,7 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
                     chevron
                     onClick={() => setShown(p.id)}
                     title={formatDate(p.date)}
-                    subtitle={[t(`payment.method.${p.method}`), p.note ?? ''].filter(Boolean).join(' · ')}
+                    subtitle={[wayLabel(t, p.method, 'out'), p.note ?? ''].filter(Boolean).join(' · ')}
                     right={<Money fils={-p.amountFils} size="sm" />}
                   />
                 ))}

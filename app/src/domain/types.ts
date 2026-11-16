@@ -4,7 +4,12 @@
 export type Lang = 'ru' | 'en';
 export type Emirate = 'DXB' | 'AUH' | 'SHJ' | 'AJM' | 'RAK' | 'UAQ' | 'FUJ';
 export type Channel = 'whatsapp' | 'telegram' | 'call';
-export type PayMethod = 'cash' | 'card' | 'transfer';
+/**
+ * How money moved: cash (the cash box), card, bank transfer — or past the garage's cash box and card (`outside`, v0.27): an
+ * expense paid with other money (the owner's own…) — not a debt; money in the owner took himself. It counts as income or an
+ * expense all the same; no cash moves, no card total.
+ */
+export type PayMethod = 'cash' | 'card' | 'transfer' | 'outside';
 /** How an expense is paid: at once (cash, card, transfer) — or on credit: owed by the garage, paid later in parts. */
 export type ExpenseMethod = PayMethod | 'credit';
 export type Localized = { ru?: string; en?: string };

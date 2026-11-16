@@ -6,14 +6,16 @@ import { unzip, zipStore } from './zip';
  * "Transactions"): the opening cash at A4, the cash balance and the cash and card totals beside it, and the
  * MoneyLog table from row 6 — Date · Type (Income / Expense) · Amount (AED, always positive) · Payment
  * (Cash / Card) · Category · Cash Balance · Notes. The card has no balance (v0.17, the user's call): its money
- * is only operations — in and out. A sheet of the older layout (Card Start, Card Balance) reads as well.
+ * is only operations — in and out. A sheet of the older layout (Card Start, Card Balance) reads as well. Money past
+ * the cash box and the card (v0.27: paid with the owner's own, taken by the owner) is Payment «Owner»: the sheet's own
+ * formulas count only Cash and Card, so such a row is in no balance and no total — as in the app.
  *
  * Export writes it exactly as the original (its styles, formulas, lists, colouring and notes), with the
  * balances already worked out so a phone's preview shows them; import reads such a workbook back.
  */
 
 export type MoneyType = 'Income' | 'Expense';
-export type MoneyPayment = 'Cash' | 'Card';
+export type MoneyPayment = 'Cash' | 'Card' | 'Owner';
 
 export interface MoneyRow {
   date: string; // YYYY-MM-DD
@@ -104,6 +106,8 @@ export function sheetBalances(sheet: MoneySheet): { cash: number[]; card: number
     } else if (r.payment === 'Cash') {
       cash -= r.amountFils;
       cashOut += r.amountFils;
+    } else if (r.payment === 'Owner') {
+      // past the cash box and the card: in no balance and no total
     } else if (r.type === 'Income') {
       card += r.amountFils;
       cardIn += r.amountFils;
@@ -151,7 +155,8 @@ export function buildMoneyWorkbook(sheet: MoneySheet): Uint8Array {
     rows.push(
       `<row r="${r}" ht="21.75" customHeight="1"><c r="A${r}" s="11"><v>${excelSerial(row.date)}</v></c>${str(`B${r}`, 12, row.type)}` +
         `<c r="C${r}" s="13"><v>${aed(row.amountFils)}</v></c>${str(`D${r}`, 12, row.payment)}${str(`E${r}`, 12, row.category)}` +
-        `<c r="F${r}" s="14">${fCash(r)}<v>${aed(b.cash[i])}</v></c>` +
+        // An «Owner» row: the formula leaves its cash balance empty — so does the value worked out here.
+        (row.payment === 'Owner' ? `<c r="F${r}" s="14" t="str">${fCash(r)}<v></v></c>` : `<c r="F${r}" s="14">${fCash(r)}<v>${aed(b.cash[i])}</v></c>`) +
         (row.notes ? str(`G${r}`, 16, row.notes) : `<c r="G${r}" s="17"/>`) +
         '</row>',
     );
@@ -270,7 +275,7 @@ const typeOf = (c: Cell): MoneyType | undefined => {
   const s = text(c).toLowerCase();
   return /^(income|приход|доход)/.test(s) ? 'Income' : /^(expense|расход)/.test(s) ? 'Expense' : undefined;
 };
-const paymentOf = (c: Cell): MoneyPayment => (/^(card|bank|transfer|карта|перевод)/i.test(text(c)) ? 'Card' : 'Cash');
+const paymentOf = (c: Cell): MoneyPayment => (/^(card|bank|transfer|карта|перевод)/i.test(text(c)) ? 'Card' : /^(owner|outside|владел|мимо)/i.test(text(c)) ? 'Owner' : 'Cash');
 
 export interface ReadMoneySheet extends MoneySheet {
   /** Rows with something in them but no date, type or positive amount. */

@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Button, Group, Modal, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCheck, IconCreditCard, IconLock, IconPaperclip, IconPencil, IconTrash } from '@tabler/icons-react';
+import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCheck, IconCreditCard, IconLock, IconPaperclip, IconPencil, IconTrash, IconUserDollar } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -18,7 +18,7 @@ import { DayPill, MonthField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { CreditSheet } from './Debts';
-import { EntrySheet, IncomeChips, LinkPicker, PursePicker, useIncomeCategories, useIncomeLabel, type EntryPreset } from './MoneyEntry';
+import { EntrySheet, IncomeChips, LinkPicker, PursePicker, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
 
@@ -348,7 +348,8 @@ export function LedgerTab() {
             </div>
           </UnstyledButton>
           <div className="money-card-month">
-            {(['cash', 'card'] as const).map((p) => (
+            {/* Money past the cash box (v0.27: paid with the owner's own, taken by the owner) — a row of its own, when the month has it. */}
+            {(['cash', 'card', 'outside'] as const).filter((p) => p !== 'outside' || totals.outside.inFils || totals.outside.outFils).map((p) => (
               <div
                 key={p}
                 className="money-card-purse"
@@ -356,9 +357,9 @@ export function LedgerTab() {
                 data-month-purse={p}
                 data-in={totals[p].inFils}
                 data-out={totals[p].outFils}
-                aria-label={`${t(`payment.method.${p}`)}: ${t('ledger.in')} ${formatAed(totals[p].inFils, lang)}, ${t('ledger.out')} ${formatAed(totals[p].outFils, lang)}`}
+                aria-label={`${p === 'outside' ? t('ledger.outside') : t(`payment.method.${p}`)}: ${t('ledger.in')} ${formatAed(totals[p].inFils, lang)}, ${t('ledger.out')} ${formatAed(totals[p].outFils, lang)}`}
               >
-                {p === 'cash' ? <IconCash size={16} stroke={2} aria-hidden /> : <IconCreditCard size={16} stroke={2} aria-hidden />}
+                {p === 'cash' ? <IconCash size={16} stroke={2} aria-hidden /> : p === 'outside' ? <IconUserDollar size={16} stroke={2} aria-hidden /> : <IconCreditCard size={16} stroke={2} aria-hidden />}
                 <span data-zero={totals[p].inFils === 0 || undefined}>
                   <Money fils={totals[p].inFils} signed roll />
                 </span>
@@ -390,10 +391,10 @@ export function LedgerTab() {
               {k === 'in' ? t('ledger.ins') : t('ledger.outs')}
             </button>
           ))}
-          {(['cash', 'card'] as const).map((p) => (
-            <button key={p} type="button" className="chip" data-active={purse === p} aria-pressed={purse === p} onClick={() => setPurse(purse === p ? 'all' : p)}>
-              {p === 'cash' ? <IconCash size={17} stroke={2} aria-hidden /> : <IconCreditCard size={17} stroke={2} aria-hidden />}
-              {t(`payment.method.${p}`)}
+          {(['cash', 'card', 'outside'] as const).filter((p) => p !== 'outside' || purse === p || totals.outside.inFils || totals.outside.outFils).map((p) => (
+            <button key={p} type="button" className="chip" data-active={purse === p} aria-pressed={purse === p} data-purse={p} onClick={() => setPurse(purse === p ? 'all' : p)}>
+              {p === 'cash' ? <IconCash size={17} stroke={2} aria-hidden /> : p === 'outside' ? <IconUserDollar size={17} stroke={2} aria-hidden /> : <IconCreditCard size={17} stroke={2} aria-hidden />}
+              {p === 'outside' ? t('ledger.outside') : t(`payment.method.${p}`)}
             </button>
           ))}
         </div>
@@ -428,7 +429,7 @@ export function LedgerTab() {
                   const c = e.customerId ? data.customers.get(e.customerId) : undefined;
                   const o = e.orderId ? data.orders.get(e.orderId) : undefined;
                   const who = c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) : '';
-                  const sub = [e.method ? t(`payment.method.${e.method}`) : '', o ? `№${o.number}` : '', who].filter(Boolean).join(' · ');
+                  const sub = [e.method ? wayLabel(t, e.method, e.kind) : '', o ? `№${o.number}` : '', who].filter(Boolean).join(' · ');
                   return (
                     <ListRow
                       key={`${e.source}-${e.id}`}
@@ -472,7 +473,7 @@ export function LedgerTab() {
                           {/* As a bank shows it: money in green with a plus, money out in the text's colour with a minus. */}
                           <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />
                           <Text size="10px" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
-                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : t('ledger.cardShort')}
+                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')}
                           </Text>
                         </Stack>
                       }

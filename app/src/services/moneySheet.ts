@@ -1,7 +1,7 @@
 import { db } from '../db/db';
 import { dubaiDate } from '../domain/dates';
-import type { LedgerEntry } from '../domain/ledger';
-import { buildMoneyWorkbook, readMoneyWorkbook, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
+import type { LedgerEntry, Purse } from '../domain/ledger';
+import { buildMoneyWorkbook, readMoneyWorkbook, type MoneyPayment, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
 import { incomeCategoryNamed } from '../domain/incomeCategories';
 import { formatPlate } from '../domain/plates';
 import type { ExpenseCategory, IncomeCategory } from '../domain/types';
@@ -71,7 +71,7 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
       date: e.date,
       type: e.kind === 'in' ? 'Income' : 'Expense',
       amountFils: e.amountFils,
-      payment: e.purse === 'cash' ? 'Cash' : 'Card',
+      payment: e.purse === 'cash' ? 'Cash' : e.purse === 'outside' ? 'Owner' : 'Card',
       category: sheetCategory(e, catBy, incomeBy),
       notes: [about, what].filter(Boolean).join(' — '),
     };
@@ -86,6 +86,8 @@ export async function exportMoneySheet(): Promise<File> {
 }
 
 /* ---------------- Import ---------------- */
+
+const purseOfSheet = (p: MoneyPayment): Purse => (p === 'Card' ? 'card' : p === 'Owner' ? 'outside' : 'cash');
 
 /** The income category of a sheet's one: the sheet's own words, else one of the garage's by its name (v0.26), else none. */
 const incomeCategory = (c: string, list: IncomeCategory[]): string | undefined =>
@@ -135,12 +137,12 @@ export async function planMoneyImport(bytes: Uint8Array): Promise<MoneyImportPla
   }
   const book = await loadLedger();
   // The book's entries by day, in/out, purse and amount: each matches one row of the sheet at most.
-  const key = (date: string, out: boolean, card: boolean, fils: number) => `${date}|${out ? 'o' : 'i'}|${card ? 'k' : 'c'}|${fils}`;
+  const key = (date: string, out: boolean, purse: Purse, fils: number) => `${date}|${out ? 'o' : 'i'}|${purse}|${fils}`;
   const have = new Map<string, number>();
   for (const e of book.entries) {
     // A closing's difference would take the row that explains it (an expense never typed) — v0.23.1.
     if (e.source === 'closing') continue;
-    const k = key(e.date, e.kind === 'out', e.purse === 'card', e.amountFils);
+    const k = key(e.date, e.kind === 'out', e.purse, e.amountFils);
     have.set(k, (have.get(k) ?? 0) + 1);
   }
   const rows: MoneyRow[] = [];
@@ -151,7 +153,7 @@ export async function planMoneyImport(bytes: Uint8Array): Promise<MoneyImportPla
       existing++;
       continue;
     }
-    const k = key(r.date, r.type === 'Expense', r.payment === 'Card', r.amountFils);
+    const k = key(r.date, r.type === 'Expense', purseOfSheet(r.payment), r.amountFils);
     const n = have.get(k) ?? 0;
     if (n > 0) {
       have.set(k, n - 1);
@@ -178,7 +180,7 @@ export async function importMoneyPlan(plan: MoneyImportPlan): Promise<number> {
   if (plan.opening) await setOpeningBalances(plan.sheet.cashStartFils, plan.sheet.cardStartFils);
   let n = 0;
   for (const r of plan.rows) {
-    const method = r.payment === 'Card' ? 'card' : 'cash';
+    const method = r.payment === 'Card' ? 'card' : r.payment === 'Owner' ? 'outside' : 'cash';
     if (r.type === 'Income') {
       const category = incomeCategory(r.category, incomeCats);
       // A category the app has no place for stays in the note.

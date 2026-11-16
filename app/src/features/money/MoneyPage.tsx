@@ -2,11 +2,7 @@ import { Alert, Badge, Box, Button, Group, Modal, Progress, Select, SimpleGrid, 
 import {
   IconArrowDownLeft,
   IconArrowUpRight,
-  IconBuildingBank,
-  IconCash,
   IconCashRegister,
-  IconClockDollar,
-  IconCreditCard,
   IconLock,
   IconPaperclip,
   IconPlus,
@@ -32,10 +28,10 @@ import { SheetFor } from '../../ui/lazy';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { DebtsOverview } from './Debts';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
-import { EntrySheet } from './MoneyEntry';
+import { EntrySheet, PURSE_ICON, wayLabel } from './MoneyEntry';
 import { MoneySheetActions } from './MoneySheetActions';
 
-const METHOD_ICON: Record<ExpenseMethod, Icon> = { cash: IconCash, card: IconCreditCard, transfer: IconBuildingBank, credit: IconClockDollar };
+const METHOD_ICON: Record<ExpenseMethod, Icon> = PURSE_ICON;
 
 function MethodPicker({ value, onChange }: { value: PayMethod; onChange: (m: PayMethod) => void }) {
   const { t } = useTranslation();
@@ -315,7 +311,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
                   <Group gap={6} wrap="nowrap" mt={2}>
                     {e.vehicleId && data.vehicles.get(e.vehicleId) && <PlateText plate={data.vehicles.get(e.vehicleId)!.plate} size="xs" />}
                     <Text span size="xs" c="dimmed" lineClamp={2}>
-                      {`${formatDate(e.date)} · ${t(`payment.method.${e.method}`)}`}
+                      {`${formatDate(e.date)} · ${wayLabel(t, e.method, 'out')}`}
                       {owed > 0 && (
                         <Text span inherit c="orange.7" fw={600}>
                           {` · ${t('debt.leftSum', { sum: formatAed(owed) })}`}
