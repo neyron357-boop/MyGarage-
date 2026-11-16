@@ -1343,3 +1343,10 @@ export async function setCarVin(vehicleId: string, values: Pick<Vehicle, 'vin' |
   const vin = values.vin?.trim().toUpperCase() || undefined;
   await db.vehicles.update(vehicleId, { vin, year: values.year });
 }
+
+/**
+ * The reader's own tools for other things read off photos on the one engine, one reading at a time (v0.28: a car's
+ * number plate — services/plateReader.ts).
+ */
+export { banded, bandLines, breathe, cutLine, draw, engine, evened, exclusive, grey, inked, lightLetters, margin, page, plain, rest, tooSmall };
+export type { TextLine };

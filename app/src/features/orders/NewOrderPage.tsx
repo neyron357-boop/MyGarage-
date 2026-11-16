@@ -1,7 +1,7 @@
-import { Autocomplete, Box, Button, Group, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconCar, IconCheck, IconUser, IconX } from '@tabler/icons-react';
+import { ActionIcon, Autocomplete, Box, Button, Group, Loader, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
+import { IconAlertTriangle, IconCamera, IconCameraOff, IconCar, IconCheck, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -11,7 +11,12 @@ import { EMIRATES } from '../../domain/plates';
 import { quickList } from '../../domain/quickLists';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
 import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
+import { setCover } from '../../services/cover';
 import { checkIn } from '../../services/orders';
+import type { PlateFound } from '../../services/plateReader';
+import { haptic } from '../../ui/haptics';
+import { usePhotoPick } from '../../ui/photoPick';
+import { dropCarShot, heldCarShot } from './carShot';
 import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { CarThumb } from '../job/CarCover';
@@ -44,12 +49,17 @@ function who(c: Customer | undefined, noName: string): string {
   return [c.name || noName, c.phone ? formatPhone(c.phone) : ''].filter(Boolean).join(' · ');
 }
 
-/** Big UAE plate: emirate chips, code and number, live preview. The number is the one thing check-in needs. */
-function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) => void }) {
+/**
+ * Big UAE plate: emirate chips, code and number, live preview. The number is the one thing check-in needs. Read off a
+ * photo (v0.28), what the reading was not sure of is ringed orange until it is typed over; the camera (a hold — the
+ * phone's photos) reads it off a photo.
+ */
+function PlateBlock({ plate, onChange, unsure, focus, camera }: { plate: Plate; onChange: (p: Plate) => void; unsure?: { code: boolean; number: boolean }; focus: boolean; camera?: ReactNode }) {
   const { t } = useTranslation();
   const lang = useLang();
   return (
-    <Box className="surface" p="md">
+    <Box className="surface" p="md" pos="relative">
+      {camera}
       <Box ta="center" mb="md" mt={4}>
         {plate.number ? (
           <PlateText plate={plate} size="xl" />
@@ -81,6 +91,7 @@ function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) =>
           enterKeyHint="next"
           autoComplete="off"
           size="lg"
+          classNames={{ input: unsure?.code ? 'plate-unsure' : undefined }}
           style={{ flex: '0 0 96px' }}
           styles={{ input: { fontFamily: 'var(--font-plate)', fontSize: 24, textAlign: 'center', fontWeight: 600 } }}
         />
@@ -94,8 +105,9 @@ function PlateBlock({ plate, onChange }: { plate: Plate; onChange: (p: Plate) =>
           autoComplete="off"
           maxLength={6}
           size="lg"
-          autoFocus
-          data-autofocus
+          autoFocus={focus}
+          data-autofocus={focus || undefined}
+          classNames={{ input: unsure?.number ? 'plate-unsure' : undefined }}
           style={{ flex: 1 }}
           styles={{ input: { fontFamily: 'var(--font-plate)', fontSize: 24, letterSpacing: '0.08em', fontWeight: 600 } }}
         />
@@ -193,6 +205,43 @@ const ComplaintBlock = memo(function ComplaintBlock({ complaint, complaints, onA
   );
 });
 
+type ShotState = 'reading' | 'read' | 'check' | 'none';
+
+/**
+ * The car's photo (v0.28 — «＋» → «Фото номера», or the camera on the plate): the plate is read off it on the phone; while
+ * it reads, a light runs over it; then the plate is ringed where it was read — green when the readings agreed, orange
+ * when it is to be checked. A tap takes it again, a hold picks one from the phone's photos; × lets it go. It becomes the
+ * car's main photo with the job.
+ */
+function CarShot({ file, state, box, pick, onRemove }: { file: File; state: ShotState; box?: PlateFound['box']; pick: ReturnType<typeof usePhotoPick>; onRemove: () => void }) {
+  const { t } = useTranslation();
+  // Made and let go by the same effect (an address made once and let go by a cleanup that runs twice would be dead).
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  const label = t(state === 'reading' ? 'newOrder.plateReading' : state === 'read' ? 'newOrder.plateRead' : state === 'check' ? 'newOrder.plateCheck' : 'newOrder.plateNone');
+  return (
+    <div className="car-shot rise-enter" data-state={state}>
+      <button type="button" className="car-shot-img" aria-label={t('newOrder.retake')} {...pick.handlers} onClick={() => !pick.consumeClick() && pick.camera()}>
+        <span className="car-shot-frame">
+          <img src={url} alt="" draggable={false} />
+          {box && state !== 'reading' && <span className="car-shot-box" style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` }} />}
+          {state === 'reading' && <span className="car-shot-scan" aria-hidden />}
+        </span>
+      </button>
+      <span className="car-shot-badge" data-state={state} role="status" aria-label={label} title={label}>
+        {state === 'reading' ? <Loader size={14} color="white" /> : state === 'read' ? <IconCheck size={17} stroke={3} /> : state === 'check' ? <IconAlertTriangle size={16} stroke={2.4} /> : <IconCameraOff size={16} stroke={2.2} />}
+      </span>
+      <button type="button" className="car-shot-x glass" aria-label={t('newOrder.removePhoto')} onClick={onRemove}>
+        <IconX size={18} stroke={2.2} />
+      </button>
+    </div>
+  );
+}
+
 export function NewOrderPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -212,6 +261,44 @@ export function NewOrderPage() {
   const [complaint, setComplaint] = useState('');
   const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();
+
+  // The car's photo (v0.28): brought by «＋» → «Фото номера», or taken here. The plate is read off it; what was typed into
+  // the plate meanwhile is not overwritten.
+  const [shot, setShot] = useState<{ file: File; id?: string } | undefined>(() => {
+    const id = params.get('photo');
+    const file = heldCarShot(id);
+    return file && id ? { file, id } : undefined;
+  });
+  const [read, setRead] = useState<{ state: ShotState; found?: PlateFound }>();
+  const typed = useRef(false);
+  const shoot = usePhotoPick((files) => files[0] && setShot({ file: files[0] }));
+  useEffect(() => {
+    if (!shot) return setRead(undefined);
+    let alive = true;
+    typed.current = false;
+    setRead({ state: 'reading' });
+    void import('../../services/plateReader')
+      .then(({ readPlate }) => readPlate(shot.file))
+      .then((found) => {
+        if (!alive) return;
+        setRead({ state: !found ? 'none' : found.sure && (found.codeSure || !found.code) ? 'read' : 'check', found });
+        if (found && !typed.current) {
+          setPlate((p) => ({ emirate: found.emirate ?? p.emirate, code: found.code, number: found.number }));
+          haptic(found.sure && found.codeSure ? 'success' : 'warning');
+        }
+      })
+      .catch(() => alive && setRead({ state: 'none' }));
+    return () => {
+      alive = false;
+    };
+  }, [shot]);
+  const typePlate = useCallback((p: Plate) => {
+    typed.current = true;
+    setPlate(p);
+  }, []);
+  // What the reading was not sure of, while it is still as read.
+  const fromPhoto = read?.found;
+  const unsure = fromPhoto ? { code: !!fromPhoto.code && !fromPhoto.codeSure && plate.code === fromPhoto.code, number: !fromPhoto.sure && plate.number === fromPhoto.number } : undefined;
 
   // Opened from a car's page ("New job" for this car).
   const preVehicle = useLiveQuery(async () => {
@@ -271,6 +358,11 @@ export function NewOrderPage() {
         bookedFor: target === 'book' ? bookedFor : undefined,
       });
       if (!picked) rememberEmirate(plate.emirate);
+      // The photo is the car's main photo now (a fresh one of a car in the base takes the place of the old).
+      if (shot) {
+        await setCover(o.vehicleId, shot.file).catch(() => undefined);
+        if (shot.id) dropCarShot(shot.id);
+      }
       // Straight to the job: findings, prices and the customer's answer all happen there.
       navigate(`/orders/${o.id}`, { replace: true });
     });
@@ -281,6 +373,7 @@ export function NewOrderPage() {
       <PageHeader back title={t('newOrder.title')} right={<DocImportButton />} />
       <Stack gap={0}>
         <div className="group-title">{t('newOrder.vehicle')}</div>
+        {shot && <CarShot file={shot.file} state={read?.state ?? 'reading'} box={fromPhoto?.box} pick={shoot} onRemove={() => setShot(undefined)} />}
         {picked ? (
           <Box className="surface rise-enter" p="md">
             <Group justify="space-between" wrap="nowrap" gap="sm">
@@ -313,7 +406,20 @@ export function NewOrderPage() {
           </Box>
         ) : (
           <>
-            <PlateBlock plate={plate} onChange={setPlate} />
+            <PlateBlock
+              plate={plate}
+              onChange={typePlate}
+              unsure={unsure}
+              focus={!shot}
+              camera={
+                !shot && (
+                  <ActionIcon className="plate-cam" size={40} radius="xl" variant="light" aria-label={t('newOrder.photo')} {...shoot.handlers} onClick={() => !shoot.consumeClick() && shoot.camera()}>
+                    <IconCamera size={20} stroke={2} />
+                  </ActionIcon>
+                )
+              }
+            />
+            {shoot.inputs}
             {auto && (
               <Box className="surface rise-enter" p="sm" mt={10} aria-label={t('newOrder.inBase')}>
                 <Group gap="sm" wrap="nowrap">

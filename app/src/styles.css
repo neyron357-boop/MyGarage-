@@ -3604,6 +3604,196 @@ html.kb .tab-bar-wrap {
   outline-offset: 2px;
 }
 
+/* «＋» quick actions (v0.28, features/quick): held or swiped up, the actions rise over it — glass pills, the nearest
+   to the thumb lowest; the finger slides onto one and lets go. «＋» turns into «×» while they are up. The press is the
+   button's own: no page pan, no callout, no text picked. */
+.tab-plus {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tab-plus > svg {
+  transition: transform 320ms var(--spring);
+}
+.tab-plus[data-open] > svg {
+  transform: rotate(45deg);
+}
+.quick-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+}
+/* While the finger is still on «＋», nothing under the actions takes it. */
+.quick-layer[data-mode='drag'] {
+  pointer-events: none;
+}
+.quick-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.2);
+  animation: mg-fade-in var(--dur-2) var(--ease-out) both;
+}
+[data-mantine-color-scheme='dark'] .quick-scrim {
+  background: rgba(0, 0, 0, 0.45);
+}
+.quick-menu {
+  position: absolute;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+}
+.quick-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 54px;
+  padding: 0 9px 0 20px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transform-origin: 100% 100%;
+  /* Only before it starts (backwards): once up, the slide onto it may scale it. */
+  animation: mg-quick-in 380ms var(--spring) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
+  transition: transform 160ms var(--spring), background-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.quick-item .row-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+.quick-item[data-hover] {
+  transform: scale(1.07);
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 18%, var(--glass-bg));
+}
+.quick-item:active {
+  transform: scale(0.96);
+  transition-duration: 80ms;
+}
+@keyframes mg-quick-in {
+  from {
+    transform: translate3d(0, 18px, 0) scale(0.55);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* The car's photo on «Новый заказ» (v0.28): the plate read off it ringed, a light running over it while it reads. */
+.car-shot {
+  position: relative;
+  margin-bottom: 10px;
+}
+.car-shot-img {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-group);
+  overflow: hidden;
+  background: var(--app-fill);
+  text-align: center;
+  line-height: 0;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.car-shot-img[data-held] {
+  transform: scale(0.98);
+  transition: transform 160ms var(--spring);
+}
+.car-shot-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.car-shot-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.car-shot-box {
+  position: absolute;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2.5px var(--mantine-color-green-5), 0 0 0 9999px rgba(0, 0, 0, 0.28);
+  animation: mg-pop 320ms var(--ease-out) both;
+}
+.car-shot[data-state='check'] .car-shot-box {
+  box-shadow: 0 0 0 2.5px var(--mantine-color-orange-5), 0 0 0 9999px rgba(0, 0, 0, 0.28);
+}
+.car-shot-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 30%;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--mantine-color-cobalt-4) 50%, transparent), transparent);
+  animation: mg-scan 1.3s var(--ease-ios) infinite alternate;
+}
+@keyframes mg-scan {
+  from {
+    transform: translateY(-40%);
+  }
+  to {
+    transform: translateY(270%);
+  }
+}
+.car-shot-badge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--mantine-color-cobalt-filled);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.car-shot-badge[data-state='read'] {
+  background: var(--mantine-color-green-filled);
+}
+.car-shot-badge[data-state='check'],
+.car-shot-badge[data-state='none'] {
+  background: var(--mantine-color-orange-filled);
+}
+.car-shot-x {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--mantine-color-text);
+  cursor: pointer;
+}
+.plate-cam {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 1;
+  -webkit-touch-callout: none;
+}
+/* A part of the plate the reading was not sure of: ringed until it is typed over. */
+.plate-unsure {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-orange-5);
+  background: color-mix(in srgb, var(--mantine-color-orange-5) 10%, var(--mantine-color-default)) !important;
+}
+
 /* Sticky action bar (above the tab bar on phones, end of content on desktop) */
 .sticky-bar {
   position: sticky;

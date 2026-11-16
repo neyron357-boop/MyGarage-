@@ -1,6 +1,6 @@
 import { IconCashBanknoteFilled, IconDotsFilled, IconLayoutKanbanFilled, IconPlus, IconSearch, type Icon } from '@tabler/icons-react';
 import { animate, type AnimationPlaybackControls } from 'motion';
-import { useLayoutEffect, useRef, type CSSProperties, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { haptic } from './haptics';
@@ -34,7 +34,7 @@ function tabOf(pathname: string): string | undefined {
  * that tab lit; tapping it goes back to the tab's first screen, tapping it there scrolls to the top.
  * "+" (new job) is its own tinted glass circle: a tab bar is for places.
  */
-export function TabBar() {
+export function TabBar({ plus }: { /** «＋» with its quick actions (features/quick); a plain new-job button without it. */ plus?: ReactNode } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -74,9 +74,11 @@ export function TabBar() {
           </button>
         ))}
       </nav>
-      <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} onClick={() => navigate('/orders/new')}>
-        <IconPlus size={28} stroke={2.2} aria-hidden />
-      </button>
+      {plus ?? (
+        <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} onClick={() => navigate('/orders/new')}>
+          <IconPlus size={28} stroke={2.2} aria-hidden />
+        </button>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { AppShell, Box, Button, Kbd, MantineProvider, NavLink as MNavLink, Stack, Text, TextInput } from '@mantine/core';
+import { AppShell, Box, Kbd, MantineProvider, NavLink as MNavLink, Stack, Text, TextInput } from '@mantine/core';
 import { DatesProvider } from '@mantine/dates';
 import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
@@ -9,7 +9,6 @@ import {
   IconLayoutKanban,
   IconNotes,
   IconPackage,
-  IconPlus,
   IconSearch,
   IconSettings,
   IconTruck,
@@ -48,6 +47,7 @@ import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
 import { cssResolver, phoneTheme, theme } from './ui/theme';
 import { useRestoreReport } from './features/settings/RestoreModal';
+import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
 function AppRoutes({ location }: { location: Location }) {
@@ -158,9 +158,7 @@ function SideNav() {
           <Logo size={28} />
         </Box>
         <SideSearch />
-        <Button fullWidth leftSection={<IconPlus size={18} />} mb="lg" onClick={() => navigate('/orders/new')}>
-          {t('nav.newOrder')}
-        </Button>
+        <QuickNewButton />
         {NAV_GROUPS.map((g) => (
           <Box key={g.key} mb="md">
             <div className="nav-group">{t(g.key)}</div>
@@ -308,7 +306,7 @@ function PhoneShell() {
   return (
     <div className="app-root">
       <PhoneStack render={render} />
-      <TabBar />
+      <TabBar plus={<QuickPlus />} />
       <PwaUpdater />
       <UnsavedGuard />
     </div>

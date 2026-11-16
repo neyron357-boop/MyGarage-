@@ -2108,6 +2108,110 @@ async function launchBrowser() {
     const owed = await page.evaluate(async () => (await (await import('/src/services/debts.ts')).loadCompanyDebts()).filter((d) => d.expense.amountFils === 7000).length);
     if (owed) throw new Error('an expense paid with other money became a debt');
   });
+  await step('v0.28: «＋» held or swiped up — quick actions; «Фото номера» — the plate read off the photo into «Новый заказ», the photo the car’s', async () => {
+    await page.goto(BASE + '#/');
+    const plusBox = await page.locator('.tab-plus').boundingBox();
+    if (!plusBox) throw new Error('no «＋»');
+    const cx = plusBox.x + plusBox.width / 2;
+    const cy = plusBox.y + plusBox.height / 2;
+    // Held: the actions come up over it; the finger slides onto «Приход» and lets go — the income sheet.
+    await page.waitForTimeout(400);
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.waitForTimeout(450);
+    await page.locator('.quick-menu').waitFor();
+    await page.waitForTimeout(450);
+    const inBox = await page.locator('[data-quick="in"]').boundingBox();
+    await page.mouse.move(inBox.x + inBox.width / 2, inBox.y + inBox.height / 2, { steps: 8 });
+    await page.locator('[data-quick="in"][data-hover]').waitFor();
+    await shot('40a-quick-actions');
+    await page.mouse.up();
+    await page.getByRole('dialog').getByRole('button', { name: /^Записать приход/ }).waitFor();
+    if (await page.locator('.quick-menu').count()) throw new Error('the actions stayed up');
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    // A tap is a new job, as it was.
+    await page.waitForTimeout(500);
+    await page.mouse.click(cx, cy);
+    await page.waitForURL(/orders\/new$/);
+    await page.goBack();
+    await page.waitForURL((u) => !/orders\/new/.test(u.href));
+    await page.waitForTimeout(600);
+    // A swipe up onto «Фото номера»: the camera; a car with a Dubai plate, B 70415.
+    const photo = await page.evaluate(async () => {
+      const c = document.createElement('canvas');
+      c.width = 2016;
+      c.height = 1512;
+      const g = c.getContext('2d');
+      const bg = g.createLinearGradient(0, 0, 0, c.height);
+      bg.addColorStop(0, '#9aa4ad');
+      bg.addColorStop(1, '#5d5a55');
+      g.fillStyle = bg;
+      g.fillRect(0, 0, c.width, c.height);
+      g.fillStyle = '#26303b';
+      g.beginPath();
+      g.roundRect(240, 270, 1530, 940, 120);
+      g.fill();
+      g.fillStyle = '#c0c0c0';
+      g.font = 'bold 40px Arial';
+      g.fillText('NISSAN', 920, 760);
+      const pw = 560;
+      const ph = pw / 4.7;
+      g.translate(1008, 1000);
+      g.fillStyle = '#f7f7f2';
+      g.strokeStyle = '#111';
+      g.lineWidth = 4;
+      g.beginPath();
+      g.roundRect(-pw / 2, -ph / 2, pw, ph, 12);
+      g.fill();
+      g.stroke();
+      const big = ph * 0.62;
+      g.fillStyle = '#111';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = `bold ${big * 0.3}px Arial`;
+      g.fillText('DUBAI', -pw / 2 + pw * 0.1, -ph * 0.12);
+      g.font = `bold ${big}px Arial`;
+      g.fillText('B', -pw / 2 + pw * 0.3, ph * 0.04);
+      g.fillText('70415', pw * 0.16, ph * 0.04);
+      return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+    });
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx, cy - 30, { steps: 3 });
+    await page.locator('.quick-menu').waitFor();
+    const ph = await page.locator('[data-quick="photo"]').boundingBox();
+    await page.mouse.move(ph.x + ph.width / 2, ph.y + ph.height / 2, { steps: 5 });
+    const chooser = page.waitForEvent('filechooser', { timeout: 5000 });
+    await page.mouse.up();
+    await (await chooser).setFiles({ name: 'car.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(photo, 'base64') });
+    await page.waitForURL(/orders\/new\?photo=/);
+    await page.locator('.car-shot').waitFor();
+    await page.locator('.car-shot-badge[data-state="read"]').waitFor({ timeout: 90000 });
+    await page.locator('.car-shot-box').waitFor();
+    const read = [await page.getByRole('textbox', { name: 'Код', exact: true }).inputValue(), await page.getByRole('textbox', { name: 'Номер', exact: true }).inputValue()];
+    if (read.join(' ') !== 'B 70415') throw new Error('the plate read as ' + read.join(' '));
+    if (!(await page.locator('[role="radio"][aria-checked="true"]').filter({ hasText: 'Дубай' }).count())) throw new Error('the emirate is not Dubai');
+    // No keyboard over the photo: the number is not focused.
+    if (await page.evaluate(() => document.activeElement?.tagName === 'INPUT')) throw new Error('a field took the focus over the photo');
+    await shot('40b-plate-read');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.waitForURL(/#\/orders\/(?!new)/);
+    const kept = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const o = await db.orders.get(location.hash.split('/')[2]);
+      const v = await db.vehicles.get(o.vehicleId);
+      return { plate: `${v.plate.emirate} ${v.plate.code} ${v.plate.number}`, covers: (await db.media.where('ownerId').equals(o.vehicleId).toArray()).filter((m) => m.slot === 'cover').length };
+    });
+    if (kept.plate !== 'DXB B 70415' || kept.covers !== 1) throw new Error('the job: ' + JSON.stringify(kept));
+    // A right click (a long press on Android): the actions stay for a tap.
+    await page.goto(BASE + '#/');
+    await page.waitForTimeout(500);
+    await page.mouse.click(cx, cy, { button: 'right' });
+    await page.locator('.quick-layer[data-mode="sticky"]').waitFor();
+    await page.locator('[data-quick="note"]').click();
+    await page.waitForURL(/#\/notes/);
+  });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {
       const docs = await import('/src/services/documents.ts');
