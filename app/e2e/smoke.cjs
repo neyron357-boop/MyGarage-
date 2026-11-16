@@ -84,7 +84,7 @@ async function launchBrowser() {
     await settled();
     await page.screenshot({ path: `${SP}/shots/${n}.png`, fullPage: full });
   };
-  const step = async (name, fn) => { try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n')[0]); await shot('fail-' + name.replace(/\W+/g, '_')); throw e; } };
+  const step = async (name, fn) => { try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n').filter((l) => l.trim() && !/^=+/.test(l.trim())).slice(0, 4).join(' | ')); await shot('fail-' + name.replace(/\W+/g, '_')); throw e; } };
 
   await step('board empty', async () => { await page.goto(BASE); await page.getByText('Мастерская', { exact: true }).first().waitFor(); await shot('01-board-empty'); });
   await step('load demo', async () => {
@@ -226,9 +226,9 @@ async function launchBrowser() {
     const dlg = page.getByRole('dialog');
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
-    await page.getByRole('button', { name: /^Оплата/ }).waitFor();
+    await page.getByRole('button', { name: /^Оплата ·/ }).waitFor();
     // "Оплата" → "В долг" (v0.19, in the payment sheet): the customer signs for the sum and the date, and the car goes.
-    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await page.getByRole('button', { name: /^Оплата ·/ }).click();
     await dlg.getByRole('button', { name: 'В долг', exact: true }).click();
     await dlg.getByText('Подпись клиента').waitFor();
     const canvas = dlg.locator('canvas').first();
@@ -244,14 +244,16 @@ async function launchBrowser() {
     await front('.list-row').filter({ hasText: 'Долг до' }).waitFor();
     const number = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.orders.get(id)).number, patrol);
     await page.goto(BASE + '#/money?tab=debts');
+    // v0.30: the customer's card is folded — a tap shows the job.
+    await front('.debt-card').filter({ hasText: '№' + number }).locator('.list-row').first().click();
     await page.locator('.screen[data-role="top"]').getByText('№' + number).first().waitFor();
     await page.goto(BASE + '#/orders/' + patrol);
-    await page.getByRole('button', { name: /^Оплата/ }).waitFor();
+    await page.getByRole('button', { name: /^Оплата ·/ }).waitFor();
     // Gone with money due: the step "debt"; its money is still taken here, and the signed paper opens from "…".
     const gone = await page.evaluate(async (id) => { const { loadOrderBundle } = await import('/src/services/orders.ts'); const { phaseOf } = await import('/src/services/flow.ts'); const b = await loadOrderBundle(id); return { phase: phaseOf(b), stage: b.order.stage, debts: b.debts.map((d) => d.status) }; }, patrol);
     if (gone.phase !== 'debt' || gone.stage !== 'delivered' || gone.debts.join() !== 'open') throw new Error('on credit: ' + JSON.stringify(gone));
     await shot('20-on-credit-gone', true);
-    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await page.getByRole('button', { name: /^Оплата ·/ }).click();
     await dlg.getByText('Карта', { exact: true }).click();
     await dlg.getByRole('button', { name: 'Провести' }).click();
     await page.getByRole('button', { name: 'Возобновить' }).waitFor();
@@ -287,13 +289,15 @@ async function launchBrowser() {
     await front('[role="tab"]').filter({ hasText: 'Долги' }).click();
     const card = front('.debt-card').filter({ hasText: 'Rashid Debtor' });
     await card.filter({ hasText: '1 000,00' }).waitFor();
+    // v0.30: a customer is folded — a tap unfolds the cars and the papers.
+    await card.locator('.list-row').first().click();
     await card.locator('.list-row').filter({ hasText: 'Altima' }).waitFor();
     await card.locator('.list-row').filter({ hasText: 'Sunny' }).waitFor();
     if (await front('.job-row').filter({ hasText: 'Altima' }).count()) throw new Error('a car gone with a debt is still on the board');
     await shot('22a-board-debts');
     // "Take payment": 250 in cash — the oldest debt first; the cash grows by all of it.
     let before = await cashNow();
-    await card.getByText('Принять оплату').click();
+    await card.locator('.debt-actions').getByText('Оплата', { exact: true }).click();
     await dlg.getByRole('button', { name: 'Оплата долга' }).and(page.locator('[data-active="true"]')).waitFor();
     await dlg.getByLabel('Сумма').fill('250');
     await dlg.locator('[data-debt-job]').first().filter({ hasText: '250,00' }).waitFor();
@@ -333,6 +337,8 @@ async function launchBrowser() {
     if ((await cashNow()) !== before) throw new Error('an expense on credit moved the cash');
     await page.goto(BASE + '#/money?tab=debts');
     await front('.kpi').filter({ hasText: 'Мы должны' }).filter({ hasText: '1 000,00' }).waitFor();
+    // v0.30: what the garage owes is its own tab.
+    await front('.kpi-tab[data-side="owe"]').click();
     await shot('22c-money-debts', true);
     // 300 of it paid in cash: the cash −300, 700 left.
     await front('.list-row').filter({ hasText: 'Запчасти' }).filter({ hasText: '1 000,00' }).first().click();
@@ -345,7 +351,9 @@ async function launchBrowser() {
     await dlg.waitFor({ state: 'detached' });
     await front('.kpi').filter({ hasText: 'Мы должны' }).filter({ hasText: '700,00' }).waitFor();
     // The customer pays the rest: both jobs closed, off the debts — back in the archive.
-    await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).getByText('Принять оплату').click();
+    await front('.kpi-tab[data-side="owed"]').click();
+    await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).locator('.list-row').first().click();
+    await front('.debt-card.is-open').filter({ hasText: 'Rashid Debtor' }).locator('.debt-actions').getByText('Оплата', { exact: true }).click();
     await dlg.getByLabel('Сумма').fill('750');
     await dlg.getByRole('button', { name: /^Записать приход/ }).click();
     await dlg.waitFor({ state: 'hidden' });
@@ -669,7 +677,7 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: 'Оплата · 309,45 AED' }).waitFor(); // 288.45 + 20 + 5 % VAT
     await shot('32b-job-amended', true);
-    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await page.getByRole('button', { name: /^Оплата ·/ }).click();
     await dlg.getByRole('button', { name: 'Провести' }).click();
     await page.getByRole('button', { name: 'Выдать' }).click();
     await page.getByText('Закрыт').first().waitFor();
@@ -1411,7 +1419,8 @@ async function launchBrowser() {
     const row = page.locator('.job-row', { hasText: '61803' }).first();
     await row.locator('.job-card-due').waitFor();
     await row.locator('svg[aria-label="На стороне"]').waitFor();
-    await page.getByText(/^Сегодня\s*\d+$/).waitFor();
+    // «Сегодня» — a bell in the head with how many (v0.30).
+    await front('.today-bell .today-bell-n').waitFor();
     await shot('34i-board-today');
   });
   await step('v0.7: suppliers from a list, their card; moving to another device', async () => {
@@ -1510,7 +1519,7 @@ async function launchBrowser() {
     // Paid in full and handed over: each moment gets its mark.
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
-    await page.getByRole('button', { name: /^Оплата/ }).click();
+    await page.getByRole('button', { name: /^Оплата ·/ }).click();
     await dlg.getByRole('button', { name: 'Провести' }).click();
     await page.locator('.celebration').getByText('Оплачено').waitFor();
     await page.getByRole('button', { name: 'Выдать' }).click();
@@ -1839,7 +1848,8 @@ async function launchBrowser() {
     await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().waitFor({ state: 'detached' });
     // 10 of it paid in cash on an earlier day; the payment opened — its sum made 20; the debt deleted, and back.
     before = await cashNow();
-    await page.goto(BASE + '#/money?tab=debts');
+    // v0.30: what the garage owes is its own tab of the debts.
+    await page.goto(BASE + '#/money?tab=debts&side=owe');
     await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().click();
     await dlg.getByLabel('Сумма').fill('10');
     await pickDay(dlg);
@@ -2279,6 +2289,77 @@ async function launchBrowser() {
     if (shared.length !== 1 || shared[0][1] !== 'image/jpeg' || !/\.jpg$/.test(shared[0][0])) throw new Error('shared ' + JSON.stringify(shared));
     await closeModal();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
+  });
+  await step('v0.30: the board — what each job is, its paper, a swipe right to WhatsApp, «Сегодня» in a bell; tabs by a swipe; debts as two tabs, folded customers, one statement, the invoices zip', async () => {
+    // A finger's swipe from (x0, y0) by dx (touch events on whatever is under it, as on a phone).
+    const fingerSwipe = (x0, y0, dx, steps = 12) =>
+      page.evaluate(
+        async ({ x0, y0, dx, steps }) => {
+          const el = document.elementFromPoint(x0, y0);
+          const touch = (x) => new Touch({ identifier: 7, target: el, clientX: x, clientY: y0 });
+          const fire = (type, x, list = true) => el.dispatchEvent(new TouchEvent(type, { touches: list ? [touch(x)] : [], changedTouches: [touch(x)], bubbles: true, cancelable: true }));
+          fire('touchstart', x0);
+          for (let i = 1; i <= steps; i++) {
+            fire('touchmove', x0 + (dx * i) / steps);
+            await new Promise((r) => setTimeout(r, 14));
+          }
+          fire('touchend', x0 + dx, false);
+        },
+        { x0, y0, dx, steps },
+      );
+    await page.goto(BASE + '#/');
+    // A card says what the job is about, and has its paper (quote or invoice) a tap away.
+    await front('.job-card-what').first().waitFor();
+    await front('.job-card-doc').first().waitFor();
+    if (await front('.today-strip').count()) throw new Error('«Сегодня» is still a strip');
+    // «Сегодня» — a bell with how many; a tap — the list.
+    await front('.today-bell').click();
+    await page.locator('.today-note').first().waitFor();
+    await shot('42a-today-bell');
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    // A card swiped right: the customer's WhatsApp.
+    await page.evaluate(() => {
+      window.__opened = [];
+      window.open = (u) => void window.__opened.push(String(u));
+    });
+    const card = await front('.job-card').first().boundingBox();
+    await fingerSwipe(card.x + 30, card.y + card.height / 2, card.width - 50);
+    await page.waitForFunction(() => window.__opened.some((u) => u.startsWith('https://wa.me/')));
+    await shot('42b-board-cards');
+    // A sideways swipe on the board (not on a card): Search; on Search — Money.
+    await page.waitForTimeout(500);
+    await fingerSwipe(330, 70, -260);
+    await page.waitForURL(/#\/search$/);
+    await page.waitForTimeout(600);
+    await fingerSwipe(330, 260, -260);
+    await page.waitForURL(/#\/money/);
+    // Money → Debts: the two sums are tabs; the list under them turns by a swipe (and stays in Debts).
+    await page.goto(BASE + '#/money?tab=debts');
+    await front('.kpi-tab[data-side="owed"][data-active]').waitFor();
+    await page.waitForTimeout(400);
+    await fingerSwipe(330, 600, -260);
+    await front('.kpi-tab[data-side="owe"][data-active]').waitFor();
+    if (!/tab=debts/.test(page.url())) throw new Error('the swipe left Debts: ' + page.url());
+    await front('.kpi-tab[data-side="owed"]').click();
+    // A customer is folded: a tap unfolds the jobs and the papers.
+    const debtor = front('.debt-card').first();
+    await debtor.waitFor();
+    if ((await debtor.locator('.debt-actions').evaluate((el) => el.parentElement.getBoundingClientRect().height)) > 1) throw new Error('a customer is not folded');
+    await debtor.locator('.list-row').first().click();
+    await front('.debt-card.is-open .debt-actions').waitFor();
+    await shot('42c-debtor-open');
+    // One sheet for all of it, and every invoice in a zip.
+    const papers = await page.evaluate(async () => {
+      const { loadDebtors } = await import('/src/services/debts.ts');
+      const { statementPdf, debtInvoicesZip } = await import('/src/services/debtDocs.ts');
+      const d = (await loadDebtors())[0];
+      const s = await statementPdf(d.customer.id);
+      const z = await debtInvoicesZip(d.customer.id).catch((e) => String(e.message || e));
+      return { pdf: [s.filename, s.blob.type, s.blob.size], zip: typeof z === 'string' ? z : [z.name, z.type, z.size] };
+    });
+    if (!/^Statement - .+\.pdf$/.test(papers.pdf[0]) || papers.pdf[2] < 2000) throw new Error('statement: ' + JSON.stringify(papers.pdf));
+    if (typeof papers.zip === 'string' || !/\.zip$/.test(papers.zip[0]) || papers.zip[2] < 2000) throw new Error('zip: ' + JSON.stringify(papers.zip));
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

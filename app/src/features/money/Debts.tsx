@@ -1,9 +1,9 @@
-import { Box, Button, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconCash, IconClockDollar, IconTrash, IconUserDollar } from '@tabler/icons-react';
+import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
+import { IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate } from '../../domain/dates';
 import type { Debtor } from '../../domain/debts';
@@ -13,12 +13,16 @@ import { formatPhone } from '../../domain/phone';
 import { formatPlate } from '../../domain/plates';
 import type { Customer, ExpenseCategory, PayMethod } from '../../domain/types';
 import { companyDebtOf, loadCompanyDebts, loadDebtors, payCredit, type CompanyDebt } from '../../services/debts';
+import { debtInvoicesZip, statementPdf } from '../../services/debtDocs';
+import { openPdf } from '../../services/documents';
 import { removeEntry, restoreEntry } from '../../services/entries';
-import { EmptyState, Kpi, List, ListRow, Money, MoneyInput, PageSkeleton, PersonAvatar, PlateLine, undoToast } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PersonAvatar, PlateLine, undoToast } from '../../ui/components';
 import { DayPill } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
+import { shareOrDownload } from '../../ui/share';
+import { useTabSwipe } from '../../ui/tabSwipe';
 import { EntryDetails } from './LedgerTab';
 import { EntrySheet, PursePicker, wayLabel, type EntryPreset } from './MoneyEntry';
 
@@ -31,26 +35,43 @@ import { EntrySheet, PursePicker, wayLabel, type EntryPreset } from './MoneyEntr
 const tint = (color: string) => ({ background: `var(--mantine-color-${color}-6)` });
 export const customerName = (c: Pick<Customer, 'type' | 'companyName' | 'name'>) => (c.type === 'company' && c.companyName ? c.companyName : c.name);
 
-/** One customer and what they owe: the total, then each car with what each of its jobs still owes. */
+/**
+ * One customer and what they owe (v0.30: folded — the name and the total; a tap unfolds it): each car with what each of
+ * its jobs still owes, and the papers — take a payment, one sheet for all of it (a statement), every invoice in a .zip,
+ * the customer's card.
+ */
 const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (customerId: string) => void }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
+  const { run, busy } = useAction();
+  const [open, setOpen] = useState(false);
   const today = dubaiDate();
   const name = customerName(d.customer) || t('customer.noName');
+  const jobs = d.cars.reduce((n, c) => n + c.jobs.length, 0);
+  const late = d.cars.some((c) => c.jobs.some((j) => !!j.dueDate && j.dueDate < today));
+  const statement = () => run(async () => openPdf(await statementPdf(d.customer.id)));
+  const archive = () => run(async () => shareOrDownload(await debtInvoicesZip(d.customer.id)));
   return (
-    <List className="debt-card">
+    <List className={open ? "debt-card is-open" : "debt-card"}>
       <ListRow
-        onClick={() => navigate(`/customers/${d.customer.id}`)}
+        onClick={() => setOpen((o) => !o)}
         left={<PersonAvatar name={name} company={d.customer.type === 'company'} />}
         title={
           <Text span inherit fw={650} lineClamp={1}>
             {name}
           </Text>
         }
-        subtitle={[d.customer.phone ? formatPhone(d.customer.phone) : '', t('debt.cars', { count: d.cars.length })].filter(Boolean).join(' · ')}
-        right={<Money fils={d.totalFils} c="red" fw={750} roll />}
+        subtitle={[d.customer.phone ? formatPhone(d.customer.phone) : '', t('debt.cars', { count: d.cars.length }), t('debt.jobs', { count: jobs })].filter(Boolean).join(' · ')}
+        right={
+          <Group gap={6} wrap="nowrap" aria-expanded={open}>
+            <Money fils={d.totalFils} c="red" fw={750} roll />
+            {late && <span className="debt-late-dot" title={t('debt.overdue')} />}
+            <IconChevronDown size={18} className="debt-fold" color="var(--app-label-3)" aria-hidden />
+          </Group>
+        }
       />
+      <Collapse in={open} transitionDuration={260}>
       {d.cars.map((car) =>
         car.jobs.map((j) => {
           const late = !!j.dueDate && j.dueDate < today;
@@ -76,19 +97,33 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           );
         }),
       )}
-      <ListRow
-        onClick={() => onPay(d.customer.id)}
-        left={
-          <span className="row-icon" style={tint('green')} aria-hidden>
-            <IconCash size={19} stroke={2} />
+      <div className="debt-actions">
+        <button type="button" className="action-tile" onClick={() => onPay(d.customer.id)}>
+          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
+            <IconCash size={21} stroke={1.9} aria-hidden />
           </span>
-        }
-        title={
-          <Text span inherit fw={600} c="green.7">
-            {t('debt.take')}
-          </Text>
-        }
-      />
+          <span>{t('debt.takeShort')}</span>
+        </button>
+        <button type="button" className="action-tile" disabled={busy} onClick={() => void statement()}>
+          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-grape-6)' } as React.CSSProperties}>
+            <IconFileInvoice size={21} stroke={1.9} aria-hidden />
+          </span>
+          <span>{t('debt.statement')}</span>
+        </button>
+        <button type="button" className="action-tile" disabled={busy} onClick={() => void archive()}>
+          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-cobalt-6)' } as React.CSSProperties}>
+            <IconFileZip size={21} stroke={1.9} aria-hidden />
+          </span>
+          <span>{t('debt.zip')}</span>
+        </button>
+        <button type="button" className="action-tile" onClick={() => navigate(`/customers/${d.customer.id}`)}>
+          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-indigo-6)' } as React.CSSProperties}>
+            <IconUser size={21} stroke={1.9} aria-hidden />
+          </span>
+          <span>{t('debt.customerCard')}</span>
+        </button>
+      </div>
+      </Collapse>
     </List>
   );
 });
@@ -255,9 +290,28 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
   );
 }
 
-/** "Money → Debts": who owes the garage (one card per customer) and what the garage owes (expenses on credit). */
-export function DebtsOverview() {
+const DEBT_TABS = ['owed', 'owe'] as const;
+type DebtTab = (typeof DEBT_TABS)[number];
+
+/**
+ * "Money → Debts": who owes the garage (one card per customer) and what the garage owes (expenses on credit) — two
+ * tabs (v0.30): the two sums are the tabs, the list under them is turned by a swipe; past the first or the last, the
+ * swipe goes on to Money's own tabs (`onEdge`).
+ */
+export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
   const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
+  const side: DebtTab = params.get('side') === 'owe' ? 'owe' : 'owed';
+  const setSide = (v: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        n.set('side', v);
+        return n;
+      },
+      { replace: true },
+    );
+  const sw = useTabSwipe(DEBT_TABS, side, setSide, onEdge);
   const data = useScreenLiveQuery(async () => {
     const [debtors, company, cats] = await Promise.all([loadDebtors(), loadCompanyDebts(), db.expenseCategories.toArray()]);
     return { debtors, company, cats };
@@ -268,24 +322,50 @@ export function DebtsOverview() {
   const owe = data.company.reduce((s, d) => s + d.leftFils, 0);
   return (
     <Stack gap="lg">
-      <SimpleGrid cols={2} spacing="sm">
-        <Kpi label={t('debt.owed')} value={<Money fils={owed} roll />} color={owed > 0 ? 'red' : undefined} />
-        <Kpi label={t('debt.weOwe')} value={<Money fils={owe} roll />} color={owe > 0 ? 'orange' : undefined} />
+      <SimpleGrid cols={2} spacing="sm" role="tablist">
+        {(
+          [
+            ['owed', t('debt.owed'), owed, 'red', data.debtors.length],
+            ['owe', t('debt.weOwe'), owe, 'orange', data.company.length],
+          ] as const
+        ).map(([key, label, fils, color, n]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={side === key}
+            className="kpi kpi-tab"
+            data-active={side === key || undefined}
+            data-side={key}
+            style={{ '--kpi-c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}
+            onClick={() => setSide(key)}
+          >
+            <span className="eyebrow">
+              {label}
+              {n > 0 && <span className="count">{n}</span>}
+            </span>
+            <span className="value" style={fils > 0 ? { color: `var(--mantine-color-${color}-text, var(--mantine-color-${color}-6))` } : undefined}>
+              <Money fils={fils} roll />
+            </span>
+          </button>
+        ))}
       </SimpleGrid>
-      <Box>
-        <div className="group-title">
-          {t('debt.customers')}
-          {data.debtors.length > 0 && <span className="count">{data.debtors.length}</span>}
-        </div>
-        {data.debtors.length ? <DebtorList debtors={data.debtors} /> : <EmptyState icon={IconUserDollar} title={t('debt.none')}>{t('debt.noneHint')}</EmptyState>}
-      </Box>
-      <Box>
-        <div className="group-title">
-          {t('debt.company')}
-          {data.company.length > 0 && <span className="count">{data.company.length}</span>}
-        </div>
-        {data.company.length ? <CompanyDebtList list={data.company} cats={data.cats} onOpen={setCredit} /> : <EmptyState icon={IconClockDollar} title={t('debt.companyNone')} />}
-      </Box>
+      {/* The list under the sums turns like a page (its own swipe, inside Money's). */}
+      <div key={side} ref={sw.panel} data-own-swipe className="debt-panel">
+        {side === 'owed' ? (
+          data.debtors.length ? (
+            <DebtorList debtors={data.debtors} />
+          ) : (
+            <EmptyState icon={IconUserDollar} title={t('debt.none')}>
+              {t('debt.noneHint')}
+            </EmptyState>
+          )
+        ) : data.company.length ? (
+          <CompanyDebtList list={data.company} cats={data.cats} onOpen={setCredit} />
+        ) : (
+          <EmptyState icon={IconClockDollar} title={t('debt.companyNone')} />
+        )}
+      </div>
       <SheetFor value={credit}>{(id, o) => <CreditSheet expenseId={id} opened={o} onClose={() => setCredit(null)} />}</SheetFor>
     </Stack>
   );

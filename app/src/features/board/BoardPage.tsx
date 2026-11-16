@@ -21,7 +21,7 @@ import { DebtorList } from '../money/Debts';
 import { InsecureWarning } from './BoardNotices';
 import { BoardViewSheet } from './BoardViewSheet';
 import { JobRow, type RowSwipe } from './JobRow';
-import { TodayList } from './TodayList';
+import { TodayBell } from './TodayBell';
 
 /** The board as it was read last: coming back to it shows the cars at once, the live read follows. */
 let lastBoard: { bundles: OrderBundle[]; covers: Map<string, string> } | undefined;
@@ -248,10 +248,14 @@ export function BoardPage() {
         title={t('board.title')}
         right={
           mobile ? (
-            viewButton
+            <Group gap="xs" wrap="nowrap">
+              <TodayBell bundles={bundles} />
+              {viewButton}
+            </Group>
           ) : (
             <Group gap="xs" wrap="nowrap">
               {view.order.filter((k): k is 'debts' | 'archive' => k === 'debts' || k === 'archive').map((k) => pcButtons[k])}
+              <TodayBell bundles={bundles} />
               {viewButton}
             </Group>
           )
@@ -294,7 +298,6 @@ export function BoardPage() {
       <>
         {header}
         <InsecureWarning />
-        <TodayList bundles={bundles} />
         <Box mt="xl">
           <EmptyState
             icon={IconLayoutKanban}
@@ -340,7 +343,6 @@ export function BoardPage() {
       <span ref={glowRef} hidden />
       {header}
       <InsecureWarning />
-      {!archive && !debtsTab && <TodayList bundles={bundles} />}
       {mobile ? (
         <>
           {/* A long press on a tab opens «Вид» — where the tabs are dragged into another order. */}

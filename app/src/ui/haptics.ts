@@ -158,6 +158,8 @@ const TAPPABLE = [
   'button.car-shot-img',
   'button.car-shot-x',
   'button.part-thumb',
+  'button.job-card-doc',
+  'button.kpi-tab',
   'button.suggest',
   'button.swipe-btn',
   'button.search-cancel',

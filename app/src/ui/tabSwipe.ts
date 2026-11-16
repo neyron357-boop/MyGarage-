@@ -4,7 +4,7 @@ import { haptic } from './haptics';
 
 /** Things that take a sideways drag themselves: the tab swipe leaves them alone. */
 const OWN_SWIPE =
-  '.chip-row:not(.wrap), .scroll-tabs, .today-strip, .swipe-row, .note-swipe, .kanban, .strip-row, [data-sort-id], input, textarea, select, [role="slider"], video, audio, [controls]';
+  '.chip-row:not(.wrap), .scroll-tabs, .today-strip, .swipe-row, .note-swipe, .kanban, .strip-row, [data-sort-id], input, textarea, select, [role="slider"], video, audio, [controls], [data-own-swipe]';
 /** The strip along the left edge belongs to "Back" (ui/stack). */
 const EDGE = 28;
 /** A touch becomes a drag after 8 px; sideways only when the first move is clearly sideways. */
@@ -171,9 +171,15 @@ interface Handoff {
  *
  * `panel` goes on the tab's page — keyed by the tab, so that each tab gets a page of its own.
  */
-export function useTabSwipe(order: readonly string[], value: string, onChange: (v: string) => void): { panel: (el: HTMLElement | null) => void } {
-  const live = useRef({ order, value, onChange });
-  live.current = { order, value, onChange };
+export function useTabSwipe(
+  order: readonly string[],
+  value: string,
+  onChange: (v: string) => void,
+  /** Swiped past the first or the last page (v0.30): the swipe goes on to what holds these pages (dir 1 — onwards). */
+  onEdge?: (dir: 1 | -1) => void,
+): { panel: (el: HTMLElement | null) => void } {
+  const live = useRef({ order, value, onChange, onEdge });
+  live.current = { order, value, onChange, onEdge };
   // How the next page comes in: after a swipe (beside the old one) or a tap (from its side).
   const at = order.indexOf(value);
   const shown = useRef(at);
@@ -264,7 +270,10 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
       }
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
-      if (t.clientX < EDGE || (e.target as Element | null)?.closest?.(OWN_SWIPE)) return;
+      // Pages inside the page (`data-own-swipe`, v0.30 — Money's debts: owed · we owe) turn themselves; this page is not
+      // its own exception.
+      const own = (e.target as Element | null)?.closest?.(OWN_SWIPE);
+      if (t.clientX < EDGE || (own && own !== el)) return;
       // Something on the screen must not be lost to a page turn (a voice note being recorded).
       if (el.closest('.screen')?.querySelector('[data-hold-page]')) return;
       const width = spanOf(el);
@@ -356,6 +365,14 @@ export function useTabSwipe(order: readonly string[], value: string, onChange: (
       const to = o.indexOf(cur) + dir;
       const flung = Math.abs(v) > FLING && Math.sign(v) === Math.sign(x) && Math.abs(x) > FLING_MIN;
       const thrownBack = Math.abs(v) > FLING && Math.sign(v) === -Math.sign(x);
+      // Past the first or the last page, drawn far enough (it gives way as a rubber band) or flung: on to what holds them.
+      const edge = live.current.onEdge;
+      if (edge && x !== 0 && (to < 0 || to >= o.length) && !thrownBack && (Math.abs(x) > g.width * 0.16 || flung)) {
+        settle(v * 1000);
+        haptic('selection');
+        edge(dir);
+        return;
+      }
       if (!(x !== 0 && to >= 0 && to < o.length && !thrownBack && (Math.abs(x) > g.width * COMMIT || flung))) {
         settle(v * 1000);
         return;

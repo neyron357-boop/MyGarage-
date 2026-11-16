@@ -11,7 +11,7 @@ import {
 } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate, formatDateTime, monthKey } from '../../domain/dates';
 import { expenseEntry, withEntries } from '../../domain/ledger';
@@ -25,6 +25,8 @@ import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, P
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
+import { stepMainTab } from '../../ui/mainSwipe';
+import { hintNavigation } from '../../ui/stack';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { DebtsOverview } from './Debts';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
@@ -411,7 +413,16 @@ export function MoneyPage() {
   // An old or mistyped link opens the book, not an empty screen.
   const asked = params.get('tab') ?? 'book';
   const tab = MONEY_TABS.includes(asked) ? asked : 'book';
-  const sw = useTabSwipe(MONEY_TABS, tab, (v) => setParams({ tab: v }, { replace: true }));
+  const navigate = useNavigate();
+  // Past the book or the debts, the swipe goes on to the tab bar's places beside Money (v0.30).
+  const mainEdge = (dir: 1 | -1) => void stepMainTab(navigate, hintNavigation, '/money', dir);
+  const sw = useTabSwipe(MONEY_TABS, tab, (v) => setParams({ tab: v }, { replace: true }), mainEdge);
+  // The debts' own pages (owed · we owe): past them, on to Money's tab beside — or past Money's, the tab bar's.
+  const debtsEdge = (dir: 1 | -1) => {
+    const to = MONEY_TABS[MONEY_TABS.indexOf('debts') + dir];
+    if (to) setParams({ tab: to }, { replace: true });
+    else mainEdge(dir);
+  };
   return (
     <>
       <PageHeader title={t('nav.money')} right={<MoneySheetActions />} />
@@ -432,7 +443,7 @@ export function MoneyPage() {
         {tab === 'cash' && <CashTab />}
         {tab === 'expenses' && <ExpensesTab addOpen={params.get('add') === '1'} />}
         {tab === 'salaries' && <SalariesTab />}
-        {tab === 'debts' && <DebtsOverview />}
+        {tab === 'debts' && <DebtsOverview onEdge={debtsEdge} />}
       </div>
     </>
   );

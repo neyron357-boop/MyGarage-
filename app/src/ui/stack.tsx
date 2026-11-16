@@ -2,6 +2,7 @@ import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffec
 import { useTranslation } from 'react-i18next';
 import { NavigationType, UNSAFE_LocationContext as LocationContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { layers } from './historyLayer';
+import { stepMainTab, watchMainSwipe } from './mainSwipe';
 
 /*
  * The phone's navigation stack, built like UINavigationController.
@@ -41,9 +42,12 @@ const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(pre
 
 /* ---------------- How the next navigation should look ---------------- */
 
-type Hint = 'tab' | 'pop';
+type Hint = 'tab' | 'pop' | 'tab-next' | 'tab-prev';
 let hint: Hint | null = null;
-/** Tab bar: the next navigation is a tab switch (cross-fade). "pop": it should look like going back. */
+/**
+ * Tab bar: the next navigation is a tab switch (cross-fade). "pop": it should look like going back. "tab-next" /
+ * "tab-prev" (v0.30): a tab switched by a swipe — the new tab slides in from its side, the old one out the other way.
+ */
 export function hintNavigation(h: Hint) {
   hint = h;
 }
@@ -57,7 +61,7 @@ interface Entry {
   idx: number;
 }
 
-type Kind = 'push' | 'pop' | 'present' | 'dismiss' | 'fade';
+type Kind = 'push' | 'pop' | 'present' | 'dismiss' | 'fade' | 'slide-next' | 'slide-prev';
 
 interface Anim {
   seq: number;
@@ -98,6 +102,8 @@ function next(model: Model, loc: Location, action: string, idx: number, h: Hint 
   const tabSwitch = h === 'tab' || (TAB_ROOTS.has(top.location.pathname) && TAB_ROOTS.has(loc.pathname) && h !== 'pop');
   if (tabSwitch) {
     const e = fresh();
+    // Swiped (v0.30): side by side — the old tab stays until it has slid out.
+    if (h === 'tab-next' || h === 'tab-prev') return { entries: [e], out: top, anim: { seq: ++seq, kind: h === 'tab-next' ? 'slide-next' : 'slide-prev', inId: e.id, outId: top.id } };
     return { entries: [e], out: null, anim: { seq: ++seq, kind: 'fade', inId: e.id } };
   }
 
@@ -492,6 +498,16 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
           slide(inEl, `translate3d(${PARALLAX * w}px,0,0)`, 'none', PUSH_MS),
           fade(dimOf(inEl), 1, 0, PUSH_MS),
         ]);
+      } else if (a.kind === 'slide-next' || a.kind === 'slide-prev') {
+        // A tab swiped to: in from its side, the old one out the other way — from where the finger left it.
+        const d = a.kind === 'slide-next' ? 1 : -1;
+        const from = outEl?.style.transform || 'none';
+        inEl.style.transform = `translate3d(${d * 100}%,0,0)`;
+        await contentReady(inEl);
+        if (cancelled) return;
+        inEl.classList.add('moving');
+        outEl?.classList.add('moving');
+        await Promise.all([slide(inEl, `translate3d(${d * 100}%,0,0)`, 'none', PUSH_MS), slide(outEl, from, `translate3d(${-d * 100}%,0,0)`, PUSH_MS)]);
       } else if (a.kind === 'dismiss') {
         await Promise.all([slide(outEl, 'none', 'translate3d(0,100%,0)', DISMISS_MS, 'cubic-bezier(0.4, 0, 1, 1)'), fade(dimOf(inEl), 0.6, 0, DISMISS_MS)]);
       } else {
@@ -658,6 +674,19 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [back]);
+
+  // A sideways swipe on a tab's own screen opens the tab beside it (v0.30, ui/mainSwipe.ts).
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const topNow = () => {
+      const m = modelRef.current;
+      const t = m.entries[m.entries.length - 1];
+      return { el: t && !m.anim ? el(t.id) : null, path: t?.location.pathname ?? '' };
+    };
+    return watchMainSwipe(root, topNow, (dir) => void stepMainTab(navRef.current, hintNavigation, topNow().path, dir));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const stack = useMemo<StackInfo>(() => ({ previous: below?.location, back }), [below?.location, back]);
 

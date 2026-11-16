@@ -1,8 +1,10 @@
-import { ActionIcon } from '@mantine/core';
+import { ActionIcon, Modal } from '@mantine/core';
 import {
   IconArrowBackUp,
+  IconBell,
   IconBuildingFactory2,
   IconCash,
+  IconChevronRight,
   IconClock,
   IconDroplet,
   IconHourglassHigh,
@@ -25,7 +27,7 @@ import type { Customer, Supplier } from '../../domain/types';
 import { simpleMessage } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { loadPast, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
-import { Money, PlateText } from '../../ui/components';
+import { EmptyState, Money, PlateText } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { useAutoAnimate } from '../../ui/motion';
@@ -49,25 +51,25 @@ const META: Record<TaskKind, { icon: Icon; color: string }> = {
 };
 
 /**
- * "Today" on top of the board: what needs the manager now across all the cars — promised for 18:00,
- * no answer for 3 h, parts to order or collect, a part to return by Friday, work outside due back, a
- * car not collected, an overdue debt, and the customers to write to. A strip of cards swiped sideways
- * (one row of the screen however much there is to do): what is late comes first, in red. A tap opens
- * the job (or the message, for a customer).
+ * "Today" as a bell (v0.30, the user's call — the strip over the board is gone): a round button in the board's head with
+ * how many things there are (red when one is late); a tap — a sheet like the phone's notifications: what needs the
+ * manager now across all the cars (domain/today.ts), what is late first, in red. A tap on one opens its job (or the
+ * message, for a customer); a customer's reminder not needed — its ×.
  */
-export const TodayList = memo(function TodayList({ bundles }: { bundles: OrderBundle[] }) {
+export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBundle[] }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
   const { run } = useAction();
   const dueLabel = useDueLabel();
+  const [open, setOpen] = useState(false);
   // Every past job of the last year: read again only once the board is back (not during the way back).
   const past = useScreenLiveQuery(() => loadPast(), [bundles.length], 600);
   const suppliers = useScreenLiveQuery(() => db.suppliers.toArray(), [], 600) ?? NONE;
   const [send, setSend] = useState<{ request: SendRequest; customer: Customer; task: Task } | null>(null);
-  const strip = useAutoAnimate<HTMLDivElement>();
+  const list = useAutoAnimate<HTMLDivElement>();
   const tasks = useMemo(() => tasksFor(bundles, past), [bundles, past]);
-  if (!tasks.length) return null;
+  const late = tasks.some((x) => x.late);
 
   const byOrder = new Map(bundles.map((b) => [b.order.id, b]));
   const vehicleOf = (task: Task) => byOrder.get(task.orderId ?? '')?.vehicle ?? past?.vehicles.get(task.vehicleId);
@@ -121,54 +123,65 @@ export const TodayList = memo(function TodayList({ bundles }: { bundles: OrderBu
       haptic('light');
     });
   const isCustomer = (task: Task) => task.kind === 'followUp' || task.kind === 'service';
-  const open = (task: Task) => {
+  const go = (task: Task) => {
+    setOpen(false);
     if (isCustomer(task)) write(task);
     else if (task.kind === 'pickup') navigate('/parts?tab=pickup');
     else if (task.orderId) navigate(`/orders/${task.orderId}`);
   };
 
   return (
-    <div className="today" aria-label={t('today.title')}>
-      <div className="group-title">
-        {t('today.title')}
-        <span className="count">{tasks.length}</span>
-      </div>
-      <div className="today-strip" ref={strip}>
-        {tasks.map((task) => {
-          const m = META[task.kind];
-          const v = vehicleOf(task);
-          return (
-            <div
-              key={task.key}
-              className="today-card"
-              data-late={task.late || undefined}
-              role="button"
-              tabIndex={0}
-              onClick={() => open(task)}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), open(task))}
-              // Each kind of task has its colour: the card is washed with it, the symbol sits on it.
-              style={{ '--c': `var(--mantine-color-${task.late ? 'red' : m.color}-6)` } as React.CSSProperties}
-            >
-              <div className="today-head">
-                <span className="today-icon">
-                  <m.icon size={18} stroke={2.2} aria-hidden />
-                </span>
-                <span className="today-text">{text(task)}</span>
-              </div>
-              <div className="today-foot">
-                {v ? <PlateText plate={v.plate} size="xs" /> : <span />}
-                {task.kind === 'debt' && task.amountFils ? (
-                  <Money fils={task.amountFils} c="red.7" />
-                ) : isCustomer(task) ? (
-                  <ActionIcon variant="subtle" color="gray" size={28} radius="xl" aria-label={t('today.notNeeded')} onClick={(e) => (e.stopPropagation(), void dismiss(task))}>
-                    <IconX size={16} />
-                  </ActionIcon>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <>
+      <ActionIcon className="today-bell" variant="default" size={40} radius="xl" aria-label={`${t('today.title')}: ${tasks.length}`} data-late={late || undefined} onClick={() => setOpen(true)}>
+        <IconBell size={22} stroke={2} />
+        {tasks.length > 0 && (
+          <span className="today-bell-n tnum" aria-hidden>
+            {tasks.length}
+          </span>
+        )}
+      </ActionIcon>
+      <Modal opened={open} onClose={() => setOpen(false)} title={t('today.title')}>
+        {tasks.length ? (
+          <div className="today-list" ref={list}>
+            {tasks.map((task) => {
+              const m = META[task.kind];
+              const v = vehicleOf(task);
+              const color = task.late ? 'red' : m.color;
+              return (
+                <div
+                  key={task.key}
+                  className="today-note"
+                  data-late={task.late || undefined}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => go(task)}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), go(task))}
+                  style={{ '--c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}
+                >
+                  <span className="row-icon" style={{ background: `var(--mantine-color-${color}-6)` }} aria-hidden>
+                    <m.icon size={18} stroke={2.2} />
+                  </span>
+                  <span className="today-note-body">
+                    <span className="today-note-text">{text(task)}</span>
+                    {v && <PlateText plate={v.plate} size="xs" />}
+                  </span>
+                  {task.kind === 'debt' && task.amountFils ? (
+                    <Money fils={task.amountFils} c="red.7" fw={650} />
+                  ) : isCustomer(task) ? (
+                    <ActionIcon variant="subtle" color="gray" size={30} radius="xl" aria-label={t('today.notNeeded')} onClick={(e) => (e.stopPropagation(), void dismiss(task))}>
+                      <IconX size={16} />
+                    </ActionIcon>
+                  ) : (
+                    <IconChevronRight size={18} color="var(--app-label-3)" aria-hidden />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState icon={IconBell} title={t('today.none')} />
+        )}
+      </Modal>
       {send && (
         <SendDialog
           customer={send.customer}
@@ -177,6 +190,6 @@ export const TodayList = memo(function TodayList({ bundles }: { bundles: OrderBu
           onSent={() => void (send.task.kind === 'service' ? markServiceReminded(send.task.vehicleId) : send.task.orderId && markFollowedUp(send.task.orderId))}
         />
       )}
-    </div>
+    </>
   );
 });

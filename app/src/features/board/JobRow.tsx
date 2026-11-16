@@ -1,6 +1,20 @@
 import { Modal, Text } from '@mantine/core';
-import { IconBuildingFactory2, IconCar, IconCash, IconClock, IconExternalLink, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon } from '@tabler/icons-react';
-import { memo, useState, type CSSProperties } from 'react';
+import {
+  IconBrandWhatsapp,
+  IconBuildingFactory2,
+  IconCar,
+  IconCash,
+  IconClock,
+  IconExternalLink,
+  IconFileInvoice,
+  IconFileTypePdf,
+  IconPackage,
+  IconRepeat,
+  IconTrash,
+  IconTruckDelivery,
+  type Icon,
+} from '@tabler/icons-react';
+import { memo, useState, type CSSProperties, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { dayShort, dueShort, hoursBetween, nowIso, shortDuration } from '../../domain/dates';
@@ -8,13 +22,16 @@ import type { Phase } from '../../domain/flow';
 import { leftBoardAt, liveLines } from '../../domain/flow';
 import { activeInvoice } from '../../domain/invoice';
 import { itemAmounts, summarize } from '../../domain/items';
+import { jobSummary } from '../../domain/jobSummary';
+import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
 import { partsToFind } from '../../services/flow';
+import { whatsappUrl } from '../../services/messages';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
-import { useLang } from '../../ui/hooks';
+import { useAction, useLang } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
-import { useSwipeAction } from '../../ui/swipe';
+import { useSwipeRow } from '../../ui/swipe';
 import { PHASE_META } from '../job/phase';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { orderFlags } from '../orders/flags';
@@ -72,9 +89,15 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
   const [menu, setMenu] = useState(false);
   const [remove, setRemove] = useState(false);
   const press = useLongPress(() => setMenu(true));
-  const sw = useSwipeAction(() => swipe?.onCommit());
+  const { run } = useAction();
+  // To the left — the row's own action (to the archive, back on the board); to the right (v0.30) — the customer's
+  // WhatsApp, when there is a number to write to.
+  const wa = b.customer.whatsapp || b.customer.phone;
+  const openWa = () => window.open(whatsappUrl(wa, ''), '_blank', 'noopener');
+  const sw = useSwipeRow({ trailing: swipe ? { onCommit: () => swipe.onCommit() } : undefined, leading: wa ? { onCommit: openWa } : undefined }, 92);
+  const swiping = !!swipe || !!wa;
   // A long press and a swipe on the same row: both see the finger.
-  const touch = swipe
+  const touch = swiping
     ? {
         ...press.handlers,
         onTouchStart: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchStart(e), sw.handlers.onTouchStart(e)),
@@ -105,6 +128,18 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
   const tone = late ? 'red' : m.color;
   const stepText = `${t(`job.phase.${phase}`)} · ${booked ? dueShort(booked, lang) : shortDuration(hours, lang)}`;
   const name = car || `№${b.order.number}`;
+  // What the job is about, in a line (v0.30): its work and parts by name, else the complaint.
+  const what = jobSummary(b.items, b.order.complaint, b.order.docLanguage);
+  // Its paper, on the card (v0.30): the invoice once issued, else the quote of its lines.
+  const inv = activeInvoice(b.invoices);
+  const doc = inv ? 'invoice' : liveLines(b.items).some((i) => i.kind !== 'discount') ? 'quote' : null;
+  const openDoc = () => run(async () => openPdf(inv ? await invoicePdf(inv.id) : await quotationPdf(b.order.id)));
+  const own =
+    <E extends SyntheticEvent>(fn?: (e: E) => void) =>
+    (e: E) => {
+      e.stopPropagation();
+      fn?.(e);
+    };
   // What else to know at a glance, each as its own coloured symbol.
   type Mark = { key: string; icon: Icon; color: string; label: string };
   const marks = ([
@@ -190,16 +225,34 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
         data-photo={row ? undefined : true}
         data-art={row || cover ? undefined : true}
         {...touch}
-        style={swipe ? { ...vars, ...sw.style } : vars}
+        style={swiping ? { ...vars, ...sw.style } : vars}
         data-swiping={sw.dragging || undefined}
         data-past={sw.past || undefined}
+        data-doc={!row && doc ? '' : undefined}
       >
-        {swipe && (
-          <span className="swipe-action" style={{ background: `var(--mantine-color-${swipe.color}-6)` }} aria-hidden={!sw.open}>
+        {wa && (
+          <span className="swipe-action lead" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden={sw.open !== 'leading'}>
             <button
               type="button"
               className="swipe-btn"
-              tabIndex={sw.open ? 0 : -1}
+              tabIndex={sw.open === 'leading' ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                sw.close();
+                openWa();
+              }}
+            >
+              <IconBrandWhatsapp size={22} stroke={1.9} aria-hidden />
+              <span>WhatsApp</span>
+            </button>
+          </span>
+        )}
+        {swipe && (
+          <span className="swipe-action" style={{ background: `var(--mantine-color-${swipe.color}-6)` }} aria-hidden={sw.open !== 'trailing'}>
+            <button
+              type="button"
+              className="swipe-btn"
+              tabIndex={sw.open === 'trailing' ? 0 : -1}
               onClick={(e) => {
                 e.stopPropagation();
                 sw.close();
@@ -242,6 +295,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
               </span>
               <span className="job-card-foot">
                 <span className="job-card-name">{name}</span>
+                {what && <span className="job-card-what">{what}</span>}
                 <span className="job-card-meta">
                   <PlateText plate={b.vehicle.plate} size="sm" />
                   {dueChip}
@@ -255,6 +309,23 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
             </>
           )}
         </button>
+        {!row && doc && (
+          // The job's paper a tap away, on the card: its touches are its own (the card neither opens nor swipes).
+          <button
+            type="button"
+            className="job-card-doc glass"
+            aria-label={t(doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote')}
+            onTouchStart={own()}
+            onTouchMove={own()}
+            onTouchEnd={own()}
+            onPointerDown={own()}
+            onContextMenu={own()}
+            onClick={own(() => void openDoc())}
+          >
+            {doc === 'invoice' ? <IconFileInvoice size={16} stroke={2} aria-hidden /> : <IconFileTypePdf size={16} stroke={2} aria-hidden />}
+            {t(doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote')}
+          </button>
+        )}
       </div>
       {/* The row's actions (long press), a sheet like the iPhone's context menu. */}
       <LazySheet opened={menu}>

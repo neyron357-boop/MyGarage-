@@ -121,6 +121,9 @@ function render(build: (fontFamily: string) => ReactNode): Promise<Blob> {
   return run;
 }
 
+/** The same, for documents made in their own files (a statement of account — pdf/statement.tsx). */
+export const renderDoc = render;
+
 export async function renderInspection(inspectionId: string): Promise<Blob> {
   const insp = await db.inspections.get(inspectionId);
   if (!insp) throw new Error('not found');
