@@ -627,6 +627,54 @@ function vinLines(p: Page): Spot[] {
   return out.slice(0, 6);
 }
 
+/**
+ * A business card read whole (v0.24 — a supplier added from the card the seller hands over): turned the right way up
+ * (the side that reads the most real words), read in grey; its lines of text with how tall their letters are (the
+ * name is printed largest). The numbers and the name are taken out of them by domain/suppliers.ts.
+ */
+export function readCardLines(blob: Blob): Promise<{ text: string; height: number }[]> {
+  return exclusive(() => readCardNow(blob));
+}
+
+/**
+ * One reading at a time on the one engine: each reading sets the engine's parameters, then reads — a card read while a
+ * VIN is being read (a supplier added while the Job card photo is still read) would get the VIN's alphabet, or give it
+ * its own.
+ */
+let lane: Promise<unknown> = Promise.resolve();
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = lane.then(fn, fn);
+  lane = run.catch(() => undefined);
+  return run;
+}
+
+async function readCardNow(blob: Blob): Promise<{ text: string; height: number }[]> {
+  const bmp = await createImageBitmap(blob);
+  try {
+    if (tooSmall(bmp)) return [];
+    const w = await engine();
+    let angle: Angle = 0;
+    let best = -1;
+    for (const a of [0, 90, 270, 180] as Angle[]) {
+      await breathe();
+      const s = sense(await page(w, grey(draw(bmp, a, 1000)), 'page'));
+      if (s > best) {
+        best = s;
+        angle = a;
+      }
+      if (s >= 40) break;
+    }
+    await breathe();
+    const p = await page(w, grey(draw(bmp, angle, 1920)));
+    return linesOf(p)
+      .map((l) => ({ text: l.text.trim(), height: l.bbox.y1 - l.bbox.y0 }))
+      .filter((l) => l.text);
+  } finally {
+    bmp.close();
+    rest();
+  }
+}
+
 export interface PhotoRead {
   reads: VinRead[];
   years: number[];
@@ -639,7 +687,11 @@ export interface PhotoRead {
  * years. `kind` — a VIN plate or label (its lines are found by their outlines first) or a card (read whole first:
  * its "Model" year too).
  */
-export async function readPhoto(blob: Blob, source: string, kind: 'plate' | 'card' = 'card'): Promise<PhotoRead> {
+export function readPhoto(blob: Blob, source: string, kind: 'plate' | 'card' = 'card'): Promise<PhotoRead> {
+  return exclusive(() => readPhotoNow(blob, source, kind));
+}
+
+async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'): Promise<PhotoRead> {
   const bmp = await createImageBitmap(blob);
   if (tooSmall(bmp)) {
     bmp.close();

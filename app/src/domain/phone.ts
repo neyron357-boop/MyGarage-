@@ -9,12 +9,18 @@ export function normalizePhone(input: string): string | null {
   if (s.startsWith('00')) s = '+' + s.slice(2);
   if (!s.startsWith('+')) {
     if (s.startsWith('971')) s = '+' + s;
-    else if (s.startsWith('0') && s.length === 10) s = '+971' + s.slice(1);
-    // A landline: "04 555 1111" (Dubai), "06…" (Sharjah).
-    else if (s.startsWith('0') && s.length === 9) s = '+971' + s.slice(1);
-    else if (s.length === 9 && s.startsWith('5')) s = '+971' + s;
+    else if (s.startsWith('0')) {
+      // Local: a mobile "05X XXX XXXX" or a landline "04 555 1111" (Dubai), "06…" (Sharjah). Anything else with a 0
+      // ("04 222 3333/4", one with an extension) is not a number to guess at: kept as typed by whoever asked.
+      if (/^05\d{8}$/.test(s) || /^0[2-46-9]\d{7}$/.test(s)) s = '+971' + s.slice(1);
+      else return null;
+    } else if (s.length === 9 && s.startsWith('5')) s = '+971' + s;
+    // UAE shared-cost and toll-free numbers (600…, 800…) are dialled as they are, not abroad.
+    else if (/^(600|800)/.test(s)) return null;
     else s = '+' + s;
   }
+  // "+971 (0)50 123 4567", as cards print it: the trunk 0 is not dialled after the country code.
+  if (s.startsWith('+9710')) s = '+971' + s.slice(5);
   const digits = s.slice(1);
   if (!/^\d{8,15}$/.test(digits)) return null;
   return '+' + digits;

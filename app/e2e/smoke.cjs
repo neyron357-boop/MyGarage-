@@ -1773,6 +1773,8 @@ async function launchBrowser() {
     const dlg = page.getByRole('dialog');
     const cashNow = () => page.evaluate(async () => (await (await import('/src/services/money.ts')).cashState()).expected);
     const undo = () => page.locator('.mantine-Notification-root').filter({ hasText: 'Отменить' }).last().getByText('Отменить').click();
+    // The undo banner stays while the pointer is on it (Mantine stops its 5 s): checks between a deletion and «Отменить» may take longer.
+    const keep = () => page.locator('.mantine-Notification-root').filter({ hasText: 'Отменить' }).last().hover({ timeout: 5000 }).catch(() => undefined);
     // A day of this month up to today, in the calendar a day pill opens (yesterday; the 1st stays the 1st).
     const today = await page.evaluate(async () => (await import('/src/domain/dates.ts')).dubaiDate());
     const day = Math.max(1, Number(today.slice(8)) - 1);
@@ -1817,6 +1819,7 @@ async function launchBrowser() {
     await shot('23a-cancelled-pair');
     await dlg.getByRole('button', { name: 'Удалить' }).click();
     await dlg.waitFor({ state: 'detached' });
+    await keep();
     await pair.first().waitFor({ state: 'detached' });
     if ((await cashNow()) !== before) throw new Error('the cancelled pair deleted moved the cash');
     await undo();
@@ -1860,6 +1863,7 @@ async function launchBrowser() {
     before = await cashNow();
     await dlg.getByRole('button', { name: 'Удалить долг' }).click();
     await dlg.waitFor({ state: 'detached' });
+    await keep();
     if ((await cashNow()) - before !== 2000) throw new Error('the debt deleted: the cash moved by ' + ((await cashNow()) - before));
     await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().waitFor({ state: 'detached' });
     await undo();
@@ -1898,9 +1902,80 @@ async function launchBrowser() {
     await page.waitForFunction(async (id) => { const m = await import('/src/services/orders.ts'); return m.bundleAmountDue(await m.loadOrderBundle(id)) === 10000; }, jobId);
     await dlg.getByRole('button', { name: 'Удалить' }).click();
     await dlg.waitFor({ state: 'detached' });
+    await keep();
     if ((await jobDue()) !== 30000) throw new Error('the payment deleted: the job owes ' + (await jobDue()));
     await undo();
     await page.waitForFunction(async (id) => { const m = await import('/src/services/orders.ts'); return m.bundleAmountDue(await m.loadOrderBundle(id)) === 10000; }, jobId);
+  });
+  await step('v0.24: a supplier added from the part — «Новый поставщик» on top, the car’s make on, the number off its business card, one already in the base offered; a hold on its chip — its card', async () => {
+    const top = () => page.getByRole('dialog').last();
+    const job = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      for (const i of await db.items.filter((x) => x.kind === 'part' && !x.customerSupplied && x.approvalState === 'draft').toArray()) {
+        const o = await db.orders.get(i.orderId);
+        const v = o && (await db.vehicles.get(o.vehicleId));
+        if (o && v?.make && !['closed', 'cancelled', 'delivered'].includes(o.stage)) return { id: o.id, title: i.titleEn || i.titleRu, make: v.make };
+      }
+      return null;
+    });
+    if (!job) throw new Error('no job with a part to look for');
+    await page.goto(BASE + '#/orders/' + job.id);
+    await front('.list-row').filter({ hasText: job.title.toUpperCase() }).first().click();
+    const line = page.getByRole('dialog').first();
+    await line.getByText('Поставщик').first().waitFor();
+    await line.locator('[aria-label="Поставщик"] button.chip').last().click();
+    // On top of the list, not under it.
+    const add = top().locator('.list-row').first();
+    await add.filter({ hasText: 'Новый поставщик' }).waitFor();
+    await add.click();
+    await top().getByText('Визитка').first().waitFor();
+    if (!(await top().locator('[aria-label="Марки"] button.chip[data-active="true"]').filter({ hasText: job.make }).count())) throw new Error('the car’s make is not on: ' + job.make);
+    // The business card photographed: its number and name come by themselves.
+    const card = await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 1400;
+      c.height = 800;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, c.width, c.height);
+      g.fillStyle = '#111';
+      g.font = 'bold 92px Arial';
+      g.fillText('DEIRA AUTO SPARES', 90, 220);
+      g.font = '48px Arial';
+      g.fillText('Mob: +971 56 909 1357', 90, 470);
+      g.fillText('Tel: 04 222 3344', 90, 560);
+      return c.toDataURL('image/png').split(',')[1];
+    });
+    await top().locator('input[data-photo-input="card"]').setInputFiles({ name: 'card.png', mimeType: 'image/png', buffer: Buffer.from(card, 'base64') });
+    const phone = top().getByRole('textbox', { name: 'Телефон' });
+    await phone.and(page.locator('input[value="+971 56 909 1357"]')).waitFor({ timeout: 90000 });
+    if ((await top().getByRole('textbox', { name: 'Название' }).inputValue()) !== 'DEIRA AUTO SPARES') throw new Error('the card’s name was not read');
+    await top().locator('[data-card-phones] button.chip').nth(1).waitFor();
+    await shot('37a-supplier-card-read');
+    // A number already in the base: that supplier is offered instead of a second one.
+    await phone.fill('04 333 4455');
+    await top().locator('button.suggest[data-twin]').filter({ hasText: 'Al Quoz' }).waitFor();
+    await phone.fill('056 909 1357');
+    await top().locator('button.suggest[data-twin]').waitFor({ state: 'detached' });
+    await top().getByRole('button', { name: 'Сохранить' }).click();
+    const chip = line.locator('[aria-label="Поставщик"] button.chip[data-active="true"]').filter({ hasText: 'DEIRA AUTO SPARES' });
+    await chip.waitFor();
+    const kept = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.suppliers.filter((s) => s.name === 'DEIRA AUTO SPARES').toArray()).map((s) => [s.phone, s.makes?.join(), s.cardMediaIds?.length]));
+    if (JSON.stringify(kept) !== JSON.stringify([['+971569091357', job.make, 1]])) throw new Error('kept as ' + JSON.stringify(kept));
+    // A hold on its chip (here a right click, as on a PC): its card — WhatsApp, Telegram, a call, the number as said.
+    await chip.click({ button: 'right' });
+    await top().locator('.contact-tiles').waitFor();
+    if ((await top().getByRole('textbox', { name: 'Телефон' }).inputValue()) !== '+971 56 909 1357') throw new Error('the number is not shown as said');
+    await shot('37b-supplier-held');
+    // Escape closes the sheet on top only: the part’s sheet under it stays, with what was typed in it.
+    await page.keyboard.press('Escape');
+    await page.locator('.contact-tiles').waitFor({ state: 'detached' });
+    await page.waitForTimeout(400);
+    if ((await page.getByRole('dialog').count()) !== 1) throw new Error('Escape closed more than the card: ' + (await page.getByRole('dialog').count()) + ' sheets left');
+    // The tap after the hold did not take the chip off.
+    if (!(await chip.count())) throw new Error('the hold took the supplier off the part');
+    await line.locator('.mantine-Modal-close').click();
+    await line.waitFor({ state: 'detached' });
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

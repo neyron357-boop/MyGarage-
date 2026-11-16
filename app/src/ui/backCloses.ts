@@ -24,14 +24,17 @@ export function useBackClosesSheets(enabled: boolean) {
         tracked.set(el, { popped: false });
         history.pushState({ ...(history.state ?? {}), mgSheet: true }, '');
       }
+      let drop = 0;
       for (const [el, st] of tracked) {
         if (el.isConnected) continue;
         tracked.delete(el);
-        // Closed from inside the sheet: drop our entry, unless a button already navigated away.
-        if (!st.popped && history.state?.mgSheet) {
-          ignorePops++;
-          history.back();
-        }
+        if (!st.popped) drop++;
+      }
+      // Closed from inside the sheet: drop our entries, unless a button already navigated away — several sheets closed
+      // together (a sheet and the list it was opened from) in one step: two history.back() in a row may be taken as one.
+      if (drop && history.state?.mgSheet) {
+        ignorePops++;
+        history.go(-drop);
       }
     };
     const schedule = () => {

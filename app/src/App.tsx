@@ -41,6 +41,7 @@ import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useLang, usePhone } from './ui/hooks';
 import { PwaUpdater } from './ui/pwa';
 import { useBackClosesSheets } from './ui/backCloses';
+import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useViewportSync } from './ui/stack';
 import { TabBar } from './ui/tabBar';
@@ -318,6 +319,7 @@ function Shell() {
   const mobile = usePhone();
   useSheetSwipe(mobile);
   useBackClosesSheets(mobile);
+  useEscapeClosesTopSheet();
   useStatusBarColor();
   const { pathname } = useLocation();
   // Toasts of the previous screen do not follow onto the next one.

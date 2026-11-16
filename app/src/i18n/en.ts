@@ -1531,6 +1531,9 @@ export const en: typeof ru = {
     importedBook: 'Added: {{added}}, updated: {{updated}}',
     book: 'Supplier base',
     notFound: 'Nobody found',
+    addNew: 'New supplier',
+    addNamed: 'Add “{{name}}”',
+    already: 'Already in the base',
   },
   mechanic: {
     title: 'Task for the mechanic',

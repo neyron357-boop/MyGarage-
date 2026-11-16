@@ -149,6 +149,14 @@ describe('plates and phones', () => {
     expect(normalizePhone('00971 50 123 4567')).toBe('+971501234567');
     expect(normalizePhone('+7 916 123-45-67')).toBe('+79161234567');
     expect(normalizePhone('12')).toBeNull();
+    // v0.24: as cards print it — the trunk 0 after +971 is not dialled; 600/800 and an extension are not guessed at.
+    expect(normalizePhone('+971 (0)50 123 4567')).toBe('+971501234567');
+    expect(normalizePhone('00971 (0)4 333 4455')).toBe('+97143334455');
+    expect(normalizePhone('04 333 4455')).toBe('+97143334455');
+    expect(normalizePhone('600 52 2222')).toBeNull();
+    expect(normalizePhone('800 647726')).toBeNull();
+    expect(normalizePhone('04 222 3333/4')).toBeNull();
+    expect(normalizePhone('04 222 3333 ext 12')).toBeNull();
     expect(formatPhone('+971501234567')).toBe('+971 50 123 4567');
     expect(phoneDigits('+971501234567')).toBe('971501234567');
   });

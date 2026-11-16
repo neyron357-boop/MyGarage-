@@ -269,6 +269,33 @@ async function launch() {
     await front('button.mechanic-chip[aria-pressed="true"]').waitFor({ state: 'detached' });
   });
 
+  await step("a supplier's chip (v0.24): a tap picks it; a hold opens its card and leaves the chip as it is", async () => {
+    await page.evaluate(async (orderId) => {
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { saveSupplier } = await import('/src/services/parts.ts');
+      await saveSupplier({ name: 'Finger Spares', phone: '050 111 2233' });
+      await addItem(orderId, { kind: 'part', block: 'A', titleEn: 'Finger test filter', unitPriceFils: 5000 });
+    }, ids.order);
+    const row = front('.list-row').filter({ hasText: 'FINGER TEST FILTER' }).first();
+    await row.waitFor();
+    await tap(row);
+    const sheet = page.getByRole('dialog').first();
+    const chips = sheet.locator('[aria-label="Поставщик"] button.chip');
+    const chip = chips.filter({ hasText: 'Finger Spares' });
+    const on = () => chips.and(page.locator('[data-active="true"]')).filter({ hasText: 'Finger Spares' }).count();
+    await chip.waitFor();
+    await page.waitForTimeout(600);
+    await tap(chip);
+    await chips.and(page.locator('[data-active="true"]')).filter({ hasText: 'Finger Spares' }).waitFor();
+    await hold(chip);
+    await page.locator('.contact-tiles').waitFor({ timeout: 5000 });
+    if ((await on()) !== 1) throw new Error('the hold changed the chip');
+    await page.getByRole('dialog').last().locator('.mantine-Modal-close').click();
+    await page.locator('.contact-tiles').waitFor({ state: 'detached' });
+    await page.waitForTimeout(400);
+    if ((await on()) !== 1) throw new Error('closing the card changed the chip');
+  });
+
   console.log('ERRORS:', errors.length ? errors.join(' | ') : 'none');
   await browser.close();
   process.exit(failed || errors.length ? 1 : 0);

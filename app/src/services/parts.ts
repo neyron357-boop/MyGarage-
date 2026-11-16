@@ -1,5 +1,6 @@
 import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
+import { normalizePhone } from '../domain/phone';
 import type { OrderItem, Outsource, PayMethod, ProcurementStatus, Supplier, SupplierReturn } from '../domain/types';
 import { readFirstSheet } from '../domain/moneySheet';
 import { parseCsv, sameSupplier, suppliersFromRows, type SupplierRow } from '../domain/supplierSheet';
@@ -9,8 +10,10 @@ import { addExpense } from './money';
 import { logEvent } from './orders';
 import { importSupplierBook } from './supplierBook';
 
-export async function saveSupplier(input: Partial<Supplier> & { name: string }): Promise<Supplier> {
-  if (!input.name.trim()) throw new AppError('err.nameRequired');
+export async function saveSupplier(given: Partial<Supplier> & { name: string }): Promise<Supplier> {
+  if (!given.name.trim()) throw new AppError('err.nameRequired');
+  // The number as the app keeps numbers (E.164): typed «050 123 4567», its WhatsApp opens (v0.24).
+  const input = 'phone' in given ? { ...given, phone: given.phone?.trim() ? normalizePhone(given.phone) ?? given.phone.trim() : undefined } : given;
   if (input.id) {
     await db.suppliers.update(input.id, input);
     return (await db.suppliers.get(input.id))!;

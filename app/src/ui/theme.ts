@@ -214,6 +214,8 @@ export const theme = createTheme({
       defaultProps: {
         radius: 'xl',
         centered: true,
+        // Escape closes only the sheet on top (ui/escapeTop.ts), not every sheet under it as well.
+        closeOnEscape: false,
         overlayProps: { backgroundOpacity: 0.4, blur: 0 },
         transitionProps: { transition: POP_OUT, duration: 200, timingFunction: EASE_IOS },
       },

@@ -9,7 +9,8 @@ import { sumAmounts } from '../domain/vat';
 import { tFor } from '../i18n';
 
 export function whatsappUrl(phone: string, text: string): string {
-  return `https://wa.me/${phoneDigits(phone)}?text=${encodeURIComponent(text)}`;
+  // A number kept as typed (a supplier added before v0.24: «050 123 4567») opens the same chat as its E.164.
+  return `https://wa.me/${phoneDigits(normalizePhone(phone) ?? phone)}?text=${encodeURIComponent(text)}`;
 }
 
 export function telegramUrl(text: string): string {

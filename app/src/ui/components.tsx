@@ -960,10 +960,10 @@ export function PageSkeleton({ variant = 'list' }: { variant?: 'list' | 'detail'
  * The action tiles of an iPhone contact card: WhatsApp, Telegram and a call, an icon over a word, in
  * equal tiles under the name. Only what the customer can be reached by (no `tel:` without a number).
  */
-export function ContactTiles({ phone, whatsapp, telegram }: { phone: string; whatsapp?: string; telegram?: string }) {
+export function ContactTiles({ phone, whatsapp, telegram, whatsappHref }: { phone: string; whatsapp?: string; telegram?: string; /** A chat link of its own (a supplier's from the workbook). */ whatsappHref?: string }) {
   const { t } = useTranslation();
   const tiles: { href: string; icon: Icon; label: string; color: string; external: boolean }[] = [];
-  if (whatsapp || phone) tiles.push({ href: whatsappUrl(whatsapp || phone, ''), icon: IconBrandWhatsapp, label: 'WhatsApp', color: 'green', external: true });
+  if (whatsappHref || whatsapp || phone) tiles.push({ href: whatsappHref ?? whatsappUrl(whatsapp || phone, ''), icon: IconBrandWhatsapp, label: 'WhatsApp', color: 'green', external: true });
   if (telegram || phone) tiles.push({ href: telegramChatUrl(phone, telegram), icon: IconBrandTelegram, label: 'Telegram', color: 'cobalt', external: true });
   if (phone) tiles.push({ href: `tel:${phone}`, icon: IconPhone, label: t('customer.call'), color: 'green', external: false });
   if (!tiles.length) return null;

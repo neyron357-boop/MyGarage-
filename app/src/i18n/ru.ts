@@ -1529,6 +1529,9 @@ export const ru = {
     importedBook: 'Добавлено: {{added}}, обновлено: {{updated}}',
     book: 'База поставщиков',
     notFound: 'Никого не нашли',
+    addNew: 'Новый поставщик',
+    addNamed: 'Добавить «{{name}}»',
+    already: 'Уже в базе',
   },
   mechanic: {
     title: 'Задание механику',

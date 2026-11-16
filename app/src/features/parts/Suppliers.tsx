@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Group, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
+import { ActionIcon, Button, Group, Loader, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
 import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPlus, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
@@ -7,53 +7,128 @@ import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
 import { CAR_MAKES, canonicalMake, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
+import { alreadyInBase, cardName, phonesInText, supplierMatches } from '../../domain/suppliers';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
 import { whatsappUrl } from '../../services/messages';
 import { saveSupplier, setSupplierCard } from '../../services/parts';
-import { EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
+import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction } from '../../ui/hooks';
+import { SheetFor } from '../../ui/lazy';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SupplierBookActions } from './SupplierBookActions';
 import { Autocomplete } from '@mantine/core';
 
-/** A supplier's card as an iOS form: who, phone, makes, new or used, what they sell, contractor, card photos, map. */
-export function SupplierSheet({ supplier, onClose }: { supplier: Partial<Supplier> | null; onClose: () => void }) {
+/**
+ * A supplier's card as an iOS form: who, phone, new or used, contractor, the business card, makes, what they sell, map,
+ * notes. Adding one (v0.24): the card photographed reads its number (and its name) by itself — several numbers are
+ * offered as chips; one already in the base (the same number, the same name) is offered instead of a second one;
+ * the number is kept as E.164. An existing one has its WhatsApp, Telegram and call on top.
+ */
+export function SupplierSheet({
+  supplier,
+  onClose,
+  opened = true,
+  onSaved,
+  onExisting,
+}: {
+  supplier: Partial<Supplier> | null;
+  onClose: () => void;
+  opened?: boolean;
+  /** Saved: the supplier as it is now (a new one picked by the sheet that opened this one). */
+  onSaved?: (s: Supplier) => void;
+  /** The one already in the base tapped instead (else it opens here). */
+  onExisting?: (s: Supplier) => void;
+}) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [v, setV] = useState<Partial<Supplier>>({});
   const [make, setMake] = useState('');
   const [kept, setKept] = useState<string[]>([]);
   const [fresh, setFresh] = useState<{ id: string; file: File; src: string }[]>([]);
+  const [reading, setReading] = useState(false);
+  const [found, setFound] = useState<string[]>([]);
+  const all = useLiveQuery(() => db.suppliers.toArray(), []);
   useEffect(() => {
-    setV(supplier ?? {});
+    // Its number as it is read out: «+971 50 765 4321» (kept as E.164).
+    setV(supplier?.phone ? { ...supplier, phone: formatPhone(normalizePhone(supplier.phone) ?? supplier.phone) } : supplier ?? {});
     setMake('');
     setKept(supplier?.cardMediaIds ?? []);
     setFresh([]);
+    setFound([]);
   }, [supplier]);
   if (!supplier) return null;
   const makes = v.makes ?? [];
   const toggleMake = (m: string) => setV({ ...v, makes: makes.includes(m) ? makes.filter((x) => x !== m) : [...makes, m] });
   const chips = [...new Set([...makes, ...POPULAR_MAKES])];
+  // The one already in the base this new one would be (its number, its name).
+  const twin = !v.id && all ? alreadyInBase(all, v) : undefined;
+  const openTwin = (s: Supplier) => {
+    if (onExisting) return onExisting(s);
+    setV(s.phone ? { ...s, phone: formatPhone(normalizePhone(s.phone) ?? s.phone) } : s);
+    setKept(s.cardMediaIds ?? []);
+    setFound([]);
+  };
+  /** The card photographed: its number and name, where they are not typed yet (several numbers — chips to pick). */
+  const readCard = async (file: File) => {
+    if (v.phone?.trim() && v.name?.trim()) return;
+    setReading(true);
+    try {
+      const { readCardLines } = await import('../../services/vinReader');
+      const lines = await readCardLines(file);
+      const phones = phonesInText(lines.map((l) => l.text).join('\n'));
+      const name = cardName(lines);
+      setV((cur) => ({ ...cur, phone: cur.phone?.trim() || !phones[0] ? cur.phone : formatPhone(phones[0]), name: cur.name?.trim() || !name ? cur.name : name }));
+      setFound(phones.length > 1 ? phones : []);
+      if (phones.length || name) haptic('success');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setReading(false);
+    }
+  };
   const save = () =>
     run(async () => {
       const phone = v.phone?.trim() ? normalizePhone(v.phone) ?? v.phone.trim() : undefined;
       const s = await saveSupplier({ ...v, name: v.name ?? '', phone, makes: makes.length ? makes : undefined, parts: v.parts?.trim() || undefined, locationUrl: v.locationUrl?.trim() || undefined, notes: v.notes?.trim() || undefined });
-      if (fresh.length || kept.length !== (supplier.cardMediaIds ?? []).length) await setSupplierCard(s.id, kept, fresh.map((f) => f.file));
+      if (fresh.length || kept.length !== (v.cardMediaIds ?? []).length) await setSupplierCard(s.id, kept, fresh.map((f) => f.file));
       haptic('light');
+      setV((cur) => ({ ...cur, id: s.id }));
+      onSaved?.(s);
       onClose();
     }, 'common.saved');
+  const typed = v.phone?.trim() ? normalizePhone(v.phone) : null;
+  const chat = v.id ? supplierChatLink(v) : undefined;
   return (
-    <Modal opened onClose={onClose} title={supplier.id ? t('parts.editSupplier') : t('parts.addSupplier')} classNames={{ content: 'sheet-grouped' }}>
+    <Modal opened={opened} onClose={onClose} title={v.id ? t('parts.editSupplier') : t('parts.addSupplier')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
+        {v.id && (v.phone || chat) && <ContactTiles phone={v.phone ? typed ?? v.phone : ''} whatsappHref={chat} />}
         <div className="ios-group">
           <div className="ios-row left line-name">
-            <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" data-autofocus={!supplier.id || undefined} />
+            <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" data-autofocus={(!v.id && !v.phone) || undefined} />
           </div>
           <FormRow label={t('customer.phone')}>
-            <TextInput aria-label={t('customer.phone')} type="tel" placeholder="05X XXX XXXX" value={v.phone ?? ''} onChange={(e) => setV({ ...v, phone: e.currentTarget.value })} />
+            <TextInput
+              aria-label={t('customer.phone')}
+              type="tel"
+              placeholder="05X XXX XXXX"
+              value={v.phone ?? ''}
+              onChange={(e) => setV({ ...v, phone: e.currentTarget.value })}
+              rightSection={reading ? <Loader size={16} /> : undefined}
+            />
           </FormRow>
+          {found.length > 1 && (
+            <div className="ios-row">
+              <div className="chip-row wrap" aria-label={t('suppliers.card')} data-card-phones>
+                {found.map((p) => (
+                  <button key={p} type="button" className="chip" data-active={typed === p} onClick={() => setV({ ...v, phone: formatPhone(p) })}>
+                    {formatPhone(p)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="ios-row">
             <SegmentedControl
               fullWidth
@@ -67,6 +142,37 @@ export function SupplierSheet({ supplier, onClose }: { supplier: Partial<Supplie
           <FormRow label={t('suppliers.contractor')}>
             <Switch aria-label={t('suppliers.contractor')} checked={!!v.service} onChange={(e) => setV({ ...v, service: e.currentTarget.checked || undefined })} />
           </FormRow>
+        </div>
+
+        {twin && (
+          <button type="button" className="suggest" data-twin={twin.id} onClick={() => openTwin(twin)}>
+            <IconTruck size={20} stroke={1.8} aria-hidden />
+            <span style={{ minWidth: 0 }}>
+              <Text span fw={600} c="cobalt.6">
+                {t('suppliers.already')}
+              </Text>
+              <Text span>{` · ${twin.name}`}</Text>
+              {twin.phone && (
+                <Text span c="dimmed">
+                  {` · ${formatPhone(normalizePhone(twin.phone) ?? twin.phone)}`}
+                </Text>
+              )}
+            </span>
+          </button>
+        )}
+
+        <div>
+          <div className="group-title">{t('suppliers.card')}</div>
+          <PhotoStrip
+            name="card"
+            addLabel={t('suppliers.cardAdd')}
+            photos={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
+            onAdd={(files) => {
+              setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))]);
+              if (files[0]) void readCard(files[0]);
+            }}
+            onRemove={(p) => (p.src ? setFresh((f) => f.filter((x) => x.id !== p.id)) : setKept((k) => k.filter((x) => x !== p.id)))}
+          />
         </div>
 
         <div>
@@ -106,17 +212,6 @@ export function SupplierSheet({ supplier, onClose }: { supplier: Partial<Supplie
           </div>
         </div>
 
-        <div>
-          <div className="group-title">{t('suppliers.card')}</div>
-          <PhotoStrip
-            name="card"
-            addLabel={t('suppliers.cardAdd')}
-            photos={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
-            onAdd={(files) => setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))])}
-            onRemove={(p) => (p.src ? setFresh((f) => f.filter((x) => x.id !== p.id)) : setKept((k) => k.filter((x) => x !== p.id)))}
-          />
-        </div>
-
         <Button size="lg" loading={busy} disabled={!v.name?.trim()} onClick={save}>
           {t('common.save')}
         </Button>
@@ -137,11 +232,8 @@ export function SuppliersTab() {
   const [q, setQ] = useState(params.get('q') ?? '');
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
   if (!all) return null;
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = all.filter((s) => {
-    const hay = `${s.name} ${s.makes?.join(' ') ?? ''} ${s.parts ?? ''} ${s.address ?? ''} ${s.notes ?? ''} ${s.phone ?? ''} ${s.service ? t('suppliers.contractor') : ''}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
+  // Found by its name, makes, what it sells — or its number as said here (050…).
+  const list = all.filter((s) => supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
   return (
     <Stack gap="md">
       <Group gap={8} wrap="nowrap">
@@ -189,7 +281,7 @@ export function SuppliersTab() {
           {t('suppliers.notFound')}
         </Text>
       )}
-      <SupplierSheet supplier={edit} onClose={() => setEdit(null)} />
+      <SheetFor value={edit}>{(s, o) => <SupplierSheet opened={o} supplier={s} onClose={() => setEdit(null)} onExisting={setEdit} />}</SheetFor>
     </Stack>
   );
 }

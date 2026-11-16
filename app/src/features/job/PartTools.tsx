@@ -1,19 +1,21 @@
 import { ActionIcon, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { IconMinus, IconPlus, IconSearch, IconSend } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { canonicalMake } from '../../domain/carCatalog';
-import { formatPhone } from '../../domain/phone';
+import { formatPhone, normalizePhone } from '../../domain/phone';
+import { looksLikePhone, supplierMatches } from '../../domain/suppliers';
 import type { Employee, OrderItem, Supplier, Vehicle } from '../../domain/types';
 import { mediaBlob } from '../../services/media';
 import { partRequestText, whatsappUrl } from '../../services/messages';
-import { saveSupplier } from '../../services/parts';
 import { copyText } from '../../ui/clipboard';
 import { List, ListRow } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { useAction } from '../../ui/hooks';
+import { SheetFor } from '../../ui/lazy';
+import { useLongPress } from '../../ui/longPress';
+import { SupplierSheet } from '../parts/Suppliers';
 
 /** Suppliers for a car: those working with its make first, then the rest; contractors first when asked for. */
 export function useSuppliers(make?: string, service?: boolean): Supplier[] {
@@ -28,13 +30,27 @@ export function useSuppliers(make?: string, service?: boolean): Supplier[] {
 const CHIPS = 6;
 
 /**
- * Who sells it (or does it): chips of the suppliers that fit the car first, the picked one always in
- * sight; "All" opens the whole list with a search and a quick new one (name and phone).
+ * Who sells it (or does it): chips of the suppliers that fit the car first, the picked one always in sight; a hold on
+ * one (on a PC — a right click) opens its card — its number, WhatsApp, a name put right. "All" opens the whole list:
+ * a search (a number too, as said here: 050…) and «＋ Новый» on top of it — the supplier's card, with the car's make
+ * already on (v0.24).
  */
 export function SupplierChips({ value, onChange, make, service, label }: { value?: string; onChange: (id: string | undefined) => void; make?: string; service?: boolean; label?: string }) {
   const { t } = useTranslation();
   const list = useSuppliers(make, service);
   const [picker, setPicker] = useState(false);
+  const [card, setCard] = useState<Supplier | null>(null);
+  // The one picked is in sight in the row (a new one comes first, the row may be scrolled to its end) — again when the
+  // list has it (a new one is picked a moment before the list shows it).
+  const row = useRef<HTMLDivElement>(null);
+  const inList = !!value && list.some((s) => s.id === value);
+  useEffect(() => {
+    const on = row.current?.querySelector<HTMLElement>('[data-active="true"]');
+    const r = row.current;
+    if (!on || !r) return;
+    const dx = on.getBoundingClientRect().left - r.getBoundingClientRect().left;
+    if (dx < 0 || dx + on.offsetWidth > r.clientWidth) r.scrollTo({ left: Math.max(0, r.scrollLeft + dx - 16), behavior: 'smooth' });
+  }, [value, inList]);
   // Work done outside, a service: the chips are those who do such work (a wash, a paint shop), not the parts
   // sellers — anyone is still in "All"; none yet — "+" adds one.
   const shown = (service ? list.filter((s) => !!s.service) : list).slice(0, CHIPS);
@@ -42,82 +58,90 @@ export function SupplierChips({ value, onChange, make, service, label }: { value
   if (picked && !shown.includes(picked)) shown.unshift(picked);
   return (
     <>
-      <div className="chip-row" aria-label={label ?? t('job.supplier')}>
+      <div className="chip-row" ref={row} aria-label={label ?? t('job.supplier')}>
         {shown.map((s) => (
-          <button key={s.id} type="button" className="chip" data-active={value === s.id} onClick={() => onChange(value === s.id ? undefined : s.id)}>
-            {s.name}
-          </button>
+          <SupplierChip key={s.id} s={s} on={value === s.id} onTap={() => onChange(value === s.id ? undefined : s.id)} onHold={() => setCard(s)} />
         ))}
         <button type="button" className="chip" onClick={() => setPicker(true)} aria-label={t('suppliers.all')}>
           {list.length > shown.length ? t('suppliers.allN', { n: list.length }) : <IconPlus size={16} stroke={2.2} style={{ verticalAlign: -3 }} />}
         </button>
       </div>
-      <SupplierPicker opened={picker} onClose={() => setPicker(false)} list={list} service={service} onPick={(id) => (onChange(id), setPicker(false))} />
+      <SupplierPicker opened={picker} onClose={() => setPicker(false)} list={list} service={service} make={make} onPick={(id) => (onChange(id), setPicker(false))} />
+      <SheetFor value={card}>{(s, o) => <SupplierSheet opened={o} supplier={s} onClose={() => setCard(null)} />}</SheetFor>
     </>
   );
 }
 
-function SupplierPicker({ opened, onClose, list, onPick, service }: { opened: boolean; onClose: () => void; list: Supplier[]; onPick: (id: string) => void; service?: boolean }) {
+function SupplierChip({ s, on, onTap, onHold }: { s: Supplier; on: boolean; onTap: () => void; onHold: () => void }) {
+  const press = useLongPress(onHold);
+  return (
+    <button type="button" className="chip" data-active={on} data-supplier={s.id} {...press.handlers} onClick={() => !press.consumeClick() && onTap()}>
+      {s.name}
+    </button>
+  );
+}
+
+function SupplierPicker({ opened, onClose, list, onPick, service, make }: { opened: boolean; onClose: () => void; list: Supplier[]; onPick: (id: string) => void; service?: boolean; make?: string }) {
   const { t } = useTranslation();
-  const { run, busy } = useAction();
   const [q, setQ] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [adding, setAdding] = useState<Partial<Supplier> | null>(null);
   useEffect(() => {
-    if (opened) {
-      setQ('');
-      setName('');
-      setPhone('');
-    }
+    if (opened) setQ('');
   }, [opened]);
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const found = list.filter((s) => {
-    const hay = `${s.name} ${s.makes?.join(' ') ?? ''} ${s.parts ?? ''} ${s.address ?? ''} ${s.phone ?? ''}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
+  const typed = q.trim();
+  const found = typed ? list.filter((s) => supplierMatches(s, typed, s.service ? t('suppliers.contractor') : '')) : list;
+  // Not in the base by that name: added as it is typed (a number — as its phone); the car's make is on already.
+  const named = found.some((s) => s.name.trim().toLowerCase() === typed.toLowerCase());
+  const add = () =>
+    setAdding({
+      ...(looksLikePhone(typed) ? { phone: typed } : typed ? { name: typed } : {}),
+      makes: make && !service ? [canonicalMake(make)] : undefined,
+      service: service || undefined,
+    });
   return (
     <Modal opened={opened} onClose={onClose} title={service ? t('suppliers.pickContractor') : t('suppliers.pick')}>
       <Stack gap="md">
         <TextInput aria-label={t('suppliers.search')} placeholder={t('suppliers.search')} leftSection={<IconSearch size={18} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} />
-        {found.length > 0 && (
-          <List>
-            {found.slice(0, 40).map((s) => (
-              <ListRow
-                key={s.id}
-                title={s.name}
-                subtitle={[s.makes?.join(', '), s.parts, s.phone && formatPhone(s.phone)].filter(Boolean).join(' · ') || undefined}
-                onClick={() => onPick(s.id)}
-              />
-            ))}
-          </List>
-        )}
-        <div>
-          <div className="group-title">{t('suppliers.new')}</div>
-          <div className="ios-group">
-            <div className="ios-row left">
-              <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={name || (found.length ? '' : q)} onChange={(e) => setName(e.currentTarget.value)} w="100%" />
-            </div>
-            <div className="ios-row left">
-              <TextInput aria-label={t('customer.phone')} placeholder={t('customer.phone')} type="tel" value={phone} onChange={(e) => setPhone(e.currentTarget.value)} w="100%" />
-            </div>
-          </div>
-          <Button
-            mt="sm"
-            fullWidth
-            variant="light"
-            loading={busy}
-            disabled={!(name || (found.length ? '' : q)).trim()}
-            onClick={() =>
-              run(async () => {
-                const s = await saveSupplier({ name: name || q, phone: phone.trim() || undefined, service: service || undefined });
-                onPick(s.id);
-              })
-            }
-          >
-            {t('suppliers.add')}
-          </Button>
-        </div>
+        <List>
+          {!named && (
+            <ListRow
+              onClick={add}
+              left={
+                <span className="row-icon" style={{ background: 'var(--mantine-color-cobalt-6)' }} aria-hidden>
+                  <IconPlus size={18} stroke={2.2} />
+                </span>
+              }
+              title={
+                <Text span inherit fw={600} c="cobalt.6">
+                  {typed ? t('suppliers.addNamed', { name: typed }) : t('suppliers.addNew')}
+                </Text>
+              }
+            />
+          )}
+          {found.slice(0, 40).map((s) => (
+            <ListRow
+              key={s.id}
+              title={s.name}
+              subtitle={[s.makes?.join(', '), s.parts, s.phone && formatPhone(normalizePhone(s.phone) ?? s.phone)].filter(Boolean).join(' · ') || undefined}
+              onClick={() => onPick(s.id)}
+            />
+          ))}
+        </List>
       </Stack>
+      <SheetFor value={adding}>
+        {(s, o) => (
+          <SupplierSheet
+            opened={o}
+            supplier={s}
+            onClose={() => setAdding(null)}
+            onSaved={(x) => onPick(x.id)}
+            onExisting={(x) => {
+              setAdding(null);
+              onPick(x.id);
+            }}
+          />
+        )}
+      </SheetFor>
     </Modal>
   );
 }
