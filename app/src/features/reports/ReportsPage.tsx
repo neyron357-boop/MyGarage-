@@ -113,7 +113,7 @@ export function ReportsPage() {
       db.incomes.toArray(),
     ]);
     const expenses = allExpenses.filter((e) => !e.voidedAt);
-    return { report: computeReport({ from: f, to: tt, orders, invoices, items, expenses, payments, closings, incomes }), invoices, payments, expenses, cats, orders };
+    return { report: computeReport({ from: f, to: tt, orders, invoices, items, expenses, payments, closings, incomes, partsCategoryId: cats.find((c) => c.code === 'parts')?.id }), invoices, payments, expenses, cats, orders };
   }, [f, tt]);
   if (!data) return <PageSkeleton />;
   const r = data.report;

@@ -1,10 +1,12 @@
 import { Button, Menu } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconCamera, IconNote, IconPlus, type Icon } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { liveCameraAvailable } from '../../ui/camera';
 import { haptic } from '../../ui/haptics';
+import { LiveCamera } from '../../ui/LiveCamera';
 import { SheetFor } from '../../ui/lazy';
 import { EntrySheet, type EntryPreset } from '../money/MoneyEntry';
 import { holdCarShot } from '../orders/carShot';
@@ -13,10 +15,11 @@ import { holdCarShot } from '../orders/carShot';
  * Quick actions of «＋» (v0.28): a tap is a new job, as always; a press held, or a swipe up from it, brings the actions
  * up over it — the finger slides onto one and lets go there, and it runs (one movement, as the iPhone's quick actions);
  * held and let go in place, they stay for a tap. On a PC — a right click on "New job".
- *   - «Фото номера»: the camera; the photo goes to "New job", which reads the plate off it (services/plateReader.ts);
+ *   - «Фото номера»: the camera inside the app (ui/LiveCamera.tsx, v0.31 — the phone's own opens only for a tap, not
+ *     where a slide lets go); the photo goes to "New job", which reads the plate off it (services/plateReader.ts);
  *   - «Приход», «Расход»: the money sheet;
  *   - «Заметка»: the workshop's notes.
- * The camera opens right in the finger's lift (the iPhone opens a picker only in a touch — ui/photoPick.tsx).
+ * The actions run right in the finger's lift (touchend).
  */
 
 export type QuickKey = 'photo' | 'in' | 'out' | 'note';
@@ -29,31 +32,38 @@ export const QUICK: { key: QuickKey; icon: Icon; color: string }[] = [
   { key: 'note', icon: IconNote, color: 'yellow' },
 ];
 
-/** The actions and what they need on the page: the camera's picker and the money sheet. */
-export function useQuickActions() {
+/**
+ * The actions and what they need on the page: the cameras, the money sheet. `live` — the phone's «＋»: «Фото номера»
+ * is the camera inside the app (v0.31: it opens where a finger lets go after a slide, which the phone's own camera
+ * does not — only for a tap); without one (plain http) and on a PC — the phone's camera / the file picker.
+ */
+export function useQuickActions(live = false) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const camera = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
+  const [cam, setCam] = useState(false);
+  /** The car's photo into "New job". */
+  const shot = (file: File) => {
+    setCam(false);
+    navigate(`/orders/new?photo=${holdCarShot(file)}`);
+  };
   const run = (k: QuickKey) => {
-    if (k === 'photo') camera.current?.click();
-    else if (k === 'in' || k === 'out') setSheet({ kind: k });
+    if (k === 'photo') {
+      if (live && liveCameraAvailable()) setCam(true);
+      else camera.current?.click();
+    } else if (k === 'in' || k === 'out') setSheet({ kind: k });
     else navigate('/notes');
+  };
+  const picked = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (file) shot(file);
   };
   const nodes = (
     <>
-      <input
-        ref={camera}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        data-quick-camera
-        onChange={(e) => {
-          const file = e.currentTarget.files?.[0];
-          e.currentTarget.value = '';
-          if (file) navigate(`/orders/new?photo=${holdCarShot(file)}`);
-        }}
-      />
+      <input ref={camera} type="file" accept="image/*" capture="environment" hidden data-quick-camera onChange={picked} />
+      {cam && <LiveCamera label={t('quick.photo')} onShot={shot} onClose={() => setCam(false)} />}
       <SheetFor value={sheet}>{(s, o) => <EntrySheet opened={o} onClose={() => setSheet(null)} preset={s} />}</SheetFor>
     </>
   );
@@ -85,7 +95,7 @@ interface Press {
 export function QuickPlus() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const quick = useQuickActions();
+  const quick = useQuickActions(true);
   const [open, setOpen] = useState<null | 'drag' | 'sticky'>(null);
   const [hover, setHover] = useState<QuickKey | null>(null);
   const [anchor, setAnchor] = useState<{ right: number; bottom: number }>({ right: 16, bottom: 100 });

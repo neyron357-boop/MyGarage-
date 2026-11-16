@@ -513,6 +513,8 @@ export function JobPage() {
   // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
   const obd = useObdImport(id ?? '');
   const expenses = useScreenLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
+  // «Запчасти» in the money book: the job's expenses there bought its parts — counted once with them (v0.31).
+  const partsCat = useScreenLiveQuery(async () => (await db.expenseCategories.where('code').equals('parts').first())?.id ?? '', []);
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
@@ -776,7 +778,7 @@ export function JobPage() {
     />
   ) : null;
   // What the job earns (with VAT: the total less parts as bought, work outside, expenses) — once some cost is known.
-  const profit = jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: expenses ?? [] });
+  const profit = jobProfit({ order: b.order, items: b.items, invoices: b.invoices, expenses: expenses ?? [], partsCategoryId: partsCat || undefined });
   const profitRow = profit.known ? (
     <ListRow
       title={<Text span c="dimmed" inherit>{t('job.profit')}</Text>}
@@ -1216,7 +1218,7 @@ export function JobPage() {
         )}
       </SheetFor>
       <LazySheet opened={ownerOpen}>
-        {(o) => <OwnerCheckSheet b={b} expenses={expenses ?? []} docLang={docLang} opened={o} onClose={() => setOwnerOpen(false)} />}
+        {(o) => <OwnerCheckSheet b={b} expenses={expenses ?? []} partsCategoryId={partsCat || undefined} docLang={docLang} opened={o} onClose={() => setOwnerOpen(false)} />}
       </LazySheet>
       <LazySheet opened={complaintOpen}>
         {(o) => (

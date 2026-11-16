@@ -4,8 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
-import { itemTitle } from '../../domain/items';
-import { roundFils } from '../../domain/money';
+import { itemCostPaid, itemTitle } from '../../domain/items';
 import type { OrderItem, ProcurementStatus, SupplierReturn } from '../../domain/types';
 import { syncStage } from '../../services/flow';
 import { createReturn, setProcurement } from '../../services/parts';
@@ -57,7 +56,7 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
     setRet(false);
     setRetReason('');
     setRetType('money');
-    setRetAmount(item.costPriceFils !== undefined ? roundFils(item.costPriceFils * item.qty) + (item.purchaseVatFils ?? 0) : undefined);
+    setRetAmount(item.costPriceFils !== undefined ? itemCostPaid(item) : undefined);
   }, [item]);
   if (!item || !live) return null;
   const save = () =>
@@ -107,9 +106,9 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
           )}
         </div>
         {cost !== undefined && cost > 0 && vat === undefined && (
-          // The seller's VAT from the cost, one tap (5 % of the purchase).
-          <Button variant="subtle" size="compact-md" onClick={() => setVat(roundFils(roundFils(cost * item.qty) * 0.05))} style={{ alignSelf: 'flex-start' }}>
-            {t('parts.vat5')}
+          // Left empty, the seller's VAT is counted at the line's rate (v0.31); a part bought without it — one tap.
+          <Button variant="subtle" size="compact-md" onClick={() => setVat(0)} style={{ alignSelf: 'flex-start' }}>
+            {t('parts.boughtNoVat')}
           </Button>
         )}
         {status === 'received' && (

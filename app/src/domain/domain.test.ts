@@ -188,11 +188,16 @@ describe('dates (Dubai time)', () => {
 });
 
 describe('items and approvals', () => {
-  it('a line costs as paid: price × qty plus the seller’s VAT when entered, none assumed', () => {
+  it('a line costs as paid: price × qty plus the seller’s VAT — entered, else a part’s at its rate (v0.31)', () => {
     expect(itemCostPaid({ costPriceFils: 6000, qty: 2, purchaseVatFils: 600 })).toBe(12600);
     expect(itemCostPaid({ costPriceFils: 35000, qty: 1 })).toBe(35000);
     expect(itemCostPaid({ costPriceFils: 1233, qty: 4.5, purchaseVatFils: 277 })).toBe(5549 + 277);
     expect(itemCostPaid({ qty: 1 })).toBe(0);
+    // A part: typed without VAT, the seller's 5 % on top; bought without VAT — 0 entered.
+    expect(itemCostPaid({ kind: 'part', costPriceFils: 11000, qty: 6, vatRateBp: 500 })).toBe(69300);
+    expect(itemCostPaid({ kind: 'part', costPriceFils: 11000, qty: 6, vatRateBp: 500, purchaseVatFils: 0 })).toBe(66000);
+    // Work outside: what they charge, as typed.
+    expect(itemCostPaid({ kind: 'labor', costPriceFils: 30000, qty: 1, vatRateBp: 500 })).toBe(30000);
   });
 
   it('summarizes blocks A/B/C into fixed / max / recommended', () => {
@@ -598,6 +603,21 @@ describe('reports', () => {
     expect(r.expensesGross).toBe(10500);
     expect(r.expensesByCategory).toEqual([{ categoryId: 'rent', gross: 10500 }]);
     expect(r.grossProfit).toBe(31500 - 6300 - 10500);
+    // The job's parts bought as its «Запчасти» expense (v0.31): that expense is their cost — not counted twice.
+    const paid = computeReport({
+      from: '2026-11-01',
+      to: '2026-11-30',
+      orders: [order()],
+      invoices: [inv],
+      items: [item({ kind: 'part', approvalState: 'approved', costPriceFils: 6000 })],
+      expenses: [{ id: 'p', date: '2026-11-04', categoryId: 'parts', orderId: 'o1', amountFils: 5000, vatFils: 0, method: 'credit', createdAt: '' }],
+      payments: [],
+      closings: [],
+      partsCategoryId: 'parts',
+    });
+    expect(paid.expensesGross).toBe(5000);
+    expect(paid.partsCostGross).toBe(6300 - 5000);
+    expect(paid.grossProfit).toBe(31500 - 6300);
     expect(r.payments.card).toBe(31500);
     expect(r.cashDiffFils).toBe(-500);
     expect(r.averageTicketGross).toBe(31500);

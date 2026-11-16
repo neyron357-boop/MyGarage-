@@ -16,8 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate } from '../../domain/dates';
-import { itemTitle } from '../../domain/items';
-import { roundFils } from '../../domain/money';
+import { itemCostPaid, itemTitle } from '../../domain/items';
 import { formatPhone } from '../../domain/phone';
 import type { OrderItem } from '../../domain/types';
 import { syncStage } from '../../services/flow';
@@ -116,7 +115,7 @@ export function PartsPage() {
         }
         right={
           <Stack gap={4} align="flex-end" style={{ flexShrink: 0 }}>
-            {i.costPriceFils !== undefined && <Money fils={roundFils(i.costPriceFils * i.qty)} size="sm" />}
+            {i.costPriceFils !== undefined && <Money fils={itemCostPaid(i)} size="sm" />}
             <Button
               size="compact-xs"
               variant="subtle"
@@ -155,7 +154,7 @@ export function PartsPage() {
           {pickup.length === 0 && <EmptyState icon={IconTruck} title={t('parts.nothingPickup')} />}
           {[...groups.entries()].map(([sid, list]) => {
             const s = suppliers.find((x) => x.id === sid);
-            const money = list.reduce((sum, i) => sum + roundFils((i.costPriceFils ?? 0) * i.qty) + (i.purchaseVatFils ?? 0), 0);
+            const money = list.reduce((sum, i) => sum + itemCostPaid(i), 0);
             return (
               <Box key={sid} className="surface" p="md">
                 <Group justify="space-between" mb="sm" wrap="nowrap" align="flex-start">

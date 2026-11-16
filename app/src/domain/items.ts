@@ -1,5 +1,5 @@
 import { roundFils } from './money';
-import { fromGross, fromNet, priceFromEntered, type Amounts, type LinePrice } from './vat';
+import { fromGross, fromNet, priceFromEntered, vatOf, type Amounts, type LinePrice } from './vat';
 import type { DecisionKind, ItemDecision, Lang, OrderItem } from './types';
 
 /** A line's name in the documents' language — work and parts in capitals, as on the garage's invoices. */
@@ -38,11 +38,13 @@ export function itemAmounts(item: OrderItem): Amounts {
 }
 
 /**
- * What a line cost the garage, as paid: the purchase price × qty plus the seller's VAT when it was
- * entered. The seller's rate is not kept, so no VAT is assumed (used parts are often bought without it).
+ * What a line cost the garage, as paid, with VAT. A part's purchase price is typed without VAT (the customer's
+ * price is made from it), and the seller adds VAT: the one entered (0 — bought without it), else at the line's
+ * rate — the cost counts with VAT at once (v0.31, the user's decision). Work outside: what they charge, as typed.
  */
-export function itemCostPaid(item: Pick<OrderItem, 'costPriceFils' | 'purchaseVatFils' | 'qty'>): number {
-  return roundFils((item.costPriceFils ?? 0) * item.qty) + (item.purchaseVatFils ?? 0);
+export function itemCostPaid(item: Pick<OrderItem, 'costPriceFils' | 'purchaseVatFils' | 'qty'> & Partial<Pick<OrderItem, 'kind' | 'vatRateBp'>>): number {
+  const net = roundFils((item.costPriceFils ?? 0) * item.qty);
+  return net + (item.purchaseVatFils ?? (item.kind === 'part' ? vatOf(net, item.vatRateBp ?? 0) : 0));
 }
 
 /** Net line amount. */

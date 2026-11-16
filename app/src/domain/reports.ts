@@ -1,11 +1,13 @@
 import { dubaiDate, inRange } from './dates';
 import { itemCostPaid } from './items';
+import { partsPaid } from './profit';
 import type { CashClosing, Expense, Income, Invoice, Order, OrderItem, Payment } from './types';
 
 /*
  * The owner's report for a period. Every sum is with VAT (v0.22, the user's decision): money as it is
- * received and paid — invoice totals, parts as bought (cost × qty + the seller's VAT when entered),
- * expenses as on the receipt. VAT is not taken out or shown here; the accountant's CSV keeps it apart.
+ * received and paid — invoice totals, parts as bought (cost × qty + the seller's VAT — `itemCostPaid`),
+ * expenses as on the receipt. A job's parts bought as its expenses in «Запчасти» are those expenses: only what its
+ * lines cost beyond them is a cost of its own (v0.31 — the same purchase was counted twice). VAT is not taken out or shown here; the accountant's CSV keeps it apart.
  */
 
 export interface ReportInput {
@@ -19,6 +21,8 @@ export interface ReportInput {
   closings: CashClosing[];
   /** Money received without an invoice (items sold, small jobs). */
   incomes?: Income[];
+  /** The money book's «Запчасти» (`code: 'parts'`): a job's expenses there are what its parts were bought for. */
+  partsCategoryId?: string;
 }
 
 export interface Report {
@@ -30,7 +34,7 @@ export interface Report {
   laborGross: number;
   partsGross: number;
   otherGross: number;
-  /** Parts of the jobs invoiced in the period, as bought (`itemCostPaid`). */
+  /** Parts of the jobs invoiced in the period, as bought (`itemCostPaid`), beyond what their «Запчасти» expenses paid. */
   partsCostGross: number;
   /** Expenses dated in the period, as paid. */
   expensesGross: number;
@@ -88,10 +92,16 @@ export function computeReport(input: ReportInput): Report {
       .filter((i) => i.type !== 'credit_note' && i.status === 'issued' && inPeriod(i.issuedAt))
       .map((i) => i.orderId),
   );
+  const linesCost = new Map<string, number>();
   for (const it of input.items) {
     if (!activeOrders.has(it.orderId)) continue;
     if (it.kind !== 'part' || it.approvalState !== 'approved' || it.customerSupplied) continue;
-    r.partsCostGross += itemCostPaid(it);
+    linesCost.set(it.orderId, (linesCost.get(it.orderId) ?? 0) + itemCostPaid(it));
+  }
+  // The job's «Запчасти» expenses (whenever dated — they count in their own period) bought the same parts.
+  for (const [orderId, cost] of linesCost) {
+    const paid = partsPaid(input.expenses.filter((e) => e.orderId === orderId), input.partsCategoryId);
+    r.partsCostGross += Math.max(0, cost - paid);
   }
 
   const byCat = new Map<string, number>();

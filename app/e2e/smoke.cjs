@@ -1376,9 +1376,10 @@ async function launchBrowser() {
     await dlg.getByText(/^Оплачено/).waitFor();
     await shot('34e-outside-paid');
     await page.locator('.mantine-Modal-close').first().click();
-    // The profit (blurred until tapped), with VAT since v0.22: 934.50 (409.50 + 525.00) − 300 − 300.
+    // The profit (blurred until tapped), with VAT since v0.22: 934.50 (409.50 + 525.00) − 315 (the part, 300 with the
+    // seller's 5 % — v0.31) − 300.
     await page.locator('.list-row', { hasText: 'Прибыль' }).click();
-    await page.locator('.profit-amount[data-shown="true"]').getByText('334,50').waitFor();
+    await page.locator('.profit-amount[data-shown="true"]').getByText('319,50').waitFor();
     // Two mechanics on the job (v0.17.2): each chip on by itself; the task goes to both.
     const crewChips = front('.job-foot button.chip:not(.due-chip):not(.vin-chip)');
     const names = await crewChips.allTextContents();
@@ -2148,7 +2149,8 @@ async function launchBrowser() {
     await page.goBack();
     await page.waitForURL((u) => !/orders\/new/.test(u.href));
     await page.waitForTimeout(600);
-    // A swipe up onto «Фото номера»: the camera; a car with a Dubai plate, B 70415.
+    // A swipe up onto «Фото номера»: the camera inside the app (v0.31 — the phone's own opens only for a tap, not where a
+    // slide lets go); a car with a Dubai plate, B 70415, before it — the test's camera is a canvas.
     const photo = await page.evaluate(async () => {
       const c = document.createElement('canvas');
       c.width = 2016;
@@ -2185,6 +2187,28 @@ async function launchBrowser() {
       g.font = `bold ${big}px Arial`;
       g.fillText('B', -pw / 2 + pw * 0.3, ph * 0.04);
       g.fillText('70415', pw * 0.16, ph * 0.04);
+      // The camera films it (redrawn a little each time: a canvas gives frames as it changes).
+      const live = document.createElement('canvas');
+      live.width = c.width;
+      live.height = c.height;
+      const lg = live.getContext('2d');
+      let n = 0;
+      const paint = () => {
+        lg.drawImage(c, 0, 0);
+        lg.fillStyle = n++ % 2 ? '#5d5a55' : '#5e5a55';
+        lg.fillRect(0, live.height - 2, 2, 2);
+      };
+      paint();
+      const timer = setInterval(paint, 80);
+      const stream = live.captureStream(15);
+      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      const taken = [];
+      window.__e2eCamera = { taken, done: () => (clearInterval(timer), (navigator.mediaDevices.getUserMedia = real)) };
+      navigator.mediaDevices.getUserMedia = async () => {
+        const k = stream.clone();
+        taken.push(k);
+        return k;
+      };
       return c.toDataURL('image/jpeg', 0.85).split(',')[1];
     });
     await page.mouse.move(cx, cy);
@@ -2193,10 +2217,15 @@ async function launchBrowser() {
     await page.locator('.quick-menu').waitFor();
     const ph = await page.locator('[data-quick="photo"]').boundingBox();
     await page.mouse.move(ph.x + ph.width / 2, ph.y + ph.height / 2, { steps: 5 });
-    const chooser = page.waitForEvent('filechooser', { timeout: 5000 });
     await page.mouse.up();
-    await (await chooser).setFiles({ name: 'car.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(photo, 'base64') });
+    // Let go: the camera is up at once, live; one tap on the shutter — the photo goes on.
+    await page.locator('.cam[data-phase="live"]').waitFor({ timeout: 8000 });
+    await page.waitForTimeout(300);
+    await shot('40b-camera');
+    await page.getByRole('button', { name: 'Снять фото' }).click();
     await page.waitForURL(/orders\/new\?photo=/);
+    if (await page.locator('.cam').count()) throw new Error('the camera stayed up');
+    if (await page.evaluate(() => window.__e2eCamera.taken.some((t) => t.getTracks().some((x) => x.readyState === 'live')))) throw new Error('the camera was not let go');
     await page.locator('.car-shot').waitFor();
     await page.locator('.car-shot-badge[data-state="read"]').waitFor({ timeout: 90000 });
     await page.locator('.car-shot-box').waitFor();
@@ -2205,7 +2234,7 @@ async function launchBrowser() {
     if (!(await page.locator('[role="radio"][aria-checked="true"]').filter({ hasText: 'Дубай' }).count())) throw new Error('the emirate is not Dubai');
     // No keyboard over the photo: the number is not focused.
     if (await page.evaluate(() => document.activeElement?.tagName === 'INPUT')) throw new Error('a field took the focus over the photo');
-    await shot('40b-plate-read');
+    await shot('40c-plate-read');
     await page.getByRole('button', { name: 'Принять' }).click();
     await page.waitForURL(/#\/orders\/(?!new)/);
     const kept = await page.evaluate(async () => {
@@ -2215,6 +2244,29 @@ async function launchBrowser() {
       return { plate: `${v.plate.emirate} ${v.plate.code} ${v.plate.number}`, covers: (await db.media.where('ownerId').equals(o.vehicleId).toArray()).filter((m) => m.slot === 'cover').length };
     });
     if (kept.plate !== 'DXB B 70415' || kept.covers !== 1) throw new Error('the job: ' + JSON.stringify(kept));
+    // The camera: Back closes it, the board stays; «Фото из телефона» — a photo from the phone goes on the same way, and
+    // Back from "New job" is the board (the camera left no step of its own in the history).
+    await page.goto(BASE + '#/');
+    await page.waitForTimeout(500);
+    await page.mouse.click(cx, cy, { button: 'right' });
+    await page.locator('[data-quick="photo"]').click();
+    await page.locator('.cam[data-phase="live"]').waitFor({ timeout: 8000 });
+    await page.goBack();
+    await page.locator('.cam').waitFor({ state: 'detached' });
+    if (!/#\/$/.test(page.url())) throw new Error('Back from the camera went to ' + page.url());
+    await page.waitForTimeout(400);
+    await page.mouse.click(cx, cy, { button: 'right' });
+    await page.locator('[data-quick="photo"]').click();
+    await page.locator('.cam').waitFor();
+    const [fromPhone] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Фото из телефона' }).click()]);
+    await fromPhone.setFiles({ name: 'car.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(photo, 'base64') });
+    await page.waitForURL(/orders\/new\?photo=/);
+    await page.locator('.car-shot').waitFor();
+    await page.goBack();
+    await page.waitForURL((u) => /#\/$/.test(u.href));
+    await page.waitForTimeout(300);
+    if (await page.evaluate(() => !!history.state?.mgCamera)) throw new Error('the camera left its step in the history');
+    await page.evaluate(() => window.__e2eCamera.done());
     // A right click (a long press on Android): the actions stay for a tap.
     await page.goto(BASE + '#/');
     await page.waitForTimeout(500);

@@ -15,7 +15,7 @@ export interface CheckLine {
   unitSale: number;
   /** All of them for the customer (with VAT). */
   sale: number;
-  /** As bought or paid out (with the seller's VAT when entered); undefined — not entered yet. */
+  /** As bought or paid out, with VAT (`itemCostPaid`); undefined — not entered yet. */
   cost?: number;
   /** Bought from / done by. */
   supplier?: string;
@@ -34,12 +34,13 @@ export interface CheckData {
   customer: string;
   parts: CheckLine[];
   work: CheckLine[];
+  /** The job's other expenses (towing, consumables…) — what they cost, nothing sold. */
+  extra: CheckLine[];
   /** The discount given (positive), if any. */
   discount: number;
   revenue: number;
-  partsCost: number;
-  outside: number;
-  expenses: number;
+  /** Everything that went out for the job, with VAT, once (`jobProfit`). */
+  spent: number;
   profit: number;
   labels: {
     parts: string;
@@ -51,8 +52,6 @@ export interface CheckData {
     own: string;
     discount: string;
     toClient: string;
-    partsCost: string;
-    outside: string;
     expenses: string;
     spent: string;
     profit: string;
@@ -82,6 +81,22 @@ const C = {
 type Draw = (g: CanvasRenderingContext2D) => void;
 
 const font = (px: number, weight = 400) => `${weight} ${px}px ${FONT}`;
+
+/**
+ * A supplier's long name (wider than its room in the name's column) shorter by 30 % — the user's call (v0.31) — and
+ * never past the cost's column: whole words, then "…".
+ */
+function shortName(g: CanvasRenderingContext2D, text: string, room: number, max: number): string {
+  const full = g.measureText(text).width;
+  if (full <= room) return text;
+  const limit = Math.min(max, full * 0.7);
+  const words = text.split(/\s+/).filter(Boolean);
+  const fits = (s: string) => g.measureText(`${s}…`).width <= limit;
+  while (words.length > 1 && !fits(words.join(' '))) words.pop();
+  let cut = words.join(' ').replace(/[\s,.;:·–—-]+$/, '');
+  while (cut.length > 1 && !fits(cut)) cut = cut.slice(0, -1);
+  return `${cut}…`;
+}
 
 /** Words into lines no wider than `max` (a word too long for a line is cut where it must be). */
 function wrap(g: CanvasRenderingContext2D, text: string, max: number, lines = 3): string[] {
@@ -206,7 +221,7 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
   }
 
   /** A table: its title with the columns' names, then its lines. */
-  const table = (title: string, lines: CheckLine[], kind: 'part' | 'work') => {
+  const table = (title: string, lines: CheckLine[], kind: 'part' | 'work' | 'extra') => {
     if (!lines.length) return;
     const top = y;
     ops.push((g) => {
@@ -228,8 +243,11 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
       const sub: { text: string; color: string }[] = [];
       if (l.qty !== 1 && !l.own) sub.push({ text: `${l.qty} × ${money(l.unitSale)}`, color: C.dim });
       if (l.own) sub.push({ text: d.labels.own, color: C.dim });
-      else if (l.supplier) sub.push({ text: l.supplier, color: C.blue });
-      else if (kind === 'part') sub.push({ text: d.labels.noSupplier, color: C.orange });
+      else if (l.supplier) {
+        m.font = font(24, 500);
+        const before = sub.length ? m.measureText(`${sub[0].text} · `).width : 0;
+        sub.push({ text: shortName(m, l.supplier, NAME_W - before, COST_R - 40 - P - before), color: C.blue });
+      } else if (kind === 'part') sub.push({ text: d.labels.noSupplier, color: C.orange });
       const textH = names.length * 38 + (sub.length ? 34 : 0);
       const margin = !l.own && l.cost !== undefined ? l.sale - l.cost : undefined;
       const numsH = 38 + (margin !== undefined && kind === 'part' ? 32 : 0);
@@ -267,8 +285,8 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
           g.fillStyle = l.cost === undefined ? (kind === 'part' ? C.orange : C.dim) : C.ink;
           g.fillText(l.cost === undefined ? (kind === 'part' ? d.labels.noCost : '—') : money(l.cost), COST_R, rowTop + 32);
           g.font = font(28, 700);
-          g.fillStyle = C.ink;
-          g.fillText(money(l.sale), SALE_R, rowTop + 32);
+          g.fillStyle = kind === 'extra' ? C.dim : C.ink;
+          g.fillText(kind === 'extra' ? '—' : money(l.sale), SALE_R, rowTop + 32);
           if (margin !== undefined && kind === 'part') {
             g.font = font(23, 600);
             g.fillStyle = margin < 0 ? C.red : C.green;
@@ -285,17 +303,15 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
   };
   table(d.labels.parts, d.parts, 'part');
   table(d.labels.work, d.work, 'work');
+  table(d.labels.expenses, d.extra, 'extra');
 
   // The sum: what the customer pays, what goes out, what stays — the profit large.
   {
     const rows: { label: string; fils: number; sign?: '−' }[] = [];
     if (d.discount > 0) rows.push({ label: d.labels.discount, fils: d.discount, sign: '−' });
+    // What went out — one sum, with VAT (v0.31: not parts and expenses apart — they were the same money).
     rows.push({ label: d.labels.toClient, fils: d.revenue });
-    rows.push({ label: d.labels.partsCost, fils: d.partsCost, sign: '−' });
-    if (d.outside) rows.push({ label: d.labels.outside, fils: d.outside, sign: '−' });
-    if (d.expenses) rows.push({ label: d.labels.expenses, fils: d.expenses, sign: '−' });
-    const spent = d.partsCost + d.outside + d.expenses;
-    if (d.outside || d.expenses) rows.push({ label: d.labels.spent, fils: spent, sign: '−' });
+    rows.push({ label: d.labels.spent, fils: d.spent, sign: '−' });
     const top = y;
     const boxH = 30 + rows.length * 48 + 24 + 92 + 26;
     const good = d.profit >= 0;

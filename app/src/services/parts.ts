@@ -1,5 +1,6 @@
 import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
+import { itemCostPaid } from '../domain/items';
 import { normalizePhone } from '../domain/phone';
 import type { OrderItem, Outsource, PayMethod, ProcurementStatus, Supplier, SupplierReturn } from '../domain/types';
 import { readFirstSheet } from '../domain/moneySheet';
@@ -97,7 +98,7 @@ export async function setProcurement(itemId: string, u: ProcurementUpdate): Prom
   await db.transaction('rw', db.items, db.cashMovements, db.events, async () => {
     await db.items.update(itemId, patch);
     if (u.status === 'received' && u.paidCash) {
-      const cost = Math.round((u.costPriceFils ?? item.costPriceFils ?? 0) * item.qty) + (u.purchaseVatFils ?? item.purchaseVatFils ?? 0);
+      const cost = itemCostPaid({ ...item, costPriceFils: u.costPriceFils ?? item.costPriceFils, purchaseVatFils: u.purchaseVatFils ?? item.purchaseVatFils });
       if (cost > 0) {
         await db.cashMovements.add({
           id: uid(),

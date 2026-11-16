@@ -168,6 +168,7 @@ const TAPPABLE = [
   'button.jc-pin',
   'button.note-quote',
   '.viewer button',
+  '.cam button',
 ].join(',');
 /** Real check boxes and switches: they become switch controls and tick by themselves. */
 const CHECKABLE = '.mantine-Switch-input, .mantine-Checkbox-input, .mantine-Chip-input';

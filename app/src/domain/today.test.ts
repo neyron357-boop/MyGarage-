@@ -121,14 +121,32 @@ describe('profit of a job', () => {
       item({ kind: 'part', customerSupplied: true, costPriceFils: 9999 }),
     ];
     const p = jobProfit({ order: {}, items, invoices: [], expenses: [{ id: 'e1', amountFils: 15000 }, { id: 'e2', amountFils: 2100 }] });
-    expect(p).toEqual({ revenue: 73500, parts: 12000, outside: 15000, expenses: 2100, profit: 44400, known: true });
-    // The seller's VAT, when entered, is part of what the parts cost.
-    const withVat = items.map((i) => (i.kind === 'part' && !i.customerSupplied ? { ...i, purchaseVatFils: 600 } : i));
-    expect(jobProfit({ order: {}, items: withVat, invoices: [], expenses: [] })).toMatchObject({ parts: 12600, profit: 73500 - 12600 - 15000 });
+    // The part's cost is typed without VAT: it counts with the seller's 5 % at once (v0.31).
+    expect(p).toEqual({ revenue: 73500, parts: 12600, outside: 15000, expenses: 2100, spent: 29700, profit: 43800, known: true });
+    // Bought without VAT (0 entered): the cost as typed.
+    const noVat = items.map((i) => (i.kind === 'part' && !i.customerSupplied ? { ...i, purchaseVatFils: 0 } : i));
+    expect(jobProfit({ order: {}, items: noVat, invoices: [], expenses: [] })).toMatchObject({ parts: 12000, profit: 73500 - 12000 - 15000 });
     // With the invoice its total counts; what was let go comes off.
     const q = jobProfit({ order: { waived: { at: NOW, fils: 10500 } }, items, invoices: [inv(70000, 73500)], expenses: [] });
     expect(q.revenue).toBe(63000);
     expect(jobProfit({ order: {}, items: [item({ kind: 'labor' })], invoices: [], expenses: [] }).known).toBe(false);
+  });
+
+  it('parts bought as the job\'s «Запчасти» expenses are the same purchase — counted once, with VAT (v0.31)', () => {
+    // Job №296: oil 6 × 120 (cost 110 without VAT), labour 200; the oil paid 490 on credit + 200 from the owner.
+    const items = [item({ kind: 'labor', unitPriceFils: 20000 }), item({ kind: 'part', qty: 6, unitPriceFils: 12000, costPriceFils: 11000 })];
+    const expenses = [
+      { id: 'x1', amountFils: 49000, categoryId: 'parts' },
+      { id: 'x2', amountFils: 20000, categoryId: 'parts' },
+    ];
+    const p = jobProfit({ order: {}, items, invoices: [], expenses, partsCategoryId: 'parts' });
+    expect(p).toEqual({ revenue: 96600, parts: 69300, outside: 0, expenses: 0, spent: 69300, profit: 27300, known: true });
+    // Paid more than the lines say (or no cost typed): what was paid.
+    const typedLess = items.map((i) => (i.kind === 'part' ? { ...i, costPriceFils: undefined } : i));
+    expect(jobProfit({ order: {}, items: typedLess, invoices: [], expenses, partsCategoryId: 'parts' })).toMatchObject({ parts: 69000, spent: 69000, profit: 27600, known: true });
+    // Another expense of the job (a tow) is its own; a cancelled one is nothing.
+    const more = [...expenses, { id: 'x3', amountFils: 10000, categoryId: 'tow' }, { id: 'x4', amountFils: 5000, categoryId: 'parts', voidedAt: NOW }];
+    expect(jobProfit({ order: {}, items, invoices: [], expenses: more, partsCategoryId: 'parts' })).toMatchObject({ parts: 69300, expenses: 10000, spent: 79300 });
   });
 });
 
