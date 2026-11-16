@@ -4156,6 +4156,91 @@ html.kb .screen-bottom > .sticky-bar {
   cursor: default;
 }
 
+/* The plate read while the camera is aimed (v0.33): a ring where it is, a pill over the shutter — orange while the frames
+   do not agree yet, green with a tick when they do. */
+.plate-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.plate-scan-ring {
+  position: absolute;
+  border: 2.5px solid var(--mantine-color-orange-5);
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.12);
+  transition: left 160ms var(--ease-out), top 160ms var(--ease-out), width 160ms var(--ease-out), height 160ms var(--ease-out), border-color var(--dur-2) ease;
+}
+.plate-scan[data-state='stable'] .plate-scan-ring {
+  border-color: var(--mantine-color-green-5);
+}
+.plate-scan-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  box-shadow: inset 0 0 0 2px var(--mantine-color-orange-5);
+  cursor: pointer;
+  transition: box-shadow var(--dur-2) ease;
+}
+.plate-scan[data-state='looking'] .plate-scan-pill {
+  box-shadow: none;
+}
+.plate-scan[data-state='stable'] .plate-scan-pill {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-green-5);
+}
+.plate-scan-tick {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--mantine-color-green-6);
+  animation: mg-pop 320ms var(--ease-out) both;
+}
+.plate-scan-looking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+.plate-scan-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.plate-scan-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: plate-scan-dot 1.1s ease-in-out infinite;
+}
+.plate-scan-dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.plate-scan-dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes plate-scan-dot {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* ---------- Photo viewer ---------- */
 .viewer {
   position: fixed;

@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { liveCameraAvailable } from '../../ui/camera';
 import { haptic } from '../../ui/haptics';
 import { LiveCamera } from '../../ui/LiveCamera';
+import { PlateScan, type ScanTally } from './PlateScan';
 import { SheetFor } from '../../ui/lazy';
 import { EntrySheet, type EntryPreset } from '../money/MoneyEntry';
 import { holdCarShot } from '../orders/carShot';
@@ -43,10 +44,15 @@ export function useQuickActions(live = false) {
   const camera = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
   const [cam, setCam] = useState(false);
-  /** The car's photo into "New job". */
+  // What the camera read off its frames while it was aimed (v0.33): the plate goes with the photo when they agreed.
+  const seen = useRef<ScanTally | undefined>(undefined);
+  /** The car's photo into "New job" (with the plate the frames agreed on: it is in the job's form at once). */
   const shot = (file: File) => {
+    const t = seen.current;
+    seen.current = undefined;
     setCam(false);
-    navigate(`/orders/new?photo=${holdCarShot(file)}`);
+    const plate = t?.stable ? { emirate: t.emirate, code: t.code, number: t.number, sure: true, codeSure: t.codeFrames >= 2, box: t.box } : undefined;
+    navigate(`/orders/new?photo=${holdCarShot(file, plate)}`);
   };
   const run = (k: QuickKey) => {
     if (k === 'photo') {
@@ -63,7 +69,14 @@ export function useQuickActions(live = false) {
   const nodes = (
     <>
       <input ref={camera} type="file" accept="image/*" capture="environment" hidden data-quick-camera onChange={picked} />
-      {cam && <LiveCamera label={t('quick.photo')} onShot={shot} onClose={() => setCam(false)} />}
+      {cam && (
+        <LiveCamera
+          label={t('quick.photo')}
+          onShot={shot}
+          onClose={() => ((seen.current = undefined), setCam(false))}
+          overlay={(video, live, shoot) => <PlateScan video={video} live={live} onTally={(x) => (seen.current = x)} onTap={shoot} />}
+        />
+      )}
       <SheetFor value={sheet}>{(s, o) => <EntrySheet opened={o} onClose={() => setSheet(null)} preset={s} />}</SheetFor>
     </>
   );

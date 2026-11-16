@@ -970,6 +970,8 @@ export function createCarScene(
   canvas.addEventListener('pointerup', onUp);
   canvas.addEventListener('pointercancel', onUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
+  // A wheel over a point's pin brings the car closer too (the pin lies over the canvas; without this the sheet scrolled).
+  pinsHost.addEventListener('wheel', onWheel, { passive: false });
 
   const turnTo = (view: CarView, now = false) => {
     const to = VIEW_ANGLES[view];
@@ -1032,6 +1034,7 @@ export function createCarScene(
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
       canvas.removeEventListener('wheel', onWheel);
+      pinsHost.removeEventListener('wheel', onWheel);
       disposeCar();
       renderer.dispose();
       renderer.forceContextLoss();

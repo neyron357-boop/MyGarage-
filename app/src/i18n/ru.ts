@@ -1677,6 +1677,8 @@ export const ru = {
   },
   quick: {
     title: 'Быстрые действия',
+    plateSeen: 'Номер',
+    plateLooking: 'Ищу номер',
     photo: 'Фото номера',
     in: 'Приход',
     out: 'Расход',

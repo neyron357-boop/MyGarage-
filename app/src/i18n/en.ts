@@ -1679,6 +1679,8 @@ export const en: typeof ru = {
   },
   quick: {
     title: 'Quick actions',
+    plateSeen: 'Plate',
+    plateLooking: 'Looking for the plate',
     photo: 'Plate photo',
     in: 'Money in',
     out: 'Expense',

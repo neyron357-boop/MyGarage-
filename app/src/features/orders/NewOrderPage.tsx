@@ -16,7 +16,7 @@ import { checkIn } from '../../services/orders';
 import type { PlateFound } from '../../services/plateReader';
 import { haptic } from '../../ui/haptics';
 import { usePhotoPick } from '../../ui/photoPick';
-import { dropCarShot, heldCarShot } from './carShot';
+import { dropCarShot, heldCarShot, heldPlate } from './carShot';
 import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { CarThumb } from '../job/CarCover';
@@ -264,10 +264,11 @@ export function NewOrderPage() {
 
   // The car's photo (v0.28): brought by «＋» → «Фото номера», or taken here. The plate is read off it; what was typed into
   // the plate meanwhile is not overwritten.
-  const [shot, setShot] = useState<{ file: File; id?: string } | undefined>(() => {
+  const [shot, setShot] = useState<{ file: File; id?: string; plate?: PlateFound } | undefined>(() => {
     const id = params.get('photo');
     const file = heldCarShot(id);
-    return file && id ? { file, id } : undefined;
+    // The plate the camera read off its frames while it was aimed (v0.33): in the form at once, nothing to read.
+    return file && id ? { file, id, plate: heldPlate(id) } : undefined;
   });
   const [read, setRead] = useState<{ state: ShotState; found?: PlateFound }>();
   const typed = useRef(false);
@@ -276,6 +277,12 @@ export function NewOrderPage() {
     if (!shot) return setRead(undefined);
     let alive = true;
     typed.current = false;
+    if (shot.plate) {
+      const found = shot.plate;
+      setRead({ state: found.codeSure || !found.code ? 'read' : 'check', found });
+      setPlate((p) => ({ emirate: found.emirate ?? p.emirate, code: found.code, number: found.number }));
+      return;
+    }
     setRead({ state: 'reading' });
     void import('../../services/plateReader')
       .then(({ readPlate }) => readPlate(shot.file))

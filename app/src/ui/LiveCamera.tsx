@@ -1,6 +1,6 @@
 import { Button, Loader } from '@mantine/core';
 import { IconBolt, IconBoltOff, IconCameraOff, IconPhoto, IconX } from '@tabler/icons-react';
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { cameraErrorKind, captureFrame, openBackCamera, setTorch, torchSupported, waitForFrames, type CameraError } from './camera';
@@ -17,11 +17,14 @@ export function LiveCamera({
   label,
   onShot,
   onClose,
+  overlay,
 }: {
   label: string;
   /** The photo (taken here, or picked from the phone): the camera has gone and its step in the history with it. */
   onShot: (file: File) => void;
   onClose: () => void;
+  /** What is shown over the picture while it is live (v0.33: the plate read off the frames) — and the shutter for it. */
+  overlay?: (video: HTMLVideoElement | null, live: boolean, shoot: () => void) => ReactNode;
 }) {
   const { t } = useTranslation();
   const video = useRef<HTMLVideoElement>(null);
@@ -178,6 +181,7 @@ export function LiveCamera({
       </div>
       <div className="cam-finder">
         <video ref={video} playsInline muted autoPlay className="cam-video" />
+        {overlay?.(video.current, phase === 'live' && !busy, () => void shoot())}
         {flash > 0 && <div className="cam-flash" key={flash} aria-hidden />}
         {phase === 'starting' && (
           <div className="cam-center">

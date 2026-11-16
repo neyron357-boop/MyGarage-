@@ -1,3 +1,4 @@
+import type { FrameRead } from '../domain/plateScan';
 import type { Emirate } from '../domain/types';
 import { emirateIn, pickPlate, platesInLine, type PlateGuess, type PlateVote } from '../domain/uaePlate';
 import { readByGlyphs } from './plateGlyphRead';
@@ -30,6 +31,43 @@ export interface PlateFound {
 /** The plate on a photo of a car, or nothing (no plate, or none read). */
 export function readPlate(blob: Blob): Promise<PlateFound | undefined> {
   return exclusive(() => readPlateNow(blob));
+}
+
+/** A camera's frame drawn at most `max` px on its long side. */
+function frameOf(video: HTMLVideoElement, max: number): HTMLCanvasElement {
+  const k = Math.min(1, max / Math.max(video.videoWidth, video.videoHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(video.videoWidth * k);
+  c.height = Math.round(video.videoHeight * k);
+  c.getContext('2d', { willReadFrequently: true })!.drawImage(video, 0, 0, c.width, c.height);
+  return c;
+}
+
+/**
+ * One frame of the camera read for its plate (v0.33 — the camera reads while it is aimed): the characters' way only, its
+ * quick look; a frame is read in a fraction of a photo's time, and the frames vote (domain/plateScan.ts). Where the
+ * plate is on the frame comes with it (to ring it on the screen).
+ */
+export function scanFrame(video: HTMLVideoElement): Promise<(FrameRead & { box?: PlateFound['box'] }) | undefined> {
+  return exclusive(async () => {
+    try {
+      if (video.videoWidth < 240 || video.videoHeight < 240) return undefined;
+      const look = frameOf(video, 1000);
+      const src = frameOf(video, 1700);
+      const g = await readByGlyphs(look, src, undefined, { quick: true });
+      if (!g) return undefined;
+      const b = g.numberBox;
+      const line: TextLine = { cx: (b.x0 + b.x1 + 1) / 2, cy: (b.y0 + b.y1 + 1) / 2, w: b.x1 - b.x0 + 1, h: g.row.h, angle: g.row.angle, score: g.row.score };
+      return { number: g.number, code: g.code, emirate: g.emirate, sure: g.sure, box: boxOn(stretched(line, g.code ? 2.4 : 0.35, 0.35), look) };
+    } finally {
+      rest();
+    }
+  });
+}
+
+/** The reading engine made ready ahead (the camera opens; the first frame is read without waiting for it). */
+export function warmPlateReader(): void {
+  void engine().catch(() => undefined);
 }
 
 /** A look into a reading as it goes (tests, tuning on hard photos). */
@@ -112,6 +150,16 @@ function inkSlope(c: HTMLCanvasElement): number {
   return Math.abs(deg) <= 20 ? Math.round(deg * 2) / 2 : 0;
 }
 
+/** Where a plate's line is on the photo, as parts of its width and height (its height and a bit — the plate). */
+function boxOn(plate: TextLine, look: HTMLCanvasElement) {
+  return {
+    x: Math.max(0, (plate.cx - plate.w / 2) / look.width),
+    y: Math.max(0, (plate.cy - plate.h * 0.85) / look.height),
+    w: Math.min(1, plate.w / look.width),
+    h: Math.min(1, (plate.h * 1.7) / look.height),
+  };
+}
+
 /** What stands beside a line on its left: from `near` to `far` of its own heights away from its start. */
 function beside(l: TextLine, near: number, far: number): TextLine {
   const r = (l.angle * Math.PI) / 180;
@@ -135,11 +183,16 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
     const src = draw(bmp, 0, 2000);
     const f = src.width / look.width;
     await breathe();
-    const lines = bandLines(look)
-      .filter(plateLike)
-      .sort((a, b) => plateScore(b) - plateScore(a))
-      .slice(0, MAX_LINES);
-    trace('lines', lines.map((l) => ({ cx: Math.round(l.cx), cy: Math.round(l.cy), w: Math.round(l.w), h: Math.round(l.h), angle: l.angle, score: Math.round(plateScore(l) * 10) / 10 })));
+    // The plate's lines of text (v0.28's way): found only when they are read — after the characters' way left it unsure.
+    let found: TextLine[] | undefined;
+    const lineList = () => {
+      found ??= bandLines(look)
+        .filter(plateLike)
+        .sort((a, b) => plateScore(b) - plateScore(a))
+        .slice(0, MAX_LINES);
+      trace('lines', found.map((l) => ({ cx: Math.round(l.cx), cy: Math.round(l.cy), w: Math.round(l.w), h: Math.round(l.h), angle: l.angle, score: Math.round(plateScore(l) * 10) / 10 })));
+      return found;
+    };
     const votes: (PlateVote & { line?: TextLine })[] = [];
     const settled = () => {
       const p = pickPlate(votes);
@@ -149,6 +202,14 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
     // for letters, outweighs a code guessed out of a line of text.
     const glyphs = await readByGlyphs(look, src, plateTrace.on ? trace : undefined);
     trace('glyphs', glyphs && { number: glyphs.number, sure: glyphs.sure, code: glyphs.code, codeSure: glyphs.codeSure, emirate: glyphs.emirate });
+    // Read whole and surely by its characters (v0.33): that is the plate — nothing more to read (the lines' way took
+    // longer than all of it).
+    if (glyphs?.sure && glyphs.code && glyphs.codeSure) {
+      const b = glyphs.numberBox;
+      const line: TextLine = { cx: (b.x0 + b.x1 + 1) / 2, cy: (b.y0 + b.y1 + 1) / 2, w: b.x1 - b.x0 + 1, h: glyphs.row.h, angle: glyphs.row.angle, score: glyphs.row.score };
+      trace('pick', { number: glyphs.number, code: glyphs.code, by: 'glyphs' });
+      return { emirate: glyphs.emirate, code: glyphs.code, number: glyphs.number, sure: true, codeSure: true, box: boxOn(stretched(line, 2.4, 0.35), look) };
+    }
     if (glyphs) {
       const b = glyphs.numberBox;
       const line: TextLine = { cx: (b.x0 + b.x1 + 1) / 2, cy: (b.y0 + b.y1 + 1) / 2, w: b.x1 - b.x0 + 1, h: glyphs.row.h, angle: glyphs.row.angle, score: glyphs.row.score };
@@ -180,7 +241,7 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
     };
 
     if (!settled())
-      for (const l of lines) {
+      for (const l of lineList()) {
         await readLine(l, ['evened', 'inked']);
         if (settled()) break;
       }
@@ -194,7 +255,7 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
     // Still nothing sure: the other engine (it tells characters by their shapes — it errs elsewhere) on the likeliest lines.
     if (!pickPlate(votes)?.sure) {
       w = await engine('legacy');
-      for (const l of lines.slice(0, 4)) {
+      for (const l of lineList().slice(0, 4)) {
         await readLine(l, ['inked']);
         if (pickPlate(votes)?.sure) break;
       }
@@ -243,7 +304,7 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
     if (!pick) return undefined;
     let emirate = pick.emirate;
     // The emirate's word: small, beside or above the number — the whole plate read as sparse text, its letters large.
-    if (line && !emirate) {
+    if (line && !emirate && !glyphs?.sure) {
       const plate = { ...stretched(line, 6, 1), h: line.h * 3.4 };
       const around = grey(cutLine(src, plate, f, PX * 3.4 * 1.6));
       const p = await page(w, around, 'page');
@@ -251,15 +312,7 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
       emirate = emirateIn(p.text);
     }
     // The plate ringed: the number, and its code beside it (on the left, as most plates have it).
-    const plate = line && stretched(line, pick.code ? 2.4 : 0.35, 0.35);
-    const box = plate
-      ? {
-          x: Math.max(0, (plate.cx - plate.w / 2) / look.width),
-          y: Math.max(0, (plate.cy - plate.h * 0.85) / look.height),
-          w: Math.min(1, plate.w / look.width),
-          h: Math.min(1, (plate.h * 1.7) / look.height),
-        }
-      : undefined;
+    const box = line ? boxOn(stretched(line, pick.code ? 2.4 : 0.35, 0.35), look) : undefined;
     return { emirate, code: pick.code, number: pick.number, sure: pick.sure, codeSure: !!pick.code && pick.codeAgree >= 2, box };
   } finally {
     bmp.close();

@@ -3,15 +3,21 @@
  * so it waits here under an id the address carries (`/orders/new?photo=…`). One at a time: a new one takes the place
  * of the last; "New job" lets it go once the job is made.
  */
-const held = new Map<string, File>();
+import type { PlateFound } from '../../services/plateReader';
 
-export function holdCarShot(file: File): string {
+const held = new Map<string, { file: File; plate?: PlateFound }>();
+
+/** A photo on its way, and the plate the camera read while it was aimed (v0.33), if its frames agreed. */
+export function holdCarShot(file: File, plate?: PlateFound): string {
   held.clear();
   const id = String(Date.now());
-  held.set(id, file);
+  held.set(id, { file, plate });
   return id;
 }
 
-export const heldCarShot = (id: string | null | undefined): File | undefined => (id ? held.get(id) : undefined);
+export const heldCarShot = (id: string | null | undefined): File | undefined => (id ? held.get(id)?.file : undefined);
+
+/** The plate read by the camera with the photo, if any. */
+export const heldPlate = (id: string | null | undefined): PlateFound | undefined => (id ? held.get(id)?.plate : undefined);
 
 export const dropCarShot = (id: string) => void held.delete(id);

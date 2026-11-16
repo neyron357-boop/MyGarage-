@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { charLike, codeWord, fitsHoles, glyphsOf, holesOf, inkOf, keepMarks, plateRows, rowsOf, sheared, slantOf, splitCode, wordIn, type Glyph } from './plateGlyphs';
+import { charLike, codeWord, codeWords, fitsHoles, fitsShapes, glyphsOf, holesOf, inkOf, keepMarks, plateRows, rightedByShapes, rowsOf, shapesOf, sheared, slantOf, splitCode, wordIn, type Glyph } from './plateGlyphs';
 
 /** A black-and-white picture from rows of text: '#' ink, anything else white. */
 const art = (rows: string[], k = 4) => {
@@ -152,5 +152,105 @@ describe('a plate found by its characters (v0.32)', () => {
     const [first] = plateRows(Y, W, H);
     expect(first.glyphs).toHaveLength(5);
     expect(first.h).toBe(40);
+  });
+
+  it('pieces found by runs are the pieces found point by point (8-way), in the same order, with the same labels', () => {
+    // The plain way, point by point: the reference.
+    const plain = (ink: Uint8Array, W: number, H: number) => {
+      const seen = new Uint8Array(ink.length);
+      const out: { x0: number; y0: number; x1: number; y1: number; area: number }[] = [];
+      for (let s = 0; s < ink.length; s++) {
+        if (!ink[s] || seen[s]) continue;
+        const q = [s];
+        seen[s] = 1;
+        const g = { x0: W, y0: H, x1: 0, y1: 0, area: 0 };
+        while (q.length) {
+          const i = q.pop()!;
+          const x = i % W;
+          const y = (i - x) / W;
+          g.area++;
+          g.x0 = Math.min(g.x0, x);
+          g.x1 = Math.max(g.x1, x);
+          g.y0 = Math.min(g.y0, y);
+          g.y1 = Math.max(g.y1, y);
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              const xx = x + dx;
+              const yy = y + dy;
+              const j = yy * W + xx;
+              if (xx >= 0 && yy >= 0 && xx < W && yy < H && ink[j] && !seen[j]) (seen[j] = 1), q.push(j);
+            }
+        }
+        out.push(g);
+      }
+      return out;
+    };
+    let seed = 11;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (const fill of [0.2, 0.45, 0.6]) {
+      const W = 61;
+      const H = 47;
+      const ink = new Uint8Array(W * H).map(() => (rnd() < fill ? 1 : 0));
+      const labels = new Int32Array(W * H);
+      const got = glyphsOf(ink, W, H, labels);
+      expect(got).toEqual(plain(ink, W, H));
+      // Each point of ink labelled with its piece; no other point.
+      for (let i = 0; i < ink.length; i++) {
+        if (!ink[i]) expect(labels[i]).toBe(0);
+        else {
+          const g = got[labels[i] - 1];
+          const x = i % W;
+          const y = (i - x) / W;
+          expect(x >= g.x0 && x <= g.x1 && y >= g.y0 && y <= g.y1).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('shapes tell where the hole is: a 9 high, a 6 low, a 0 tall; a 1 is a bar (v0.33)', () => {
+    const six = art(['#####', '#....', '#####', '#...#', '#####']);
+    const nine = art(['#####', '#...#', '#####', '....#', '#####']);
+    const zero = art(['#####', '#...#', '#...#', '#...#', '#####']);
+    const one = art(['..#..', '..#..', '..#..', '..#..', '..#..']);
+    const seven = art(['#####', '....#', '...#.', '..#..', '..#..']);
+    const row = (...cs: { ink: Uint8Array; W: number; H: number }[]) => {
+      const W = cs.length * 28;
+      const ink = new Uint8Array(W * 28);
+      cs.forEach((c, i) => {
+        for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) ink[(y + 4) * W + i * 28 + x + 4] = c.ink[y * 20 + x];
+      });
+      return { ink, W, H: 28 };
+    };
+    const r = row(six, nine, zero, one, seven);
+    const shapes = shapesOf(r.ink, r.W, r.H);
+    expect(fitsShapes('69017', shapes)).toBe(true);
+    // A 6 and a 9 swapped, a 0 for a 6, a 7 for a 1: their holes or widths say no.
+    expect(fitsShapes('96017', shapes)).toBe(false);
+    expect(fitsShapes('09017', shapes)).toBe(false);
+    expect(fitsShapes('69077', shapes)).toBe(false);
+    // An 8 read where a mark has one hole high: righted to the only digit that fits — a 9.
+    expect(rightedByShapes('68017', shapes)).toBe('69017');
+    // Nothing wrong: nothing to right.
+    expect(rightedByShapes('69017', shapes)).toBeUndefined();
+  });
+
+  it('the code’s likely words come in order — a thin bar (a frame’s edge) after a letter (v0.33)', () => {
+    const W = 260;
+    const H = 120;
+    const px = 56;
+    // A bar next to the number (the cut's right side) and a letter a little further: the letter first.
+    const ink = boxes(W, H, [[246, 40, 6, 50], ...ring(180, 54, 26, 40)]);
+    const words = codeWords(ink, W, H, px, 96, 'right');
+    expect(words[0].map((g) => g.x0)).toEqual([180]);
+    expect(words.some((w) => w[0].x0 === 246)).toBe(true);
+  });
+
+  it('a photo’s rows: the quick way alone, or its shades alone (v0.33)', () => {
+    const W = 300;
+    const H = 200;
+    const Y = new Float32Array(W * H).fill(200);
+    for (let i = 0; i < 5; i++) for (let y = 80; y < 120; y++) for (let x = 70 + i * 34; x < 70 + i * 34 + 20; x++) if (x - (70 + i * 34) < 5 || x - (70 + i * 34) > 14 || y < 85 || y > 114) Y[y * W + x] = 40;
+    expect(plateRows(Y, W, H, 4, 'light')[0]?.glyphs).toHaveLength(5);
+    expect(plateRows(Y, W, H, 4, 'shades')[0]?.glyphs).toHaveLength(5);
   });
 });

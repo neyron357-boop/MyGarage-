@@ -62,46 +62,88 @@ export function inkOf(Y: Float32Array, W: number, H: number, r: number, dark = t
   return ink;
 }
 
-/** The ink's pieces (each point joined to its eight neighbours); `labels`, if given, gets each point's piece (its index + 1). */
+/**
+ * The ink's pieces (each point joined to its eight neighbours); `labels`, if given, gets each point's piece (its index
+ * + 1). Found by runs (v0.33): each row's stretches of ink joined to the stretches of the row above that touch them,
+ * corners too — several times faster than going point by point, on a photo cut to black and white at a middle shade
+ * (half of it ink). Pieces come in the order their first point is met, row by row.
+ */
 export function glyphsOf(ink: Uint8Array, W: number, H: number, labels?: Int32Array): Glyph[] {
-  const seen = new Uint8Array(ink.length);
-  const q = new Int32Array(ink.length);
-  const out: Glyph[] = [];
-  for (let s = 0; s < ink.length; s++) {
-    if (!ink[s] || seen[s]) continue;
-    let head = 0;
-    let tail = 0;
-    q[tail++] = s;
-    seen[s] = 1;
-    let x0 = W;
-    let x1 = 0;
-    let y0 = H;
-    let y1 = 0;
-    const id = out.length + 1;
-    while (head < tail) {
-      const i = q[head++];
-      if (labels) labels[i] = id;
-      const x = i % W;
-      const y = (i - x) / W;
-      if (x < x0) x0 = x;
-      if (x > x1) x1 = x;
-      if (y < y0) y0 = y;
-      if (y > y1) y1 = y;
-      for (let dy = -1; dy <= 1; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= H) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= W) continue;
-          const j = yy * W + xx;
-          if (ink[j] && !seen[j]) {
-            seen[j] = 1;
-            q[tail++] = j;
-          }
+  let n = 0;
+  let cap = 1024;
+  let rx0 = new Int32Array(cap);
+  let rx1 = new Int32Array(cap);
+  let ry = new Int32Array(cap);
+  let parent = new Int32Array(cap);
+  const find = (i: number) => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  let prevStart = 0;
+  let prevEnd = 0;
+  for (let y = 0; y < H; y++) {
+    const rowStart = n;
+    const base = y * W;
+    let p = prevStart;
+    let x = 0;
+    while (x < W) {
+      if (!ink[base + x]) {
+        x++;
+        continue;
+      }
+      const x0 = x;
+      while (x < W && ink[base + x]) x++;
+      const x1 = x - 1;
+      if (n === cap) {
+        cap *= 2;
+        const grow = (old: Int32Array) => {
+          const next = new Int32Array(cap);
+          next.set(old);
+          return next;
+        };
+        rx0 = grow(rx0);
+        rx1 = grow(rx1);
+        ry = grow(ry);
+        parent = grow(parent);
+      }
+      const id = n++;
+      rx0[id] = x0;
+      rx1[id] = x1;
+      ry[id] = y;
+      parent[id] = id;
+      // The runs above that touch this one (a corner too): one piece.
+      while (p < prevEnd && rx1[p] < x0 - 1) p++;
+      for (let q = p; q < prevEnd && rx0[q] <= x1 + 1; q++) {
+        const ra = find(id);
+        const rb = find(q);
+        if (ra !== rb) {
+          if (ra < rb) parent[rb] = ra;
+          else parent[ra] = rb;
         }
       }
     }
-    out.push({ x0, y0, x1, y1, area: tail });
+    prevStart = rowStart;
+    prevEnd = n;
+  }
+  // Each piece: its box and its points, numbered in the order its first run was met.
+  const index = new Int32Array(n).fill(-1);
+  const out: Glyph[] = [];
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    let k = index[r];
+    if (k < 0) {
+      k = index[r] = out.length;
+      out.push({ x0: rx0[i], y0: ry[i], x1: rx1[i], y1: ry[i], area: 0 });
+    }
+    const g = out[k];
+    if (rx0[i] < g.x0) g.x0 = rx0[i];
+    if (rx1[i] > g.x1) g.x1 = rx1[i];
+    if (ry[i] > g.y1) g.y1 = ry[i];
+    g.area += rx1[i] - rx0[i] + 1;
+    if (labels) labels.fill(k + 1, ry[i] * W + rx0[i], ry[i] * W + rx1[i] + 1);
   }
   return out;
 }
@@ -204,7 +246,7 @@ export function rowsOf(glyphs: Glyph[], gap = 1.5): GlyphRow[] {
 export function rowScore(r: GlyphRow): number {
   const n = r.glyphs.length;
   if (n < 2 || n > 8) return 0;
-  if (Math.abs(r.angle) > 25) return 0;
+  if (Math.abs(r.angle) > 40) return 0;
   const hs = r.glyphs.map(gh);
   const spread = Math.sqrt(hs.reduce((s, h) => s + (h - r.h) ** 2, 0) / n) / r.h;
   // The feet: how far each stands off the line through them.
@@ -301,11 +343,18 @@ export function sheared(ink: Uint8Array, W: number, H: number, s: number): { ink
   return { ink: out, W: W2 };
 }
 
+/** A mark's shape, as a digit shows it: how wide it is (of its height) and its holes — where each stands (0 top, 1 foot) and how tall. */
+export interface MarkShape {
+  wide: number;
+  holes: { at: number; tall: number }[];
+}
+
 /**
- * The holes in each character of a cut, left to right (v0.32): the white closed inside a mark — an 8 has two, a 0, 6 and 9
- * one, a 1, 2, 3, 5 and 7 none. A hole of a speck's size is grain, not a hole.
+ * The shapes of a cut's characters, left to right (v0.33): the white closed inside each mark — an 8 has two holes, a 0 one
+ * as tall as itself, a 6 one low, a 9 one high, a 1, 2, 3, 5 and 7 none — and how wide it is (a 1 is a bar). A hole of a
+ * speck's size is grain, not a hole.
  */
-export function holesOf(ink: Uint8Array, W: number, H: number): number[] {
+export function shapesOf(ink: Uint8Array, W: number, H: number): MarkShape[] {
   const labels = new Int32Array(W * H);
   const marks = glyphsOf(ink, W, H, labels);
   const order = marks.map((g, i) => ({ g, id: i + 1 })).sort((a, b) => a.g.x0 - b.g.x0);
@@ -321,10 +370,61 @@ export function holesOf(ink: Uint8Array, W: number, H: number): number[] {
         const inside = sx >= 0 && sy >= 0 && sx < W && sy < H && labels[sy * W + sx] === id;
         white[y * bw + x] = inside ? 0 : 1;
       }
-    const pieces = glyphsOf(white, bw, bh);
     const least = Math.max(4, g.area * 0.02);
-    return pieces.filter((p) => !(p.x0 === 0 && p.y0 === 0) && p.area >= least && p.x0 > 0 && p.y0 > 0 && p.x1 < bw - 1 && p.y1 < bh - 1).length;
+    const holes = glyphsOf(white, bw, bh)
+      .filter((p) => p.area >= least && p.x0 > 0 && p.y0 > 0 && p.x1 < bw - 1 && p.y1 < bh - 1)
+      .map((p) => ({ at: ((p.y0 + p.y1) / 2 - 1) / gh(g), tall: gh(p) / gh(g) }))
+      .sort((a, b) => a.at - b.at);
+    return { wide: gw(g) / gh(g), holes };
   });
+}
+
+/** The holes in each character of a cut, left to right. */
+export function holesOf(ink: Uint8Array, W: number, H: number): number[] {
+  return shapesOf(ink, W, H).map((s) => s.holes.length);
+}
+
+/** What each digit's shape may be (a 4 drawn closed or open; a 1 a bar, or with its flag). */
+const DIGIT: Record<string, (s: MarkShape) => boolean> = {
+  '0': (s) => s.holes.length === 1 && s.holes[0].tall >= 0.4 && s.holes[0].at >= 0.35 && s.holes[0].at <= 0.65,
+  '1': (s) => s.holes.length === 0 && s.wide <= 0.5,
+  '2': (s) => s.holes.length === 0 && s.wide >= 0.3,
+  '3': (s) => s.holes.length === 0 && s.wide >= 0.3,
+  '4': (s) => s.holes.length <= 1 && s.wide >= 0.3,
+  '5': (s) => s.holes.length === 0 && s.wide >= 0.3,
+  '6': (s) => s.holes.length === 1 && s.holes[0].at >= 0.52,
+  '7': (s) => s.holes.length === 0 && s.wide >= 0.3,
+  '8': (s) => s.holes.length === 2,
+  '9': (s) => s.holes.length === 1 && s.holes[0].at <= 0.48,
+};
+
+/** A reading of digits its marks' shapes allow: as many marks as digits, each the shape of its digit. */
+export function fitsShapes(digits: string, shapes: MarkShape[]): boolean {
+  return digits.length === shapes.length && [...digits].every((d, i) => DIGIT[d]?.(shapes[i]) ?? false);
+}
+
+/** Digits a reading mistakes for each other (by their likeness in a plate's lettering). */
+const ALIKE = ['0689352', '174'];
+
+/**
+ * A reading put right by its marks' shapes, where it is wrong in a way only one digit could right at each place (an 8 read
+ * where a mark has one hole high — a 9). Undefined — nothing to right, or more than one way.
+ */
+export function rightedByShapes(digits: string, shapes: MarkShape[]): string | undefined {
+  if (digits.length !== shapes.length || fitsShapes(digits, shapes)) return undefined;
+  let out = '';
+  for (let i = 0; i < digits.length; i++) {
+    const d = digits[i];
+    if (DIGIT[d]?.(shapes[i])) {
+      out += d;
+      continue;
+    }
+    const group = ALIKE.find((g) => g.includes(d)) ?? '';
+    const could = [...group].filter((x) => x !== d && DIGIT[x](shapes[i]));
+    if (could.length !== 1) return undefined;
+    out += could[0];
+  }
+  return out;
 }
 
 /** How many holes each digit has (a 4 may be drawn closed or open). */
@@ -341,7 +441,7 @@ export interface FoundRow extends GlyphRow {
 }
 
 /** How much two boxes cover each other (0–1, of the smaller). */
-function cover(a: Box, b: Box): number {
+export function cover(a: Box, b: Box): number {
   const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) + 1;
   const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) + 1;
   if (w <= 0 || h <= 0) return 0;
@@ -355,15 +455,23 @@ function cover(a: Box, b: Box): number {
  * digits on a silver plate in a dark frame come out whole only at one shade between the two). A row found in more than
  * one way is kept once, at its best.
  */
-export function plateRows(Y: Float32Array, W: number, H: number, keep = 6): FoundRow[] {
+export function plateRows(
+  Y: Float32Array,
+  W: number,
+  H: number,
+  keep = 6,
+  ways: 'light' | 'shades' | 'all' = 'all',
+  /** Which of the seven shades (1 darkest – 7 lightest): one at a time lets a phone breathe between them (v0.33). */
+  levels?: number[],
+): FoundRow[] {
   const minH = Math.max(9, Math.round(H * 0.012));
   const found: FoundRow[] = [];
   const take = (ink: Uint8Array) => {
     const all = glyphsOf(ink, W, H);
     for (const r of rowsOf(all.filter((g) => charLike(g, H, minH)))) found.push({ ...r, all });
   };
-  take(inkOf(Y, W, H, Math.max(10, Math.round(Math.min(W, H) / 24))));
-  // The shades: between the photo's darkest and lightest (a twentieth of it each side left out).
+  if (ways !== 'shades') take(inkOf(Y, W, H, Math.max(10, Math.round(Math.min(W, H) / 24))));
+  // The shades (v0.33: a second look — only when the first way found nothing read surely): between the photo's darkest and lightest (a twentieth of it each side left out).
   const hist = new Uint32Array(256);
   for (const v of Y) hist[Math.min(255, Math.max(0, v | 0))]++;
   const at = (q: number) => {
@@ -374,7 +482,8 @@ export function plateRows(Y: Float32Array, W: number, H: number, keep = 6): Foun
   const lo = at(0.05);
   const hi = at(0.95);
   const ink = new Uint8Array(Y.length);
-  for (let k = 1; k <= 7; k++) {
+  for (let k = 1; k <= (ways === 'light' ? 0 : 7); k++) {
+    if (levels && !levels.includes(k)) continue;
     const t = lo + ((hi - lo) * k) / 8;
     for (let i = 0; i < Y.length; i++) ink[i] = Y[i] < t ? 1 : 0;
     take(ink);
@@ -411,6 +520,14 @@ export const boxOf = (gs: Glyph[]): Box => ({
  * side the number is on) and largest. None — undefined.
  */
 export function codeWord(ink: Uint8Array, W: number, H: number, px: number, foot: number, toward: 'right' | 'bottom'): Glyph[] | undefined {
+  return codeWords(ink, W, H, px, foot, toward)[0];
+}
+
+/**
+ * The words that may be the code in a cut beside the number, likeliest first (v0.33): a reading may show the likeliest
+ * is not (a bar of the plate's frame read as a 1) — the next is looked at. A thin bar is a code's letter seldom (an I).
+ */
+export function codeWords(ink: Uint8Array, W: number, H: number, px: number, foot: number, toward: 'right' | 'bottom'): Glyph[][] {
   const marks = glyphsOf(ink, W, H).filter((g) => {
     const h = gh(g);
     const w = gw(g);
@@ -422,17 +539,16 @@ export function codeWord(ink: Uint8Array, W: number, H: number, px: number, foot
     const capped = toward === 'right' && Math.abs(g.y1 - foot) <= px * 0.2 && h <= px * 1.5;
     return sized || capped;
   });
-  let best: Glyph[] | undefined;
-  let bestScore = 0;
+  const scored: { w: Glyph[]; score: number }[] = [];
   for (const w of rowsOfAny(marks, 0.7)) {
     if (w.length > 2) continue;
     const b = boxOf(w);
     const tall = Math.min(px, b.y1 - b.y0 + 1) / px;
     const away = toward === 'right' ? W - 1 - b.x1 : H - 1 - b.y1;
-    const score = tall / (1 + away / px);
-    if (score > bestScore) (best = w), (bestScore = score);
+    const bar = w.length === 1 && gw(w[0]) < gh(w[0]) * 0.25 ? 0.4 : 1;
+    scored.push({ w, score: (tall / (1 + away / px)) * bar });
   }
-  return best;
+  return scored.sort((a, b) => b.score - a.score).map((x) => x.w);
 }
 
 /**

@@ -65,6 +65,28 @@ async function launchBrowser() {
     };
   }
   const page = await ctx.newPage();
+  // A sheet just closed takes its own step back in the history a frame after it is gone (ui/backCloses.ts): a goto or a
+  // reload that meets that step is aborted or undone by it (a person never types an address that fast). Let the step
+  // pass first — and go once more if it was aborted anyway.
+  {
+    const sheetStepDone = () =>
+      page
+        .waitForFunction(() => !!document.querySelector('.mantine-Modal-content, .mantine-Drawer-content') || !history.state?.mgSheet, null, { timeout: 2000 })
+        .catch(() => undefined);
+    for (const m of ['goto', 'reload']) {
+      const own = page[m].bind(page);
+      page[m] = async (...a) => {
+        await sheetStepDone();
+        try {
+          return await own(...a);
+        } catch (e) {
+          if (!/ERR_ABORTED|interrupted by another navigation/.test(String(e))) throw e;
+          await page.waitForTimeout(300);
+          return own(...a);
+        }
+      };
+    }
+  }
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 300)); });
@@ -488,7 +510,9 @@ async function launchBrowser() {
     await mulkiya.setFiles({ name: 'mulkiya.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Mulkiya', exact: true }).getByText('1/2').waitFor();
     // v0.21: a saved side opens with a tap (not the camera); the missing back is taken right there — a hold on its
-    // button picks it from the phone's photos — and it lands on the back, the front stays.
+    // button picks it from the phone's photos — and it lands on the back, the front stays. (A finger's pause first: a tap
+    // on the chip changed under it within 350 ms of the last one is the guard's — ui/tapGuard.ts.)
+    await page.waitForTimeout(450);
     await page.getByRole('button', { name: 'Mulkiya', exact: true }).click();
     const mulkiyaView = page.locator('.viewer');
     await mulkiyaView.getByText('Mulkiya, лицевая').waitFor();
@@ -566,9 +590,12 @@ async function launchBrowser() {
     await card.locator('.jc-mark .strip-tile img').waitFor();
     if (await car3d.count()) {
       // Close up (v0.20): a wheel over the car brings it nearer and puts no point; the round button — the whole car.
+      // Right on the point just put: a wheel over its pin brings the car closer too (v0.33 — it scrolled the sheet).
       const pins = await card.locator('.jc-pin').count();
-      const cb = await car3d.boundingBox();
-      await page.mouse.move(cb.x + cb.width * 0.5, cb.y + cb.height * 0.5);
+      const pb = await card.locator('.jc-pin').first().boundingBox();
+      await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+      if (!(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.jc-pin'), { x: pb.x + pb.width / 2, y: pb.y + pb.height / 2 })))
+        throw new Error('the point is not under the mouse');
       for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -120);
       await card.locator('.car3d-whole').waitFor();
       await shot('30a2-job-card-close');
@@ -2220,9 +2247,12 @@ async function launchBrowser() {
     const ph = await page.locator('[data-quick="photo"]').boundingBox();
     await page.mouse.move(ph.x + ph.width / 2, ph.y + ph.height / 2, { steps: 5 });
     await page.mouse.up();
-    // Let go: the camera is up at once, live; one tap on the shutter — the photo goes on.
+    // Let go: the camera is up at once, live; it reads the plate off its frames while aimed (v0.33) — the pill shows it,
+    // green when two frames agree; one tap on the shutter — the photo goes on with the plate.
     await page.locator('.cam[data-phase="live"]').waitFor({ timeout: 8000 });
-    await page.waitForTimeout(300);
+    await page.locator('.plate-scan[data-state="stable"]').waitFor({ timeout: 30000 });
+    const pill = await page.locator('.plate-scan-pill').getAttribute('aria-label');
+    if (!/B 70415/.test(pill || '')) throw new Error('the camera read ' + pill);
     await shot('40b-camera');
     await page.getByRole('button', { name: 'Снять фото' }).click();
     await page.waitForURL(/orders\/new\?photo=/);
@@ -2381,13 +2411,18 @@ async function launchBrowser() {
     await fingerSwipe(card.x + 30, card.y + card.height / 2, card.width - 50);
     await page.waitForFunction(() => window.__opened.some((u) => u.startsWith('https://wa.me/')));
     await shot('42b-board-cards');
-    // A sideways swipe on the board (not on a card): Search; on Search — Money.
-    await page.waitForTimeout(500);
-    await fingerSwipe(330, 70, -260);
-    await page.waitForURL(/#\/search$/);
-    await page.waitForTimeout(600);
-    await fingerSwipe(330, 260, -260);
-    await page.waitForURL(/#\/money/);
+    // A sideways swipe on the board (not on a card): Search; on Search — Money. (A swipe begun while the screen still
+    // slides in is the stack's, not a new one: it is tried again once the screen has settled.)
+    const swipeTo = async (x, y, dx, url) => {
+      for (let i = 0; i < 3; i++) {
+        await page.waitForTimeout(600);
+        await fingerSwipe(x, y, dx);
+        if (await page.waitForURL(url, { timeout: 3000 }).then(() => true, () => false)) return;
+      }
+      throw new Error('a sideways swipe did not go to ' + url);
+    };
+    await swipeTo(330, 70, -260, /#\/search$/);
+    await swipeTo(330, 260, -260, /#\/money/);
     // Money → Debts: the two sums are tabs; the list under them turns by a swipe (and stays in Debts).
     await page.goto(BASE + '#/money?tab=debts');
     await front('.kpi-tab[data-side="owed"][data-active]').waitFor();
