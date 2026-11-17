@@ -2,7 +2,10 @@ import type { Line, Page, Worker as OcrWorker } from 'tesseract.js';
 import { db } from '../db/db';
 import type { Vehicle } from '../domain/types';
 import { fitCode39Row, readBarcodeRow, runsOf, vinOfBarcode } from '../domain/barcode';
-import { checkDigitOk, fixByCheckDigit, mulkiyaYear, pickVin, readingsNear, solveVin, VIN_CHARS, vinChars, vinsInText, vinsRead, voteVin, type VinPick, type VinRead } from '../domain/vin';
+import { FONT_SAMPLES } from '../domain/vinGlyphBook';
+import { keep, opened, piecesOf, readPieces, spacedOut, unkeep, unlike, type KeptSample, type Pieces, type Sample } from '../domain/vinGlyphs';
+import { vinRows } from '../domain/vinRows';
+import { checkDigitOk, fixByCheckDigit, isVin, mulkiyaYear, pickVin, plainReads, readingsNear, shapesDisagree, solveVin, VIN_CHARS, vinChars, vinsInText, vinsRead, voteVin, type VinPick, type VinRead } from '../domain/vin';
 import { mulkiyaOf, vinPhotoOf } from './cover';
 import { mediaBlob } from './media';
 
@@ -716,6 +719,54 @@ function despeck(ink: Uint8Array, W: number, H: number, letter: number) {
   }
 }
 
+/* ---------------- The characters' shapes ---------------- */
+
+/** The typefaces' characters (domain/vinGlyphBook.ts), made ready once. */
+let fontBook: Sample[] | undefined;
+/** The characters learned off this garage's plates (v0.35), as the database keeps them. */
+let learnedBook: Promise<KeptSample[]> | undefined;
+const LEARNED = 'vinGlyphs';
+/** The most kept of each character learned: the newest. */
+const LEARN_EACH = 24;
+
+const learnedNow = (): Promise<KeptSample[]> =>
+  (learnedBook ??= db.books
+    .get(LEARNED)
+    .then((b) => (b ? (JSON.parse(b.data) as KeptSample[]) : []))
+    .catch(() => []));
+
+/** What the shapes of a VIN's characters are read by: the typefaces' and the garage's own plates'. */
+async function shapeBook(): Promise<Sample[]> {
+  fontBook ??= FONT_SAMPLES.map(unkeep);
+  return [...fontBook, ...(await learnedNow()).map(unkeep)];
+}
+
+/**
+ * The app learns a plate's characters (v0.35): a VIN known to be on rows read off a photo — proven there, or kept by
+ * the user on the sheet it is checked on — is laid over each row's pieces (each place as its own character); where it
+ * fits, each character's shape that fits it well is kept (one the book already has nearly so adds nothing). The next
+ * plate printed the same way reads by them. Returns how many were learned.
+ */
+export async function learnVin(rows: Pieces[], vin: string): Promise<number> {
+  if (!isVin(vin) || !rows.length) return 0;
+  const book = await shapeBook();
+  for (const p of rows) {
+    // Laid over the pieces as a whole, it may fit loosely (a worn engraved plate's letters are like no typeface's);
+    // a character is learned only where it fits well.
+    const r = readPieces(p, book, vin, 1.6, Infinity);
+    if (!r) continue;
+    const add = r.chars.filter((c) => c.shape && c.d <= 2 && !book.some((b) => b.c === c.c && unlike(c.shape!, b) < 0.15)).map((c) => keep(c.c, c.shape!));
+    if (!add.length) return 0;
+    const all = [...(await learnedNow()), ...add];
+    const kept: KeptSample[] = [];
+    for (const c of new Set(all.map((x) => x[0]))) kept.push(...all.filter((x) => x[0] === c).slice(-LEARN_EACH));
+    await db.books.put({ id: LEARNED, name: 'VIN', savedAt: new Date().toISOString(), data: JSON.stringify(kept) });
+    learnedBook = Promise.resolve(kept);
+    return add.length;
+  }
+  return 0;
+}
+
 /* ---------------- Reading ---------------- */
 
 /** How Tesseract is to take the picture: a sparse page, a line, a raw line (no layout guesses), one word, a block of lines. */
@@ -861,6 +912,8 @@ export interface PhotoRead {
   years: number[];
   /** The picture of the line each VIN was read off (a small JPEG address), to check it by. */
   crops: Record<string, string>;
+  /** The pieces of the lines read by their characters' shapes: a VIN found on them later is learned off them (`learnVin`). */
+  rows: Pieces[];
 }
 
 /**
@@ -876,7 +929,7 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
   const whole = await createImageBitmap(blob);
   if (tooSmall(whole)) {
     whole.close();
-    return { reads: [], years: [], crops: {} };
+    return { reads: [], years: [], crops: {}, rows: [] };
   }
   // What is read: the photo — or the part of it that holds all its lines (`closer`).
   let bmp = whole;
@@ -885,6 +938,11 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
   const cuts = new Map<string, HTMLCanvasElement>();
   /** Everything a reading of a line heard, as it heard it: imperfect readings still meet in one VIN (`solveVin`). */
   const heard: string[] = [];
+  /** …of which the engine's own (a VIN that does not add up stands only on readings of the engine's: the shapes are one reader). */
+  const engineHeard: string[] = [];
+  const book = await shapeBook();
+  /** The pieces of each line its characters' shapes were read off, best reading first. */
+  const shaped: Pieces[] = [];
   // The engine is asked for only when letters are read: a barcode that proves the VIN needs none of it.
   let w!: OcrWorker;
   // The pictures the stages share: the photo at reading size, and its bands found at a smaller one — each way up.
@@ -939,11 +997,11 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
 
   /** What a reading heard; `line` — it read a line cut out (that cut is the VIN's picture), else a page drawn on `src`. */
   const take = (p: Page, src: HTMLCanvasElement, line = false) => {
-    if (line) for (const t of p.text.split(/\r?\n/)) if (vinChars(t).length >= 15) heard.push(t);
+    if (line) for (const t of p.text.split(/\r?\n/)) if (vinChars(t).length >= 15) heard.push(t), engineHeard.push(t);
     for (const { vin, cut: guess } of vinsRead(p.text)) {
       reads.push(guess ? { vin, source, cut: true } : { vin, source, conf: charConfidence(p, vin) });
       // A page read whole says it once too (its lines are read again below).
-      if (!line) heard.push(vin);
+      if (!line) heard.push(vin), engineHeard.push(vin);
       // Cut out of a longer word and then fitted to its check digit too: one liberty too many.
       const fixed = guess ? undefined : fixByCheckDigit(vin);
       if (fixed) reads.push({ vin: fixed, source, from: vin });
@@ -957,19 +1015,68 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
     const y = mulkiyaYear(p.text);
     if (y) years.push(y);
   };
+  /** A line read by its characters' shapes (`byShapes`): taken as a reading of the line `src`. */
+  const takeText = (text: string, src: HTMLCanvasElement) => {
+    heard.push(text);
+    for (const { vin, cut: guess } of vinsRead(text)) {
+      reads.push(guess ? { vin, source, cut: true, shapes: true } : { vin, source, shapes: true });
+      const fixed = guess ? undefined : fixByCheckDigit(vin);
+      if (fixed) reads.push({ vin: fixed, source, from: vin, shapes: true });
+      if (!cuts.has(vin)) cuts.set(vin, src);
+      if (fixed && !cuts.has(fixed)) cuts.set(fixed, src);
+    }
+  };
+
+  /**
+   * A found line read by its characters' shapes (v0.35, domain/vinGlyphs.ts) — the app's own reader, beside the engine:
+   * it errs elsewhere, so where the two read the same, the VIN stands. The line (letters dark, evened out) in black and
+   * white at three shades, each cut into pieces and read as seventeen characters; the shade whose characters are most
+   * like characters is taken. Its pieces are kept to learn from.
+   */
+  const byShapes = (ev: HTMLCanvasElement, src: HTMLCanvasElement): { text: string; spaced: HTMLCanvasElement } | undefined => {
+    const Y = luma(ev);
+    let best: { text: string; pieces: Pieces; parts: [number, number][]; mean: number } | undefined;
+    for (const shade of [135, 150, 165]) {
+      const ink = new Uint8Array(Y.length);
+      for (let i = 0; i < Y.length; i++) ink[i] = Y[i] < shade ? 1 : 0;
+      // As it is, and opened — grain that joins the letters to each other or to the plate's edge cut away.
+      for (const way of [ink, opened(ink, ev.width, ev.height)]) {
+        const pieces = piecesOf(way, ev.width, ev.height, 56);
+        const r = readPieces(pieces, book);
+        if (!r) continue;
+        const mean = r.chars.reduce((t, c) => t + c.d, 0) / r.chars.length;
+        if (!best || mean < best.mean) best = { text: r.text, pieces, parts: r.parts, mean };
+      }
+    }
+    trace('shapes', { text: best?.text, mean: best && Math.round(best.mean * 100) / 100 });
+    if (!best) return undefined;
+    shaped.push(best.pieces);
+    takeText(best.text, src);
+    // Its characters set apart, for the engine to read too (`spacedOut`).
+    const sp = spacedOut(best.pieces, best.parts, 56);
+    const spaced = document.createElement('canvas');
+    spaced.width = sp.W;
+    spaced.height = sp.H;
+    const g = spaced.getContext('2d', { willReadFrequently: true })!;
+    const img = g.createImageData(sp.W, sp.H);
+    for (let i = 0; i < sp.ink.length; i++) {
+      img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = sp.ink[i] ? 0 : 255;
+      img.data[i * 4 + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    return { text: best.text, spaced };
+  };
+
   // A VIN proves itself on a photo when it adds up and was read so twice (one lucky misreading may add up too) — or
   // when the barcode and the letters say the same (`pickVin` judges the same way).
   const proven = () => {
-    const by = new Map<string, { plain: number; from: Set<string> }>();
-    for (const r of reads) {
-      const e = by.get(r.vin) ?? { plain: 0, from: new Set<string>() };
-      if (!r.from && !r.cut) e.plain++;
-      e.from.add(r.source);
-      by.set(r.vin, e);
-    }
-    for (const [vin, e] of by) if ((checkDigitOk(vin) && e.plain >= 2) || e.from.size >= 2) return true;
+    const by = new Map<string, Set<string>>();
+    for (const r of reads) by.set(r.vin, (by.get(r.vin) ?? new Set<string>()).add(r.source));
+    for (const [vin, from] of by) if ((checkDigitOk(vin) && plainReads(reads, vin) >= 2 && !shapesDisagree(reads, vin)) || from.size >= 2) return true;
     return false;
   };
+  /** The rows gave a VIN to go on: one read as it is that adds up, or one the readings meet in (`solveVin`). */
+  const promising = () => proven() || reads.some((r) => !r.cut && !r.from && checkDigitOk(r.vin)) || !!solveVin(heard);
 
   /**
    * The photo's barcode (v0.25) — a VIN label or plate often carries one, and it is exact where letters are guessed.
@@ -1118,7 +1225,7 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
   };
 
   /** The lines that read like a VIN, kept for a second opinion (the other engine): the cut, which way its letters are. */
-  const kept: { cut: HTMLCanvasElement; light: boolean; chars: number; shape: number }[] = [];
+  const kept: { cut: HTMLCanvasElement; light: boolean; chars: number; shape: number; spaced?: HTMLCanvasElement }[] = [];
 
   /**
    * The lines found by their outlines (`bandLines`; the photo as it is and turned a quarter — a label is often shot
@@ -1136,46 +1243,97 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
     }
     found.sort((a, b) => b.l.score - a.l.score);
     trace('lines', found.slice(0, 14).map(({ l, angle }) => ({ angle, cx: Math.round(l.cx), cy: Math.round(l.cy), w: Math.round(l.w), h: Math.round(l.h), tilt: l.angle, score: Math.round(l.score * 10) / 10 })));
-    const px = 56;
     for (const { l, angle } of found.slice(0, 8)) {
       const src = full(angle);
-      const light = lightLetters(cutLine(src, l, f, px));
-      const look = async (flip: boolean) => {
-        const cut = banded(cutLine(src, l, f, px, flip), light);
-        const before = reads.length;
-        const p = await page(w, evened(cut, light), 'line');
-        trace('look', { flip, light, text: p.text.trim(), sure: Math.round(sureness(p)), cut: readerTrace.on ? cut.toDataURL('image/jpeg', 0.8) : undefined });
-        take(p, cut, true);
-        return { flip, cut, text: p.text, vin: reads.length > before, chars: vinChars(p.text).length, shape: vinShape(p.text), sure: sureness(p) };
-      };
-      const asIs = await look(false);
-      if (proven()) return;
-      // A long line read surely is a line of words, the right way up: not turned over, not read again.
-      const words = !asIs.vin && asIs.chars > 22 && asIs.sure / asIs.chars >= 75;
-      const over = asIs.vin || words ? undefined : await look(true);
-      if (proven()) return;
-      const ways = [asIs, over].filter((x): x is NonNullable<typeof x> => !!x);
-      // Which way up: a VIN ends in digits — read upside down it ends in letters and reads just as surely (its 5 an S,
-      // its 6 a 9), so the shape of what was read decides first, how surely it read only after.
-      const way = ways.find((x) => x.vin) ?? ways.filter((x) => x.chars >= 12).sort((a, b) => b.shape - a.shape || b.sure - a.sure)[0];
-      if (!way || (!way.vin && !maybeVin(way.text))) continue;
-      const { cut, flip } = way;
-      kept.push({ cut, light, chars: way.chars, shape: way.shape });
-      const tries: (() => Promise<Page>)[] = [
-        () => page(w, inked(cut, light, px), 'line'),
-        () => page(w, evened(cut, light), 'word'),
-        () => page(w, inkedAtOnce(cut, px), 'line'),
-        () => page(w, sized(evened(cut, light), 0.6), 'line'),
-        () => page(w, inked(cut, !light, px), 'line'),
-      ];
-      if (l.w / l.h < 10) tries.push(() => page(w, inked(cutLine(src, l, f, px * 2, flip), light, px), 'block'));
-      for (const read of tries) {
-        const p = await read();
-        trace('try', { text: p.text.trim() });
-        take(p, cut, true);
-        if (proven()) return;
-      }
+      if (await readFound(src, l, lightLetters(cutLine(src, l, f, 56)))) return;
     }
+  };
+
+  /**
+   * The rows of characters that look like a VIN's (v0.35, domain/vinRows.ts): about seventeen marks of one height at an
+   * even pitch, at any slant — found in a fraction of a second where the lines found by their outlines are mostly the
+   * plate's Arabic words and its frame (a VIN in thin print on a plate full of them was never among those read). Best
+   * first, each read as a found line is; a row found short (a few of its characters faint, joined or broken) is cut
+   * wider by the characters it lacks.
+   */
+  const byRows = async () => {
+    await breathe();
+    const pic = draw(bmp, 0, 1200);
+    const d = pic.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, pic.width, pic.height).data;
+    const Y = new Float32Array(pic.width * pic.height);
+    for (let i = 0; i < Y.length; i++) Y[i] = (d[i * 4] * 299 + d[i * 4 + 1] * 587 + d[i * 4 + 2] * 114) / 1000;
+    const rows = vinRows(Y, pic.width, pic.height, 4);
+    trace('rows', rows.map((r) => ({ n: r.glyphs.length, cx: Math.round(r.cx), cy: Math.round(r.cy), w: Math.round(r.w), h: Math.round(r.h), angle: Math.round(r.angle), dark: r.dark, score: Math.round(r.score * 10) / 10 })));
+    for (const row of rows) {
+      await breathe();
+      const n = row.glyphs.length;
+      // Found whole (seventeen), it is cut close (a cut takes almost a letter's height either side — the colon after a
+      // VIN, read as a 1, made eighteen characters of it); found short, wider by the characters it lacks.
+      const w = n === 17 ? row.w - 1.2 * row.h : row.w + 2 * Math.max(0, 17 - n) * row.pitch;
+      const l: TextLine = { cx: row.cx, cy: row.cy, w, h: row.h, angle: row.angle, score: row.score };
+      if (await readFound(full(0), l, !row.dark)) return;
+      // This row gave a VIN to go on: the next ones are other lines of the plate.
+      if (promising()) return;
+    }
+  };
+
+  /** One line found read (see `byLines`); true — a VIN proved itself. */
+  const readFound = async (src: HTMLCanvasElement, l: TextLine, light: boolean): Promise<boolean> => {
+    const px = 56;
+    const look = async (flip: boolean) => {
+      const cut = banded(cutLine(src, l, f, px, flip), light);
+      const before = reads.length;
+      const mark = { reads: reads.length, heard: heard.length, engine: engineHeard.length, shaped: shaped.length };
+      const even = evened(cut, light);
+      const p = await page(w, even, 'line');
+      trace('look', { flip, light, text: p.text.trim(), sure: Math.round(sureness(p)), cut: readerTrace.on ? cut.toDataURL('image/jpeg', 0.8) : undefined });
+      take(p, cut, true);
+      // Which way up is told by the engine's reading (letters upside down are letters still to the shapes).
+      const vin = reads.length > before;
+      const shapes = proven() ? undefined : byShapes(even, cut);
+      return { flip, cut, text: p.text, vin, chars: vinChars(p.text).length, shape: vinShape(p.text), sure: sureness(p), spaced: shapes?.spaced, mark };
+    };
+    const asIs = await look(false);
+    if (proven()) return true;
+    // A long line read surely is a line of words, the right way up: not turned over, not read again.
+    const words = !asIs.vin && asIs.chars > 22 && asIs.sure / asIs.chars >= 75;
+    const over = asIs.vin || words ? undefined : await look(true);
+    if (proven()) return true;
+    const ways = [asIs, over].filter((x): x is NonNullable<typeof x> => !!x);
+    // Which way up: a VIN ends in digits — read upside down it ends in letters and reads just as surely (its 5 an S,
+    // its 6 a 9), so the shape of what was read decides first, how surely it read only after.
+    // A line of words read surely the right way up (v0.35): what it reads as turned over is no VIN, however VIN-like
+    // ("FRONT GAWR 2460 LB" upside down read as seventeen characters ending in digits).
+    const each = (x: typeof asIs) => x.sure / Math.max(1, x.chars);
+    const upright = !asIs.vin && !!over && asIs.chars >= 12 && each(asIs) >= 70 && each(asIs) - each(over) >= 8;
+    // …and what it read turned over is taken back (it was read last: all of it after the line's first look).
+    if (upright && over) {
+      reads.length = over.mark.reads;
+      heard.length = over.mark.heard;
+      engineHeard.length = over.mark.engine;
+      shaped.length = over.mark.shaped;
+    }
+    const way = upright ? asIs : (ways.find((x) => x.vin) ?? ways.filter((x) => x.chars >= 12).sort((a, b) => b.shape - a.shape || b.sure - a.sure)[0]);
+    if (!way || (!way.vin && !maybeVin(way.text))) return false;
+    const { cut, flip, spaced } = way;
+    kept.push({ cut, light, chars: way.chars, shape: way.shape, spaced });
+    const tries: (() => Promise<Page>)[] = [
+      // The characters the shapes were read off, set apart: the engine reads each for itself.
+      ...(spaced ? [() => page(w, spaced, 'raw'), () => page(w, spaced, 'line')] : []),
+      () => page(w, inked(cut, light, px), 'line'),
+      () => page(w, evened(cut, light), 'word'),
+      () => page(w, inkedAtOnce(cut, px), 'line'),
+      () => page(w, sized(evened(cut, light), 0.6), 'line'),
+      () => page(w, inked(cut, !light, px), 'line'),
+    ];
+    if (l.w / l.h < 10) tries.push(() => page(w, inked(cutLine(src, l, f, px * 2, flip), light, px), 'block'));
+    for (const read of tries) {
+      const p = await read();
+      trace('try', { text: p.text.trim() });
+      take(p, cut, true);
+      if (proven()) return true;
+    }
+    return false;
   };
 
   /**
@@ -1187,7 +1345,15 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
     const lines = kept.sort((a, b) => b.shape - a.shape || b.chars - a.chars).slice(0, 2);
     if (!lines.length) return;
     w = await engine('legacy');
-    for (const { cut, light } of lines) {
+    for (const { cut, light, spaced } of lines) {
+      // The characters set apart first: the older engine tells them one by one best when they stand apart.
+      for (const k of spaced ? [0.7, 1] : []) {
+        await breathe();
+        const p = await page(w, margin(sized(spaced!, k)), 'line');
+        trace('second', { k, spaced: true, text: p.text.trim() });
+        take(p, cut, true);
+        if (proven()) return;
+      }
       for (const k of [1, 0.8, 0.65, 0.5]) {
         await breathe();
         const p = await page(w, margin(sized(plain(cut, light), k)), 'line');
@@ -1205,13 +1371,17 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
       if (proven()) return;
       w = await engine();
       if (kind === 'plate') {
-        await byLines();
+        await byRows();
+        // The rows gave a VIN to go on (v0.35): the lines found by their outlines would only read the plate's words.
+        if (!promising()) await byLines();
         // A plate whose lines the outlines did not find: read whole, as a card is.
         if (!proven() && !reads.some((r) => !r.source.includes('#'))) await byPage();
       } else {
         await byPage();
         // The card read whole gave its VIN: its other lines are not gone over one by one.
-        if (!proven() && !reads.length) await byLines();
+        const fromPage = reads.length > 0;
+        if (!proven() && !fromPage) await byRows();
+        if (!fromPage && !promising()) await byLines();
       }
     };
     part = await closer();
@@ -1249,7 +1419,7 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
   // A VIN that does not add up and that nothing else read nearly so is no VIN (v0.25): bars, a pattern, words upside
   // down read once as 17 characters. One fitted to its check digit stands on the reading it was fitted from.
   const stands = (r: VinRead) =>
-    r.source.includes('#') || (!r.from && checkDigitOk(r.vin)) || readingsNear(r.from ?? r.vin, heard) >= 2;
+    r.source.includes('#') || (!r.from && checkDigitOk(r.vin)) || readingsNear(r.from ?? r.vin, engineHeard) >= 2;
   const stood = reads.filter(stands);
   trace('dropped', reads.filter((r) => !stands(r)).map((r) => r.vin));
   reads.length = 0;
@@ -1262,7 +1432,7 @@ async function readPhotoNow(blob: Blob, source: string, kind: 'plate' | 'card'):
     if (!shots.has(cut)) shots.set(cut, snapshot(cut));
     crops[vin] = shots.get(cut)!;
   }
-  return { reads, years, crops };
+  return { reads, years, crops, rows: shaped.slice(0, 3) };
 }
 
 /** What each photo said — read once (a photo never changes: a turned one is a new photo). The last few are kept. */
@@ -1275,6 +1445,8 @@ async function readOnce(id: string, kind: 'plate' | 'card'): Promise<PhotoRead |
   const r = await readPhoto(blob, id, kind);
   said.set(id, r);
   if (said.size > 12) said.delete(said.keys().next().value!);
+  // The pieces to learn from are large: kept for the last few photos only (a VIN is kept on its sheet soon after).
+  [...said.entries()].slice(0, -3).forEach(([key, v]) => v.rows.length && said.set(key, { ...v, rows: [] }));
   return r;
 }
 
@@ -1323,6 +1495,8 @@ export async function readCarVin(vehicleId: string): Promise<CarVinRead> {
     if (p.sure && p.why === 'check' && p.yearSure) break;
   }
   const pick = pickVin(reads, years, vehicle);
+  // A VIN that proved itself teaches the reader its plate's characters (in the background: nothing waits on it).
+  if (pick.sure && pick.vin) void learnOff(queue, pick.vin);
   const before = { vin: vehicle.vin, year: vehicle.year };
   const patch: Partial<Vehicle> = {};
   const differs: CarVinRead['differs'] = {};
@@ -1338,10 +1512,24 @@ export async function readCarVin(vehicleId: string): Promise<CarVinRead> {
   return { ...pick, photos, filled: Object.keys(patch) as ('vin' | 'year')[], before, differs, crop: pick.vin ? crops[pick.vin] : undefined };
 }
 
-/** The VIN and year the user looked at and kept (the sheet), or put back as they were ("Undo"). */
-export async function setCarVin(vehicleId: string, values: Pick<Vehicle, 'vin' | 'year'>): Promise<void> {
+/** The characters of a VIN learned off the photos it was read off, where it is on them (the photos read lately). */
+async function learnOff(photos: string[], vin: string): Promise<void> {
+  const rows = photos.flatMap((id) => said.get(id)?.rows ?? []);
+  await learnVin(rows, vin).catch(() => 0);
+}
+
+/**
+ * The VIN and year the user looked at and kept (the sheet), or put back as they were ("Undo"). `learn` — kept on the
+ * sheet: the reader learns the plate's characters off it (where it is on the plate — a VIN typed off the papers is not).
+ */
+export async function setCarVin(vehicleId: string, values: Pick<Vehicle, 'vin' | 'year'>, opts: { learn?: boolean } = {}): Promise<void> {
   const vin = values.vin?.trim().toUpperCase() || undefined;
   await db.vehicles.update(vehicleId, { vin, year: values.year });
+  if (opts.learn && vin) {
+    const plate = await vinPhotoOf(vehicleId);
+    const mulkiya = await mulkiyaOf(vehicleId);
+    void learnOff([plate, mulkiya.mulkiya_back, mulkiya.mulkiya].filter((x): x is string => !!x), vin);
+  }
 }
 
 /**

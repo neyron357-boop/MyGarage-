@@ -154,9 +154,11 @@ export function vinYear(vin: string, now = new Date()): number | undefined {
 
 /** Makers by the first characters of their VINs — the ones a garage in the UAE sees most; brands of one maker together. */
 const MAKERS: [makes: string[], prefixes: string[]][] = [
-  [['toyota', 'lexus'], ['JT', '2T', '4T', '5T', 'MR0', 'MR1', 'MR2', '6T1', 'VNK', 'SB1', 'AHT', 'NMT', 'LTV', 'LFM', 'MHF']],
+  [['toyota', 'lexus'], ['JT', '2T', '4T', '5T', 'MR0', 'MR1', 'MR2', '6T1', 'VNK', 'SB1', 'AHT', 'NMT', 'LTV', 'LFM', 'MHF', 'RKL', 'MBJ', '8AJ']],
   [['nissan', 'infiniti'], ['JN', '1N', '3N', '5N', 'MNT', 'VSK', 'SJN', 'MDH', 'VNV']],
   [['mitsubishi'], ['JA3', 'JA4', 'JA7', 'JMB', 'JMY', 'JMA', 'JMF', 'ML3', 'MMB', 'MMC', 'MMT', 'MMA', 'MME', '4A3', '4A4']],
+  // Mitsubishi Fuso's trucks — a Mitsubishi to most of their owners.
+  [['fuso', 'mitsubishi fuso', 'mitsubishi'], ['JL5', 'JL6', 'JL7']],
   [['honda', 'acura'], ['JH', '1HG', '2HG', '5FN', '5J6', '5J8', '19X', '19U', 'MRH', 'SHH', 'SHS', 'LUC', '7FA']],
   [['mazda'], ['JM1', 'JM3', 'JMZ', '1YV', '4F2', 'MM7', 'MM8', '3MZ', '3MD', '3MV', 'PE1']],
   [['hyundai', 'genesis'], ['KMH', 'KM8', 'KMF', 'KMT', 'KMJ', '5NP', '5NM', 'MAL', 'NLH', 'TMA', 'KMC']],
@@ -249,6 +251,35 @@ export interface VinRead {
   from?: string;
   conf?: number[];
   cut?: boolean;
+  /** Read by the characters' shapes (v0.35, domain/vinGlyphs.ts): one reader — however many of its readings say it, they are one. */
+  shapes?: boolean;
+}
+
+/**
+ * How many times a VIN was read plainly (not fitted to its check digit, not cut out of a longer word): the shapes'
+ * readings of it count once — and when the shapes read it, the engine's reading that held it in a longer word ("…552TT":
+ * a screw read as letters) counts too: the shapes found where it begins and ends, the engine read the same seventeen.
+ */
+export function plainReads(reads: VinRead[], vin: string): number {
+  let n = 0;
+  let shaped = false;
+  let held = false;
+  for (const r of reads) {
+    if (r.vin !== vin || r.from) continue;
+    if (r.shapes) shaped ||= !r.cut;
+    else if (r.cut) held = true;
+    else n++;
+  }
+  return n + (shaped ? 1 + (held ? 1 : 0) : 0);
+}
+
+/**
+ * The shapes read the same line otherwise (v0.35): a reading of theirs a character or three off this VIN — two readers
+ * that disagree. The check digit cannot settle it where the two read look-alikes it weighs the same (J and 1, S and B):
+ * the engine's J read as a 1 twice adds up all the same.
+ */
+export function shapesDisagree(reads: VinRead[], vin: string): boolean {
+  return reads.some((r) => r.shapes && !r.cut && !r.from && r.vin !== vin && apart(r.vin, vin) <= 3);
 }
 
 export interface VinPick {
@@ -279,23 +310,26 @@ export function pickVin(reads: VinRead[], years: number[], car: { make?: string 
   for (const r of reads) {
     const e = by.get(r.vin) ?? { votes: 0, plain: 0, sources: new Set<string>() };
     e.votes++;
-    // Read as it is: not fitted to its check digit, not cut out of a longer word.
-    if (!r.from && !r.cut) e.plain++;
     e.sources.add(r.source);
     by.set(r.vin, e);
   }
+  // Read as it is: not fitted to its check digit, not cut out of a longer word (the shapes' readings once).
+  for (const [vin, e] of by) e.plain = plainReads(reads, vin);
   const scored = [...by.entries()].map(([vin, e]) => {
     const adds = checkDigitOk(vin);
     const check = adds && e.plain >= 2;
     const fixed = !e.plain;
     const make = makeMatches(vin, car.make);
-    const proven = make !== false && (check || e.sources.size >= 2);
+    // Two photos read the same; or it adds up, read so twice — and the shapes did not read it otherwise.
+    const proven = make !== false && ((check && !shapesDisagree(reads, vin)) || e.sources.size >= 2);
     // A VIN that adds up only once fitted (a look-alike swapped) still ranks above the misreading it was fitted from —
     // unless that was read so again and again (v0.25): a line read the same however its picture was prepared, by both
     // engines, is read right, and its VIN one made for elsewhere, with no check digit (a Gulf Toyota's "JTMHV05J…").
     const source = fixed ? Math.max(0, ...reads.filter((r) => r.vin === vin && r.from).map((r) => by.get(r.from!)?.plain ?? 0)) : 0;
     const fitting = fixed ? 2 + 3 * Math.max(0, source - 1) : 0;
-    const score = e.votes + 4 * e.sources.size + (check ? 12 : adds ? 6 : 0) + (make === true ? 4 : make === false ? -8 : 0) - fitting;
+    // Adding up counts for nothing in a guess cut out of a longer word, and only that (it was taken because it adds up).
+    const guessed = reads.every((r) => r.vin !== vin || r.cut);
+    const score = e.votes + 4 * e.sources.size + (check ? 12 : adds && !guessed ? 6 : 0) + (make === true ? 4 : make === false ? -8 : 0) - fitting;
     return { vin, e, check, make, proven, score };
   });
   // …and above one the other reads are farther from (v0.25): of two that add up only once fitted, the one most reads

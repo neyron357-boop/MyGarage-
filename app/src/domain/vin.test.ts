@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkDigitOk, fixByCheckDigit, isVin, makeMatches, mulkiyaYear, pickVin, solveVin, vinChars, vinCheckDigit, vinMaker, vinsInText, vinYear, voteVin, type VinRead } from './vin';
+import { checkDigitOk, fixByCheckDigit, isVin, makeMatches, mulkiyaYear, pickVin, plainReads, solveVin, vinChars, vinCheckDigit, vinMaker, vinsInText, vinYear, voteVin, type VinRead } from './vin';
 
 const NOW = new Date('2026-11-15T10:00:00Z');
 /** The textbook VIN (its check digit is X). */
@@ -255,5 +255,66 @@ describe('one VIN out of many imperfect readings (v0.25)', () => {
     expect(pick.vin).toBe(VIN);
     // Met out of readings that each erred: to look at, not sure.
     expect(pick.sure).toBe(false);
+  });
+});
+
+describe('a VIN read by its characters\' shapes too (v0.35)', () => {
+  const VIN = 'RKLBC42EXD5301385';
+  it('the shapes are one reader: however many of their readings say it, it is read once by them', () => {
+    const shapes: VinRead[] = [
+      { vin: VIN, source: 'p', shapes: true },
+      { vin: VIN, source: 'p', shapes: true },
+    ];
+    expect(plainReads(shapes, VIN)).toBe(1);
+    expect(pickVin(shapes, []).sure).toBe(false);
+    // …and with the engine reading it as well: twice, and it adds up — sure.
+    const both = [...shapes, { vin: VIN, source: 'p' }];
+    expect(plainReads(both, VIN)).toBe(2);
+    expect(pickVin(both, [])).toMatchObject({ vin: VIN, sure: true, why: 'check' });
+  });
+
+  it('the engine\'s reading that held it in a longer word counts when the shapes read it alone', () => {
+    const held: VinRead[] = [
+      { vin: VIN, source: 'p', cut: true },
+      { vin: VIN, source: 'p', shapes: true },
+    ];
+    expect(plainReads(held, VIN)).toBe(2);
+    expect(pickVin(held, []).sure).toBe(true);
+    // Without the shapes, cut out of words twice is still a guess.
+    expect(plainReads([held[0], held[0]], VIN)).toBe(0);
+  });
+
+  it('a guess cut out of a longer word gains nothing for adding up — that is why it was taken', () => {
+    // The engine read a Pajero's plate (no check digit) nearly right twice; a word of 21 gave a seventeen that adds up.
+    const reads: VinRead[] = [
+      { vin: 'JMYMRVZ0W8J723018', source: 'p' },
+      { vin: 'JMYMRV00W8J723018', source: 'p' },
+      { vin: 'MYMRY83W8T7230182', source: 'p', cut: true },
+    ];
+    expect(checkDigitOk('MYMRY83W8T7230182')).toBe(true);
+    expect(pickVin(reads, []).vin).toMatch(/^JMYMRV/);
+  });
+
+  it('knows a Fuso truck and a Toyota made in Taiwan by their codes', () => {
+    expect(makeMatches('JL6BDG6A2SK002157', 'Mitsubishi')).toBe(true);
+    expect(makeMatches('JL6BDG6A2SK002157', 'Fuso')).toBe(true);
+    expect(makeMatches('RKLBC42EXD5301385', 'Toyota')).toBe(true);
+    expect(makeMatches('RKLBC42EXD5301385', 'Nissan')).toBe(false);
+  });
+});
+
+describe('two readers that disagree (v0.35)', () => {
+  it('the engine reading a J as a 1 twice adds up all the same — the shapes reading the J keep it from being sure', () => {
+    const misread = 'JTMHV051004123456';
+    const right = 'JTMHV05J004123456';
+    expect(checkDigitOk(misread)).toBe(checkDigitOk(right));
+    const reads: VinRead[] = [
+      { vin: misread, source: 'p' },
+      { vin: misread, source: 'p' },
+    ];
+    expect(pickVin(reads, []).sure).toBe(checkDigitOk(misread));
+    const pick = pickVin([...reads, { vin: right, source: 'p', shapes: true }], []);
+    expect(pick.sure).toBe(false);
+    expect(pick.doubt).toContain(7);
   });
 });

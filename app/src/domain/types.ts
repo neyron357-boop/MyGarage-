@@ -570,10 +570,11 @@ export interface SupplierBookRow {
 
 /** The supplier base workbook last brought in: its other sheets (photo log, questions) go back out as they were. */
 export interface StoredBook {
-  id: 'suppliers';
+  /** The supplier base workbook; the VIN characters learned off this garage's plates (v0.35, services/vinReader.ts). */
+  id: 'suppliers' | 'vinGlyphs';
   name: string;
   savedAt: string;
-  /** The .xlsx, in base64 (a backup carries it as text). */
+  /** The .xlsx, in base64 (a backup carries it as text); the learned characters — JSON of their samples (domain/vinGlyphs.ts `KeptSample`). */
   data: string;
 }
 

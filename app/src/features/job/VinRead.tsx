@@ -202,7 +202,7 @@ function CheckSheet({ vehicleId, current, opened: open }: { vehicleId: string; c
             onClick={() =>
               run(async () => {
                 const { setCarVin } = await import('../../services/vinReader');
-                await setCarVin(vehicleId, { vin: ok ? typed : current.vin, year: year ? y : current.year });
+                await setCarVin(vehicleId, { vin: ok ? typed : current.vin, year: year ? y : current.year }, { learn: ok });
                 close();
                 haptic('success');
               }, 'common.saved')
