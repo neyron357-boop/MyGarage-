@@ -15,6 +15,7 @@ import { ensureSeed } from './services/seed';
 import { applyAccent } from './ui/accent';
 import { installHaptics, isApple } from './ui/haptics';
 import { installTapGuard } from './ui/tapGuard';
+import { startSync } from './services/sync/engine';
 
 /** The Mini App owns vertical swipes inside its webview. Telegram's header still handles dismissal. */
 function prepareTelegramGestures() {
@@ -76,6 +77,8 @@ async function start() {
       <App />
     </React.StrictMode>,
   );
+  // Paired with the garage's server (v0.40): syncing runs by itself from now on.
+  startSync();
 }
 
 void start();

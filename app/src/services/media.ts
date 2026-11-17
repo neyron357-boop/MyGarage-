@@ -2,6 +2,7 @@ import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { sha256Bytes, toHex } from '../domain/sha256';
 import type { Media, MediaBlob, MediaOwner } from '../domain/types';
+import { remoteMedia } from './sync/engine';
 
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
@@ -153,13 +154,31 @@ export function cachedMediaUrl(id: string, thumb = false): string | undefined {
   return urlCache.get(`${id}:${thumb ? 't' : 'f'}`);
 }
 
+/**
+ * A photo's (video's, PDF's…) file — here, or from the garage's server when it went there (v0.40: originals leave the
+ * phone; previews stay, and one brought from the server is kept as a preview).
+ */
+async function fileOf(id: string, thumb: boolean): Promise<Blob | undefined> {
+  const rec = await db.mediaBlobs.get(id);
+  if (thumb && rec?.thumb) return rec.thumb;
+  if (rec?.blob) return rec.blob;
+  if (thumb) {
+    const t = await remoteMedia(id, 'thumb');
+    if (t) {
+      if (!rec) void db.mediaBlobs.put({ id, thumb: t, up: 1 }).catch(() => undefined);
+      else void db.mediaBlobs.update(id, { thumb: t }).catch(() => undefined);
+      return t;
+    }
+  }
+  return (await remoteMedia(id, 'blob')) ?? rec?.thumb;
+}
+
 export async function mediaUrl(id: string, thumb = false): Promise<string | undefined> {
   const key = `${id}:${thumb ? 't' : 'f'}`;
   const cached = urlCache.get(key);
   if (cached) return cached;
-  const rec = await db.mediaBlobs.get(id);
-  if (!rec) return undefined;
-  const blob = thumb && rec.thumb ? rec.thumb : rec.blob;
+  const blob = await fileOf(id, thumb);
+  if (!blob) return undefined;
   const url = URL.createObjectURL(blob);
   urlCache.set(key, url);
   return url;
@@ -186,13 +205,21 @@ export function cardUrl(id: string): Promise<string | undefined> {
     const again = urlCache.get(key);
     if (again) return again;
     const rec = await db.mediaBlobs.get(id);
-    if (!rec) return undefined;
-    let card = rec.card;
+    let card = rec?.card;
+    let source: Blob | undefined;
     if (!card) {
-      card = await shrinkPhoto(rec.blob, 1080);
-      if (card) void db.mediaBlobs.update(id, { card }).catch(() => undefined);
+      // The original here, or brought from the server once (the card it makes is kept here: a board stays a board).
+      source = rec?.blob ?? (await remoteMedia(id, 'blob'));
+      if (!source) return undefined;
+      card = await shrinkPhoto(source, 1080);
+      if (card) {
+        if (rec) void db.mediaBlobs.update(id, { card }).catch(() => undefined);
+        else void db.mediaBlobs.put({ id, card, up: 1 }).catch(() => undefined);
+      }
     }
-    const url = URL.createObjectURL(card ?? rec.blob);
+    const shown = card ?? source;
+    if (!shown) return undefined;
+    const url = URL.createObjectURL(shown);
     urlCache.set(key, url);
     return url;
   });
@@ -234,13 +261,13 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 export async function mediaDataUrl(id: string, thumb = true): Promise<string | undefined> {
-  const rec = await db.mediaBlobs.get(id);
-  if (!rec) return undefined;
-  return blobToDataUrl(thumb && rec.thumb ? rec.thumb : rec.blob);
+  const blob = await fileOf(id, thumb);
+  return blob ? blobToDataUrl(blob) : undefined;
 }
 
+/** The file itself (here, or from the server): none when neither has it. */
 export async function mediaBlob(id: string): Promise<Blob | undefined> {
-  return (await db.mediaBlobs.get(id))?.blob;
+  return (await db.mediaBlobs.get(id))?.blob ?? (await remoteMedia(id, 'blob'));
 }
 
 export function dataUrlToBlob(dataUrl: string): Blob {

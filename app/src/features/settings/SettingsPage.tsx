@@ -52,6 +52,7 @@ import { incomeCategoryName, KEPT_INCOME } from '../../domain/incomeCategories';
 import type { Employee, ExpenseCategory, IncomeCategory, JobTemplate, Settings, TemplateItem } from '../../domain/types';
 import { saveBackupFile, wipeAll } from '../../services/backup';
 import { RestoreModal } from './RestoreModal';
+import { ServerCard } from './ServerCard';
 import { loadDemoData } from '../../services/demo';
 import { addIncomeCategory, loadIncomeCategories, saveIncomeCategory } from '../../services/incomeCategories';
 import { blobToDataUrl } from '../../services/media';
@@ -543,6 +544,7 @@ function DeviceCard() {
 }
 
 function DataTab() {
+  // The garage's server (v0.40) first: where the data lives once it is on.
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const counts = useLiveQuery(async () => ({ orders: await db.orders.count(), customers: await db.customers.count(), media: await db.media.count() }), []);
@@ -555,6 +557,7 @@ function DataTab() {
   const [reset, setReset] = useState(false);
   return (
     <Stack gap="md">
+      <ServerCard />
       {counts && (
         <SimpleGrid cols={3} spacing="sm">
           <Box className="kpi">

@@ -1,0 +1,206 @@
+import 'fake-indexeddb/auto';
+import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import { createServer } from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { db, GarageDB, setDb, uid } from '../../db/db';
+import { addItem } from '../estimate';
+import { addMedia, mediaBlob } from '../media';
+import { checkIn } from '../orders';
+import { ensureSeed } from '../seed';
+import { forgetSyncMemory, resetSyncState, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
+import { applyChanges, changeServerAddress, pairDevice, sendLocalData, syncNow, takeServerData } from './engine';
+
+/*
+ * Two devices and the garage's own server (server/src/main.mjs, started here as it runs on the computer): what one
+ * does reaches the other — records, deletions, photos (which leave the phone once the server has them and come back
+ * from it when opened).
+ */
+
+const main = path.resolve(__dirname, '../../../../server/src/main.mjs');
+let proc: ChildProcess | undefined;
+let url = '';
+let admin = '';
+let dataDir = '';
+
+const freePort = () =>
+  new Promise<number>((resolve) => {
+    const s = createServer();
+    s.listen(0, '127.0.0.1', () => {
+      const port = (s.address() as { port: number }).port;
+      s.close(() => resolve(port));
+    });
+  });
+
+/** What the server keeps, read from its own database file. */
+const store = {
+  record(t: string, id: string): Record<string, unknown> | undefined {
+    const d = new DatabaseSync(path.join(dataDir, 'Служебное', 'garage.db'), { readOnly: true });
+    try {
+      const row = d.prepare('SELECT data, deleted FROM records WHERE tbl = ? AND id = ?').get(t, id) as { data: string; deleted: number } | undefined;
+      return row && !row.deleted ? (JSON.parse(row.data) as Record<string, unknown>) : undefined;
+    } finally {
+      d.close();
+    }
+  },
+  file(id: string, variant: string): { size: number } | undefined {
+    const d = new DatabaseSync(path.join(dataDir, 'Служебное', 'garage.db'), { readOnly: true });
+    try {
+      return d.prepare('SELECT size FROM files WHERE id = ? AND variant = ?').get(id, variant) as { size: number } | undefined;
+    } finally {
+      d.close();
+    }
+  },
+};
+/** A pairing code, as this computer's page gives it. */
+const newCode = async () => ((await (await fetch(`${admin}/code`, { method: 'POST' })).json()) as { code: string }).code;
+
+interface Device {
+  name: string;
+  db: GarageDB;
+  config: SyncConfig | null;
+  state: SyncState;
+}
+const devices: Record<string, Device> = {};
+let current: Device | undefined;
+
+/** This process acts as the device: its own database, its own pairing and sync state. */
+function as(name: string): Device {
+  if (current) {
+    current.config = syncConfig();
+    current.state = syncState();
+  }
+  let d = devices[name];
+  if (!d) d = devices[name] = { name, db: new GarageDB(`sync-${name}-${uid()}`), config: null, state: { cursor: 0, pushedT: 0, initialDone: false } };
+  forgetSyncMemory();
+  setDb(d.db);
+  setSyncConfig(d.config);
+  resetSyncState(d.state);
+  current = d;
+  return d;
+}
+
+const bytes = (n: number, seed: number) => new Uint8Array(Array.from({ length: n }, (_, i) => (i * seed) % 251));
+
+beforeAll(async () => {
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-sync-'));
+  const [port, adminPort] = [await freePort(), await freePort()];
+  url = `http://127.0.0.1:${port}`;
+  admin = `http://127.0.0.1:${adminPort}`;
+  proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', main], {
+    env: { ...process.env, DATA_DIR: dataDir, PORT: String(port), ADMIN_PORT: String(adminPort) },
+    stdio: 'ignore',
+  });
+  for (let i = 0; i < 100; i++) {
+    try {
+      if ((await fetch(`${url}/api/health`)).ok) return;
+    } catch {
+      // starting
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the server did not start');
+}, 20_000);
+afterAll(() => {
+  proc?.kill();
+  setTimeout(() => fs.rmSync(dataDir, { recursive: true, force: true }), 300);
+});
+
+describe('syncing with the garage’s server (v0.40)', () => {
+  let orderId = '';
+  let photoId = '';
+
+  it('the first device sends everything it has; its photo leaves it once the server has it', async () => {
+    as('phone');
+    await ensureSeed();
+    const o = await checkIn({ plate: { emirate: 'DXB', code: 'Q', number: '52594' }, make: 'Toyota', model: 'Camry', name: 'Ahmed', phone: '0507778899', docLanguage: 'en', complaint: 'Brake noise', arrivedNow: true });
+    orderId = o.id;
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake pads', unitPriceFils: 25000 });
+    const photo = await addMedia({ ownerType: 'order', ownerId: o.id, slot: 'car', file: new Blob([bytes(70_000, 7)], { type: 'image/jpeg' }), compress: false });
+    photoId = photo.id;
+    const paired = await pairDevice(url, await newCode(), 'iPhone');
+    expect(paired).toEqual({ server: 0, local: 1 });
+    await sendLocalData();
+    expect(syncState().lastError).toBeUndefined();
+    expect(store.record('orders', o.id)?.complaint).toBe('Brake noise');
+    expect(store.record('orders', o.id)?._t).toBeUndefined();
+    expect(store.file(photo.id, 'blob')?.size).toBe(70_000);
+    const row = await db.mediaBlobs.get(photo.id);
+    expect(row?.up).toBe(1);
+    expect(row?.blob).toBeUndefined();
+    expect(syncState().freedBytes).toBe(70_000);
+    // Opened again: brought from the server.
+    expect((await mediaBlob(photo.id))?.size).toBe(70_000);
+  });
+
+  it('another device takes the garage’s data from the server — the photo too, when it is opened', async () => {
+    as('pc');
+    await ensureSeed();
+    const paired = await pairDevice(`${url}/#pair=000000`, await newCode(), 'PC');
+    expect(paired.server).toBe(1);
+    await takeServerData();
+    expect((await db.orders.get(orderId))?.complaint).toBe('Brake noise');
+    expect(await db.items.where('orderId').equals(orderId).count()).toBe(1);
+    expect(await db.mediaBlobs.get(photoId)).toBeUndefined();
+    const blob = await mediaBlob(photoId);
+    expect(new Uint8Array(await blob!.arrayBuffer())).toEqual(bytes(70_000, 7));
+    expect(((await db.settings.get('main')) as { _t?: number } | undefined)?._t).toBe(0);
+  });
+
+  it('a change on one reaches the other; a deletion too', async () => {
+    as('pc');
+    await db.orders.update(orderId, { complaint: 'Brake noise, front left' });
+    const item = (await db.items.where('orderId').equals(orderId).first())!;
+    await db.items.delete(item.id);
+    await new Promise((r) => setTimeout(r, 20));
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+    as('phone');
+    await syncNow();
+    expect((await db.orders.get(orderId))?.complaint).toBe('Brake noise, front left');
+    expect(await db.items.get(item.id)).toBeUndefined();
+  });
+
+  it('a record changed here and not sent yet is not overwritten — it goes up and wins', async () => {
+    as('phone');
+    await db.orders.update(orderId, { complaint: 'phone says' });
+    as('pc');
+    await db.orders.update(orderId, { complaint: 'pc says' });
+    await syncNow();
+    as('phone');
+    await syncNow();
+    expect((await db.orders.get(orderId))?.complaint).toBe('phone says');
+    expect(store.record('orders', orderId)?.complaint).toBe('phone says');
+    as('pc');
+    await syncNow();
+    expect((await db.orders.get(orderId))?.complaint).toBe('phone says');
+  });
+
+  it('a job’s number never goes back', async () => {
+    as('pc');
+    await db.counters.put({ name: 'order', value: 1500 });
+    await applyChanges([{ t: 'counters', k: 'order', d: { name: 'order', value: 1001 } }]);
+    expect((await db.counters.get('order'))?.value).toBe(1500);
+  });
+
+  it('the same server at a new address: the device keeps its key; a wrong address is not kept', async () => {
+    as('phone');
+    const before = syncConfig()!.url;
+    await expect(changeServerAddress('http://127.0.0.1:1')).rejects.toThrow();
+    expect(syncConfig()!.url).toBe(before);
+    await changeServerAddress(before.replace('127.0.0.1', 'localhost'));
+    expect(syncConfig()!.url).toBe(before.replace('127.0.0.1', 'localhost'));
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+  });
+
+  it('a device cut off on the server stops, and says why', async () => {
+    as('pc');
+    setSyncConfig({ ...syncConfig()!, token: 'wrong' });
+    await syncNow();
+    expect(syncState().lastError).toBe('revoked');
+  });
+});

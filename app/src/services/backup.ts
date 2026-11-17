@@ -2,6 +2,7 @@ import { db, GarageDB } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { AppError } from './errors';
 import { dataUrlToBlob } from './media';
+import { forgetSync } from './sync/engine';
 
 const FORMAT = 'mygarage-backup';
 /** First bytes of a v2 backup file. */
@@ -18,7 +19,8 @@ interface Manifest {
   version: 2;
   exportedAt: string;
   tables: Record<string, unknown[]>;
-  blobs: { id: string; blob: BlobRef; thumb?: BlobRef }[];
+  /** A file that went to the garage's server (v0.40) has none here: only its preview. */
+  blobs: { id: string; blob?: BlobRef; thumb?: BlobRef }[];
 }
 
 /**
@@ -44,7 +46,7 @@ export async function exportBackup(): Promise<Blob> {
     return ref;
   };
   await db.mediaBlobs.each((row) => {
-    blobs.push({ id: row.id, blob: add(row.blob), thumb: row.thumb ? add(row.thumb) : undefined });
+    blobs.push({ id: row.id, blob: row.blob ? add(row.blob) : undefined, thumb: row.thumb ? add(row.thumb) : undefined });
   });
   const manifest: Manifest = { format: FORMAT, version: 2, exportedAt: nowIso(), tables, blobs };
   const json = new TextEncoder().encode(JSON.stringify(manifest));
@@ -52,7 +54,7 @@ export async function exportBackup(): Promise<Blob> {
   return new Blob([header, json, ...files], { type: 'application/octet-stream' });
 }
 
-type Restorable = { exportedAt?: string; tables: Record<string, unknown[]>; blobs: { id: string; blob: Blob; thumb?: Blob }[] };
+type Restorable = { exportedAt?: string; tables: Record<string, unknown[]>; blobs: { id: string; blob?: Blob; thumb?: Blob }[] };
 
 async function readBackup(file: Blob): Promise<Restorable> {
   const head = await file.slice(0, MAGIC.length).text();
@@ -68,7 +70,7 @@ async function readBackup(file: Blob): Promise<Restorable> {
       if (r.offset < 0 || base + r.offset + r.size > file.size) throw new AppError('err.backupDamaged');
       return file.slice(base + r.offset, base + r.offset + r.size, r.type);
     };
-    return { exportedAt: manifest.exportedAt, tables: manifest.tables, blobs: (manifest.blobs ?? []).map((b) => ({ id: b.id, blob: at(b.blob), thumb: b.thumb ? at(b.thumb) : undefined })) };
+    return { exportedAt: manifest.exportedAt, tables: manifest.tables, blobs: (manifest.blobs ?? []).map((b) => ({ id: b.id, blob: b.blob ? at(b.blob) : undefined, thumb: b.thumb ? at(b.thumb) : undefined })) };
   }
   // v1: one JSON document with files as data URLs.
   let data: { format?: string; exportedAt?: string; tables?: Record<string, unknown[]>; blobs?: { id: string; blob: string; thumb?: string }[] };
@@ -145,14 +147,15 @@ export async function importBackup(file: Blob, onProgress?: (done: number, total
         await Promise.all(
           data.blobs.slice(i, i + 12).map(async (b) => {
             try {
-              return { id: b.id, blob: await ownCopy(b.blob), thumb: b.thumb ? await ownCopy(b.thumb) : undefined };
+              // A file that went to the garage's server (v0.40) comes back as its preview; the original stays there.
+              return { id: b.id, blob: b.blob ? await ownCopy(b.blob) : undefined, thumb: b.thumb ? await ownCopy(b.thumb) : undefined, up: b.blob ? undefined : 1 };
             } catch {
               lost++;
               return null;
             }
           }),
         )
-      ).filter((x): x is { id: string; blob: Blob; thumb: Blob | undefined } => !!x);
+      ).filter((x): x is { id: string; blob: Blob | undefined; thumb: Blob | undefined; up: number | undefined } => !!x);
       try {
         await fresh.mediaBlobs.bulkPut(batch);
       } catch {
@@ -172,6 +175,8 @@ export async function wipeAll(): Promise<void> {
   db.close();
   await GarageDB.delete(name);
   forgetBackup();
+  // Everything here is gone: this device is no longer paired with the garage's server (its data there stays).
+  forgetSync();
 }
 
 /* ---------------- Backup reminder ---------------- */

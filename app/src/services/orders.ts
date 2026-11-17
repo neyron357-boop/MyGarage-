@@ -20,6 +20,7 @@ import type {
   JobNote,
   Lang,
   Media,
+  MediaBlob,
   MessageLog,
   Order,
   OrderEvent,
@@ -461,7 +462,7 @@ export interface DeletedJob {
   inspections: Inspection[];
   marks: DamageMark[];
   media: Media[];
-  blobs: { id: string; blob: Blob; thumb?: Blob }[];
+  blobs: MediaBlob[];
   messages: MessageLog[];
   incidents: Incident[];
   notes?: JobNote[];

@@ -1,0 +1,14 @@
+{
+  "name": "mygarage-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MyGarage's own server: keeps the garage's data and files in one folder on this computer and syncs the app between devices.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  }
+}
