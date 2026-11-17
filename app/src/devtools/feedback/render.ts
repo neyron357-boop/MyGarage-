@@ -152,8 +152,14 @@ export async function renderAnnotated(shot: { blob: Blob; width: number; height:
   return canvas;
 }
 
-export function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob: empty'))), type, quality));
+/** The canvas as a file — and the canvas let go (Safari keeps a canvas's memory until its size is zero): not drawn on after. */
+export async function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  try {
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob: empty'))), type, quality));
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 /** The list's small picture: the screenshot with its marks, 240 px wide. */

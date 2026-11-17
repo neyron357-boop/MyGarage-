@@ -25,8 +25,9 @@ export async function buildExport(ids: string[], s: FbStrings, onStep?: (done: n
     if (shot) {
       const canvas = await renderAnnotated(shot, note.marks);
       const file = shotFile(note.n);
+      const { width, height } = canvas;
       files.push({ name: file, data: await bytes(await canvasBlob(canvas, 'image/png')) });
-      items.push({ note, shot: { file, width: canvas.width, height: canvas.height } });
+      items.push({ note, shot: { file, width, height } });
     } else items.push({ note });
     // Let the progress paint between pictures.
     await new Promise((r) => window.setTimeout(r, 0));

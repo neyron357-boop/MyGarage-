@@ -87,6 +87,29 @@ function readPos(): Pos {
   return { side: 'right', y: 0.62 };
 }
 
+/**
+ * A hold opens «Мои замечания» while the finger is still down, and the pencil goes: the finger is then lifted over the
+ * list, and the click its release brings would open the note under it. That click goes nowhere.
+ */
+function swallowReleaseClick() {
+  const ended = () => {
+    window.removeEventListener('pointerup', ended, true);
+    window.removeEventListener('touchend', ended, true);
+    const until = performance.now() + 500;
+    const stop = (e: Event) => {
+      window.removeEventListener('click', stop, true);
+      if (performance.now() > until) return;
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    };
+    window.addEventListener('click', stop, true);
+    window.setTimeout(() => window.removeEventListener('click', stop, true), 500);
+  };
+  window.addEventListener('pointerup', ended, true);
+  window.addEventListener('touchend', ended, true);
+}
+
 /** The pencil: a tap — pick mode; held (on a PC — a right click) — «Мои замечания»; dragged — moved along the edge. */
 function Pencil({ count, onTap, onHold, label }: { count: number; onTap: () => void; onHold: () => void; label: string }) {
   const [pos, setPos] = useState(readPos);
@@ -123,6 +146,7 @@ function Pencil({ count, onTap, onHold, label }: { count: number; onTap: () => v
         const timer = window.setTimeout(() => {
           if (g.current && !g.current.moved) {
             g.current.held = true;
+            swallowReleaseClick();
             onHold();
           }
         }, 550);
