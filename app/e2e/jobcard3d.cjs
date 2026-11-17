@@ -43,6 +43,7 @@ async function run(dir) {
   const { server, base } = await serve(dir);
   const browser = await launch();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ru-RU' });
+  await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   await page.goto(base + '#/settings?tab=data');
   await page.getByRole('button', { name: 'Загрузить демо-данные' }).click();

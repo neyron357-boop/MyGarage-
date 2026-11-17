@@ -23,6 +23,7 @@ async function launchBrowser() {
 (async () => {
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, locale: 'ru-RU' });
+  await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
@@ -208,6 +209,7 @@ async function launchBrowser() {
   await page.locator('.screen[data-role="top"]').getByText(/^(Светлая|Light)$/).click();
 
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, locale: 'ru-RU' });
+  await desk.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const dp = await desk.newPage();
   // The computer's browser has its own (empty) storage: the demo first, as on the phone.
   await dp.goto(BASE + '#/settings?tab=data');

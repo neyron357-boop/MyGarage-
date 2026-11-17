@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setLang } from '../i18n';
 import { FormRow, RowGroup } from './components';
+import { FeedbackSwitchRow } from '../devtools/feedback';
 import { hapticsAvailable, iosVersion, isApple, useHaptics } from './haptics';
 import { useLang } from './hooks';
 import { ACCENTS, ACCENT_COLOR, setAccent, useAccent } from './accent';
@@ -91,6 +92,7 @@ export function AppearanceRows() {
           <Switch checked={haptics} onChange={(e) => setHaptics(e.currentTarget.checked)} aria-label={t('app.haptics')} />
         </FormRow>
       )}
+      <FeedbackSwitchRow />
     </RowGroup>
   );
 }

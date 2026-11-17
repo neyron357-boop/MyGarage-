@@ -26,6 +26,7 @@ const check = (name, ok, detail) => {
 (async () => {
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'ru-RU' });
+  await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
@@ -175,6 +176,7 @@ const check = (name, ok, detail) => {
   // card above it — Chromium's scroll anchoring lost its card and took the board up to its top (2000 → 64).
   {
     const dc = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'ru-RU' });
+    await dc.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
     const dp = await dc.newPage();
     dp.on('pageerror', (e) => errors.push('pageerror (long board): ' + e.message));
     await dp.goto(BASE + '#/');
@@ -727,6 +729,7 @@ const check = (name, ok, detail) => {
   // A computer (or an iPhone on its side — the wide layout): "Record payment" clicked again the moment its
   // save ends, while the sheet leaves. A closing dialog takes no clicks: one payment.
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "ru-RU" });
+  await desk.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const wp = await desk.newPage();
   wp.on('pageerror', (e) => errors.push('pageerror (wide): ' + e.message));
   await wp.goto(BASE + '#/settings?tab=data');

@@ -1,7 +1,7 @@
 {
   "name": "mygarage",
   "private": true,
-  "version": "0.38.0",
+  "version": "0.39.0",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/ocr-assets.cjs",
@@ -35,6 +35,7 @@
     "dexie-react-hooks": "^4.4.0",
     "i18next": "^24.2.3",
     "jsbarcode": "^3.12.3",
+    "modern-screenshot": "4.7.0",
     "motion": "14.9.0",
     "pdfjs-dist": "6.4.299",
     "qrcode": "^1.5.4",

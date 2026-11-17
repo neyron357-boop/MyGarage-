@@ -82,6 +82,7 @@ async function run(dir) {
   const { server, base } = await serve(dir);
   const browser = await launch();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ru-RU', hasTouch: false });
+  await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   const cdp = await ctx.newCDPSession(page);
   const top = (sel) => page.locator(`.screen[data-role="top"] ${sel}`);

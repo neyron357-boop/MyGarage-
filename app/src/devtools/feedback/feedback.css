@@ -1,0 +1,734 @@
+/* ---------- The feedback tool (src/devtools/feedback — temporary, for the developer) ----------
+   Everything here is the tool's own (`fb-` classes, `[data-fb-ui]`), above everything in the app, and never in a
+   screenshot. Colours come from the app's tokens (with fallbacks, so it works on its own). */
+
+[data-fb-ui] {
+  --fb-red: var(--mantine-color-red-filled, rgb(255, 59, 48));
+  --fb-accent: var(--mantine-color-cobalt-filled, rgb(0, 122, 255));
+  --fb-card: var(--app-card, #fff);
+  --fb-soft: var(--app-soft, #f2f2f7);
+  --fb-fill: var(--app-fill, rgba(118, 118, 128, 0.12));
+  --fb-line: var(--app-hairline, rgba(60, 60, 67, 0.2));
+  --fb-dim: var(--app-label-2, rgba(60, 60, 67, 0.6));
+  --fb-glass: var(--glass-bg-strong, rgba(255, 255, 255, 0.86));
+  --fb-ease: var(--ease-ios, cubic-bezier(0.32, 0.72, 0, 1));
+  --fb-spring: var(--spring, cubic-bezier(0.34, 1.4, 0.64, 1));
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, system-ui, sans-serif;
+  color: var(--mantine-color-text, #000);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The pencil: a small glass disc on the edge, dragged anywhere along it. */
+.fb-fab {
+  position: fixed;
+  z-index: 2147483000;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: color-mix(in srgb, var(--fb-accent) 84%, transparent);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  -webkit-backdrop-filter: blur(10px) saturate(1.6);
+  backdrop-filter: blur(10px) saturate(1.6);
+  opacity: 0.86;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: pointer;
+  transition:
+    transform 80ms var(--fb-spring),
+    opacity 200ms;
+}
+.fb-fab:active,
+.fb-fab[data-drag] {
+  transform: scale(0.92);
+  opacity: 1;
+}
+.fb-fab[data-drag] {
+  transition: none;
+}
+.fb-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--fb-red);
+  color: #fff;
+  font: 700 11px/19px -apple-system, system-ui, sans-serif;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--app-canvas, #fff);
+  pointer-events: none;
+}
+html.kb .fb-fab {
+  display: none;
+}
+
+/* Buttons of the tool: capsules, 44 pt at least. */
+.fb-btn {
+  position: relative;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font: 600 15px/1.1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  color: var(--mantine-color-text, #000);
+  background: var(--fb-fill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 80ms var(--fb-spring);
+}
+.fb-btn:active {
+  transform: scale(0.95);
+}
+.fb-btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.fb-btn[data-primary] {
+  background: var(--fb-accent);
+  color: #fff;
+}
+.fb-btn[data-danger] {
+  color: var(--fb-red);
+}
+.fb-btn[data-danger][data-primary] {
+  background: var(--fb-red);
+  color: #fff;
+}
+.fb-btn[data-round] {
+  padding: 0;
+  width: 44px;
+  border-radius: 50%;
+}
+.fb-btn[data-wide] {
+  width: 100%;
+  min-height: 50px;
+  font-size: 17px;
+  border-radius: 25px;
+}
+.fb-btn[data-on] {
+  background: var(--fb-accent);
+  color: #fff;
+}
+.fb-btn > .haptic-hit {
+  border-radius: inherit;
+}
+
+/* Pick mode: a red edge round the screen, the frame on what is under the finger, the bar. */
+.fb-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+.fb-edge {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px var(--fb-red);
+}
+.fb-frame {
+  position: fixed;
+  pointer-events: none;
+  border: 2px solid var(--fb-red);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fb-red) 10%, transparent);
+  box-shadow: 0 0 0 2px #fff;
+}
+.fb-frame-label {
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% + 4px);
+  max-width: min(320px, 80vw);
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--fb-red);
+  color: #fff;
+  font: 600 12px/1.35 -apple-system, system-ui, sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fb-frame[data-below] .fb-frame-label {
+  bottom: auto;
+  top: calc(100% + 4px);
+}
+.fb-frame[data-right] .fb-frame-label {
+  left: auto;
+  right: -2px;
+}
+.fb-bar {
+  position: fixed;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 28px;
+  background: var(--fb-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.26),
+    inset 0 0 0 0.5px var(--fb-line);
+}
+.fb-bar[data-top] {
+  bottom: auto;
+  top: calc(env(safe-area-inset-top) + 8px);
+}
+@media (min-width: 700px) {
+  .fb-bar {
+    left: 50%;
+    right: auto;
+    width: 480px;
+    transform: translateX(-50%);
+  }
+}
+.fb-bar-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font: 600 15px/1.2 -apple-system, system-ui, sans-serif;
+  color: var(--fb-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The note's sheet: from below, above the keyboard. */
+.fb-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--fb-kb, 0px);
+  max-height: calc(100% - var(--fb-kb, 0px) - env(safe-area-inset-top) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  background: var(--fb-card);
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.22);
+  padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+  transform: translateY(calc(100% + 40px));
+  visibility: hidden;
+  transition:
+    transform 380ms var(--fb-ease),
+    visibility 0s 380ms;
+}
+.fb-sheet[data-open] {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 380ms var(--fb-ease),
+    visibility 0s;
+}
+/* While closed it still holds the field the tap focuses (the iPhone opens its keyboard only in the tap itself). */
+.fb-sheet[data-ready] {
+  visibility: visible;
+}
+@media (min-width: 700px) {
+  .fb-sheet {
+    left: auto;
+    right: 24px;
+    bottom: calc(var(--fb-kb, 0px) + 24px);
+    width: 420px;
+    border-radius: 24px;
+  }
+}
+.fb-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.fb-head-text {
+  flex: 1;
+  min-width: 0;
+}
+.fb-title {
+  font: 700 17px/1.25 -apple-system, system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.fb-sub {
+  font: 400 13px/1.3 -apple-system, system-ui, sans-serif;
+  color: var(--fb-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fb-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.fb-scroll-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 10px -16px 0;
+  padding: 0 16px;
+}
+.fb-scroll-row::-webkit-scrollbar {
+  display: none;
+}
+.fb-chip {
+  position: relative;
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--fb-fill);
+  color: var(--mantine-color-text, #000);
+  font: 500 15px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fb-chip::after {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+.fb-text {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  max-height: 140px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 14px;
+  resize: none;
+  background: var(--fb-soft);
+  color: var(--mantine-color-text, #000);
+  font: 400 16px/1.35 -apple-system, system-ui, sans-serif;
+  outline: none;
+}
+.fb-text:focus {
+  box-shadow: 0 0 0 2px var(--fb-accent);
+}
+.fb-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fb-soft);
+  color: var(--mantine-color-text, #000);
+  font: 400 16px/1 -apple-system, system-ui, sans-serif;
+  outline: none;
+}
+.fb-input:focus {
+  box-shadow: 0 0 0 2px var(--fb-accent);
+}
+
+/* A small screenshot with the frame on it (the note's sheet). */
+.fb-shot {
+  position: relative;
+  flex-shrink: 0;
+  width: 54px;
+  border: 0;
+  padding: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--fb-soft);
+  box-shadow: inset 0 0 0 0.5px var(--fb-line);
+  cursor: pointer;
+}
+.fb-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.fb-shot-frame {
+  position: absolute;
+  border: 1.5px solid var(--fb-red);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #fff;
+}
+.fb-shot-state {
+  display: grid;
+  place-items: center;
+  height: 96px;
+  color: var(--fb-dim);
+}
+@keyframes fb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.fb-spin {
+  animation: fb-spin 0.9s linear infinite;
+}
+
+/* The annotator and «Мои замечания»: full screen, above everything. */
+.fb-full {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483001;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-canvas, #f2f2f7);
+  pointer-events: auto;
+  animation: fb-up 380ms var(--fb-ease);
+}
+@keyframes fb-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb-full,
+  .fb-sheet {
+    animation: none;
+    transition: none;
+  }
+}
+.fb-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
+}
+.fb-top-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font: 700 17px/1.2 -apple-system, system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fb-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px calc(env(safe-area-inset-bottom) + 10px);
+}
+
+/* The annotator's picture and its marks. */
+.fb-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 4px 12px;
+  overflow: hidden;
+}
+.fb-canvas {
+  position: relative;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.18),
+    0 0 0 0.5px var(--fb-line);
+  border-radius: 6px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fb-canvas img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.fb-canvas svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+.fb-mark-hit {
+  cursor: pointer;
+}
+.fb-seg {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 24px;
+  background: var(--fb-fill);
+}
+.fb-seg .fb-btn {
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  background: transparent;
+}
+.fb-seg .fb-btn[data-on] {
+  background: var(--app-pill, #1c1c1e);
+  color: var(--app-pill-text, #fff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.fb-mark-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 12px;
+  padding: 8px;
+  border-radius: 18px;
+  background: var(--fb-card);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
+}
+.fb-num {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--fb-red);
+  color: #fff;
+  font: 700 14px/1 -apple-system, system-ui, sans-serif;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* «Мои замечания»: the list, a note, the export. */
+.fb-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 12px 12px;
+}
+.fb-group {
+  background: var(--fb-card);
+  border-radius: 20px;
+  overflow: hidden;
+}
+.fb-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px 10px 4px;
+}
+.fb-item + .fb-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 52px;
+  right: 0;
+  height: 0.5px;
+  background: var(--fb-line);
+}
+.fb-check {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  margin-top: 26px;
+  border: 0;
+  padding: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.fb-check i {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--fb-line);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.fb-check[data-on] i {
+  background: var(--fb-accent);
+  box-shadow: none;
+}
+.fb-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.fb-thumb {
+  flex-shrink: 0;
+  width: 54px;
+  height: 96px;
+  border-radius: 9px;
+  object-fit: cover;
+  object-position: top;
+  background: var(--fb-soft);
+  box-shadow: inset 0 0 0 0.5px var(--fb-line);
+}
+.fb-thumb[data-wide] {
+  width: 96px;
+  height: 60px;
+}
+.fb-item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fb-item-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font: 600 15px/1.25 -apple-system, system-ui, sans-serif;
+}
+.fb-item-head b {
+  flex-shrink: 0;
+}
+.fb-item-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fb-item-comment {
+  font: 400 15px/1.3 -apple-system, system-ui, sans-serif;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.fb-item-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font: 400 13px/1.2 -apple-system, system-ui, sans-serif;
+  color: var(--fb-dim);
+}
+.fb-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font: 600 12px/1 -apple-system, system-ui, sans-serif;
+  color: #fff;
+  background: var(--mantine-color-orange-filled, rgb(255, 149, 0));
+}
+.fb-pill[data-fixed] {
+  background: var(--mantine-color-green-filled, rgb(52, 199, 89));
+}
+.fb-empty {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--fb-dim);
+  font: 400 17px/1.4 -apple-system, system-ui, sans-serif;
+}
+.fb-note-shot {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  border: 0;
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--fb-soft);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+}
+.fb-note-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.fb-section {
+  margin-top: 16px;
+}
+.fb-section-title {
+  margin: 0 4px 6px;
+  font: 600 13px/1.2 -apple-system, system-ui, sans-serif;
+  color: var(--fb-dim);
+}
+.fb-mark-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+}
+.fb-tech {
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--fb-card);
+  font: 400 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fb-dim);
+}
+.fb-menu {
+  position: absolute;
+  right: 12px;
+  top: calc(env(safe-area-inset-top) + 58px);
+  z-index: 2;
+  min-width: 240px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--fb-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.24);
+  display: flex;
+  flex-direction: column;
+}
+.fb-menu .fb-btn {
+  justify-content: flex-start;
+  background: none;
+  border-radius: 12px;
+}
+.fb-toast {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top) + 10px);
+  z-index: 2147483002;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 22px;
+  background: var(--fb-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
+  font: 600 15px/1.2 -apple-system, system-ui, sans-serif;
+  pointer-events: none;
+  animation: fb-up 300ms var(--fb-ease);
+}
+.fb-hide {
+  display: none !important;
+}

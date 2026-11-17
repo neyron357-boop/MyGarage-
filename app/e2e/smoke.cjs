@@ -29,6 +29,8 @@ async function launchBrowser() {
 (async () => {
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: false, locale: 'ru-RU' });
+  // The developer's feedback pencil (src/devtools/feedback) out of the way of scripted taps.
+  await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   // E2E_HAPTIC_LABELS=1: lay the iPhone's haptic labels over the controls (they must not get in the way).
   // A segment is covered by its haptic switch, as the finger will be: a click that Playwright refuses as
   // "covered" is repeated at the same point (the switch gets it and picks the segment, like a tap).
@@ -2663,6 +2665,66 @@ async function launchBrowser() {
       return [await db.invoices.where('orderId').equals(id).count(), await db.payments.where('orderId').equals(id).count()];
     }, paid.paid.order);
     if (!back[0] || !back[1]) throw new Error('Undo did not bring it back: ' + JSON.stringify(back));
+  });
+  await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
+    await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
+    await page.goto(BASE + '#/');
+    await page.reload();
+    const pencil = page.locator('.fb-fab');
+    await pencil.waitFor();
+    await pencil.click();
+    // The screenshot is taken as the mode opens.
+    await page.locator('.fb-layer[data-shot="ok"]').waitFor({ timeout: 20000 });
+    // The bell «Сегодня» in the board's head: picked, its sheet not opened.
+    const bell = front('.today-bell').first();
+    const box = await bell.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const sheet = page.locator('.fb-sheet[data-open]');
+    await sheet.waitFor();
+    await page.waitForTimeout(300);
+    if ((await page.locator('.mantine-Modal-content').count()) || !/#\/$/.test(page.url())) throw new Error('the picked bell acted: ' + page.url());
+    if (!/Сегодня/.test(await sheet.locator('.fb-title').innerText())) throw new Error('picked: ' + (await sheet.locator('.fb-title').innerText()));
+    await sheet.locator('textarea').fill('Не тот цвет');
+    await shot('45a-feedback-note');
+    await sheet.getByRole('button', { name: 'Сохранить' }).click();
+    await page.locator('.fb-toast', { hasText: /Замечание №\d+ сохранено/ }).waitFor();
+    await page.locator('.fb-layer').waitFor({ state: 'detached' });
+    // «Мои замечания»: a right click on the pencil (a hold on the phone).
+    await pencil.click({ button: 'right' });
+    const panel = page.locator('.fb-full');
+    await panel.locator('.fb-item').first().waitFor();
+    if (!(await panel.locator('.fb-item').first().innerText()).includes('Не тот цвет')) throw new Error('the note is not in the list');
+    await page.evaluate(() => {
+      window.__zip = null;
+      navigator.canShare = () => true;
+      navigator.share = async (d) => void (window.__zip = d.files[0]);
+    });
+    await panel.getByRole('button', { name: /Экспорт для агента · 1/ }).click();
+    await panel.getByRole('button', { name: 'Поделиться' }).waitFor();
+    await page.waitForTimeout(450);
+    await panel.getByRole('button', { name: 'Поделиться' }).click();
+    await page.waitForFunction(() => window.__zip);
+    const zip = await page.evaluate(async () => {
+      const { unzip } = await import('/src/domain/zip.ts');
+      const files = await unzip(new Uint8Array(await window.__zip.arrayBuffer()));
+      const tasks = new TextDecoder().decode(files.get('TASKS.md'));
+      const json = JSON.parse(new TextDecoder().decode(files.get('annotations.json')));
+      const png = files.get(json.tasks[0].screenshot?.file ?? '');
+      return { name: window.__zip.name, names: [...files.keys()], tasks, json: json.tasks[0], png: png ? [png[1], png[2], png[3]] : null };
+    });
+    if (!/^mygarage-feedback-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/.test(zip.name)) throw new Error('zip name ' + zip.name);
+    const n = zip.json.n;
+    const file = `screenshots/${String(n).padStart(3, '0')}.png`;
+    if (!zip.names.includes('TASKS.md') || !zip.names.includes('annotations.json') || !zip.names.includes(file)) throw new Error('zip holds ' + zip.names.join(', '));
+    if (String.fromCharCode(...zip.png) !== 'PNG') throw new Error('not a PNG');
+    if (!zip.tasks.includes(`Задача №${n}`) || !zip.tasks.includes('**Проблема:** Не тот цвет') || !zip.tasks.includes(file)) throw new Error('TASKS.md:\n' + zip.tasks);
+    if (zip.json.comment !== 'Не тот цвет' || !zip.json.element?.selector || zip.json.marks[0]?.kind !== 'rect' || !zip.json.marks[0].box) throw new Error('annotations.json: ' + JSON.stringify(zip.json));
+    // Exported — and still there.
+    if (!(await panel.locator('.fb-item').count())) throw new Error('the export took the notes away');
+    await shot('45b-feedback-list');
+    await panel.getByRole('button', { name: 'Закрыть' }).click();
+    await page.evaluate(() => localStorage.setItem('mygarage.feedback', '0'));
+    await page.reload();
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

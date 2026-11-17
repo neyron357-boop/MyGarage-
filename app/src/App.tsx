@@ -49,6 +49,8 @@ import { UnsavedGuard } from './ui/unsaved';
 import { cssResolver, phoneTheme, theme } from './ui/theme';
 import { useRestoreReport } from './features/settings/RestoreModal';
 import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
+// The developer's feedback tool (temporary): removed with src/devtools/feedback and this line and the one below.
+import { FeedbackTool } from './devtools/feedback';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
 function AppRoutes({ location }: { location: Location }) {
@@ -371,6 +373,7 @@ function Providers({ children }: { children: React.ReactNode }) {
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
       <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />
       <Celebration />
+      <FeedbackTool />
       {children}
     </DatesProvider>
   );

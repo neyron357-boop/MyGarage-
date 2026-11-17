@@ -24,6 +24,7 @@ async function launch() {
 (async () => {
   const browser = await launch();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ru-RU', hasTouch: true, isMobile: true });
+  await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   if (process.env.E2E_HAPTIC_LABELS === '1') await ctx.addInitScript(() => localStorage.setItem('mygarage.hapticLabels', '1'));
   const page = await ctx.newPage();
   const cdp = await ctx.newCDPSession(page);
