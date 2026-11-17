@@ -30,12 +30,12 @@
   display: grid;
   place-items: center;
   color: #fff;
-  background: color-mix(in srgb, var(--fb-accent) 84%, transparent);
+  /* Solid, no blur: it stays over the app's scrolling lists, and a blur under it is redrawn with every frame of them
+     on an iPhone (v0.40.1). */
+  background: var(--fb-accent);
   box-shadow:
     0 6px 18px rgba(0, 0, 0, 0.22),
     inset 0 0 0 1px rgba(255, 255, 255, 0.28);
-  -webkit-backdrop-filter: blur(10px) saturate(1.6);
-  backdrop-filter: blur(10px) saturate(1.6);
   opacity: 0.86;
   touch-action: none;
   user-select: none;
@@ -141,10 +141,14 @@ html.kb .fb-fab {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  box-shadow: inset 0 0 0 3px var(--fb-red);
+  border: 3px solid var(--fb-red);
 }
+/* Moved by its transform (written only when something moves — a scroll, the keyboard), never every frame. */
 .fb-frame {
   position: fixed;
+  left: 0;
+  top: 0;
+  will-change: transform;
   pointer-events: none;
   border: 2px solid var(--fb-red);
   border-radius: 6px;
@@ -184,9 +188,8 @@ html.kb .fb-fab {
   gap: 6px;
   padding: 6px;
   border-radius: 28px;
-  background: var(--fb-glass);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  backdrop-filter: blur(24px) saturate(1.8);
+  /* Solid, no blur: the page scrolls under it in pick mode (a blur would be redrawn with every frame on an iPhone). */
+  background: var(--fb-card);
   box-shadow:
     0 10px 34px rgba(0, 0, 0, 0.26),
     inset 0 0 0 0.5px var(--fb-line);
@@ -700,9 +703,7 @@ html.kb .fb-fab {
   min-width: 240px;
   padding: 6px;
   border-radius: 16px;
-  background: var(--fb-glass);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  backdrop-filter: blur(24px) saturate(1.8);
+  background: var(--fb-card);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.24);
   display: flex;
   flex-direction: column;
@@ -721,9 +722,7 @@ html.kb .fb-fab {
   max-width: calc(100% - 32px);
   padding: 10px 16px;
   border-radius: 22px;
-  background: var(--fb-glass);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  backdrop-filter: blur(24px) saturate(1.8);
+  background: var(--fb-card);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
   font: 600 15px/1.2 -apple-system, system-ui, sans-serif;
   pointer-events: none;

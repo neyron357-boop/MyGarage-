@@ -2673,8 +2673,9 @@ async function launchBrowser() {
     const pencil = page.locator('.fb-fab');
     await pencil.waitFor();
     await pencil.click();
-    // The screenshot is taken as the mode opens.
-    await page.locator('.fb-layer[data-shot="ok"]').waitFor({ timeout: 20000 });
+    // v0.40.1: opening the mode takes nothing from the page — no screenshot until one is asked for.
+    await page.locator('.fb-layer[data-shot="none"]').waitFor();
+    await page.waitForTimeout(450);
     // The bell «Сегодня» in the board's head: picked, its sheet not opened.
     const bell = front('.today-bell').first();
     const box = await bell.boundingBox();
@@ -2685,6 +2686,11 @@ async function launchBrowser() {
     if ((await page.locator('.mantine-Modal-content').count()) || !/#\/$/.test(page.url())) throw new Error('the picked bell acted: ' + page.url());
     if (!/Сегодня/.test(await sheet.locator('.fb-title').innerText())) throw new Error('picked: ' + (await sheet.locator('.fb-title').innerText()));
     await sheet.locator('textarea').fill('Не тот цвет');
+    // The screenshot, asked for: the frame round the bell goes on it.
+    await page.waitForTimeout(400);
+    await sheet.getByRole('button', { name: 'Снимок', exact: true }).click();
+    await page.locator('.fb-layer[data-shot="ok"]').waitFor({ timeout: 20000 });
+    await sheet.locator('.fb-shot-frame').waitFor();
     await shot('45a-feedback-note');
     await sheet.getByRole('button', { name: 'Сохранить' }).click();
     await page.locator('.fb-toast', { hasText: /Замечание №\d+ сохранено/ }).waitFor();
