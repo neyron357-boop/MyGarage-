@@ -76,7 +76,8 @@ import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
-import { useAction, useLang, useOrderBundle, useScreenLiveQuery } from '../../ui/hooks';
+import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { useDeskHotkeys } from '../../ui/desk';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { OwnerCheckSheet } from './OwnerCheck';
@@ -190,29 +191,37 @@ function AddExtra({ icon: I, label, onClick }: { icon: Icon; label: string; onCl
   );
 }
 
+/** The tiles of "…": one tap, one word each — in its sheet, and on a PC beside the job (v0.41). */
+function ActionTiles({ tiles, onPick }: { tiles: Tile[]; onPick?: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="action-tiles">
+      {tiles.map((x) => (
+        <button
+          key={x.key}
+          type="button"
+          className="action-tile"
+          onClick={() => {
+            onPick?.();
+            x.onClick();
+          }}
+        >
+          <span className="tile-icon" style={{ '--c': `var(--mantine-color-${x.color ?? TILE_COLOR[x.key] ?? 'cobalt'}-6)` } as React.CSSProperties}>
+            <x.icon size={23} stroke={1.9} aria-hidden />
+          </span>
+          <span>{t(`job.more.${x.key}`)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Everything else that can happen to a job, as a grid of tiles: one tap, one word each. */
 function MoreSheet({ opened, onClose, tiles }: { opened: boolean; onClose: () => void; tiles: Tile[] }) {
   const { t } = useTranslation();
   return (
     <Modal opened={opened} onClose={onClose} title={t('common.more')}>
-      <div className="action-tiles">
-        {tiles.map((x) => (
-          <button
-            key={x.key}
-            type="button"
-            className="action-tile"
-            onClick={() => {
-              onClose();
-              x.onClick();
-            }}
-          >
-            <span className="tile-icon" style={{ '--c': `var(--mantine-color-${x.color ?? TILE_COLOR[x.key] ?? 'cobalt'}-6)` } as React.CSSProperties}>
-              <x.icon size={23} stroke={1.9} aria-hidden />
-            </span>
-            <span>{t(`job.more.${x.key}`)}</span>
-          </button>
-        ))}
-      </div>
+      <ActionTiles tiles={tiles} onPick={onClose} />
     </Modal>
   );
 }
@@ -538,6 +547,17 @@ export function JobPage() {
   const sortGrip = useSortable(sortIds, (ids) => {
     if (orderId) void run(async () => (await reorderLines(orderId, ids), haptic('light')));
   });
+  // On a PC (v0.41): the job in two columns, and 1 · 2 · 3 add work, a part, a service — the tiles under the lines.
+  const phone = usePhone();
+  const addable = !!b && !!phase && !['closed', 'cancelled', 'booked'].includes(phase) && !activeInvoice(b.invoices);
+  useDeskHotkeys(
+    [
+      ['1', () => setSheet({ kind: 'labor' })],
+      ['2', () => setSheet({ kind: 'part' })],
+      ['3', () => setSheet({ kind: 'service' })],
+    ],
+    !phone && addable && tab === 'main',
+  );
 
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b || !phase) return <EmptyState title={t('err.notFound')} />;
@@ -949,6 +969,236 @@ export function JobPage() {
       </Group>
     );
 
+  // The car and its customer: on a phone on top of the job, on a PC (v0.41) in the column beside its lines.
+  const carCard = (
+    <Box className="surface" p="md" mb="lg">
+      <CarCover vehicleId={b.vehicle.id} hideEmpty={!open} />
+      <Group gap="sm" wrap="nowrap" justify="space-between">
+        <PlateText plate={b.vehicle.plate} size="card" />
+        {/* The step's name pops when the job moves on. */}
+        <span key={phase} className="pop-in" style={{ flexShrink: 0 }}>
+          <PhasePill phase={phase} filled />
+        </span>
+      </Group>
+      <PhaseTrack phase={phase} />
+      <Group justify="space-between" wrap="nowrap" mt="sm" gap="sm">
+        {c.name || c.phone ? (
+          <UnstyledButton className="job-line" onClick={() => setCustomerOpen(true)}>
+            <Text fw={500} lineClamp={1}>
+              {(c.type === 'company' && c.companyName ? c.companyName : c.name) || formatPhone(c.phone)}
+            </Text>
+            {c.name && c.phone && (
+              <Text size="sm" c="dimmed" lineClamp={1}>
+                {formatPhone(c.phone)}
+              </Text>
+            )}
+          </UnstyledButton>
+        ) : open ? (
+          <Button variant="light" size="compact-md" leftSection={<IconUserPlus size={16} />} onClick={() => setCustomerOpen(true)}>
+            {t('job.client')}
+          </Button>
+        ) : (
+          <span />
+        )}
+        {c.phone && (
+          <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
+            <ActionIcon component="a" href={whatsappUrl(c.whatsapp || c.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp">
+              <IconBrandWhatsapp size={21} />
+            </ActionIcon>
+            <ActionIcon component="a" href={`tel:${c.phone}`} variant="light" color="green" size={40} radius="xl" aria-label={t('customer.call')}>
+              <IconPhone size={20} />
+            </ActionIcon>
+          </Group>
+        )}
+      </Group>
+      {(open || !!b.order.complaint) && (
+        <UnstyledButton className="job-line job-complaint" mt="sm" onClick={open ? () => setComplaintOpen(true) : undefined} aria-label={t('job.complaint')}>
+          <IconMessage2 size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+          <Text size="sm" c={b.order.complaint ? undefined : 'dimmed'} lineClamp={3}>
+            {b.order.complaint || t('job.complaint')}
+          </Text>
+        </UnstyledButton>
+      )}
+      <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
+      <ObdLine orderId={b.order.id} scans={b.order.obdScans ?? []} open={open} />
+      {/* One flow of chips: when the car was promised, who does the job (one or several — each chip on or
+          off by itself), the car's VIN photo. Wrapping, not scrolling — every chip stays in sight, one tap away. */}
+      <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>
+        {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
+        {open &&
+          mechanics.map((m) => (
+            <MechanicChip key={m.id} name={m.name} on={crew.includes(m.id)} onToggle={() => void run(() => toggleMechanic(oid, m.id))} onTask={() => setMechanicOpen(true)} />
+          ))}
+        <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
+        <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
+        <JobCardChip orderId={oid} open={open} />
+        {open && (
+          <button type="button" className="chip vin-chip" data-empty aria-label={t('suppliers.forJob')} onClick={() => navigate(`/orders/${oid}/suppliers`)}>
+            <IconTruck size={17} stroke={1.9} aria-hidden />
+            <span>{t('suppliers.forJob')}</span>
+          </button>
+        )}
+      </div>
+    </Box>
+  );
+
+  // The tabs and what they show: the job (its lines, money, next step) or its notes.
+  const panel = (
+    <>
+    <div ref={tabsMark} aria-hidden />
+    <div ref={tabsBar} className="job-tabs">
+      <ScrollTabs
+        value={tab}
+        onChange={pickTab}
+        mb="0"
+        items={[
+          { value: 'main', label: t('job.tab.main') },
+          { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
+        ]}
+      />
+    </div>
+    <div key={tab} ref={sw.panel} className="job-panel">
+    {tab === 'notes' ? (
+      <NotesChat orderId={oid} notes={b.notes} editable={open} />
+    ) : (
+    <>
+    {phone && carCard}
+
+    {inv ? (
+      <>
+        <List>
+          <ListRow
+            left={<IconFileInvoice size={22} stroke={1.7} color="var(--mantine-color-green-6)" aria-hidden />}
+            title={inv.number}
+            subtitle={billTo?.name || (billTo?.phone ? formatPhone(billTo.phone) : undefined)}
+            right={
+              <Group gap={6} wrap="nowrap">
+                {copyButton(36)}
+                <ActionIcon variant="light" size={36} radius="xl" aria-label={t('common.sendClient')} onClick={sendInvoice}>
+                  <IconSend size={18} />
+                </ActionIcon>
+                <ActionIcon variant="light" color="gray" size={36} radius="xl" aria-label="PDF" loading={busy} onClick={() => run(async () => openPdf(await invoicePdf(inv.id)))}>
+                  <IconFileTypePdf size={18} />
+                </ActionIcon>
+              </Group>
+            }
+          />
+          {inv.lines
+            .filter((l) => l.kind !== 'discount')
+            .map((l, k) => (
+              <ListRow
+                key={k}
+                title={lineName(l.description, l.kind)}
+                onClick={amendable ? () => setAmend({}) : undefined}
+                subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
+                right={<Money fils={l.gross} />}
+              />
+            ))}
+          {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0), amendable && due > 0 ? () => setDiscountOpen(true) : undefined)}
+        </List>
+        {amendable && (
+          // Something forgotten or to change after the invoice: the same tiles, the invoice is redone. "%" — a
+          // discount on the invoice out (a credit note and a new invoice at once), while money is due.
+          <AddBar onAdd={(kind) => setAmend({ then: () => setSheet({ kind }) })}>
+            {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+            <AddExtra icon={IconPencil} label={t('job.amend')} onClick={() => setAmend({})} />
+          </AddBar>
+        )}
+        <Box mt="lg">
+          <List>
+            <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
+            {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
+            {due > 0 && paid > 0 && !openDebt && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
+            {debtRow}
+            {waivedRow}
+            {profitRow}
+          </List>
+        </Box>
+      </>
+    ) : (
+      <>
+        {(lines.length > 0 || refusedLines.length > 0) && (
+          <List animate={!picking}>
+            {lines.map(row)}
+            {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
+            {refusedLines.map(row)}
+            {sentAt && (
+              <ListRow
+                left={<IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />}
+                title={
+                  <Text span inherit c="orange.7">
+                    {shortDuration(hoursBetween(sentAt), lang)}
+                  </Text>
+                }
+                right={
+                  <Button variant="light" color="orange" size="compact-md" onClick={remind}>
+                    {t('job.remind')}
+                  </Button>
+                }
+              />
+            )}
+          </List>
+        )}
+        {editable && phase !== 'booked' && (
+          // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
+          <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
+            {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+            {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
+            {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
+          </AddBar>
+        )}
+        {editable && phase === 'booked' && lines.length > 0 && (
+          // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one.
+          <div className="add-row">
+            <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />
+          </div>
+        )}
+        {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
+          // Building the quote: the usual jobs for such a complaint, one tap each (name, last price) — under
+          // the lines, where the work is added.
+          <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('qi.frequent')}>
+            {quick.map(([name, s]) => (
+              <button key={name} type="button" className="chip" onClick={() => quickAdd(s)}>
+                {name}
+                <span className="chip-note">{formatAed(s.gross ?? s.price, lang, false)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {live.length > 0 && (
+          <Box mt="lg">
+            <List>
+              <ListRow
+                title={<Text span fw={700} inherit>{t('job.total')}</Text>}
+                subtitle={sum.vat ? t('job.vatIn', { vat: formatAed(sum.vat, lang, false) }) : undefined}
+                right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display roll /></Text>}
+              />
+              {reissue && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
+              {reissue && debtRow}
+              {waivedRow}
+              {profitRow}
+            </List>
+          </Box>
+        )}
+      </>
+    )}
+
+    {(phase === 'pay' || phase === 'out') && <HandoverChecks order={b.order} />}
+
+    {bar && (
+      <StickyBar>
+        {/* The button of the new step settles in on a spring. */}
+        <div key={picking ? 'pick' : phase} className="bar-swap">
+          {bar}
+        </div>
+      </StickyBar>
+    )}
+    </>
+    )}
+    </div>
+    </>
+  );
+
   return (
     <>
       <PageHeader
@@ -968,235 +1218,31 @@ export function JobPage() {
           <>
             {/* The job to the garage's group: the car's photo, the car, the customer's name, the lines. */}
             <ShareJobButton b={b} />
-            <ActionIcon variant="default" size={40} radius="md" aria-label={t('common.more')} onClick={() => setMore(true)}>
+            {/* On a wide PC its tiles are beside the job already: the button goes (desk.css). */}
+            <ActionIcon variant="default" size={40} radius="md" aria-label={t('common.more')} onClick={() => setMore(true)} className={phone ? undefined : 'job-more-btn'}>
               <IconDots size={20} />
             </ActionIcon>
           </>
         }
       />
 
-      {/* On a computer the job keeps a readable width (like a sheet on an iPad), not the whole window. */}
-      <div className="job-body" ref={bodyRef}>
-      <div ref={tabsMark} aria-hidden />
-      <div ref={tabsBar} className="job-tabs">
-        <ScrollTabs
-          value={tab}
-          onChange={pickTab}
-          mb="0"
-          items={[
-            { value: 'main', label: t('job.tab.main') },
-            { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
-          ]}
-        />
-      </div>
-      <div key={tab} ref={sw.panel} className="job-panel">
-      {tab === 'notes' ? (
-        <NotesChat orderId={oid} notes={b.notes} editable={open} />
-      ) : (
-      <>
-      <Box className="surface" p="md" mb="lg">
-        <CarCover vehicleId={b.vehicle.id} hideEmpty={!open} />
-        <Group gap="sm" wrap="nowrap" justify="space-between">
-          <PlateText plate={b.vehicle.plate} size="card" />
-          {/* The step's name pops when the job moves on. */}
-          <span key={phase} className="pop-in" style={{ flexShrink: 0 }}>
-            <PhasePill phase={phase} filled />
-          </span>
-        </Group>
-        <PhaseTrack phase={phase} />
-        <Group justify="space-between" wrap="nowrap" mt="sm" gap="sm">
-          {c.name || c.phone ? (
-            <UnstyledButton className="job-line" onClick={() => setCustomerOpen(true)}>
-              <Text fw={500} lineClamp={1}>
-                {(c.type === 'company' && c.companyName ? c.companyName : c.name) || formatPhone(c.phone)}
-              </Text>
-              {c.name && c.phone && (
-                <Text size="sm" c="dimmed" lineClamp={1}>
-                  {formatPhone(c.phone)}
-                </Text>
-              )}
-            </UnstyledButton>
-          ) : open ? (
-            <Button variant="light" size="compact-md" leftSection={<IconUserPlus size={16} />} onClick={() => setCustomerOpen(true)}>
-              {t('job.client')}
-            </Button>
-          ) : (
-            <span />
-          )}
-          {c.phone && (
-            <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
-              <ActionIcon component="a" href={whatsappUrl(c.whatsapp || c.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp">
-                <IconBrandWhatsapp size={21} />
-              </ActionIcon>
-              <ActionIcon component="a" href={`tel:${c.phone}`} variant="light" color="green" size={40} radius="xl" aria-label={t('customer.call')}>
-                <IconPhone size={20} />
-              </ActionIcon>
-            </Group>
-          )}
-        </Group>
-        {(open || !!b.order.complaint) && (
-          <UnstyledButton className="job-line job-complaint" mt="sm" onClick={open ? () => setComplaintOpen(true) : undefined} aria-label={t('job.complaint')}>
-            <IconMessage2 size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
-            <Text size="sm" c={b.order.complaint ? undefined : 'dimmed'} lineClamp={3}>
-              {b.order.complaint || t('job.complaint')}
-            </Text>
-          </UnstyledButton>
-        )}
-        <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
-        <ObdLine orderId={b.order.id} scans={b.order.obdScans ?? []} open={open} />
-        {/* One flow of chips: when the car was promised, who does the job (one or several — each chip on or
-            off by itself), the car's VIN photo. Wrapping, not scrolling — every chip stays in sight, one tap away. */}
-        <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>
-          {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
-          {open &&
-            mechanics.map((m) => (
-              <MechanicChip key={m.id} name={m.name} on={crew.includes(m.id)} onToggle={() => void run(() => toggleMechanic(oid, m.id))} onTask={() => setMechanicOpen(true)} />
-            ))}
-          <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
-          <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
-          <JobCardChip orderId={oid} open={open} />
-          {open && (
-            <button type="button" className="chip vin-chip" data-empty aria-label={t('suppliers.forJob')} onClick={() => navigate(`/orders/${oid}/suppliers`)}>
-              <IconTruck size={17} stroke={1.9} aria-hidden />
-              <span>{t('suppliers.forJob')}</span>
-            </button>
-          )}
+      {phone ? (
+        // On a phone: the tabs, then the car and the lines under each other (the job keeps a readable width).
+        <div className="job-body" ref={bodyRef}>
+          {panel}
         </div>
-      </Box>
-
-      {inv ? (
-        <>
-          <List>
-            <ListRow
-              left={<IconFileInvoice size={22} stroke={1.7} color="var(--mantine-color-green-6)" aria-hidden />}
-              title={inv.number}
-              subtitle={billTo?.name || (billTo?.phone ? formatPhone(billTo.phone) : undefined)}
-              right={
-                <Group gap={6} wrap="nowrap">
-                  {copyButton(36)}
-                  <ActionIcon variant="light" size={36} radius="xl" aria-label={t('common.sendClient')} onClick={sendInvoice}>
-                    <IconSend size={18} />
-                  </ActionIcon>
-                  <ActionIcon variant="light" color="gray" size={36} radius="xl" aria-label="PDF" loading={busy} onClick={() => run(async () => openPdf(await invoicePdf(inv.id)))}>
-                    <IconFileTypePdf size={18} />
-                  </ActionIcon>
-                </Group>
-              }
-            />
-            {inv.lines
-              .filter((l) => l.kind !== 'discount')
-              .map((l, k) => (
-                <ListRow
-                  key={k}
-                  title={lineName(l.description, l.kind)}
-                  onClick={amendable ? () => setAmend({}) : undefined}
-                  subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
-                  right={<Money fils={l.gross} />}
-                />
-              ))}
-            {invOff.length > 0 && discountRow(undefined, invOff[0].description, invOff.reduce((a, l) => a + l.gross, 0), amendable && due > 0 ? () => setDiscountOpen(true) : undefined)}
-          </List>
-          {amendable && (
-            // Something forgotten or to change after the invoice: the same tiles, the invoice is redone. "%" — a
-            // discount on the invoice out (a credit note and a new invoice at once), while money is due.
-            <AddBar onAdd={(kind) => setAmend({ then: () => setSheet({ kind }) })}>
-              {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
-              <AddExtra icon={IconPencil} label={t('job.amend')} onClick={() => setAmend({})} />
-            </AddBar>
-          )}
-          <Box mt="lg">
-            <List>
-              <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
-              {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
-              {due > 0 && paid > 0 && !openDebt && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
-              {debtRow}
-              {waivedRow}
-              {profitRow}
-            </List>
-          </Box>
-        </>
       ) : (
-        <>
-          {(lines.length > 0 || refusedLines.length > 0) && (
-            <List animate={!picking}>
-              {lines.map(row)}
-              {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
-              {refusedLines.map(row)}
-              {sentAt && (
-                <ListRow
-                  left={<IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />}
-                  title={
-                    <Text span inherit c="orange.7">
-                      {shortDuration(hoursBetween(sentAt), lang)}
-                    </Text>
-                  }
-                  right={
-                    <Button variant="light" color="orange" size="compact-md" onClick={remind}>
-                      {t('job.remind')}
-                    </Button>
-                  }
-                />
-              )}
-            </List>
-          )}
-          {editable && phase !== 'booked' && (
-            // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
-            <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
-              {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
-              {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
-              {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
-            </AddBar>
-          )}
-          {editable && phase === 'booked' && lines.length > 0 && (
-            // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one.
-            <div className="add-row">
-              <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />
-            </div>
-          )}
-          {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
-            // Building the quote: the usual jobs for such a complaint, one tap each (name, last price) — under
-            // the lines, where the work is added.
-            <div className="chip-row" style={{ marginTop: 12 }} aria-label={t('qi.frequent')}>
-              {quick.map(([name, s]) => (
-                <button key={name} type="button" className="chip" onClick={() => quickAdd(s)}>
-                  {name}
-                  <span className="chip-note">{formatAed(s.gross ?? s.price, lang, false)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {live.length > 0 && (
-            <Box mt="lg">
-              <List>
-                <ListRow
-                  title={<Text span fw={700} inherit>{t('job.total')}</Text>}
-                  subtitle={sum.vat ? t('job.vatIn', { vat: formatAed(sum.vat, lang, false) }) : undefined}
-                  right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display roll /></Text>}
-                />
-                {reissue && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
-                {reissue && debtRow}
-                {waivedRow}
-                {profitRow}
-              </List>
-            </Box>
-          )}
-        </>
+        // On a PC (v0.41): the lines — or the notes — in a wide column; the car and the job's actions beside it.
+        <div className="job-body job-desk" ref={bodyRef}>
+          <aside className="job-desk-aside">
+            {carCard}
+            <section className="job-desk-actions" aria-label={t('desk.actions')}>
+              <ActionTiles tiles={tiles} />
+            </section>
+          </aside>
+          <div className="job-desk-main">{panel}</div>
+        </div>
       )}
-
-      {(phase === 'pay' || phase === 'out') && <HandoverChecks order={b.order} />}
-
-      {bar && (
-        <StickyBar>
-          {/* The button of the new step settles in on a spring. */}
-          <div key={picking ? 'pick' : phase} className="bar-swap">
-            {bar}
-          </div>
-        </StickyBar>
-      )}
-      </>
-      )}
-      </div>
-      </div>
 
       <LazySheet opened={!!sheet} warm={editable}>
         {(o) => (

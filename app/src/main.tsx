@@ -5,6 +5,8 @@ import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
 import 'dayjs/locale/ru';
 import './styles.css';
+// The computer's own layout (v0.41): every rule under html.desk — the PC shell's, never the phone's.
+import './desk.css';
 import i18n from './i18n';
 import React from 'react';
 import ReactDOM from 'react-dom/client';

@@ -44,6 +44,7 @@ import { useBackClosesSheets } from './ui/backCloses';
 import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useViewportSync } from './ui/stack';
+import { DeskKeys, deskPage, useDeskShell } from './ui/desk';
 import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
 import { cssResolver, phoneTheme, theme } from './ui/theme';
@@ -89,10 +90,10 @@ function SideSearch() {
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const ref = useRef<HTMLInputElement>(null);
-  // "/" or Ctrl+K jumps to search from anywhere on a PC.
+  // "/" or Ctrl+K jumps to search from anywhere on a PC — by the keys' places, so the Russian layout works too (v0.41).
   useHotkeys([
-    ['/', () => ref.current?.focus()],
-    ['mod+K', () => ref.current?.focus()],
+    ['/', () => ref.current?.focus(), { preventDefault: true, usePhysicalKeys: true }],
+    ['mod+K', () => ref.current?.focus(), { preventDefault: true, usePhysicalKeys: true }],
   ]);
   return (
     <TextInput
@@ -267,6 +268,8 @@ function ScrollManager() {
 function DesktopShell() {
   const { t } = useTranslation();
   const location = useLocation();
+  // The computer's own layout (v0.41): every rule of it is under html.desk, which the phone never has.
+  useDeskShell();
   return (
     <AppShell navbar={{ width: 256, breakpoint: 0 }} padding={0}>
       <ScrollManager />
@@ -274,17 +277,19 @@ function DesktopShell() {
         <SideNav />
       </AppShell.Navbar>
       <AppShell.Main>
-        <div className="page-shell">
-          <Box maw={1320} mx="auto">
+        {/* The screen decides its width (styles.css «Desk»): the board the whole window, a job two columns, a form one. */}
+        <div className="page-shell" data-page={deskPage(location.pathname)}>
+          <div className="desk-page">
             <PreviewNotice />
             <ErrorBoundary resetKey={location.pathname}>
               <div key={location.pathname} className="page-enter">
                 <AppRoutes location={location} />
               </div>
             </ErrorBoundary>
-          </Box>
+          </div>
         </div>
       </AppShell.Main>
+      <DeskKeys />
       <PwaUpdater />
       <UnsavedGuard />
     </AppShell>

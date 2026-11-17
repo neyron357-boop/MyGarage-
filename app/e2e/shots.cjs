@@ -3,8 +3,11 @@ const fs = require('fs');
 const path = require('path');
 // Design review: screenshots of the main screens on a phone (light and dark) and on a PC.
 // Usage: start the dev server (npm run dev -- --port 5173), then: node e2e/shots.cjs [outDir]
+// SHOTS_CLOCK=2026-11-18T09:30:00+04:00 — the page's date stays at that moment (timers run as usual): two runs draw the same
+// times and durations, so their pictures can be compared pixel by pixel (the phone before and after a PC change).
 const OUT = process.argv[2] || path.join(__dirname, '..', 'test-results', 'design');
 const BASE = process.env.BASE_URL || 'http://localhost:5173/';
+const CLOCK = process.env.SHOTS_CLOCK ? new Date(process.env.SHOTS_CLOCK) : undefined;
 fs.mkdirSync(OUT, { recursive: true });
 
 async function launchBrowser() {
@@ -23,6 +26,7 @@ async function launchBrowser() {
 (async () => {
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, locale: 'ru-RU' });
+  if (CLOCK) await ctx.clock.setFixedTime(CLOCK);
   await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   const errors = [];
@@ -209,6 +213,7 @@ async function launchBrowser() {
   await page.locator('.screen[data-role="top"]').getByText(/^(Светлая|Light)$/).click();
 
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, locale: 'ru-RU' });
+  if (CLOCK) await desk.clock.setFixedTime(CLOCK);
   await desk.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const dp = await desk.newPage();
   // The computer's browser has its own (empty) storage: the demo first, as on the phone.

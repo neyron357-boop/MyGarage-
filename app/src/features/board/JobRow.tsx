@@ -28,7 +28,8 @@ import { partsToFind } from '../../services/flow';
 import { openWhatsApp } from '../../services/messages';
 import { bundleAmountDue, prefetchBundle, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
-import { useAction, useLang } from '../../ui/hooks';
+import { DeskMenu } from '../../ui/desk';
+import { useAction, useLang, usePhone } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { useSwipeRow } from '../../ui/swipe';
@@ -92,6 +93,9 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
   const [menu, setMenu] = useState(false);
   const [remove, setRemove] = useState(false);
   const press = useLongPress(() => setMenu(true));
+  // On a PC (v0.41) a right click opens the card's menu where the mouse is, not a sheet in the middle.
+  const phone = usePhone();
+  const [deskAt, setDeskAt] = useState<{ x: number; y: number } | null>(null);
   const { run } = useAction();
   // To the left — the row's own action (to the archive, back on the board); to the right (v0.30) — the customer's
   // WhatsApp, when there is a number to write to. Only from the card's edge (v0.36): a card is most of what a thumb
@@ -231,6 +235,14 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
         data-photo={row ? undefined : true}
         data-art={row || cover ? undefined : true}
         {...touch}
+        {...(phone
+          ? {}
+          : {
+              onContextMenu: (e: React.MouseEvent) => {
+                e.preventDefault();
+                setDeskAt({ x: e.clientX, y: e.clientY });
+              },
+            })}
         style={swiping ? { ...vars, ...sw.style } : vars}
         data-swiping={sw.dragging || undefined}
         data-past={sw.past || undefined}
@@ -377,6 +389,20 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
         )}
       </LazySheet>
       <LazySheet opened={remove}>{(o) => <DeleteJobModal order={b.order} opened={o} onClose={() => setRemove(false)} />}</LazySheet>
+      {!phone && (
+        <DeskMenu
+          at={deskAt}
+          onClose={() => setDeskAt(null)}
+          label={`№${b.order.number} · ${car}`.trim()}
+          items={[
+            { key: 'open', label: t('common.open'), icon: IconExternalLink, onClick: open },
+            ...(doc ? [{ key: 'doc', label: t(doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote'), icon: doc === 'invoice' ? IconFileInvoice : IconFileTypePdf, onClick: () => void openDoc() }] : []),
+            ...(wa ? [{ key: 'wa', label: 'WhatsApp', icon: IconBrandWhatsapp, onClick: openWa }] : []),
+            ...(swipe ? [{ key: 'swipe', label: swipe.label, icon: swipe.icon, onClick: () => swipe.onCommit() }] : []),
+            { key: 'delete', label: t('order.delete'), icon: IconTrash, color: 'red', divided: true, onClick: () => setRemove(true) },
+          ]}
+        />
+      )}
     </>
   );
 }

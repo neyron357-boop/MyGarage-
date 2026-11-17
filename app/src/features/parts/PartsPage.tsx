@@ -23,7 +23,8 @@ import { syncStage } from '../../services/flow';
 import { closeReturn, setProcurement } from '../../services/parts';
 import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { DataTable, type Column } from '../../ui/DataTable';
+import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { ProcurementModal } from './Procurement';
 import { SuppliersTab } from './Suppliers';
@@ -60,6 +61,7 @@ export function PartsPage() {
   const [params, setParams] = useSearchParams();
   const explicitTab = params.get('tab');
   const [proc, setProc] = useState<OrderItem | null>(null);
+  const phone = usePhone();
   const data = useScreenLiveQuery(loadParts, []);
   const today = dubaiDate();
   const needed = (data?.items ?? []).filter((i) => (i.procurementStatus ?? 'needed') === 'needed');
@@ -132,6 +134,88 @@ export function PartsPage() {
     );
   };
 
+  // On a PC (v0.41): what to find and what is on its way as a table — a part a line, its next step a click away (the
+  // phone's swipe), sorted by a click on a head.
+  const next = (i: OrderItem) =>
+    (i.procurementStatus ?? 'needed') === 'needed'
+      ? { label: t('job.part.ordered'), icon: IconReceipt2, color: 'cobalt', status: 'ordered' as const }
+      : i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit'
+        ? { label: t('job.part.received'), icon: IconCheck, color: 'green', status: 'received' as const }
+        : undefined;
+  const plateOf = (i: OrderItem) => {
+    const o = byId.get(i.orderId);
+    return o ? vById.get(o.vehicleId) : undefined;
+  };
+  const cols: Column<OrderItem>[] = [
+    {
+      key: 'part',
+      label: t('desk.col.part'),
+      sort: (i) => itemTitle(i, lang),
+      cell: (i) => {
+        const m = STATUS_META[i.procurementStatus ?? 'needed'];
+        return (
+          <span className="dt-who">
+            <ThemeIcon variant="light" color={m.color} size={34} radius="md">
+              <m.icon size={18} />
+            </ThemeIcon>
+            <span style={{ minWidth: 0 }}>
+              <span className="dt-main dt-clip">
+                {itemTitle(i, lang)} × {i.qty}
+              </span>
+              {i.partNumber && <span className="dt-sub dt-clip">{i.partNumber}</span>}
+            </span>
+          </span>
+        );
+      },
+    },
+    { key: 'plate', label: t('desk.col.car'), cell: (i) => (plateOf(i) ? <PlateText plate={plateOf(i)!.plate} size="xs" /> : null), sort: (i) => plateOf(i)?.plate.number ?? '', width: 150 },
+    {
+      key: 'job',
+      label: t('desk.col.job'),
+      sort: (i) => byId.get(i.orderId)?.number ?? '',
+      width: 96,
+      cell: (i) => (
+        <Button
+          size="compact-sm"
+          variant="subtle"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/orders/${i.orderId}`);
+          }}
+        >
+          №{byId.get(i.orderId)?.number}
+        </Button>
+      ),
+    },
+    { key: 'supplier', label: t('desk.col.supplier'), cell: (i) => <span className="dt-clip">{i.supplierId ? sName(i.supplierId) : ''}</span>, sort: (i) => (i.supplierId ? sName(i.supplierId) : '') },
+    { key: 'expected', label: t('desk.col.expected'), cell: (i) => (i.expectedAt ? formatDate(i.expectedAt) : ''), sort: (i) => i.expectedAt ?? '', muted: true, nowrap: true, width: 120 },
+    { key: 'cost', label: t('desk.col.cost'), cell: (i) => (i.costPriceFils !== undefined ? <Money fils={itemCostPaid(i)} /> : null), sort: (i) => (i.costPriceFils !== undefined ? itemCostPaid(i) : -1), desc: true, align: 'right', nowrap: true, width: 140 },
+    {
+      key: 'next',
+      label: '',
+      align: 'right',
+      width: 150,
+      cell: (i) => {
+        const n = next(i);
+        return n ? (
+          <Button
+            size="compact-sm"
+            variant="light"
+            color={n.color}
+            leftSection={<n.icon size={15} />}
+            onClick={(e) => {
+              e.stopPropagation();
+              void step(i, n.status);
+            }}
+          >
+            {n.label}
+          </Button>
+        ) : null;
+      },
+    },
+  ];
+  const table = (list: OrderItem[], id: string) => <DataTable rows={list} columns={cols} rowKey={(i) => i.id} onRow={setProc} sortId={`parts-${id}`} label={t('nav.parts')} />;
+
   return (
     <>
       <PageHeader title={t('nav.parts')} />
@@ -147,10 +231,11 @@ export function PartsPage() {
         ]}
       />
       <div key={tab} ref={sw.panel} className="tab-panel">
-      {tab === 'needed' && (needed.length ? <List animate>{needed.map(row)}</List> : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
-      {tab === 'ordered' && (ordered.length ? <List animate>{ordered.map(row)}</List> : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
+      {tab === 'needed' && (needed.length ? phone ? <List animate>{needed.map(row)}</List> : table(needed, 'needed') : <EmptyState icon={IconPackage} title={t('parts.nothingNeeded')}>{t('parts.nothingNeededHint')}</EmptyState>)}
+      {tab === 'ordered' && (ordered.length ? phone ? <List animate>{ordered.map(row)}</List> : table(ordered, 'ordered') : <EmptyState icon={IconReceipt2} title={t('parts.nothingOrdered')} />)}
       {tab === 'pickup' && (
-        <Stack gap="md">
+        // On a PC the suppliers to drive to sit side by side (v0.41).
+        <Stack gap="md" className={phone ? undefined : 'desk-cols desk-cols-gap'}>
           {pickup.length === 0 && <EmptyState icon={IconTruck} title={t('parts.nothingPickup')} />}
           {[...groups.entries()].map(([sid, list]) => {
             const s = suppliers.find((x) => x.id === sid);

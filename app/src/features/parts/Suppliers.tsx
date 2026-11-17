@@ -18,7 +18,8 @@ import { whatsappUrl } from '../../services/messages';
 import { saveSupplier, setSupplierCard } from '../../services/parts';
 import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { typedOnly, useAction, useScreenLiveQuery } from '../../ui/hooks';
+import { typedOnly, useAction, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { DataTable, type Column } from '../../ui/DataTable';
 import { SheetFor } from '../../ui/lazy';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SupplierBookActions } from './SupplierBookActions';
@@ -273,20 +274,61 @@ export function SuppliersTab() {
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
+  const phone = usePhone();
   if (!all) return null;
   // Found by its name, makes, what it sells — or its number as said here (050…).
   const list = all.filter((s) => supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
+  const contact = (s: Supplier, size: number) => (
+    <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+      {s.locationUrl && (
+        <ActionIcon component="a" href={s.locationUrl} target="_blank" rel="noopener" variant="light" color="gray" size={size} radius="xl" aria-label={t('parts.map')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+          <IconMapPin size={18} />
+        </ActionIcon>
+      )}
+      {(s.phone || supplierChatLink(s)) && (
+        <ActionIcon component="a" href={supplierChatLink(s) ?? whatsappUrl(s.phone!, '')} target="_blank" rel="noopener" variant="light" color="green" size={size} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+          <IconBrandWhatsapp size={19} />
+        </ActionIcon>
+      )}
+      {s.phone && (
+        <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={size} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+          <IconPhone size={18} />
+        </ActionIcon>
+      )}
+    </Group>
+  );
+  // On a PC (v0.41): a table — the best first as on the phone (the ranking), or by a column clicked.
+  const cols: Column<Supplier>[] = [
+    {
+      key: 'name',
+      label: t('desk.col.supplier'),
+      sort: (s) => s.name.toLowerCase(),
+      cell: (s) => (
+        <span className="supplier-name">
+          <span className="supplier-name-text dt-main">{s.name}</span>
+          <StarsPill s={s} />
+        </span>
+      ),
+    },
+    { key: 'phone', label: t('desk.col.phone'), cell: (s) => (s.phone ? formatPhone(s.phone) : ''), sort: (s) => s.phone ?? '', muted: true, nowrap: true, width: 180 },
+    { key: 'makes', label: t('desk.col.makes'), cell: (s) => <span className="dt-clip">{s.service ? t('suppliers.contractor') : s.makes?.join(', ')}</span>, sort: (s) => (s.service ? t('suppliers.contractor') : s.makes?.join(', ') ?? '') },
+    { key: 'parts', label: t('desk.col.part'), cell: (s) => <span className="dt-clip">{s.parts}</span>, sort: (s) => s.parts ?? '', muted: true },
+    { key: 'jobs', label: t('desk.col.jobs'), cell: (s) => useOf(ranked!.use, s.id).jobs || '', sort: (s) => useOf(ranked!.use, s.id).jobs, desc: true, align: 'right', width: 100 },
+    { key: 'contact', label: '', cell: (s) => contact(s, 34), align: 'right', width: 150 },
+  ];
   return (
     <Stack gap="md">
-      <Group gap={8} wrap="nowrap">
+      <Group gap={8} wrap="nowrap" maw={phone ? undefined : 560}>
         <Button leftSection={<IconPlus size={18} />} onClick={() => setEdit({})} style={{ flex: 1 }} aria-label={t('parts.addSupplier')}>
           {t('suppliers.new')}
         </Button>
         <SupplierBookActions />
       </Group>
-      {(all.length > 6 || q) && <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} />}
+      {(all.length > 6 || q) && (phone ? <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} /> : <div style={{ maxWidth: 560 }}><SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} /></div>)}
       {all.length === 0 ? (
         <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} />
+      ) : !phone ? (
+        list.length > 0 && <DataTable rows={list} columns={cols} rowKey={(s) => s.id} onRow={setEdit} initialSort={{ key: 'rank', dir: 1 }} label={t('nav.suppliers')} />
       ) : (
         <List>
           {list.map((s) => (

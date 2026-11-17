@@ -1,26 +1,29 @@
-import { ActionIcon, Badge, Box, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
-import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { ActionIcon, Box, Button, Group, Stack, Tooltip } from '@mantine/core';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dayLong } from '../../domain/dates';
+import { dayLong, dayShort } from '../../domain/dates';
 import { lastChange, leftBoardAt, type Phase } from '../../domain/flow';
+import { formatPhone } from '../../domain/phone';
 import { coverIndex } from '../../services/cover';
 import { loadDebtors } from '../../services/debts';
 import { archiveJob, phaseOf } from '../../services/flow';
-import { bundleAmountDue, loadOrderBundle, loadRowBundles, type OrderBundle } from '../../services/orders';
+import { bundleAmountDue, loadOrderBundle, loadRowBundles, prefetchBundle, type OrderBundle } from '../../services/orders';
 import { useBoardView, type BoardTab } from '../../ui/boardView';
-import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast, type TabItem } from '../../ui/components';
+import { EmptyState, List, MediaImage, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs, undoToast, type TabItem } from '../../ui/components';
+import { DataTable, type Column } from '../../ui/DataTable';
+import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
 import { checkForUpdate } from '../../ui/pwa';
 import { usePullRefresh } from '../../ui/pullRefresh';
-import { PHASE_META, usePhaseGlow } from '../job/phase';
+import { PHASE_META, PhaseTag, usePhaseGlow } from '../job/phase';
 import { DebtorList } from '../money/Debts';
 import { InsecureWarning } from './BoardNotices';
 import { BoardViewSheet } from './BoardViewSheet';
-import { JobRow, type RowSwipe } from './JobRow';
+import { jobAmount, jobTotal, JobRow, type RowSwipe } from './JobRow';
 import { TodayBell } from './TodayBell';
 
 /** The board as it was read last: coming back to it shows the cars at once, the live read follows. */
@@ -97,15 +100,36 @@ function useEdgeFade() {
   return ref;
 }
 
+/** Where each lane of the PC board was scrolled to: back from a job, the lanes are where they were (v0.41). */
+const laneScroll = new Map<string, number>();
+
 /**
  * PC board: one lane per step, in the order of the board's tabs («Вид»); empty steps fold into thin strips so busy
- * lanes get the width. A step hidden from the phone's strip keeps its lane — a lane holds cars.
+ * lanes get the width. A step hidden from the phone's strip keeps its lane — a lane holds cars. v0.41: the lanes are
+ * the height of the window and each scrolls by itself (desk.css); a lane's head says how many cars and what they
+ * come to.
  */
 function Kanban({ jobs, covers, swipe, tick, order, compact }: { jobs: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe; tick: number; order: BoardTab[]; compact: boolean }) {
   const { t } = useTranslation();
   const ref = useEdgeFade();
   const lanes = (order.filter((k) => isStep(k)) as Phase[]).map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
-  const cols = lanes.map((l) => (l.list.length ? 'minmax(280px, 1fr)' : '46px')).join(' ');
+  const cols = lanes.map((l) => (l.list.length ? `minmax(${compact ? 220 : 236}px, 1fr)` : '46px')).join(' ');
+  // Each lane's scroll is kept as it moves, and put back when the board comes back.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollLeft = laneScroll.get('') ?? 0;
+    el.querySelectorAll<HTMLElement>('.kanban-col[data-lane] > .list').forEach((list) => {
+      list.scrollTop = laneScroll.get(list.parentElement!.dataset.lane!) ?? 0;
+    });
+    const onScroll = (e: Event) => {
+      const at = e.target as HTMLElement;
+      if (at === el) laneScroll.set('', el.scrollLeft);
+      else if (at.parentElement?.dataset.lane) laneScroll.set(at.parentElement.dataset.lane, at.scrollTop);
+    };
+    el.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => el.removeEventListener('scroll', onScroll, { capture: true });
+  }, [ref]);
   return (
     <div className="kanban edge-fade" ref={ref} style={{ gridTemplateColumns: cols, gridAutoFlow: 'initial' }}>
       {lanes.map(({ p, list }) => {
@@ -120,19 +144,19 @@ function Kanban({ jobs, covers, swipe, tick, order, compact }: { jobs: Job[]; co
               </div>
             </Tooltip>
           );
+        const sum = list.reduce((s, j) => s + jobAmount(j.b), 0);
         return (
-          <div key={p} className="kanban-col">
-            <Group justify="space-between" mb="xs" px={4} wrap="nowrap">
-              <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                <span className="stage-dot" style={{ background: `var(--mantine-color-${m.color}-6)` }} />
-                <Text fw={700} size="sm" truncate>
-                  {name}
-                </Text>
-              </Group>
-              <Badge variant="default" size="sm" radius="xl" className="tnum">
-                {list.length}
-              </Badge>
-            </Group>
+          <div key={p} className="kanban-col" data-lane={p} style={{ '--c': `var(--mantine-color-${m.color}-6)`, '--c-ink': `var(--mantine-color-${m.color}-light-color)` } as CSSProperties}>
+            <div className="kanban-head">
+              <span className="stage-dot" style={{ background: 'var(--c)' }} />
+              <span className="kanban-name">{name}</span>
+              <span className="kanban-count">{list.length}</span>
+              {sum > 0 && (
+                <span className="kanban-sum">
+                  <Money fils={sum} />
+                </span>
+              )}
+            </div>
             <List animate className={compact ? 'mini-list' : 'board-cards'}>
               {list.map((j) => (
                 <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} variant={compact ? 'row' : 'card'} />
@@ -142,6 +166,98 @@ function Kanban({ jobs, covers, swipe, tick, order, compact }: { jobs: Job[]; co
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The archive on a PC (v0.41): one table — the day each job left the board, its number, the car, its customer, where
+ * it stands, what it came to; a click on a head sorts (the latest first). A job taken off by hand goes back with ↩ or
+ * from its right click's menu.
+ */
+function DeskArchive({ jobs, byHand, covers, onBack }: { jobs: Job[]; byHand: Set<string>; covers?: Map<string, string>; onBack: (b: OrderBundle) => void }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; j: Job } | null>(null);
+  const open = (j: Job) => navigate(`/orders/${j.b.order.id}`);
+  const name = (j: Job) => [j.b.vehicle.make, j.b.vehicle.model].filter(Boolean).join(' ') || `№${j.b.order.number}`;
+  const who = (j: Job) => {
+    const c = j.b.customer;
+    return (c.type === 'company' && c.companyName ? c.companyName : c.name) || (c.phone ? formatPhone(c.phone) : '');
+  };
+  // What it came to (a closed one owes nothing), or what is left of it (one taken off by hand).
+  const amount = (j: Job) => (j.phase === 'closed' || j.phase === 'cancelled' ? jobTotal(j.b) : jobAmount(j.b));
+  const day = (j: Job) => {
+    const d = dayShort(leftBoardAt(j.b.order));
+    return d.word ? t(`common.${d.word}`) : d.text;
+  };
+  const cols: Column<Job>[] = [
+    { key: 'left', label: t('desk.col.left'), cell: day, sort: (j) => leftBoardAt(j.b.order), desc: true, muted: true, nowrap: true, width: 112 },
+    { key: 'number', label: t('desk.col.number'), cell: (j) => j.b.order.number, sort: (j) => j.b.order.number, desc: true, muted: true, width: 84 },
+    {
+      key: 'car',
+      label: t('desk.col.car'),
+      sort: name,
+      cell: (j) => {
+        const cover = covers?.get(j.b.vehicle.id);
+        return (
+          <span className="dt-who">
+            <span className="dt-thumb">{cover ? <MediaImage id={cover} h={40} w={40} radius="0" /> : <IconCar size={22} stroke={1.6} aria-hidden />}</span>
+            <span className="dt-main dt-clip">{name(j)}</span>
+          </span>
+        );
+      },
+    },
+    { key: 'plate', label: t('desk.col.plate'), cell: (j) => <PlateText plate={j.b.vehicle.plate} size="xs" />, width: 150 },
+    { key: 'customer', label: t('desk.col.customer'), cell: (j) => <span className="dt-clip">{who(j)}</span>, sort: who },
+    { key: 'step', label: t('desk.col.step'), cell: (j) => <PhaseTag phase={j.phase} />, sort: (j) => t(`job.phase.${j.phase}`), width: 150 },
+    { key: 'amount', label: t('desk.col.amount'), cell: (j) => (amount(j) > 0 ? <Money fils={amount(j)} fw={650} /> : null), sort: amount, desc: true, align: 'right', nowrap: true, width: 150 },
+    {
+      key: 'back',
+      label: '',
+      width: 64,
+      align: 'right',
+      cell: (j) =>
+        byHand.has(j.b.order.id) ? (
+          <Tooltip label={t('board.unarchive')}>
+            <ActionIcon
+              variant="light"
+              size={34}
+              radius="xl"
+              aria-label={t('board.unarchive')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onBack(j.b);
+              }}
+            >
+              <IconArrowBackUp size={18} />
+            </ActionIcon>
+          </Tooltip>
+        ) : null,
+    },
+  ];
+  const items: DeskMenuItem[] = menu
+    ? [
+        { key: 'open', label: t('common.open'), icon: IconExternalLink, onClick: () => open(menu.j) },
+        ...(byHand.has(menu.j.b.order.id) ? [{ key: 'back', label: t('board.unarchive'), icon: IconArrowBackUp, onClick: () => onBack(menu.j.b) }] : []),
+      ]
+    : [];
+  return (
+    <>
+      <DataTable
+        rows={jobs}
+        columns={cols}
+        rowKey={(j) => j.b.order.id}
+        onRow={(j) => {
+          prefetchBundle(j.b.order.id);
+          open(j);
+        }}
+        onRowMenu={(j, at) => setMenu({ j, at })}
+        initialSort={{ key: 'left', dir: -1 }}
+        sortId="archive"
+        label={t('board.archive')}
+      />
+      <DeskMenu at={menu?.at ?? null} items={items} onClose={() => setMenu(null)} />
+    </>
   );
 }
 
@@ -362,9 +478,14 @@ export function BoardPage() {
           )}
         </>
       ) : debtsTab ? (
-        <Box maw={720}>{debtList}</Box>
+        <Box maw={920}>{debtList}</Box>
       ) : archive ? (
-        <Box maw={720}>{archiveList}</Box>
+        // On a PC the archive is a table (v0.41): every job one line, sorted by a click on a head.
+        archived.length + done.length > 0 ? (
+          <DeskArchive jobs={[...archived, ...done]} byHand={new Set(archived.map((j) => j.b.order.id))} covers={covers} onBack={(b) => back(b).onCommit()} />
+        ) : (
+          <Box maw={720}>{archiveList}</Box>
+        )
       ) : (
         <Kanban jobs={jobs} covers={covers} swipe={toArchive} tick={tick} order={view.order} compact={compact} />
       )}

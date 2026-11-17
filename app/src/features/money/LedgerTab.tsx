@@ -16,7 +16,8 @@ import { proofIndex } from '../../services/proofs';
 import { EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PlateLine, PlateText, SearchField, undoToast } from '../../ui/components';
 import { DayPill, MonthField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { DataTable, type Column } from '../../ui/DataTable';
 import { CreditSheet } from './Debts';
 import { EntrySheet, IncomeChips, LinkPicker, PursePicker, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
@@ -293,6 +294,8 @@ export function LedgerTab() {
   const [opened, setOpen] = useState<Pick<LedgerEntry, 'id' | 'source'> | null>(null);
   const view = `${month}-${kind}-${purse}`;
   const firstView = useRef(view);
+  // On a PC (v0.41): the card and the filters in a column, the book beside them as a table.
+  const phone = usePhone();
   const data = useScreenLiveQuery(async () => {
     const [book, cats, vehicles, customers, orders] = await Promise.all([loadLedger(), db.expenseCategories.toArray(), db.vehicles.toArray(), db.customers.toArray(), db.orders.toArray()]);
     const photos = await proofIndex(book.entries.map((e) => e.id));
@@ -323,9 +326,106 @@ export function LedgerTab() {
   const totals = periodTotals(book.entries, from, to);
   const days = new Map<string, LedgerEntry[]>();
   for (const r of rows) days.set(r.date, [...(days.get(r.date) ?? []), r]);
+  const dayHead = (day: string, list: LedgerEntry[]) => {
+    const net = list.reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
+    const head = dayHeading(day, lang);
+    return { net, text: head.word ? t(`common.${head.word}`) : head.text };
+  };
+  const whoOf = (e: LedgerEntry) => {
+    const c = e.customerId ? data.customers.get(e.customerId) : undefined;
+    return c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) : '';
+  };
+  // The book on a PC: a line an entry, the days as groups (their net beside them), the newest first.
+  const cols: Column<LedgerEntry>[] = [
+    {
+      key: 'what',
+      label: t('desk.col.what'),
+      cell: (e) => (
+        <span className="dt-who">
+          {e.source === 'closing' ? (
+            <ThemeIcon variant="light" color="gray" size={32} radius="md">
+              <IconLock size={16} />
+            </ThemeIcon>
+          ) : (
+            <ThemeIcon variant="light" color={e.kind === 'in' ? 'green' : 'red'} size={32} radius="md">
+              {e.kind === 'in' ? <IconArrowDownLeft size={17} /> : <IconArrowUpRight size={17} />}
+            </ThemeIcon>
+          )}
+          <span style={{ minWidth: 0 }}>
+            <span className="dt-main dt-clip">
+              {data.photos.has(e.id) && <IconPaperclip size={14} className="inline-icon" aria-label={t('ledger.proof')} />}
+              {label(e)}
+            </span>
+            {e.note && <span className="dt-sub dt-clip">{e.note}</span>}
+          </span>
+        </span>
+      ),
+    },
+    {
+      key: 'car',
+      label: t('desk.col.job'),
+      cell: (e) => {
+        const v = e.vehicleId ? data.vehicles.get(e.vehicleId) : undefined;
+        const o = e.orderId ? data.orders.get(e.orderId) : undefined;
+        const who = whoOf(e);
+        if (!v && !o && !who) return null;
+        return (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {v && <PlateText plate={v.plate} size="xs" />}
+            <span className="dt-sub dt-clip" style={{ marginTop: 0 }}>
+              {[o ? `№${o.number}` : '', who].filter(Boolean).join(' · ')}
+            </span>
+          </span>
+        );
+      },
+    },
+    { key: 'way', label: t('desk.col.way'), cell: (e) => (e.method ? wayLabel(t, e.method, e.kind) : ''), muted: true, nowrap: true, width: 116 },
+    {
+      key: 'amount',
+      label: t('desk.col.amount'),
+      align: 'right',
+      nowrap: true,
+      width: 136,
+      // As a bank shows it: money in green with a plus, money out with a minus.
+      cell: (e) => <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />,
+    },
+    {
+      key: 'cash',
+      label: t('desk.col.cash'),
+      align: 'right',
+      nowrap: true,
+      muted: true,
+      width: 120,
+      cell: (e) => (e.purse === 'cash' ? formatAed(e.cashAfter).replace(/^-/, '−') : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')),
+    },
+  ];
+  const deskBook = (
+    <DataTable
+      sections={[...days.entries()].map(([day, list]) => {
+        const h = dayHead(day, list);
+        return {
+          key: day,
+          rows: list,
+          head: (
+            <span className="dt-group-head">
+              <span className="day-head">{h.text}</span>
+              <span className="tnum" style={{ color: h.net >= 0 ? 'var(--mantine-color-green-7)' : undefined }}>
+                {h.net >= 0 ? '+' : '−'}
+                {formatAed(Math.abs(h.net))}
+              </span>
+            </span>
+          ),
+        };
+      })}
+      columns={cols}
+      rowKey={(e) => `${e.source}-${e.id}`}
+      onRow={setOpen}
+      label={t('money.book')}
+    />
+  );
 
   return (
-    <Stack gap="lg">
+    <Stack gap="lg" className={phone ? undefined : 'desk-ledger'}>
       <Stack gap="sm" maw={560}>
         {/* The month the figures and the list below are for. */}
         <MonthField value={month} onChange={setMonth} />
@@ -410,6 +510,10 @@ export function LedgerTab() {
         <EmptyState icon={IconBook2} title={t('ledger.empty')}>
           {t('ledger.emptyHint')}
         </EmptyState>
+      ) : !phone ? (
+        <div key={view} className={view === firstView.current ? undefined : 'fade-enter'}>
+          {deskBook}
+        </div>
       ) : (
         // Another month or filter: the list comes in with a soft fade (the old one does not just blink away);
         // not when the tab opens — the book is simply there.

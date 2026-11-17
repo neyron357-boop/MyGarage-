@@ -1,4 +1,5 @@
-import { useScreenLiveQuery } from '../../ui/hooks';
+import { usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { DeskSplit } from '../../ui/desk';
 import { Alert, Badge, Box, Button, Group, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconCar, IconNote, IconPencil, IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -20,6 +21,7 @@ export function CustomerPage() {
   const navigate = useNavigate();
   const [edit, setEdit] = useState(false);
   const [addCar, setAddCar] = useState(false);
+  const phone = usePhone();
   const data = useScreenLiveQuery(async () => {
     const c = await db.customers.get(id!);
     if (!c) return null;
@@ -50,122 +52,134 @@ export function CustomerPage() {
           </Button>
         }
       />
-      <Box className="surface" p="md">
-        {/* The name is the large title above: the card starts with how to reach the customer. */}
-        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-          <PersonAvatar name={displayName} company={c.type === 'company'} size={52} />
-          <Box style={{ minWidth: 0 }}>
-            <Text fz={17} fw={600} className="tnum selectable" c={c.phone ? undefined : 'dimmed'}>
-              {c.phone ? formatPhone(c.phone) : t('customer.noPhone')}
-            </Text>
-            {c.type === 'company' && c.companyName && c.name && (
-              <Text fz={15} c="dimmed" lineClamp={1}>
-                {t('customer.contact')}: {c.name}
-              </Text>
+      {/* On a wide PC (v0.41) the card beside what it has; on a phone one after the other, as before. */}
+      <DeskSplit
+        desk={!phone}
+        side={
+          <>
+            <Box className="surface" p="md">
+              {/* The name is the large title above: the card starts with how to reach the customer. */}
+              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                <PersonAvatar name={displayName} company={c.type === 'company'} size={52} />
+                <Box style={{ minWidth: 0 }}>
+                  <Text fz={17} fw={600} className="tnum selectable" c={c.phone ? undefined : 'dimmed'}>
+                    {c.phone ? formatPhone(c.phone) : t('customer.noPhone')}
+                  </Text>
+                  {c.type === 'company' && c.companyName && c.name && (
+                    <Text fz={15} c="dimmed" lineClamp={1}>
+                      {t('customer.contact')}: {c.name}
+                    </Text>
+                  )}
+                </Box>
+              </Group>
+              <ContactTiles phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
+              <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md" spacing="md">
+                <Field label={t('customer.docLanguage')}>{t(`lang.${c.docLanguage}`)}</Field>
+                <Field label={t('customer.channel')}>{c.preferredChannel === 'call' ? t('customer.call') : c.preferredChannel === 'telegram' ? 'Telegram' : 'WhatsApp'}</Field>
+                <Field label={t('customer.source')}>{c.source ? t(`source.${c.source}`) : '—'}</Field>
+                <Field label="TRN">{c.trn || '—'}</Field>
+              </SimpleGrid>
+              {c.address && (
+                <Text size="sm" c="dimmed" mt="sm">
+                  {c.address}
+                </Text>
+              )}
+            </Box>
+            {c.notes && (
+              <Alert mt="md" color="yellow" icon={<IconNote size={18} />}>
+                {c.notes}
+              </Alert>
             )}
-          </Box>
-        </Group>
-        <ContactTiles phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
-        <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md" spacing="md">
-          <Field label={t('customer.docLanguage')}>{t(`lang.${c.docLanguage}`)}</Field>
-          <Field label={t('customer.channel')}>{c.preferredChannel === 'call' ? t('customer.call') : c.preferredChannel === 'telegram' ? 'Telegram' : 'WhatsApp'}</Field>
-          <Field label={t('customer.source')}>{c.source ? t(`source.${c.source}`) : '—'}</Field>
-          <Field label="TRN">{c.trn || '—'}</Field>
-        </SimpleGrid>
-        {c.address && (
-          <Text size="sm" c="dimmed" mt="sm">
-            {c.address}
-          </Text>
-        )}
-      </Box>
-      {c.notes && (
-        <Alert mt="md" color="yellow" icon={<IconNote size={18} />}>
-          {c.notes}
-        </Alert>
-      )}
-      <SimpleGrid cols={3} spacing="sm" mt="md">
-        <Kpi label={t('customer.visitsTitle')} value={orders.length} />
-        <Kpi label={t('customer.spent')} value={<Money fils={spent} display />} />
-        {/* No debt is no figure: a quiet dash, the red amount only when there is one. */}
-        <Kpi label={t('flags.debt')} value={debt ? <Money fils={debt} display /> : '—'} color={debt ? 'red' : undefined} />
-      </SimpleGrid>
-      <Section
-        title={t('customer.vehicles')}
-        action={
-          <Button size="compact-sm" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setAddCar(true)}>
-            {t('vehicle.new')}
-          </Button>
+            <SimpleGrid cols={3} spacing="sm" mt="md">
+              <Kpi label={t('customer.visitsTitle')} value={orders.length} />
+              <Kpi label={t('customer.spent')} value={<Money fils={spent} display />} />
+              {/* No debt is no figure: a quiet dash, the red amount only when there is one. */}
+              <Kpi label={t('flags.debt')} value={debt ? <Money fils={debt} display /> : '—'} color={debt ? 'red' : undefined} />
+            </SimpleGrid>
+          </>
         }
-      >
-        {cars.length === 0 ? (
-          <EmptyState icon={IconCar}>{t('customer.noCars')}</EmptyState>
-        ) : (
-          <List>
-            {cars.map((v) => (
-              <ListRow
-                key={v.id}
-                onClick={() => navigate(`/vehicles/${v.id}`)}
-                chevron
-                left={<PlateText plate={v.plate} size="sm" />}
-                title={`${v.make} ${v.model}${v.year ? ` ${v.year}` : ''}`}
-                subtitle={v.vin ? `VIN ${v.vin}` : undefined}
-                right={
-                  <Button
-                    visibleFrom="xs"
-                    size="compact-sm"
-                    variant="light"
-                    style={{ flexShrink: 0 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/orders/new?vehicleId=${v.id}`);
-                    }}
-                  >
-                    {t('search.newJob')}
-                  </Button>
-                }
-              />
-            ))}
-          </List>
-        )}
-      </Section>
-      <Section title={t('customer.orders')}>
-        {orders.length === 0 ? (
-          <EmptyState>{t('customer.noOrders')}</EmptyState>
-        ) : (
-          <List>
-            {orders.map((o) => {
-              const v = vehicles.get(o.vehicleId);
-              return (
-                <ListRow
-                  key={o.id}
-                  onClick={() => navigate(`/orders/${o.id}`)}
-                  chevron
-                  title={
-                    <>
-                      №{o.number} · {v ? `${v.make} ${v.model}` : ''}
-                    </>
-                  }
-                  subtitle={
-                    <Stack gap={4}>
-                      <span>
-                        {formatDate(o.createdAt)}
-                        {o.complaint ? ` · ${o.complaint}` : ''}
-                      </span>
-                      <Group gap={6}>
-                        <OrderStatus orderId={o.id} stage={o.stage} />
-                        {o.warrantyOfOrderId && <Badge color="grape" size="sm">{t('flags.warranty')}</Badge>}
-                      </Group>
-                    </Stack>
-                  }
-                />
-              );
-            })}
-          </List>
-        )}
-      </Section>
-      <Box mt="lg">
-        <LinkedMoney link={{ customerId: c.id }} by="customerId" />
-      </Box>
+        main={
+          <>
+            <Section
+              title={t('customer.vehicles')}
+              action={
+                <Button size="compact-sm" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setAddCar(true)}>
+                  {t('vehicle.new')}
+                </Button>
+              }
+            >
+              {cars.length === 0 ? (
+                <EmptyState icon={IconCar}>{t('customer.noCars')}</EmptyState>
+              ) : (
+                <List>
+                  {cars.map((v) => (
+                    <ListRow
+                      key={v.id}
+                      onClick={() => navigate(`/vehicles/${v.id}`)}
+                      chevron
+                      left={<PlateText plate={v.plate} size="sm" />}
+                      title={`${v.make} ${v.model}${v.year ? ` ${v.year}` : ''}`}
+                      subtitle={v.vin ? `VIN ${v.vin}` : undefined}
+                      right={
+                        <Button
+                          visibleFrom="xs"
+                          size="compact-sm"
+                          variant="light"
+                          style={{ flexShrink: 0 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/orders/new?vehicleId=${v.id}`);
+                          }}
+                        >
+                          {t('search.newJob')}
+                        </Button>
+                      }
+                    />
+                  ))}
+                </List>
+              )}
+            </Section>
+            <Section title={t('customer.orders')}>
+              {orders.length === 0 ? (
+                <EmptyState>{t('customer.noOrders')}</EmptyState>
+              ) : (
+                <List>
+                  {orders.map((o) => {
+                    const v = vehicles.get(o.vehicleId);
+                    return (
+                      <ListRow
+                        key={o.id}
+                        onClick={() => navigate(`/orders/${o.id}`)}
+                        chevron
+                        title={
+                          <>
+                            №{o.number} · {v ? `${v.make} ${v.model}` : ''}
+                          </>
+                        }
+                        subtitle={
+                          <Stack gap={4}>
+                            <span>
+                              {formatDate(o.createdAt)}
+                              {o.complaint ? ` · ${o.complaint}` : ''}
+                            </span>
+                            <Group gap={6}>
+                              <OrderStatus orderId={o.id} stage={o.stage} />
+                              {o.warrantyOfOrderId && <Badge color="grape" size="sm">{t('flags.warranty')}</Badge>}
+                            </Group>
+                          </Stack>
+                        }
+                      />
+                    );
+                  })}
+                </List>
+              )}
+            </Section>
+            <Box mt="lg">
+              <LinkedMoney link={{ customerId: c.id }} by="customerId" />
+            </Box>
+          </>
+        }
+      />
       <CustomerModal opened={edit} onClose={() => setEdit(false)} customer={c} />
       <VehicleModal opened={addCar} onClose={() => setAddCar(false)} customerId={c.id} />
     </>

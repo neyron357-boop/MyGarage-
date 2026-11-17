@@ -1,4 +1,4 @@
-import { Button, Menu } from '@mantine/core';
+import { Button, Kbd, Menu } from '@mantine/core';
 import { IconArrowDownLeft, IconArrowUpRight, IconCamera, IconNote, IconPlus, type Icon } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
@@ -298,6 +298,8 @@ export function QuickNewButton() {
           <Button
             fullWidth
             leftSection={<IconPlus size={18} />}
+            // Its key (v0.41): N, from anywhere on the PC (ui/desk.tsx).
+            rightSection={<Kbd className="desk-kbd-on-fill">N</Kbd>}
             mb="lg"
             onClick={() => navigate('/orders/new')}
             onContextMenu={(e) => {

@@ -23,7 +23,7 @@ import { addCashMovement, cashState, closeCashDay, paySalary } from '../../servi
 import { proofIndex } from '../../services/proofs';
 import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
-import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { stepMainTab } from '../../ui/mainSwipe';
 import { hintNavigation } from '../../ui/stack';
@@ -77,13 +77,15 @@ function CashTab() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [actual, setActual] = useState<number>();
   const [comment, setComment] = useState('');
+  // On a PC (v0.41): the box and its closings in a column, the movements beside them.
+  const phone = usePhone();
   if (!data) return <PageSkeleton />;
   const { st } = data;
   // The sheet follows its entry as it changes; when the day is closed, the line is gone and the sheet with it.
   const open = opened ? data.lines.find((l) => l.m.id === opened)?.entry : undefined;
   const diff = actual !== undefined ? actual - st.expected : 0;
   return (
-    <Stack gap="lg">
+    <Stack gap="lg" className={phone ? undefined : 'desk-cash'}>
       <Box p="lg" className="surface">
         <div className="eyebrow">{t('cash.expected')}</div>
         <Text fz={40} lh={1.1} mt={4}>
@@ -240,6 +242,8 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   // The open one is read by itself: moved to another month (v0.23), it stays open and follows; deleted — it closes.
   const opened = useScreenLiveQuery(async () => (shown ? ((await db.expenses.get(shown)) ?? null) : null), [shown]);
   const label = useCategoryLabel(data?.cats);
+  // On a PC (v0.41): the month and its sums in a column, the expenses beside them.
+  const phone = usePhone();
   if (!data) return <PageSkeleton />;
   const expense = opened && opened.id === shown && !opened.voidedAt ? opened : undefined;
   const entry = expense ? { ...expenseEntry(expense), cashAfter: 0, cardAfter: 0 } : undefined;
@@ -247,7 +251,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const total = data.list.reduce((s, e) => s + e.amountFils, 0);
   const cats = data.cats.filter((c) => c.active && (byCat(c.id) > 0 || c.monthlyLimitFils > 0)).sort((a, b) => byCat(b.id) - byCat(a.id));
   return (
-    <Stack gap="lg">
+    <Stack gap="lg" className={phone ? undefined : 'desk-expenses'}>
       <MonthField value={month} onChange={setMonth} />
       <Button size="md" color="red" variant="light" leftSection={<IconPlus size={20} />} onClick={() => setOpen(true)}>
         {t('expense.add')}

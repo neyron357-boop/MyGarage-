@@ -158,10 +158,102 @@ export function SearchPage() {
     const [vs, cs] = await Promise.all([db.vehicles.bulkGet(orders.map((o) => o.vehicleId)), db.customers.bulkGet(orders.map((o) => o.customerId))]);
     return orders.map((o, i) => ({ o, v: vs[i], c: cs[i] }));
   }, []);
+  // What was found: the cars and customers, the jobs, the suppliers.
+  const carsSec = q && !!hits?.length && (
+    <Section title={t('search.cars')} mt={0}>
+      <List key="hits">
+        {hits.map((h) => (
+          <Fragment key={(h.vehicle?.id ?? '') + h.customer.id}>
+            <HitRow
+              hit={h}
+              onClick={() => (h.activeOrder ? navigate(`/orders/${h.activeOrder.id}`) : h.vehicle ? navigate(`/vehicles/${h.vehicle.id}`) : navigate(`/customers/${h.customer.id}`))}
+              right={
+                h.vehicle && !h.activeOrder ? (
+                  <Button
+                    size="compact-sm"
+                    variant="light"
+                    style={{ flexShrink: 0 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/orders/new?vehicleId=${h.vehicle!.id}`);
+                    }}
+                  >
+                    {t('search.newJob')}
+                  </Button>
+                ) : undefined
+              }
+            />
+            {/* The car's last visits stay here, also once a new job for it is open. */}
+            {h.history?.map((o) => (
+              <ListRow
+                key={o.id}
+                onClick={() => navigate(`/orders/${o.id}`)}
+                chevron
+                left={<IconHistory size={18} stroke={1.8} className="history-icon" aria-hidden />}
+                title={<Text span fz={15}>{[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}</Text>}
+                subtitle={
+                  <Group gap={6} wrap="nowrap">
+                    {o.complaint && (
+                      <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
+                        {o.complaint}
+                      </Text>
+                    )}
+                    <OrderStatus orderId={o.id} stage={o.stage} />
+                  </Group>
+                }
+              />
+            ))}
+            {h.vehicle && (h.historyCount ?? 0) > (h.history?.length ?? 0) && (
+              <ListRow onClick={() => navigate(`/vehicles/${h.vehicle!.id}`)} chevron left={<span className="history-icon-space" />} title={<Text span fz={15} c="cobalt.6">{t('search.allVisits', { n: h.historyCount })}</Text>} />
+            )}
+          </Fragment>
+        ))}
+      </List>
+    </Section>
+  );
+  const jobsSec = q && !!jobs?.total && (
+    <Section
+      title={t('search.jobs')}
+      description={jobs.total > jobs.matches.length ? t('search.jobsMore', { n: jobs.matches.length, total: jobs.total }) : undefined}
+      mt={hits?.length ? 'xl' : 0}
+    >
+      <List key="jobs">
+        {jobs.matches.map((m) => (
+          <JobRow key={m.doc.orderId} m={m} onClick={() => navigate(`/orders/${m.doc.orderId}`)} />
+        ))}
+      </List>
+    </Section>
+  );
+  const supSec = q && suppliers.length > 0 && (
+    <Section title={t('nav.suppliers')} mt={hits?.length || jobs?.total ? 'xl' : 0}>
+      <List key="suppliers">
+        {suppliers.map((s) => (
+          <ListRow
+            key={s.id}
+            title={s.name}
+            subtitle={[s.service ? t('suppliers.contractor') : '', s.makes?.join(', '), s.parts].filter(Boolean).join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)}
+            onClick={() => navigate(`/parts?tab=suppliers&q=${encodeURIComponent(s.name)}`)}
+            right={
+              s.phone ? (
+                <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+                  <ActionIcon component="a" href={whatsappUrl(s.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <IconBrandWhatsapp size={19} />
+                  </ActionIcon>
+                  <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <IconPhone size={18} />
+                  </ActionIcon>
+                </Group>
+              ) : undefined
+            }
+          />
+        ))}
+      </List>
+    </Section>
+  );
   return (
     <>
       <PageHeader title={t('search.title')} />
-      <Box mb="lg">
+      <Box mb="lg" maw={phone ? undefined : 720}>
         {/* On a phone the keyboard waits for a tap on the field (opening the tab only shows the search). */}
         <SearchField autoFocus={!phone} placeholder={t('search.placeholder')} value={q} onChange={setQ} />
       </Box>
@@ -178,99 +270,24 @@ export function SearchPage() {
           {t('search.noResultsHint')}
         </EmptyState>
       )}
-      {q && !!hits?.length && (
-        <Section title={t('search.cars')} mt={0}>
-          <List key="hits">
-            {hits.map((h) => (
-              <Fragment key={(h.vehicle?.id ?? '') + h.customer.id}>
-                <HitRow
-                  hit={h}
-                  onClick={() => (h.activeOrder ? navigate(`/orders/${h.activeOrder.id}`) : h.vehicle ? navigate(`/vehicles/${h.vehicle.id}`) : navigate(`/customers/${h.customer.id}`))}
-                  right={
-                    h.vehicle && !h.activeOrder ? (
-                      <Button
-                        size="compact-sm"
-                        variant="light"
-                        style={{ flexShrink: 0 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/orders/new?vehicleId=${h.vehicle!.id}`);
-                        }}
-                      >
-                        {t('search.newJob')}
-                      </Button>
-                    ) : undefined
-                  }
-                />
-                {/* The car's last visits stay here, also once a new job for it is open. */}
-                {h.history?.map((o) => (
-                  <ListRow
-                    key={o.id}
-                    onClick={() => navigate(`/orders/${o.id}`)}
-                    chevron
-                    left={<IconHistory size={18} stroke={1.8} className="history-icon" aria-hidden />}
-                    title={<Text span fz={15}>{[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}</Text>}
-                    subtitle={
-                      <Group gap={6} wrap="nowrap">
-                        {o.complaint && (
-                          <Text span inherit lineClamp={1} style={{ minWidth: 0 }}>
-                            {o.complaint}
-                          </Text>
-                        )}
-                        <OrderStatus orderId={o.id} stage={o.stage} />
-                      </Group>
-                    }
-                  />
-                ))}
-                {h.vehicle && (h.historyCount ?? 0) > (h.history?.length ?? 0) && (
-                  <ListRow onClick={() => navigate(`/vehicles/${h.vehicle!.id}`)} chevron left={<span className="history-icon-space" />} title={<Text span fz={15} c="cobalt.6">{t('search.allVisits', { n: h.historyCount })}</Text>} />
-                )}
-              </Fragment>
-            ))}
-          </List>
-        </Section>
-      )}
-      {q && !!jobs?.total && (
-        <Section
-          title={t('search.jobs')}
-          description={jobs.total > jobs.matches.length ? t('search.jobsMore', { n: jobs.matches.length, total: jobs.total }) : undefined}
-          mt={hits?.length ? 'xl' : 0}
-        >
-          <List key="jobs">
-            {jobs.matches.map((m) => (
-              <JobRow key={m.doc.orderId} m={m} onClick={() => navigate(`/orders/${m.doc.orderId}`)} />
-            ))}
-          </List>
-        </Section>
-      )}
-      {q && suppliers.length > 0 && (
-        <Section title={t('nav.suppliers')} mt={hits?.length || jobs?.total ? 'xl' : 0}>
-          <List key="suppliers">
-            {suppliers.map((s) => (
-              <ListRow
-                key={s.id}
-                title={s.name}
-                subtitle={[s.service ? t('suppliers.contractor') : '', s.makes?.join(', '), s.parts].filter(Boolean).join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)}
-                onClick={() => navigate(`/parts?tab=suppliers&q=${encodeURIComponent(s.name)}`)}
-                right={
-                  s.phone ? (
-                    <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
-                      <ActionIcon component="a" href={whatsappUrl(s.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                        <IconBrandWhatsapp size={19} />
-                      </ActionIcon>
-                      <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                        <IconPhone size={18} />
-                      </ActionIcon>
-                    </Group>
-                  ) : undefined
-                }
-              />
-            ))}
-          </List>
-        </Section>
+      {phone ? (
+        <>
+          {carsSec}
+          {jobsSec}
+          {supSec}
+        </>
+      ) : (
+        // On a PC (v0.41): the cars and customers (and the suppliers) on the left, the jobs found on the right.
+        <div className="desk-search">
+          <div>
+            {carsSec}
+            {supSec}
+          </div>
+          <div>{jobsSec}</div>
+        </div>
       )}
       {!q && (
-        <Stack gap={0}>
+        <Stack gap={0} maw={phone ? undefined : 720}>
           {/* What can be searched for is said only while there is nothing to show yet (a new device). */}
           {recent && !recent.length && (
             <Text size="sm" c="dimmed">
