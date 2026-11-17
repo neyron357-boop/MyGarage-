@@ -11,6 +11,8 @@ import { formatPhone } from '../../domain/phone';
 import { formatPlate } from '../../domain/plates';
 import { jobProfit, partsPaid } from '../../domain/profit';
 import type { Expense, Lang, OrderItem } from '../../domain/types';
+import { coverOf } from '../../services/cover';
+import { cardUrl } from '../../services/media';
 import type { OrderBundle } from '../../services/orders';
 import { useLang } from '../../ui/hooks';
 import { shareOrDownload } from '../../ui/share';
@@ -45,11 +47,15 @@ async function checkData(b: OrderBundle, expenses: Expense[], partsCategoryId: s
   const extra: CheckLine[] = others.map((e) => ({ name: [cats.get(e.categoryId), e.vendor || e.note].filter(Boolean).join(' · ') || '—', qty: 1, unitSale: 0, sale: 0, cost: e.amountFils }));
   const beyond = partsPaid(expenses, partsCategoryId, paidOutside) - lines.filter((i) => i.kind === 'part' && !i.customerSupplied).reduce((s, i) => s + itemCostPaid(i), 0);
   if (beyond > 0) extra.unshift({ name: t('ownerCheck.partsBeyond'), qty: 1, unitSale: 0, sale: 0, cost: beyond });
+  // The car's main photo, at a card's size (made once a session, v0.36).
+  const cover = await coverOf(b.vehicle.id);
+  const photo = cover ? await cardUrl(cover) : undefined;
   const c = b.customer;
   const who = [(c.type === 'company' && c.companyName ? c.companyName : c.name) || '', c.phone ? formatPhone(c.phone) : ''].filter(Boolean).join(' · ');
   return {
     lang,
     logo: b.settings.logoDataUrl,
+    photo,
     garage: b.settings.name,
     number: `№${b.order.number}`,
     date: formatDate(nowIso()),

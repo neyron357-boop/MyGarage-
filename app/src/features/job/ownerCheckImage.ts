@@ -2,10 +2,10 @@ import { formatAed } from '../../domain/money';
 import type { Lang } from '../../domain/types';
 
 /*
- * The job for the owner to check (v0.29): one picture (JPEG) to send — what the car is and whose, every part with what
- * it is bought for, from whom and what it is sold for, the work, and what the job earns. Plain and quiet: a table and a
- * sum, black on white, the profit the one green (or red) thing; the garage's logo small at the top. Drawn on a canvas
- * in two passes — measured, then drawn at the height it came to.
+ * The job for the owner to check (v0.29): one picture (JPEG) to send — what the car is and whose (its photo beside it,
+ * v0.36), every part with what it is bought for, from whom and what it is sold for, the work, and what the job earns.
+ * Plain and quiet: a table and a sum, black on white, the profit the one green (or red) thing; the garage's logo small at
+ * the top. Drawn on a canvas in two passes — measured, then drawn at the height it came to.
  */
 
 export interface CheckLine {
@@ -26,6 +26,8 @@ export interface CheckLine {
 export interface CheckData {
   lang: Lang;
   logo?: string;
+  /** The car's main photo (an address the picture can load), beside its name. */
+  photo?: string;
   garage: string;
   number: string;
   date: string;
@@ -141,6 +143,7 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
   const m = document.createElement('canvas').getContext('2d')!;
   const money = (fils: number) => formatAed(fils, d.lang, false);
   const logo = d.logo ? await loadImage(d.logo) : undefined;
+  const photo = d.photo ? await loadImage(d.photo) : undefined;
   const ops: Draw[] = [];
   let y = P;
 
@@ -181,10 +184,28 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
     y += 34;
   }
 
-  // The car, its plate, the customer.
+  // The car, its plate, the customer — and its photo on the right (v0.36: which car it is, at a glance).
   {
+    const PW = 300;
+    const PH = 225;
+    const room = photo ? W - 2 * P - PW - 32 : W - 2 * P;
+    const top0 = y;
+    if (photo) {
+      ops.push((g) => {
+        // Filled to its frame, the middle of the photo kept.
+        const k = Math.max(PW / photo.width, PH / photo.height);
+        const sw = PW / k;
+        const sh = PH / k;
+        g.save();
+        g.beginPath();
+        g.roundRect(W - P - PW, top0, PW, PH, 24);
+        g.clip();
+        g.drawImage(photo, (photo.width - sw) / 2, (photo.height - sh) / 2, sw, sh, W - P - PW, top0, PW, PH);
+        g.restore();
+      });
+    }
     m.font = font(50, 800);
-    const carLines = wrap(m, d.car, W - 2 * P, 2);
+    const carLines = wrap(m, d.car, room, 2);
     for (const line of carLines) {
       const at = y + 48;
       ops.push((g) => {
@@ -198,6 +219,10 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
     m.font = font(28, 700);
     const pw = m.measureText(d.plate).width + 32;
     const top = y;
+    // The customer beside the plate (cut to fit) — or, beside a photo, under it: the name a line, the phone a line.
+    m.font = font(28);
+    const beside = !!d.customer && (!photo || m.measureText(d.customer).width <= room - pw - 24);
+    const who = d.customer && !beside ? d.customer.split(' · ').flatMap((part) => wrap(m, part, room, 1)).slice(0, 2) : [];
     ops.push((g) => {
       g.strokeStyle = C.ink;
       g.lineWidth = 3;
@@ -209,15 +234,17 @@ export async function drawOwnerCheck(d: CheckData): Promise<Blob> {
       g.textBaseline = 'middle';
       g.fillText(d.plate, P + 16, top + 25);
       g.textBaseline = 'alphabetic';
-      if (d.customer) {
-        g.font = font(28);
-        g.fillStyle = C.dim;
-        let who = d.customer;
-        while (who.length > 1 && g.measureText(who).width > W - 2 * P - pw - 24) who = who.slice(0, -1);
-        g.fillText(who === d.customer ? who : `${who}…`, P + pw + 24, top + 34);
+      g.font = font(28);
+      g.fillStyle = C.dim;
+      if (beside) {
+        let cut = d.customer;
+        while (cut.length > 1 && g.measureText(cut).width > room - pw - 24) cut = cut.slice(0, -1);
+        g.fillText(cut === d.customer ? cut : `${cut}…`, P + pw + 24, top + 34);
       }
+      who.forEach((line, i) => g.fillText(line, P, top + 48 + 42 + i * 36));
     });
-    y += 48 + 40;
+    y += 48 + (who.length ? 14 + who.length * 36 : 0);
+    y = Math.max(y, photo ? top0 + PH : 0) + 40;
   }
 
   /** A table: its title with the columns' names, then its lines. */

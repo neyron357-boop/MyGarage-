@@ -77,6 +77,9 @@ type RowProps = {
  * not — `loadBoard`), its photo or step did, or the clock moved on: the board refreshing, the stack
  * moving, a swipe on another row leave it alone.
  */
+/** How far in from a card's side a swipe may start (a fingertip's width). */
+const EDGE = 40;
+
 export const JobRow = memo(
   JobRowView,
   (a, z) => a.b === z.b && a.phase === z.phase && a.cover === z.cover && a.tick === z.tick && a.swipe?.label === z.swipe?.label && a.variant === z.variant && a.dated === z.dated,
@@ -91,10 +94,11 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
   const press = useLongPress(() => setMenu(true));
   const { run } = useAction();
   // To the left — the row's own action (to the archive, back on the board); to the right (v0.30) — the customer's
-  // WhatsApp, when there is a number to write to.
+  // WhatsApp, when there is a number to write to. Only from the card's edge (v0.36): a card is most of what a thumb
+  // touches on the board, and a scroll that drifted sideways sent cars to the archive.
   const wa = b.customer.whatsapp || b.customer.phone;
   const openWa = () => openWhatsApp(wa);
-  const sw = useSwipeRow({ trailing: swipe ? { onCommit: () => swipe.onCommit() } : undefined, leading: wa ? { onCommit: openWa } : undefined }, 92);
+  const sw = useSwipeRow({ trailing: swipe ? { onCommit: () => swipe.onCommit() } : undefined, leading: wa ? { onCommit: openWa } : undefined }, 92, { edge: EDGE });
   const swiping = !!swipe || !!wa;
   // A long press and a swipe on the same row: both see the finger.
   const touch = swiping

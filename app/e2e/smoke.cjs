@@ -1049,21 +1049,25 @@ async function launchBrowser() {
     await front('.vin-chip[data-check]').waitFor({ state: 'detached' });
   });
   await step('archive: a swipe left takes a job off the board, a swipe in the archive brings it back', async () => {
-    // A finger's swipe from the right edge of a row to the left (touch events, as on a phone).
-    const swipeLeft = (loc) =>
-      loc.evaluate((el) => {
+    // A finger's swipe from the right edge of a row to the left (touch events, as on a phone) — or from its middle.
+    const swipeLeft = (loc, middle = false) =>
+      loc.evaluate((el, middle) => {
         const r = el.getBoundingClientRect();
         const y = r.top + r.height / 2;
-        const x0 = r.right - 20;
+        const x0 = middle ? r.left + r.width * 0.75 : r.right - 20;
         const touch = (x) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
         const fire = (type, x, list = true) => el.dispatchEvent(new TouchEvent(type, { touches: list ? [touch(x)] : [], changedTouches: [touch(x)], bubbles: true, cancelable: true }));
         fire('touchstart', x0);
         for (let i = 1; i <= 12; i++) fire('touchmove', x0 - i * 28);
         fire('touchend', x0 - 12 * 28, false);
-      });
+      }, middle);
     await page.goto(BASE + '#/');
     const row = page.locator('.job-row', { hasText: '31415' }).first();
     await row.waitFor();
+    // v0.36: begun in the middle of a card (a scroll drifting sideways) — nothing: the card stays, nothing uncovered.
+    await swipeLeft(row, true);
+    await page.waitForTimeout(500);
+    if (!(await row.isVisible()) || (await row.evaluate((el) => el.style.getPropertyValue('--swipe'))) !== '0px') throw new Error('a swipe begun in the middle of a card moved it');
     await swipeLeft(row);
     await page.getByText(/в архиве$/).first().waitFor();
     await page.locator('.job-row', { hasText: '31415' }).waitFor({ state: 'detached' });
@@ -2392,6 +2396,16 @@ async function launchBrowser() {
       return parts.length;
     }, job);
     if (set < 2) throw new Error('parts set at once: ' + set);
+    // The car's photo (v0.36: it is on the picture, top right).
+    await page.evaluate(
+      async ({ job, b64 }) => {
+        const { db } = await import('/src/db/db.ts');
+        const { setCover } = await import('/src/services/cover.ts');
+        const o = await db.orders.get(job);
+        await setCover(o.vehicleId, new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' }));
+      },
+      { job, b64: fs.readFileSync(FIXTURE).toString('base64') },
+    );
     // «…» → «Владельцу»: the picture, then «Отправить» (a download on a PC).
     await page.waitForTimeout(400);
     await front('[aria-label="Ещё"]').first().click();
@@ -2399,6 +2413,19 @@ async function launchBrowser() {
     await page.locator('img[data-owner-check]').waitFor({ timeout: 15000 });
     const size = await page.locator('img[data-owner-check]').evaluate((img) => [img.naturalWidth, img.naturalHeight]);
     if (size[0] !== 1080 || size[1] < 900) throw new Error('the picture is ' + size.join('×'));
+    // The photo top right: there the picture is not white paper.
+    const shade = await page.locator('img[data-owner-check]').evaluate((img) => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(760, 200, 240, 180).data;
+      let s = 0;
+      for (let i = 0; i < d.length; i += 4) s += (d[i] + d[i + 1] + d[i + 2]) / 3;
+      return s / (d.length / 4);
+    });
+    if (shade > 235) throw new Error('no car photo on the owner’s picture: ' + shade);
     await shot('41c-owner-check');
     // The phone's share sheet (a PC's too, in Chrome): what it is handed is the picture.
     await page.evaluate(() => {

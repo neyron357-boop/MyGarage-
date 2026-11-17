@@ -1660,8 +1660,9 @@ export const ru = {
     send: 'Отправить',
     parts: 'Запчасти',
     work: 'Работа',
-    cost: 'Закупка',
-    sale: 'Продажа',
+    // Buy / Sell — the user's words (v0.36), as the owner reads them.
+    cost: 'Buy',
+    sale: 'Sell',
     noSupplier: 'поставщик не выбран',
     noCost: 'нет цены',
     own: 'запчасть клиента',

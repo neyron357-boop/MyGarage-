@@ -24,15 +24,23 @@ export interface SwipeSpec {
  *
  * Under the finger the offset is written straight to the row (its --swipe), frame by frame: the row is
  * not rendered again while it follows the finger — only when it starts, crosses the line and comes to rest.
+ *
+ * `edge` (v0.36, the board's cards — a whole card under the thumb, a scroll that drifts sideways sent cars to the
+ * archive): the row swipes only when the finger starts at its edge, within `edge` px of it — from the right edge to
+ * the left, from the left edge to the right; a swipe begun anywhere else does nothing (an open row still closes).
  */
-export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'full'>; leading?: Pick<SwipeSpec, 'onCommit' | 'full'> }, actionWidth = 88) {
+export function useSwipeRow(
+  spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'full'>; leading?: Pick<SwipeSpec, 'onCommit' | 'full'> },
+  actionWidth = 88,
+  opts: { edge?: number } = {},
+) {
   // Where the row rests (shut, a button open, flown out) — a render; where the finger has it — no render.
   const [rest, setRest] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [past, setPast] = useState(false);
   const off = useRef(0);
   const row = useRef<HTMLElement | null>(null);
-  const start = useRef<{ x: number; y: number; base: number; w: number; axis?: 'x' | 'y'; past?: boolean } | null>(null);
+  const start = useRef<{ x: number; y: number; base: number; w: number; axis?: 'x' | 'y'; past?: boolean; from?: 'left' | 'right' } | null>(null);
   const swiped = useRef(false);
   const live = useRef(spec);
   live.current = spec;
@@ -67,8 +75,16 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
       // The strip along the left edge belongs to "Back" (ui/stack): a touch there never swipes a row; nor does one
       // on the row's grip (≡, ui/sortable) — that moves the row up and down.
       if (t.clientX < 28 || (e.target as Element).closest?.('[data-sort-id]')) return;
+      // Only from the row's edge, when it asks for that (an open row is moved back from anywhere).
+      let from: 'left' | 'right' | undefined;
+      if (opts.edge && off.current === 0) {
+        const box = e.currentTarget.getBoundingClientRect();
+        if (t.clientX - box.left <= opts.edge) from = 'left';
+        else if (box.right - t.clientX <= opts.edge) from = 'right';
+        else return;
+      }
       row.current = e.currentTarget;
-      start.current = { x: t.clientX, y: t.clientY, base: off.current, w: e.currentTarget.offsetWidth };
+      start.current = { x: t.clientX, y: t.clientY, base: off.current, w: e.currentTarget.offsetWidth, from };
     },
     onTouchMove: (e: TouchEvent<HTMLElement>) => {
       const s = start.current;
@@ -79,6 +95,11 @@ export function useSwipeRow(spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'ful
       if (!s.axis) {
         if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
         s.axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+        // From an edge, only away from it: from the right edge to the left, from the left edge to the right.
+        if (s.axis === 'x' && s.from && (s.from === 'right') !== mx < 0) {
+          start.current = null;
+          return;
+        }
       }
       if (s.axis !== 'x') return;
       let v = s.base + mx;
