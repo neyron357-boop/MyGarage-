@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { animate, spring, type AnimationPlaybackControls } from 'motion';
 import { haptic } from './haptics';
+import { ownsSideways } from './swipe';
 
 /** Things that take a sideways drag themselves: the tab swipe leaves them alone. */
 const OWN_SWIPE =
@@ -272,7 +273,7 @@ export function useTabSwipe(
       const t = e.touches[0];
       // Pages inside the page (`data-own-swipe`, v0.30 — Money's debts: owed · we owe) turn themselves; this page is not
       // its own exception.
-      const own = (e.target as Element | null)?.closest?.(OWN_SWIPE);
+      const own = ownsSideways(e.target, t.clientX, OWN_SWIPE);
       if (t.clientX < EDGE || (own && own !== el)) return;
       // Something on the screen must not be lost to a page turn (a voice note being recorded).
       if (el.closest('.screen')?.querySelector('[data-hold-page]')) return;

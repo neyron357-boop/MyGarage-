@@ -29,6 +29,34 @@ export interface SwipeSpec {
  * archive): the row swipes only when the finger starts at its edge, within `edge` px of it — from the right edge to
  * the left, from the left edge to the right; a swipe begun anywhere else does nothing (an open row still closes).
  */
+/**
+ * The left edge's strip belongs to "Back" — the stack's swipe where there is a screen to go back to, Safari's in one of
+ * its tabs. On a tab's own screen in the installed app (the board) nothing goes back: a row swipes from the very edge.
+ */
+function backEdgeTaken(): boolean {
+  const c = document.documentElement.classList;
+  if (c.contains('ios') && !c.contains('standalone')) return true;
+  return !!document.querySelector('.stack > .screen[data-role="below"]');
+}
+
+/**
+ * What under a touch takes a sideways drag itself (`selector` — what does), for the page's own swipes (`ui/tabSwipe`,
+ * `ui/mainSwipe`): a row that swipes only from its edges (`data-swipe-edge`, v0.38 — the board's cards) takes it only
+ * there, or while its button is open — begun in its middle, the drag is the page's: the tab beside.
+ */
+export function ownsSideways(target: EventTarget | null, x: number, selector: string): Element | null {
+  let el = (target as Element | null)?.closest?.(selector) ?? null;
+  while (el) {
+    const edge = Number((el as HTMLElement).dataset?.swipeEdge || 0);
+    if (!edge) return el;
+    const open = parseFloat((el as HTMLElement).style.getPropertyValue('--swipe') || '0') !== 0;
+    const box = el.getBoundingClientRect();
+    if (open || x - box.left <= edge || box.right - x <= edge) return el;
+    el = el.parentElement?.closest(selector) ?? null;
+  }
+  return null;
+}
+
 export function useSwipeRow(
   spec: { trailing?: Pick<SwipeSpec, 'onCommit' | 'full'>; leading?: Pick<SwipeSpec, 'onCommit' | 'full'> },
   actionWidth = 88,
@@ -74,7 +102,7 @@ export function useSwipeRow(
       const t = e.touches[0];
       // The strip along the left edge belongs to "Back" (ui/stack): a touch there never swipes a row; nor does one
       // on the row's grip (≡, ui/sortable) — that moves the row up and down.
-      if (t.clientX < 28 || (e.target as Element).closest?.('[data-sort-id]')) return;
+      if ((t.clientX < 28 && backEdgeTaken()) || (e.target as Element).closest?.('[data-sort-id]')) return;
       // Only from the row's edge, when it asks for that (an open row is moved back from anywhere).
       let from: 'left' | 'right' | undefined;
       if (opts.edge && off.current === 0) {

@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { invoiceBuyer } from '../domain/invoice';
+import { invoiceBuyer, invoicePaidAt } from '../domain/invoice';
 import { formatPlate } from '../domain/plates';
 import type { Media, MediaOwner, Vehicle } from '../domain/types';
 import { AppError } from './errors';
@@ -80,6 +80,9 @@ export async function quotationPdf(orderId: string): Promise<PdfFile> {
   return { blob: await (await pdf()).renderQuotation(orderId), filename: documentFileName('Quotation', await carOf(orderId)) };
 }
 
+/** Paid invoices stamped this session (made when asked: a payment taken back takes the stamp off). */
+const stampedNow = new Map<string, Promise<Blob>>();
+
 export async function invoicePdf(invoiceId: string): Promise<PdfFile> {
   const inv = await db.invoices.get(invoiceId);
   if (!inv) throw new AppError('err.notFound');
@@ -89,6 +92,17 @@ export async function invoicePdf(invoiceId: string): Promise<PdfFile> {
   // Issued with the buyer blank, it prints the job's customer as it is now (`invoiceBuyer`): made each time,
   // not kept — the PDF kept before the customer was added (with no name) is not the one given any more.
   const customer = order ? await db.customers.get(order.customerId) : undefined;
+  // Paid in full (v0.38): printed, sent and opened with the PAID stamp — made from the invoice when asked (it is paid
+  // after it is issued); the PDF kept at its issue stays as it was.
+  if (order) {
+    const [invoices, payments] = await Promise.all([db.invoices.where('orderId').equals(order.id).toArray(), db.payments.where('orderId').equals(order.id).toArray()]);
+    const paidAt = invoicePaidAt(inv, invoices, payments, order);
+    if (paidAt) {
+      const key = [invoiceId, paidAt, customer ? JSON.stringify([customer.name, customer.companyName, customer.phone, customer.trn, customer.address]) : ''].join('|');
+      if (!stampedNow.has(key)) stampedNow.set(key, (async () => (await pdf()).renderInvoice(invoiceId, paidAt))().catch((e) => (stampedNow.delete(key), Promise.reject(e))));
+      return { blob: await stampedNow.get(key)!, filename };
+    }
+  }
   if (invoiceBuyer(inv.buyer, customer) !== inv.buyer) return { blob: await make(), filename };
   return keep('invoice', invoiceId, filename, make);
 }

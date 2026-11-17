@@ -31,6 +31,8 @@ export const COLOR = {
   strong: '#111827',
   sign: '#232629',
   footer: '#454545',
+  /** The PAID stamp's ink (v0.38): a rubber stamp's red. */
+  paid: '#c62828',
 };
 
 /** Arabic labels as on the garage's documents. */
@@ -79,6 +81,28 @@ export function Ar({ children, size, bold, color, align, inline = true }: { chil
     <Text style={{ fontSize: size * AR, fontWeight: bold ? 'bold' : 'normal', color, textAlign: align, ...(inline ? { position: 'relative', top: size * AR_DROP } : {}) }}>
       {children}
     </Text>
+  );
+}
+
+/**
+ * "PAID" on an invoice paid in full (v0.38), as a rubber stamp: a frame a little turned, the day it was paid under it
+ * — and the Arabic word apart from the English and the date (`Ar`).
+ */
+export function PaidStamp({ on }: { on: string }) {
+  return (
+    <View style={{ alignSelf: 'flex-start', marginTop: 6, marginBottom: 10, marginLeft: 8, transform: 'rotate(-8deg)', borderWidth: 2.4, borderColor: COLOR.paid, borderRadius: 6, paddingTop: 2, paddingBottom: 3, paddingHorizontal: 14, alignItems: 'center' }}>
+      <Text style={{ fontSize: 26, fontWeight: 'bold', color: COLOR.paid, letterSpacing: 5 }}>PAID</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+        <Text style={{ fontSize: 8, fontWeight: 'bold', color: COLOR.paid }}>
+          {on}
+          {SP}
+          {SP}
+        </Text>
+        <Ar size={9} bold color={COLOR.paid}>
+          مدفوع
+        </Ar>
+      </View>
+    </View>
   );
 }
 

@@ -260,6 +260,18 @@ async function followUp(closings: Iterable<string>, orders: Iterable<string>) {
   await resettle(orders);
 }
 
+/**
+ * A job deleted whole with its money (v0.38): each of its payments goes as it would by itself — its cash movement, its
+ * proofs, the day closings' figures counted again. A debt payment stays (the money came): it pays less of the debts now.
+ * Runs inside the caller's transaction (all tables); returns what went, for "Undo" (`restoreEntry`, after the job is back).
+ */
+export async function takeJobPayments(orderId: string): Promise<RemovedEntry> {
+  const t = new Touch();
+  for (const p of await db.payments.where('orderId').equals(orderId).toArray()) await takePayment(t, p);
+  for (const id of t.closings) await recountClosing(id);
+  return t.removed();
+}
+
 /** Delete an operation of the money book — whatever it is, with everything that hangs on it. Returns it for "Undo". */
 export async function removeEntry(ref: EntryRef): Promise<RemovedEntry> {
   const t = new Touch();

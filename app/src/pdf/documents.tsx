@@ -20,7 +20,7 @@ import tinosBold from './fonts/Tinos-Bold.ttf?url';
 import tinosRegular from './fonts/Tinos-Regular.ttf?url';
 import arabicBold from './fonts/MarkaziText-Bold.ttf?url';
 import arabicRegular from './fonts/MarkaziText-Regular.ttf?url';
-import { aed, AR_LABEL, BiLine, BlockLabel, Codes, COLOR, GarageFooter, GarageHeader, ItemsTable, Signatures, TitleBar, Totals, type DocRow } from './garage';
+import { aed, AR_LABEL, BiLine, BlockLabel, Codes, COLOR, GarageFooter, GarageHeader, ItemsTable, PaidStamp, Signatures, TitleBar, Totals, type DocRow } from './garage';
 
 Font.registerHyphenationCallback((w) => [w]);
 
@@ -407,7 +407,8 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
  * VAT (Subtotal − Discount = Total), barcodes and a QR code with the invoice summary. Always in English
  * with Arabic labels (UAE tax invoice).
  */
-export async function renderInvoice(invoiceId: string): Promise<Blob> {
+/** `paidAt` — paid in full then (v0.38): the PAID stamp beside the totals. */
+export async function renderInvoice(invoiceId: string, paidAt?: string): Promise<Blob> {
   const inv = await db.invoices.get(invoiceId);
   if (!inv) throw new Error('not found');
   const b = (await loadOrderBundle(inv.orderId))!;
@@ -462,6 +463,7 @@ export async function renderInvoice(invoiceId: string): Promise<Blob> {
           total={inv.totalFils}
           notes={
             <>
+              {paidAt ? <PaidStamp on={formatDate(paidAt)} /> : null}
               {methods ? <BiLine en="Payment method" ar={AR_LABEL.paymentMethod} value={methods} color={COLOR.head} /> : null}
               {b.settings.bankDetails ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 2 }}>{b.settings.bankDetails}</Text> : null}
             </>

@@ -720,6 +720,74 @@ html.kb .tab-bar-wrap {
   pointer-events: none;
 }
 
+/* ---------- Suppliers: their stars, counts, the job's suppliers (v0.38) ---------- */
+.supplier-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.supplier-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stars-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  color: var(--mantine-color-orange-filled);
+  background: color-mix(in srgb, var(--mantine-color-yellow-6) 18%, transparent);
+}
+.star-row {
+  display: flex;
+  gap: 0;
+}
+.star-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--mantine-color-gray-5);
+  cursor: pointer;
+  position: relative;
+  transition: transform 80ms var(--spring);
+}
+.star-btn[data-on] {
+  color: var(--mantine-color-yellow-6);
+}
+.star-btn:active {
+  transform: scale(0.86);
+}
+.supplier-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 0 4px;
+  font-size: 15px;
+  color: var(--mantine-color-dimmed);
+}
+.supplier-stats b {
+  color: var(--mantine-color-text);
+  font-weight: 700;
+}
+.job-suppliers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* ---------- Touch targets ---------- */
 /* Small controls (compact buttons in rows, the stage chip, round icon buttons, the clear "x") keep their
    look but take a touch of about 44 pt, the iPhone minimum: an invisible margin of touch around them
@@ -813,6 +881,16 @@ html.kb .tab-bar-wrap {
   border-radius: inherit;
   cursor: inherit;
   -webkit-tap-highlight-color: transparent;
+}
+/* A row's own label (v0.38) lies under what in the row is tapped by itself — a button on its right, a photo, the grip
+   ≡: the row's taps tick, theirs stay theirs. (No weight: a class that places such a thing wins.) A row that swipes has
+   no label (ui/haptics.ts): each of its parts moves by itself (a layer of its own), which no label could lie under. */
+.list-row.clickable > .haptic-hit {
+  z-index: 1;
+}
+:where(.list-row.clickable) :where(button, a, input, textarea, select, [role='button'], [data-sort-id], .sort-grip) {
+  position: relative;
+  z-index: 2;
 }
 .haptic-switch {
   position: absolute;

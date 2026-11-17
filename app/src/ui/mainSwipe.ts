@@ -1,5 +1,6 @@
 import type { NavigateFunction } from 'react-router-dom';
 import { haptic } from './haptics';
+import { ownsSideways } from './swipe';
 
 /*
  * Swipes between the tab bar's places (v0.30, the user's call): a sideways swipe on a tab's own screen (Board, Search,
@@ -60,7 +61,7 @@ export function watchMainSwipe(root: HTMLElement, top: () => { el: HTMLElement |
     const now = top();
     if (!now.el || !MAIN_TABS.includes(now.path as (typeof MAIN_TABS)[number])) return;
     if (t.clientX < EDGE || t.clientX > window.innerWidth - 8) return;
-    if ((e.target as Element | null)?.closest?.(OWN)) return;
+    if (ownsSideways(e.target, t.clientX, OWN)) return;
     g = { id: t.identifier, x0: t.clientX, y0: t.clientY, el: now.el, samples: [[e.timeStamp, 0]], dx: 0 };
   };
   const move = (e: TouchEvent) => {

@@ -25,6 +25,7 @@ import { CustomersPage } from './features/customers/CustomersPage';
 import { VehiclePage } from './features/customers/VehiclePage';
 import { MoneyPage } from './features/money/MoneyPage';
 import { JobPage } from './features/job/JobPage';
+import { JobSuppliersPage } from './features/job/JobSuppliers';
 import { MorePage } from './features/more/MorePage';
 import { GarageNotesPage } from './features/more/GarageNotes';
 import { NewOrderPage } from './features/orders/NewOrderPage';
@@ -63,6 +64,8 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/orders/:id/intake" element={<JobPage />} />
       <Route path="/orders/:id/invoice" element={<JobPage />} />
       <Route path="/orders/:id/claim" element={<ClaimPage />} />
+      {/* v0.38: the suppliers for a job — its own screen (the user's ask), from the chip under the job. */}
+      <Route path="/orders/:id/suppliers" element={<JobSuppliersPage />} />
       <Route path="/customers" element={<CustomersPage />} />
       <Route path="/customers/:id" element={<CustomerPage />} />
       <Route path="/vehicles/:id" element={<VehiclePage />} />

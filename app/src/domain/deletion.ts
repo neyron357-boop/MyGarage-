@@ -20,14 +20,23 @@ export interface DeletableJob {
   lockedMedia?: boolean;
 }
 
-/** Why the job cannot be deleted, or undefined when it can. */
+/**
+ * Everything the job holds that a plain deletion must not take (v0.38: the sheet lists them all, and the manager may
+ * still delete the job with them, confirmed — `deleteJob(id, { withRecords: true })`).
+ */
+export function whatJobHolds(j: DeletableJob): DeleteBlock[] {
+  const out: DeleteBlock[] = [];
+  if (j.invoices.length) out.push('invoice');
+  if (j.payments.length) out.push('payment');
+  if (j.debts.length) out.push('debt');
+  if (j.inspections.some((i) => i.locked) || j.lockedMedia) out.push('signed');
+  if (j.versions.length || j.decisions.length) out.push('sent');
+  if (j.claims.length) out.push('claim');
+  if (j.supplierReturns?.length) out.push('return');
+  return out;
+}
+
+/** Why the job cannot be deleted plainly, or undefined when it can. */
 export function whyJobStays(j: DeletableJob): DeleteBlock | undefined {
-  if (j.invoices.length) return 'invoice';
-  if (j.payments.length) return 'payment';
-  if (j.debts.length) return 'debt';
-  if (j.inspections.some((i) => i.locked) || j.lockedMedia) return 'signed';
-  if (j.versions.length || j.decisions.length) return 'sent';
-  if (j.claims.length) return 'claim';
-  if (j.supplierReturns?.length) return 'return';
-  return undefined;
+  return whatJobHolds(j)[0];
 }

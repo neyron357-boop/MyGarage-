@@ -7,6 +7,7 @@ import { db } from '../../db/db';
 import { canonicalMake } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import { looksLikePhone, supplierMatches } from '../../domain/suppliers';
+import { starsOf } from '../../domain/supplierRank';
 import type { Employee, OrderItem, Supplier, Vehicle } from '../../domain/types';
 import { mediaBlob } from '../../services/media';
 import { partRequestText, whatsappUrl } from '../../services/messages';
@@ -20,11 +21,18 @@ import { SupplierSheet } from '../parts/Suppliers';
 /** Suppliers for a car: those working with its make first, then the rest; contractors first when asked for. */
 export function useSuppliers(make?: string, service?: boolean): Supplier[] {
   const all = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []) ?? [];
+  // How many parts were bought from each (v0.38) — the index alone, not the lines.
+  const bought = useLiveQuery(async () => {
+    const m = new Map<string, number>();
+    for (const k of await db.items.where('supplierId').above('').keys()) m.set(String(k), (m.get(String(k)) ?? 0) + 1);
+    return m;
+  }, []);
   return useMemo(() => {
     const m = make ? canonicalMake(make).toLowerCase() : '';
     const score = (s: Supplier) => (service !== undefined && !!s.service === service ? 0 : 2) + (m && s.makes?.some((x) => x.toLowerCase() === m) ? 0 : 1);
-    return [...all].sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
-  }, [all, make, service]);
+    const used = (s: Supplier) => (starsOf(s) ?? 3) * 1000 + Math.min(999, bought?.get(s.id) ?? 0);
+    return [...all].sort((a, b) => score(a) - score(b) || used(b) - used(a) || a.name.localeCompare(b.name));
+  }, [all, bought, make, service]);
 }
 
 const CHIPS = 6;

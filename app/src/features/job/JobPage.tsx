@@ -37,6 +37,7 @@ import {
   IconUser,
   IconUserDollar,
   IconUserPlus,
+  IconTruck,
   IconTruckDelivery,
   IconUserCheck,
   IconUserX,
@@ -1054,6 +1055,12 @@ export function JobPage() {
           <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
           <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
           <JobCardChip orderId={oid} open={open} />
+          {open && (
+            <button type="button" className="chip vin-chip" data-empty aria-label={t('suppliers.forJob')} onClick={() => navigate(`/orders/${oid}/suppliers`)}>
+              <IconTruck size={17} stroke={1.9} aria-hidden />
+              <span>{t('suppliers.forJob')}</span>
+            </button>
+          )}
         </div>
       </Box>
 

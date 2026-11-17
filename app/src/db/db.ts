@@ -162,7 +162,8 @@ function guard<T>(table: Table<T, string>, allowed: string[], isLocked: (obj: T)
     );
     if (bad.length) throw new ImmutableError(t.name, bad);
   });
-  t.hook('deleting', (_key: unknown, obj: T) => {
+  t.hook('deleting', (key: unknown, obj: T) => {
+    if (purgeable.has(String(key))) return;
     if (isLocked(obj)) throw new ImmutableError(t.name, ['(delete)']);
   });
 }
@@ -181,17 +182,23 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Journal entries that may go: only those of a job being deleted whole, a job with no documents and no
- * money (domain/deletion.ts, services/orders deleteJob), and only while that deletion runs.
+ * Guarded records that may go: only those of a job being deleted whole (services/orders `deleteJob`) — its journal;
+ * since v0.38 (the user's call: «сделай так чтобы можно было удалить с подтверждением») also its invoices, debts, sent
+ * estimates, the customer's answers, signed reports and their stored PDFs, after the manager confirmed it — and only
+ * while that deletion runs.
  */
 const purgeable = new Set<string>();
-export async function purgeJournal(ids: string[]): Promise<void> {
+export async function purge(table: Table<any, string>, ids: string[]): Promise<void> {
+  if (!ids.length) return;
   ids.forEach((id) => purgeable.add(id));
   try {
-    await db.events.bulkDelete(ids);
+    await table.bulkDelete(ids);
   } finally {
     ids.forEach((id) => purgeable.delete(id));
   }
+}
+export async function purgeJournal(ids: string[]): Promise<void> {
+  await purge(db.events, ids);
 }
 
 function installGuards(db: GarageDB) {

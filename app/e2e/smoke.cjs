@@ -1064,10 +1064,17 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     const row = page.locator('.job-row', { hasText: '31415' }).first();
     await row.waitFor();
-    // v0.36: begun in the middle of a card (a scroll drifting sideways) — nothing: the card stays, nothing uncovered.
+    // v0.36: begun in the middle of a card (a scroll drifting sideways) the card is not swiped — v0.38: the drag is the
+    // board's, the tab beside (Search) opens; the card stays on the board, nothing uncovered. (The board in front, its
+    // transition over: while screens move, a swipe is nobody's.)
+    await front('.job-row').filter({ hasText: '31415' }).first().waitFor();
+    await page.waitForTimeout(700);
     await swipeLeft(row, true);
-    await page.waitForTimeout(500);
-    if (!(await row.isVisible()) || (await row.evaluate((el) => el.style.getPropertyValue('--swipe'))) !== '0px') throw new Error('a swipe begun in the middle of a card moved it');
+    await page.waitForURL(/#\/search$/, { timeout: 5000 });
+    await page.goto(BASE + '#/');
+    await front('.job-row').filter({ hasText: '31415' }).first().waitFor();
+    await page.waitForTimeout(700);
+    if ((await row.evaluate((el) => el.style.getPropertyValue('--swipe'))) !== '0px') throw new Error('a swipe begun in the middle of a card moved it');
     await swipeLeft(row);
     await page.getByText(/в архиве$/).first().waitFor();
     await page.locator('.job-row', { hasText: '31415' }).waitFor({ state: 'detached' });
@@ -2574,6 +2581,88 @@ async function launchBrowser() {
     if (!(await tiles.first().locator('.money-card-purse-name').innerText()).trim()) throw new Error('a purse tile without its name');
     await front('.money-card-start').waitFor();
     await shot('43c-cash-card');
+  });
+  await step('v0.38: the job’s suppliers on their own screen, best fit first; a supplier’s stars; an invoice paid in full printed PAID; a job with its invoice and money deleted, confirmed, «Отменить» brings it back', async () => {
+    // A job whose part has a supplier (v0.29 above): the chip «Поставщики» under it — that supplier first, «На этом заказе».
+    const job = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      for (const o of await db.orders.toArray()) {
+        if (['closed', 'cancelled', 'delivered'].includes(o.stage)) continue;
+        const items = await db.items.where('orderId').equals(o.id).toArray();
+        const it = items.find((i) => i.kind === 'part' && i.supplierId);
+        if (it) return { id: o.id, supplierId: it.supplierId };
+      }
+      return null;
+    });
+    if (!job) throw new Error('no open job with a supplier on a part');
+    await page.goto(BASE + '#/orders/' + job.id);
+    const chip = front('.job-foot').getByRole('button', { name: 'Поставщики' });
+    await chip.scrollIntoViewIfNeeded();
+    await chip.click();
+    await page.waitForURL(/\/suppliers$/);
+    const first = front('.job-suppliers .list-row').first();
+    await first.waitFor();
+    if (!(await first.innerText()).includes('На этом заказе')) throw new Error('the job’s own supplier is not first: ' + (await first.innerText()));
+    await shot('44a-job-suppliers');
+    // «Спросить»: all the job's parts at once, through the share sheet.
+    await page.evaluate(() => {
+      window.__asked = null;
+      navigator.share = async (d) => void (window.__asked = d.text);
+    });
+    await front('.nav-bar, .page-header').getByRole('button', { name: 'Спросить' }).first().click();
+    const asked = await page.waitForFunction(() => window.__asked).then((h) => h.jsonValue());
+    if (!/^1\. /m.test(asked) || !/Price and availability/.test(asked)) throw new Error('asked: ' + asked);
+    // Its card: four stars, saved; the pill on its row.
+    await first.click();
+    const dlg = page.getByRole('dialog');
+    await dlg.locator('[data-supplier-stats]').waitFor();
+    await dlg.getByRole('radio', { name: '4' }).click();
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    const stars = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.suppliers.get(id)).reliability, job.supplierId);
+    if (stars !== 4) throw new Error('stars ' + stars);
+    await front('.job-suppliers .stars-pill').first().waitFor();
+    // An invoice paid in full: its PDF says PAID; one still owed does not.
+    const paid = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { invoicePaidAt } = await import('/src/domain/invoice.ts');
+      const { invoicePdf } = await import('/src/services/documents.ts');
+      const { pdfTextItems } = await import('/src/services/pdfText.ts');
+      const out = { paid: null, owed: null };
+      for (const inv of await db.invoices.toArray()) {
+        const order = await db.orders.get(inv.orderId);
+        if (!order || inv.type === 'credit_note' || inv.status !== 'issued') continue;
+        const at = invoicePaidAt(inv, await db.invoices.where('orderId').equals(order.id).toArray(), await db.payments.where('orderId').equals(order.id).toArray(), order);
+        const key = at ? 'paid' : 'owed';
+        if (out[key]) continue;
+        const text = (await pdfTextItems((await invoicePdf(inv.id)).blob)).map((t) => t.str ?? t.text ?? '').join(' ');
+        out[key] = { order: order.id, number: inv.number, stamped: /\bP\s?A\s?I\s?D\b/.test(text) };
+      }
+      return out;
+    });
+    if (!paid.paid?.stamped) throw new Error('a paid invoice without PAID: ' + JSON.stringify(paid));
+    if (paid.owed?.stamped) throw new Error('an owed invoice with PAID: ' + JSON.stringify(paid));
+    // That job deleted with its invoice and money: the sheet lists them, «Удалить всё»; «Отменить» brings it all back.
+    await page.goto(BASE + '#/orders/' + paid.paid.order);
+    await front('.nav-bar .mantine-ActionIcon-root').last().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Удалить' }).click();
+    const sheet = page.getByRole('dialog').filter({ hasText: 'с документами' });
+    await sheet.getByText(paid.paid.number).waitFor();
+    await shot('44b-delete-with-invoice');
+    await sheet.getByRole('button', { name: 'Удалить всё' }).click();
+    await page.getByText(/удалён/).first().waitFor();
+    const gone = await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      return [await db.orders.get(id), await db.invoices.where('orderId').equals(id).count(), await db.payments.where('orderId').equals(id).count()];
+    }, paid.paid.order);
+    if (gone[0] || gone[1] || gone[2]) throw new Error('not deleted whole: ' + JSON.stringify(gone.slice(1)));
+    await page.getByRole('button', { name: 'Отменить' }).first().click();
+    await page.waitForFunction(async (id) => !!(await (await import('/src/db/db.ts')).db.orders.get(id)), paid.paid.order);
+    const back = await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      return [await db.invoices.where('orderId').equals(id).count(), await db.payments.where('orderId').equals(id).count()];
+    }, paid.paid.order);
+    if (!back[0] || !back[1]) throw new Error('Undo did not bring it back: ' + JSON.stringify(back));
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

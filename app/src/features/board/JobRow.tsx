@@ -224,6 +224,8 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
     <>
       <div
         className={row ? 'job-row job-mini swipe-row' : 'job-row job-card swipe-row'}
+        // Swiped only from its edge (v0.36): begun in its middle, a sideways drag is the board's — the tab beside (v0.38).
+        data-swipe-edge={EDGE}
         // Every card the same size (the user's call, v0.17.3): a job without the car's photo has the same 2 : 1
         // card, with the car drawn on a dark ground in its place. A row (compact, the archive) — all rows one size.
         data-photo={row ? undefined : true}

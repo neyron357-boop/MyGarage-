@@ -4,8 +4,9 @@ import { db, GarageDB, ImmutableError, setDb, uid } from '../db/db';
 import { AppError } from './errors';
 import { addItem } from './estimate';
 import { addInspectionPhoto, getOrCreateInspection } from './inspections';
-import { addExpense, quickInvoice } from './money';
-import { checkIn, deleteJob, jobDeleteBlock, loadOrderBundle, restoreJob } from './orders';
+import { addMedia } from './media';
+import { addPayment, addExpense, cashState, closeCashDay, quickInvoice } from './money';
+import { checkIn, deleteJob, jobDeleteBlock, jobHolds, loadOrderBundle, restoreJob } from './orders';
 import { ensureSeed } from './seed';
 
 const png = () => new Blob([new Uint8Array([137, 80, 78, 71, 1, 2, 3, Math.random() * 255])], { type: 'image/png' });
@@ -58,5 +59,45 @@ describe('deleting a job', () => {
     expect(await db.orders.get(o.id)).toBeDefined();
     const ev = (await db.events.where('orderId').equals(o.id).first())!;
     await expect(db.events.delete(ev.id)).rejects.toBeInstanceOf(ImmutableError);
+  });
+
+  it('v0.38: confirmed, a job goes with its invoice and money — the cash box and its closing follow; Undo brings it all back', async () => {
+    const o = await job('41546');
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    const inv = await quickInvoice(o.id);
+    const pdf = await addMedia({ ownerType: 'invoice', ownerId: inv.id, slot: 'document_pdf', file: png(), kind: 'pdf', compress: false, locked: true });
+    const pay = await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: inv.totalFils });
+    const closing = await closeCashDay((await cashState()).expected);
+    expect(closing.actualFils).toBe(inv.totalFils);
+
+    const h = await jobHolds(o.id);
+    expect(h.holds).toEqual(['invoice', 'payment', 'sent']);
+    expect(h.invoices).toEqual([inv.number]);
+    expect(h.paidFils).toBe(inv.totalFils);
+
+    const gone = await deleteJob(o.id, { withRecords: true });
+    expect(await db.orders.get(o.id)).toBeUndefined();
+    expect(await db.invoices.get(inv.id)).toBeUndefined();
+    expect(await db.payments.get(pay.id)).toBeUndefined();
+    expect(await db.media.get(pdf.id)).toBeUndefined();
+    expect(await db.cashMovements.filter((m) => m.paymentId === pay.id).count()).toBe(0);
+    expect(await db.events.where('orderId').equals(o.id).count()).toBe(0);
+    // The counted cash stays as counted: the day's difference shows the money that left the book.
+    const c = (await db.cashClosings.get(closing.id))!;
+    expect(c.actualFils).toBe(inv.totalFils);
+    expect(c.expectedFils).toBe(0);
+    // Still guarded outside such a deletion.
+    const other = await job('41547');
+    await addItem(other.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    const inv2 = await quickInvoice(other.id);
+    await expect(db.invoices.delete(inv2.id)).rejects.toBeInstanceOf(ImmutableError);
+
+    await restoreJob(gone);
+    expect(await db.orders.get(o.id)).toBeDefined();
+    expect((await db.invoices.get(inv.id))?.number).toBe(inv.number);
+    expect(await db.payments.get(pay.id)).toBeDefined();
+    expect(await db.media.get(pdf.id)).toBeDefined();
+    expect(await db.cashMovements.filter((m) => m.paymentId === pay.id).count()).toBe(1);
+    expect((await db.cashClosings.get(closing.id))!.expectedFils).toBe(inv.totalFils);
   });
 });

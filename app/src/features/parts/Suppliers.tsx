@@ -1,5 +1,5 @@
 import { ActionIcon, Button, Group, Loader, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPlus, IconTruck } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,13 +8,17 @@ import { db, uid } from '../../db/db';
 import { CAR_MAKES, canonicalMake, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import { alreadyInBase, cardName, phonesInText, supplierMatches } from '../../domain/suppliers';
+import { starsOf, useOf } from '../../domain/supplierRank';
+import { dayShort } from '../../domain/dates';
+import { suppliersRanked } from '../../services/supplierRank';
+import { StarsPill } from '../job/JobSuppliers';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
 import { whatsappUrl } from '../../services/messages';
 import { saveSupplier, setSupplierCard } from '../../services/parts';
 import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { typedOnly, useAction } from '../../ui/hooks';
+import { typedOnly, useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SupplierBookActions } from './SupplierBookActions';
@@ -50,6 +54,9 @@ export function SupplierSheet({
   const [reading, setReading] = useState(false);
   const [found, setFound] = useState<string[]>([]);
   const all = useLiveQuery(() => db.suppliers.toArray(), []);
+  // What was bought from it (v0.38): its jobs, parts, returns, the last time — on its card.
+  const ranked = useLiveQuery(() => (supplier?.id ? suppliersRanked() : undefined), [supplier?.id]);
+  const use = supplier?.id && ranked ? useOf(ranked.use, supplier.id) : undefined;
   useEffect(() => {
     // Its number as it is read out: «+971 50 765 4321» (kept as E.164).
     setV(supplier?.phone ? { ...supplier, phone: formatPhone(normalizePhone(supplier.phone) ?? supplier.phone) } : supplier ?? {});
@@ -104,6 +111,26 @@ export function SupplierSheet({
     <Modal opened={opened} onClose={onClose} title={v.id ? t('parts.editSupplier') : t('parts.addSupplier')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
         {v.id && (v.phone || chat) && <ContactTiles phone={v.phone ? typed ?? v.phone : ''} whatsappHref={chat} />}
+        {use && use.jobs > 0 && (
+          <div className="supplier-stats" data-supplier-stats>
+            <span>
+              <b className="tnum">{use.jobs}</b> {t('suppliers.statJobs', { count: use.jobs })}
+            </span>
+            <span>
+              <b className="tnum">{use.lines}</b> {t('suppliers.statParts', { count: use.lines })}
+            </span>
+            {use.returns > 0 && (
+              <span>
+                <b className="tnum">{use.returns}</b> {t('suppliers.statReturns', { count: use.returns })}
+              </span>
+            )}
+            {use.lastAt && (
+              <span>
+                <b>{dayShort(use.lastAt).word ? t(`common.${dayShort(use.lastAt).word}`) : dayShort(use.lastAt).text}</b>
+              </span>
+            )}
+          </div>
+        )}
         <div className="ios-group">
           <div className="ios-row left line-name">
             <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" data-autofocus={(!v.id && !v.phone) || undefined} />
@@ -141,6 +168,19 @@ export function SupplierSheet({
           </div>
           <FormRow label={t('suppliers.contractor')}>
             <Switch aria-label={t('suppliers.contractor')} checked={!!v.service} onChange={(e) => setV({ ...v, service: e.currentTarget.checked || undefined })} />
+          </FormRow>
+          {/* The manager's stars (v0.38): a tap — that many, the same star again — none. */}
+          <FormRow label={t('suppliers.rating')}>
+            <div className="star-row" role="radiogroup" aria-label={t('suppliers.rating')}>
+              {[1, 2, 3, 4, 5].map((n) => {
+                const on = (starsOf(v) ?? 0) >= n;
+                return (
+                  <button key={n} type="button" className="star-btn" role="radio" aria-checked={starsOf(v) === n} aria-label={`${n}`} data-on={on || undefined} onClick={() => setV({ ...v, reliability: starsOf(v) === n ? undefined : n })}>
+                    {on ? <IconStarFilled size={24} aria-hidden /> : <IconStar size={24} stroke={1.7} aria-hidden />}
+                  </button>
+                );
+              })}
+            </div>
           </FormRow>
         </div>
 
@@ -222,11 +262,13 @@ export function SupplierSheet({
 
 /**
  * The supplier list: a search over names, makes and what they sell; a tap opens the card, the phone
- * and WhatsApp are one tap from the row; one's own list comes in from Excel or CSV.
+ * and WhatsApp are one tap from the row; one's own list comes in from Excel or CSV. The most used and best rated first
+ * (v0.38), each with its stars and how many jobs it supplied.
  */
 export function SuppliersTab() {
   const { t } = useTranslation();
-  const all = useLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).sortBy('name'), []);
+  const ranked = useScreenLiveQuery(suppliersRanked, []);
+  const all = ranked?.list;
   // Opened from the search: the supplier found is the one shown.
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -251,8 +293,22 @@ export function SuppliersTab() {
             <ListRow
               key={s.id}
               onClick={() => setEdit(s)}
-              title={s.name}
-              subtitle={[s.service ? t('suppliers.contractor') : s.condition ? t(`suppliers.cond.${s.condition}`) : '', s.makes?.join(', '), s.parts].filter(Boolean).join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)}
+              title={
+                <span className="supplier-name">
+                  <span className="supplier-name-text">{s.name}</span>
+                  <StarsPill s={s} />
+                </span>
+              }
+              subtitle={
+                [
+                  useOf(ranked!.use, s.id).jobs ? t('suppliers.jobs', { count: useOf(ranked!.use, s.id).jobs }) : '',
+                  s.service ? t('suppliers.contractor') : s.condition ? t(`suppliers.cond.${s.condition}`) : '',
+                  s.makes?.join(', '),
+                  s.parts,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)
+              }
               right={
                 <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
                   {s.locationUrl && (

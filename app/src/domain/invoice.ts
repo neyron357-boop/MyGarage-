@@ -1,5 +1,5 @@
 import { byPosition, itemAmounts, itemTitle } from './items';
-import type { Customer, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, PartySnapshot, Payment, Stage } from './types';
+import type { Customer, Invoice, InvoiceLine, InvoiceType, Lang, Order, OrderItem, PartySnapshot, Payment, Stage } from './types';
 
 /** The name a customer goes by on a document: a company's name, else the person's. */
 export const buyerName = (c: Pick<Customer, 'type' | 'companyName' | 'name'>): string => (c.type === 'company' && c.companyName ? c.companyName : c.name);
@@ -67,6 +67,19 @@ export function paidNet(payments: Payment[]): number {
   let sum = 0;
   for (const p of payments) sum += p.kind === 'refund' ? -p.amountFils : p.amountFils;
   return sum;
+}
+
+/**
+ * When a job's invoice was paid in full (v0.38: the PAID stamp on it) — its payments cover it, or the customer paid the
+ * garage's owner (closed «Оплата у главного»): the moment the last payment came (or the job was closed so). Never a
+ * credit note, an invoice another replaced (its payments count for the new one), a job closed without payment.
+ */
+export function invoicePaidAt(inv: Invoice, invoices: Invoice[], payments: Payment[], order: Pick<Order, 'waived'>): string | undefined {
+  if (inv.type === 'credit_note' || inv.status !== 'issued' || inv.totalFils <= 0) return undefined;
+  if (activeInvoice(invoices)?.id !== inv.id) return undefined;
+  if (order.waived?.via === 'owner') return order.waived.at;
+  if (amountDue(0, invoices, payments) > 0) return undefined;
+  return payments.filter((p) => p.kind !== 'refund').map((p) => p.receivedAt).sort().at(-1) ?? inv.issuedAt;
 }
 
 /** The invoice that currently counts for an order (issued and not credited). */

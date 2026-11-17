@@ -160,6 +160,16 @@ export function partRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year'
   return out.join('\n');
 }
 
+/** All of a job's parts to ask a supplier about at once (v0.38, the job's suppliers): the car, its VIN, the parts. */
+export function partsRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>, items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>[]): string {
+  const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ');
+  const out = [car];
+  if (vehicle.vin) out.push(`VIN: ${vehicle.vin}`);
+  out.push('', ...items.map((i, k) => `${k + 1}. ${i.titleEn || i.titleRu || ''}${i.qty > 1 ? ` × ${i.qty}` : ''}${i.partNumber ? ` (${i.partNumber})` : ''}`));
+  out.push('', 'Price and availability, please: original / aftermarket / used?');
+  return out.join('\n');
+}
+
 /** When an offer is here, in words: today, tomorrow, in 3 days. */
 export function offerWhen(days: number | undefined, lang: Lang): string {
   if (days === undefined) return '';

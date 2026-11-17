@@ -169,6 +169,18 @@ const TAPPABLE = [
   'button.note-quote',
   '.viewer button',
   '.cam button',
+  // v0.38: the round "‹" and "×" of a screen's head, the search's ×, a row of a list, the job's own lines (its
+  // complaint, the last visit), a notice's "Undo", a note's photo and video, and every plain button.
+  'button.nav-back',
+  'button.nav-close',
+  'button.search-clear',
+  'button.mantine-UnstyledButton-root',
+  'button.note-photo',
+  'button.note-video',
+  'button.vp-big',
+  'button.plate-scan-pill',
+  '.list-row.clickable:not(.swipe-row)',
+  'button.star-btn',
 ].join(',');
 /** Real check boxes and switches: they become switch controls and tick by themselves. */
 const CHECKABLE = '.mantine-Switch-input, .mantine-Checkbox-input, .mantine-Chip-input';
