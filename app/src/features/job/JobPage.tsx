@@ -557,8 +557,11 @@ export function JobPage() {
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
   const open = phase !== 'closed' && phase !== 'cancelled';
   const editable = open && !inv;
-  // The invoice is out, the car still here: its lines can be changed (credit note, then a new invoice).
-  const amendable = canAmendInvoice(b.order.stage, b.invoices, b.debts);
+  // The invoice is out, the job open: its lines can be changed (credit note, then a new invoice) — the car here or
+  // gone on credit (v0.34).
+  const amendable = canAmendInvoice(b.order.stage, b.invoices);
+  // A car gone on credit whose invoice is being changed: it stays handed over, "Done" issues the new invoice.
+  const reissue = phase === 'debt' && !inv;
   const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
   const sentAt = waiting.length ? b.versions.filter((v) => waiting.some((i) => i.lastVersionId === v.id)).map((v) => v.sentAt).sort()[0] : undefined;
 
@@ -771,7 +774,9 @@ export function JobPage() {
       onClick={() => void run(async () => openPdf(await debtPdf(openDebt.id)))}
       right={
         <Group gap={8} wrap="nowrap">
-          <Money fils={openDebt.amountFils} c="red.7" />
+          {/* What is owed now (the invoice changed since, payments made; while it is changed — by its lines); the
+              paper keeps the sum signed. */}
+          <Money fils={reissue ? Math.max(0, sum.gross - paid) : due} c="red.7" />
           <IconFileTypePdf size={18} color="var(--mantine-color-dimmed)" aria-label={t('debt.document')} />
         </Group>
       }
@@ -804,13 +809,13 @@ export function JobPage() {
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
-  if (open && !inv) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
+  if (open && !inv && !reissue) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
   // On credit and without payment are ways to settle the job: in the payment sheet ("Pay"), not here.
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (live.some((i) => i.kind !== 'discount')) tiles.push({ key: 'owner', icon: IconUserCheck, onClick: () => setOwnerOpen(true) });
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
-  if (editable && phase !== 'booked') tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
+  if (editable && phase !== 'booked' && !reissue) tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
   let bar: ReactNode = null;
@@ -845,6 +850,13 @@ export function JobPage() {
   else if (phase === 'work')
     bar = (
       <Button fullWidth color="green" loading={busy} leftSection={<IconChecks size={20} />} onClick={() => setFinish(true)}>
+        {t('job.done')} · {formatAed(sum.gross)}
+      </Button>
+    );
+  else if (reissue)
+    // Gone on credit, the invoice changed: the new one — the debt is then what it leaves.
+    bar = (
+      <Button fullWidth color="green" loading={busy} disabled={unpriced.length > 0 || !lines.length} leftSection={<IconChecks size={20} />} onClick={() => setFinish(true)}>
         {t('job.done')} · {formatAed(sum.gross)}
       </Button>
     );
@@ -1089,7 +1101,7 @@ export function JobPage() {
             <List>
               <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
               {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
-              {due > 0 && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
+              {due > 0 && paid > 0 && !openDebt && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
               {debtRow}
               {waivedRow}
               {profitRow}
@@ -1154,6 +1166,8 @@ export function JobPage() {
                   subtitle={sum.vat ? t('job.vatIn', { vat: formatAed(sum.vat, lang, false) }) : undefined}
                   right={<Text fz={24} lh={1.1}><Money fils={sum.gross} display roll /></Text>}
                 />
+                {reissue && paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
+                {reissue && debtRow}
                 {waivedRow}
                 {profitRow}
               </List>

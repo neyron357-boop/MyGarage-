@@ -1,5 +1,5 @@
 import { byPosition, itemAmounts, itemTitle } from './items';
-import type { Customer, Debt, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, PartySnapshot, Payment, Stage } from './types';
+import type { Customer, Invoice, InvoiceLine, InvoiceType, Lang, OrderItem, PartySnapshot, Payment, Stage } from './types';
 
 /** The name a customer goes by on a document: a company's name, else the person's. */
 export const buyerName = (c: Pick<Customer, 'type' | 'companyName' | 'name'>): string => (c.type === 'company' && c.companyName ? c.companyName : c.name);
@@ -78,10 +78,12 @@ export function activeInvoice(invoices: Invoice[]): Invoice | undefined {
 
 /**
  * An issued invoice can still be changed — cancelled by a credit note, the lines changed, a new invoice
- * issued — while the car is in the garage: not once it has left, nor with a debt signed for that invoice.
+ * issued — while the job is open: the car in the garage, or gone on credit (v0.34, the user's call — a signed
+ * debt does not freeze the lines: its paper stays as signed, what is owed follows the new invoice). Not once
+ * the job is closed.
  */
-export function canAmendInvoice(stage: Stage, invoices: Invoice[], debts: Pick<Debt, 'status'>[]): boolean {
-  return !!activeInvoice(invoices) && !['booked', 'delivered', 'closed', 'cancelled'].includes(stage) && !debts.some((d) => d.status === 'open');
+export function canAmendInvoice(stage: Stage, invoices: Invoice[]): boolean {
+  return !!activeInvoice(invoices) && !['booked', 'closed', 'cancelled'].includes(stage);
 }
 
 /** Amount still due: active invoice total (or approved total before invoicing) minus what was paid. */

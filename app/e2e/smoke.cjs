@@ -275,6 +275,44 @@ async function launchBrowser() {
     const gone = await page.evaluate(async (id) => { const { loadOrderBundle } = await import('/src/services/orders.ts'); const { phaseOf } = await import('/src/services/flow.ts'); const b = await loadOrderBundle(id); return { phase: phaseOf(b), stage: b.order.stage, debts: b.debts.map((d) => d.status) }; }, patrol);
     if (gone.phase !== 'debt' || gone.stage !== 'delivered' || gone.debts.join() !== 'open') throw new Error('on credit: ' + JSON.stringify(gone));
     await shot('20-on-credit-gone', true);
+    // v0.34: gone on credit, its lines and prices still change — a tap on an invoice line, «Изменить» (a credit note):
+    // the car stays handed over; a new price, «Готово» issues the new invoice; the debt is what it leaves, its paper
+    // as it was signed.
+    const was = await page.evaluate(async (id) => {
+      const { loadOrderBundle, bundleAmountDue } = await import('/src/services/orders.ts');
+      const { activeInvoice } = await import('/src/domain/invoice.ts');
+      const { itemAmounts, itemTitle } = await import('/src/domain/items.ts');
+      const b = await loadOrderBundle(id);
+      // A work line of one: on the invoice by its description, on the job (changed) by its title in the job's language.
+      const work = b.items.find((i) => i.kind === 'labor' && i.approvalState === 'approved' && i.qty === 1);
+      const line = activeInvoice(b.invoices).lines.find((l) => l.kind !== 'discount');
+      return { due: bundleAmountDue(b), signed: b.debts[0].amountFils, onInvoice: line.description, name: itemTitle(work, b.order.docLanguage), gross: itemAmounts(work).gross };
+    }, patrol);
+    await front('.list-row').filter({ hasText: was.onInvoice }).first().click();
+    await dlg.getByRole('button', { name: 'Изменить', exact: true }).click();
+    await page.getByRole('button', { name: /^Готово ·/ }).waitFor();
+    await front('.list-row').filter({ hasText: was.name }).first().click();
+    await dlg.getByRole('button', { name: 'Изменить цену' }).click();
+    const newPrice = String((was.gross + 5000) / 100).replace('.', ',');
+    await dlg.getByLabel('Изменить цену').fill(newPrice);
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    const [whole, cents = ''] = newPrice.split(',');
+    const shown = new RegExp(whole.replace(/\B(?=(\d{3})+$)/g, '[\\s\\u00a0\\u202f]?') + ',' + cents.padEnd(2, '0'));
+    await dlg.getByRole('button', { name: 'Изменить цену' }).filter({ hasText: shown }).waitFor();
+    await page.locator('.mantine-Modal-close').first().click();
+    await page.getByRole('button', { name: /^Готово ·/ }).click();
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await page.getByRole('button', { name: /^Оплата ·/ }).waitFor();
+    await front('.list-row').filter({ hasText: 'Долг до' }).waitFor();
+    await shot('20a-on-credit-changed', true);
+    const changed = await page.evaluate(async (id) => {
+      const { loadOrderBundle, bundleAmountDue } = await import('/src/services/orders.ts');
+      const { phaseOf } = await import('/src/services/flow.ts');
+      const b = await loadOrderBundle(id);
+      return { phase: phaseOf(b), stage: b.order.stage, due: bundleAmountDue(b), debts: b.debts.map((d) => [d.status, d.amountFils]), notes: b.invoices.filter((i) => i.type === 'credit_note').length, issued: b.invoices.filter((i) => i.type !== 'credit_note' && i.status === 'issued').length };
+    }, patrol);
+    if (changed.phase !== 'debt' || changed.stage !== 'delivered' || changed.due !== was.due + 5000 || JSON.stringify(changed.debts) !== JSON.stringify([['open', was.signed]]) || changed.notes !== 1 || changed.issued !== 1)
+      throw new Error('a job on credit changed: ' + JSON.stringify({ was, changed }));
     await page.getByRole('button', { name: /^Оплата ·/ }).click();
     await dlg.getByText('Карта', { exact: true }).click();
     await dlg.getByRole('button', { name: 'Провести' }).click();

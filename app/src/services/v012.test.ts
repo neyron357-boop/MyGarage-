@@ -5,15 +5,16 @@ import { activeInvoice, canAmendInvoice } from '../domain/invoice';
 import { byPosition, itemTitle, lineName } from '../domain/items';
 import { createCustomer, suggestCustomers } from './customers';
 import { addItem, updateItem } from './estimate';
-import { amendInvoice, approveAll, phaseOf, reorderLines, reviseLine } from './flow';
-import { addPayment, quickInvoice } from './money';
-import { checkIn, loadOrderBundle, setJobCustomer } from './orders';
+import { amendInvoice, approveAll, leaveOnDebt, phaseOf, reorderLines, repriceLine, reviseLine } from './flow';
+import { addPayment, discountIssuedInvoice, quickInvoice } from './money';
+import { bundleAmountDue, checkIn, loadOrderBundle, setJobCustomer } from './orders';
 import { ensureSeed } from './seed';
 
 async function job(name = '', phone = '') {
   return checkIn({ plate: { emirate: 'DXB', code: 'K', number: String(Math.floor(Math.random() * 90000) + 10000) }, make: 'Mitsubishi', model: 'Pajero', name, phone, docLanguage: 'en', complaint: '', arrivedNow: true });
 }
 
+const signature = () => new Blob(['sig'], { type: 'image/png' });
 const titles = async (orderId: string) => (await loadOrderBundle(orderId))!.items.map((i) => itemTitle(i, 'en'));
 
 beforeEach(async () => {
@@ -84,7 +85,7 @@ describe('changing the lines after the invoice', () => {
     await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 5000 });
     let b = (await loadOrderBundle(o.id))!;
     expect(phaseOf(b)).toBe('pay');
-    expect(canAmendInvoice(b.order.stage, b.invoices, b.debts)).toBe(true);
+    expect(canAmendInvoice(b.order.stage, b.invoices)).toBe(true);
 
     await amendInvoice(o.id);
     b = (await loadOrderBundle(o.id))!;
@@ -110,14 +111,69 @@ describe('changing the lines after the invoice', () => {
     expect(second.totalFils).toBe(12600);
   });
 
-  it('is not offered once the car has left, nor with a debt signed', async () => {
+  it('is not offered once the job is closed, nor without an invoice', async () => {
     const o = await job();
     await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
     await quickInvoice(o.id);
     const b = (await loadOrderBundle(o.id))!;
-    expect(canAmendInvoice('delivered', b.invoices, [])).toBe(false);
-    expect(canAmendInvoice('ready', b.invoices, [{ status: 'open' }])).toBe(false);
-    expect(canAmendInvoice('ready', [], [])).toBe(false);
+    expect(canAmendInvoice('closed', b.invoices)).toBe(false);
+    expect(canAmendInvoice('cancelled', b.invoices)).toBe(false);
+    expect(canAmendInvoice('ready', [])).toBe(false);
+  });
+
+  // v0.34, the user's call: a car gone on credit — its lines and prices can still be changed.
+  it('changes a job gone on credit: the car stays handed over, the debt is what the new invoice leaves, its paper as signed', async () => {
+    const o = await job();
+    const oil = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 25000 });
+    const first = await quickInvoice(o.id);
+    expect(first.totalFils).toBe(26250);
+    await leaveOnDebt(o.id, { amountFils: 26250, dueDate: '2026-12-01', signature: signature() });
+    let b = (await loadOrderBundle(o.id))!;
+    expect(phaseOf(b)).toBe('debt');
+    expect(canAmendInvoice(b.order.stage, b.invoices)).toBe(true);
+
+    await amendInvoice(o.id);
+    b = (await loadOrderBundle(o.id))!;
+    expect(activeInvoice(b.invoices)).toBeUndefined();
+    expect(b.order.stage).toBe('delivered');
+    expect(phaseOf(b)).toBe('debt');
+    // A new price, a part forgotten — then Done: the new invoice, the car still gone.
+    expect(await repriceLine(oil.id, 21000)).toBe('agreed');
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Oil filter', unitPriceFils: 2000 });
+    const second = await quickInvoice(o.id);
+    expect(second.totalFils).toBe(23100);
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.order.stage).toBe('delivered');
+    expect(phaseOf(b)).toBe('debt');
+    expect(bundleAmountDue(b)).toBe(23100);
+    expect(b.debts.map((d) => [d.status, d.amountFils])).toEqual([['open', 26250]]);
+    // Paid off: the debt is settled and the job closes, as with any debt.
+    await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 23100 });
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.order.stage).toBe('closed');
+    expect(b.debts[0].status).toBe('paid');
+  });
+
+  it('closes a job gone on credit at once when the new invoice is paid already; a discount on it too', async () => {
+    const o = await job();
+    const oil = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await quickInvoice(o.id);
+    await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 5000 });
+    await leaveOnDebt(o.id, { amountFils: 5500, dueDate: '2026-12-01', signature: signature() });
+    // A discount on the invoice of a car gone on credit: a credit note and a new invoice, the debt follows.
+    await discountIssuedInvoice(o.id, { grossFils: 500 });
+    let b = (await loadOrderBundle(o.id))!;
+    expect(activeInvoice(b.invoices)!.totalFils).toBe(10000);
+    expect(bundleAmountDue(b)).toBe(5000);
+    expect(b.order.stage).toBe('delivered');
+    // The price down to what was paid: issued again, nothing owed — settled and closed.
+    await amendInvoice(o.id);
+    await repriceLine(oil.id, 5500);
+    await quickInvoice(o.id);
+    b = (await loadOrderBundle(o.id))!;
+    expect(bundleAmountDue(b)).toBe(0);
+    expect(b.order.stage).toBe('closed');
+    expect(b.debts[0].status).toBe('paid');
   });
 });
 

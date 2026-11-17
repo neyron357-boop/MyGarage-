@@ -100,6 +100,8 @@ export async function quickInvoice(orderId: string): Promise<Invoice> {
   }
   const inv = await issueInvoice(orderId);
   await tryStage(orderId, 'ready');
+  // Issued again for a car gone on credit (v0.34): paid already in full — the debt is settled, the job closes.
+  await settleIfPaid(orderId);
   return inv;
 }
 
@@ -170,16 +172,14 @@ export async function issueCreditNote(invoiceId: string, reason: string): Promis
  * towards it. The total cannot drop below what was paid — that would be a refund.
  */
 export async function discountIssuedInvoice(orderId: string, spec: DiscountSpec | null): Promise<{ credit: Invoice; invoice: Invoice }> {
-  return db.transaction('rw', db.tables, async () => {
-    const [invoices, items, payments, debts] = await Promise.all([
+  const done = await db.transaction('rw', db.tables, async () => {
+    const [invoices, items, payments] = await Promise.all([
       db.invoices.where('orderId').equals(orderId).toArray(),
       db.items.where('orderId').equals(orderId).toArray(),
       db.payments.where('orderId').equals(orderId).toArray(),
-      db.debts.where('orderId').equals(orderId).toArray(),
     ]);
     const inv = activeInvoice(invoices);
     if (!inv || inv.type === 'credit_note') throw new AppError('err.notFound');
-    if (debts.some((d) => d.status === 'open')) throw new AppError('err.discountDebt');
     // Only the invoiced lines are issued again: lines added since would slip onto the new invoice unasked.
     if (items.some((i) => i.approvalState === 'draft' && i.kind !== 'discount')) throw new AppError('err.discountDrafts');
     const before = grossOf(discountBase(items));
@@ -200,6 +200,9 @@ export async function discountIssuedInvoice(orderId: string, spec: DiscountSpec 
     await logEvent(orderId, 'discount', { amount: off, pct: spec && 'pctBp' in spec ? spec.pctBp : undefined, credit: credit.number, invoice: invoice.number });
     return { credit, invoice };
   });
+  // A debt (v0.34: a discount on a car gone on credit too) that the discount leaves nothing of is settled.
+  await settleIfPaid(orderId);
+  return done;
 }
 
 export async function createDebt(orderId: string, amountFils: number, dueDate: string, signature: Blob): Promise<Debt> {

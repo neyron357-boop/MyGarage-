@@ -329,16 +329,15 @@ export async function reviseLine(itemId: string): Promise<void> {
 /**
  * Lines to change once the invoice is out (a line forgotten, a price, a name, the order): an issued invoice
  * never changes, so it is cancelled by a credit note and the job is back at work — its lines can be changed,
- * added, moved, and "Done" issues the new invoice. Payments made count towards it. While the car is in the
- * garage and no debt is signed for the invoice (`canAmendInvoice`).
+ * added, moved, and "Done" issues the new invoice. Payments made count towards it. While the job is open
+ * (`canAmendInvoice`): a car gone on credit stays handed over (v0.34) — its debt is what the new invoice leaves.
  */
 export async function amendInvoice(orderId: string): Promise<void> {
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
   const inv = activeInvoice(b.invoices);
   if (!inv) throw new AppError('err.notFound');
-  if (b.debts.some((d) => d.status === 'open')) throw new AppError('err.amendDebt');
-  if (!canAmendInvoice(b.order.stage, b.invoices, b.debts)) throw new AppError('stageErr.notAllowed');
+  if (!canAmendInvoice(b.order.stage, b.invoices)) throw new AppError('stageErr.notAllowed');
   await issueCreditNote(inv.id, 'Invoice corrected');
   if (b.order.stage === 'quality_check' || b.order.stage === 'ready') await changeStage(orderId, 'in_progress', 'Invoice corrected');
   await syncStage(orderId);
