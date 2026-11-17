@@ -220,6 +220,17 @@ export function setDb(next: GarageDB) {
  * over the local network (http://192.168…) we build the same kind of id from `getRandomValues`, which
  * works everywhere.
  */
+/**
+ * Records whose `index` is any of `keys`, in the order Dexie's `anyOf` gives them (by key, then by primary key) — but
+ * one request a key (v0.37): `anyOf` walks one cursor record by record (sixty jobs' journals, 1 440 records, took a
+ * third of a second), while a key's records come back at once. For keys with many records each (a job's journal, an
+ * act's photos, a car's visits); where a key has a record or two, `anyOf` is quicker.
+ */
+export async function whereAnyOf<T>(table: Table<T, string>, index: string, keys: readonly string[]): Promise<T[]> {
+  const sorted = [...new Set(keys)].sort();
+  return (await Promise.all(sorted.map((k) => table.where(index).equals(k).toArray()))).flat();
+}
+
 export function uid(): string {
   const c = globalThis.crypto;
   if (typeof c?.randomUUID === 'function') return c.randomUUID();

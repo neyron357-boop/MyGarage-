@@ -1,4 +1,4 @@
-import { db } from '../db/db';
+import { db, whereAnyOf } from '../db/db';
 import type { Media } from '../domain/types';
 import { AppError } from './errors';
 import { addMedia, deleteMedia, mediaBlob, putBackMedia, takeMedia, turnPhoto, type RemovedMedia } from './media';
@@ -24,22 +24,32 @@ export async function coverIndex(vehicleIds: string[]): Promise<Map<string, stri
 
   const rest = ids.filter((id) => !out.has(id));
   if (!rest.length) return out;
-  const orders = await db.orders.where('vehicleId').anyOf(rest).toArray();
-  if (!orders.length) return out;
-  const inspections = await db.inspections.where('orderId').anyOf(orders.map((o) => o.id)).toArray();
-  if (!inspections.length) return out;
-  const orderOf = new Map(orders.map((o) => [o.id, o]));
-  const inspOf = new Map(inspections.map((i) => [i.id, i]));
-  const photos = (await db.media.where('ownerId').anyOf(inspections.map((i) => i.id)).toArray())
-    .filter((m) => m.kind === 'photo' && rank(m.slot) >= 0)
-    .map((m) => {
-      const insp = inspOf.get(m.ownerId)!;
-      const order = orderOf.get(insp.orderId)!;
-      return { m, vehicleId: order.vehicleId, at: order.createdAt, rank: rank(m.slot), handover: insp.kind === 'handover' ? 1 : 0 };
-    })
-    // The latest visit first, then the best angle, the check-in before the hand-over.
-    .sort((a, b) => b.at.localeCompare(a.at) || a.rank - b.rank || a.handover - b.handover || a.m.createdAt.localeCompare(b.m.createdAt));
-  for (const p of photos) if (!out.has(p.vehicleId)) out.set(p.vehicleId, p.m.id);
+  // A car's photo is its latest visit's that has one: the visits are gone over the latest first, a few dozen at a time,
+  // and older ones only for the cars still without (v0.37 — a regular's years of visits and their photos are not all
+  // read). Visits made at the same moment are looked at together, as one.
+  const orders = (await whereAnyOf(db.orders, 'vehicleId', rest)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const todo = new Set(rest);
+  for (let from = 0; from < orders.length && todo.size; ) {
+    let to = Math.min(orders.length, from + 24);
+    while (to < orders.length && orders[to].createdAt === orders[to - 1].createdAt) to++;
+    const batch = orders.slice(from, to).filter((o) => todo.has(o.vehicleId));
+    from = to;
+    if (!batch.length) continue;
+    const inspections = await db.inspections.where('orderId').anyOf(batch.map((o) => o.id)).toArray();
+    if (!inspections.length) continue;
+    const orderOf = new Map(batch.map((o) => [o.id, o]));
+    const inspOf = new Map(inspections.map((i) => [i.id, i]));
+    const photos = (await whereAnyOf(db.media, 'ownerId', inspections.map((i) => i.id)))
+      .filter((m) => m.kind === 'photo' && rank(m.slot) >= 0)
+      .map((m) => {
+        const insp = inspOf.get(m.ownerId)!;
+        const order = orderOf.get(insp.orderId)!;
+        return { m, vehicleId: order.vehicleId, at: order.createdAt, rank: rank(m.slot), handover: insp.kind === 'handover' ? 1 : 0 };
+      })
+      // The latest visit first, then the best angle, the check-in before the hand-over.
+      .sort((a, b) => b.at.localeCompare(a.at) || a.rank - b.rank || a.handover - b.handover || a.m.createdAt.localeCompare(b.m.createdAt));
+    for (const p of photos) if (todo.delete(p.vehicleId)) out.set(p.vehicleId, p.m.id);
+  }
   return out;
 }
 

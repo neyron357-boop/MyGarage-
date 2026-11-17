@@ -1,8 +1,8 @@
 import { db, nextNumber, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
 import { allocate, creditLeft, groupDebts, isCustomerDebt, orderDue, type DebtJob, type DebtShare, type Debtor } from '../domain/debts';
-import { activeInvoice, formatDocNumber } from '../domain/invoice';
-import type { CreditPayment, Customer, Expense, Income, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
+import { activeInvoice, amountDue, formatDocNumber } from '../domain/invoice';
+import type { CreditPayment, Customer, Expense, Income, Invoice, Order, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
 import { AppError } from './errors';
 import { placeInDay } from './cashDays';
 import { settleIfPaid } from './money';
@@ -30,20 +30,41 @@ function groupBy<T extends { orderId: string }>(list: T[]): Map<string, T[]> {
   return m;
 }
 
+/** One customer's jobs gone (handed over or closed), with their invoices and payments. */
+async function customerGone(customerId: string): Promise<{ gone: Order[]; invoices: Map<string, Invoice[]>; payments: Map<string, Payment[]> }> {
+  const gone = (await db.orders.where('customerId').equals(customerId).toArray()).filter((o) => o.stage === 'delivered' || o.stage === 'closed');
+  const ids = gone.map((o) => o.id);
+  const [invoices, payments] = await Promise.all([db.invoices.where('orderId').anyOf(ids).toArray().then(groupBy), db.payments.where('orderId').anyOf(ids).toArray().then(groupBy)]);
+  return { gone, invoices, payments };
+}
+
+/**
+ * Every job gone that may owe (v0.37): the invoices and payments read in one go each (not job by job), and of the jobs
+ * gone only those read whole whose invoice their payments do not cover — or that have no invoice to tell by. A year of
+ * closed, paid jobs is not read at all; a job its invoice says owes nothing owes nothing (`orderDue` only lowers it).
+ */
+async function allGone(): Promise<{ gone: Order[]; invoices: Map<string, Invoice[]>; payments: Map<string, Payment[]> }> {
+  const [ids, invoices, payments] = await Promise.all([
+    db.orders.where('stage').anyOf('delivered', 'closed').primaryKeys() as Promise<string[]>,
+    db.invoices.toArray().then(groupBy),
+    db.payments.toArray().then(groupBy),
+  ]);
+  const maybe = ids.filter((id) => {
+    const inv = invoices.get(id) ?? [];
+    return !activeInvoice(inv) || amountDue(0, inv, payments.get(id) ?? []) > 0;
+  });
+  const gone = (await db.orders.bulkGet(maybe)).filter((o): o is Order => !!o && (o.stage === 'delivered' || o.stage === 'closed'));
+  return { gone, invoices, payments };
+}
+
 /** The jobs gone with money due (of one customer, when asked). */
 export async function loadDebtJobs(customerId?: string): Promise<DebtJob[]> {
-  const gone = customerId
-    ? (await db.orders.where('customerId').equals(customerId).toArray()).filter((o) => o.stage === 'delivered' || o.stage === 'closed')
-    : await db.orders.where('stage').anyOf('delivered', 'closed').toArray();
+  const { gone, invoices, payments } = customerId ? await customerGone(customerId) : await allGone();
   // Nothing is owed on history carried over or on a job closed without payment: not looked into.
   const orders = gone.filter((o) => !o.imported?.history && !o.waived);
   if (!orders.length) return [];
   const ids = orders.map((o) => o.id);
-  const [invoices, payments, debts] = await Promise.all([
-    db.invoices.where('orderId').anyOf(ids).toArray().then(groupBy),
-    db.payments.where('orderId').anyOf(ids).toArray().then(groupBy),
-    db.debts.where('orderId').anyOf(ids).toArray().then(groupBy),
-  ]);
+  const debts = groupBy(await db.debts.where('orderId').anyOf(ids).toArray());
   // The lines are needed only where no invoice counts (the agreed lines are what is owed then).
   const bare = ids.filter((id) => !activeInvoice(invoices.get(id) ?? []));
   const items = bare.length ? groupBy<OrderItem>(await db.items.where('orderId').anyOf(bare).toArray()) : new Map<string, OrderItem[]>();

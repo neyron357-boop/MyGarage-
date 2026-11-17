@@ -63,9 +63,10 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
   const { run } = useAction();
   const dueLabel = useDueLabel();
   const [open, setOpen] = useState(false);
-  // Every past job of the last year: read again only once the board is back (not during the way back).
-  const past = useScreenLiveQuery(() => loadPast(), [bundles.length], 600);
-  const suppliers = useScreenLiveQuery(() => db.suppliers.toArray(), [], 600) ?? NONE;
+  // Every past job of the last year: read again only once the board is back (not during the way back) — and first a
+  // moment after the board's own cars are on it (v0.37).
+  const past = useScreenLiveQuery(() => loadPast(), [bundles.length], 600, 600);
+  const suppliers = useScreenLiveQuery(() => db.suppliers.toArray(), [], 600, 600) ?? NONE;
   const [send, setSend] = useState<{ request: SendRequest; customer: Customer; task: Task } | null>(null);
   const list = useAutoAnimate<HTMLDivElement>();
   const tasks = useMemo(() => tasksFor(bundles, past), [bundles, past]);

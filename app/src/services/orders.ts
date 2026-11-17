@@ -269,6 +269,78 @@ export async function loadOrderBundle(orderId: string): Promise<OrderBundle | un
   });
 }
 
+/**
+ * Jobs as a row of a list shows them (v0.37: the archive's sixty latest) — their order, customer and car, lines,
+ * versions, invoices, payments, debts and incidents: what the row, its step, its flags and its sums are made of. Their
+ * journal, messages, notes, photos and acts are not read (a row shows none of them; a job's journal is the most of
+ * it), and these bundles are not kept to open a job by — a touch on the row reads it whole (`prefetchBundle`). One
+ * read a table for all the rows (a job has a record or two in each: a cursor over them is quickest).
+ */
+export async function loadRowBundles(orders: Order[]): Promise<(OrderBundle | undefined)[]> {
+  const ids = orders.map((o) => o.id);
+  const [settings, customers, vehicles, items, versions, payments, invoices, debts, incidents] = await Promise.all([
+    getSettings(),
+    db.customers.bulkGet([...new Set(orders.map((o) => o.customerId))]),
+    db.vehicles.bulkGet([...new Set(orders.map((o) => o.vehicleId))]),
+    db.items.where('orderId').anyOf(ids).toArray().then(byOrder),
+    db.versions.where('orderId').anyOf(ids).toArray().then(byOrder),
+    db.payments.where('orderId').anyOf(ids).toArray().then(byOrder),
+    db.invoices.where('orderId').anyOf(ids).toArray().then(byOrder),
+    db.debts.where('orderId').anyOf(ids).toArray().then(byOrder),
+    db.incidents.where('orderId').anyOf(ids).toArray().then(byOrder),
+  ]);
+  const customerBy = new Map(customers.filter((c): c is Customer => !!c).map((c) => [c.id, c]));
+  const vehicleBy = new Map(vehicles.filter((v): v is Vehicle => !!v).map((v) => [v.id, v]));
+  return orders.map((order): OrderBundle | undefined => {
+    const customer = customerBy.get(order.customerId);
+    const vehicle = vehicleBy.get(order.vehicleId);
+    if (!customer || !vehicle) return undefined;
+    const id = order.id;
+    return {
+      order,
+      customer,
+      vehicle,
+      // In the order a job's own read gives them (`loadOrderBundle`: Dexie's `sortBy`, ties as they came).
+      items: sortedBy(items.get(id) ?? [], 'createdAt').sort(byPosition),
+      versions: sortedBy(versions.get(id) ?? [], 'number'),
+      payments: sortedBy(payments.get(id) ?? [], 'receivedAt'),
+      invoices: sortedBy(invoices.get(id) ?? [], 'issuedAt'),
+      debts: debts.get(id) ?? [],
+      incidents: incidents.get(id) ?? [],
+      decisions: [],
+      marks: [],
+      media: [],
+      events: [],
+      messages: [],
+      claims: [],
+      notes: [],
+      settings,
+    };
+  });
+}
+
+/** Sorted by one field, as Dexie's `sortBy` does it (ties keep the order they came in). */
+function sortedBy<T>(list: T[], key: keyof T): T[] {
+  return list.sort((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0));
+}
+
+/** Records by the job they belong to, in the order they came. */
+function byOrder<T extends { orderId?: string }>(list: T[]): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of list) {
+    if (!r.orderId) continue;
+    const l = out.get(r.orderId);
+    if (l) l.push(r);
+    else out.set(r.orderId, [r]);
+  }
+  return out;
+}
+
+/** A job about to be opened (a finger on its row) read whole now: the job's screen shows it at once (`seenBundle`). */
+export function prefetchBundle(orderId: string): void {
+  if (!seen.has(orderId)) void loadOrderBundle(orderId).catch(() => undefined);
+}
+
 /** What the job still owes — the one sum everywhere (the job, the board's "Debts", "Money → Debts"): `orderDue`. */
 export function bundleAmountDue(b: OrderBundle): number {
   return orderDue(b.order, b.items, b.invoices, b.payments);

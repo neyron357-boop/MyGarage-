@@ -367,6 +367,11 @@ export interface MediaBlob {
   id: string;
   blob: Blob;
   thumb?: Blob;
+  /**
+   * The photo at a board card's size (1080 px, v0.37), made the first time a card shows it and kept: not made again at
+   * every start. A photo's file never changes (a turned photo is a new one), so this copy never goes stale.
+   */
+  card?: Blob;
 }
 
 export type ItemKind = 'labor' | 'part' | 'fee' | 'discount';

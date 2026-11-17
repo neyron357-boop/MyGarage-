@@ -38,8 +38,15 @@ export function useSettings() {
  * `wakeAfter` (ms) — a heavy read (every past job, the search index) waits that long after the screen is
  * back in front: the way back slides on, the read follows.
  */
-export function useScreenLiveQuery<T>(query: () => Promise<T> | T, deps: unknown[], wakeAfter = 0): T | undefined {
+export function useScreenLiveQuery<T>(query: () => Promise<T> | T, deps: unknown[], wakeAfter = 0, startAfter = 0): T | undefined {
   const screen = useScreen() ?? ALWAYS_FRONT;
+  // `startAfter` (v0.37): what is secondary on a screen is first read a moment after it — the screen's own reads go first.
+  const [started, setStarted] = useState(!startAfter);
+  useEffect(() => {
+    if (started) return;
+    const t = window.setTimeout(() => setStarted(true), startAfter);
+    return () => window.clearTimeout(t);
+  }, [started, startAfter]);
   // Renders again only when the screen comes back to the front (stepping back renders nothing).
   const wakes = useSyncExternalStore(screen.watch, screen.wakes);
   const [caught, setCaught] = useState(wakes);
@@ -52,7 +59,7 @@ export function useScreenLiveQuery<T>(query: () => Promise<T> | T, deps: unknown
   const last = useRef<T | undefined>(undefined);
   // Behind another screen a change in the database runs this once more: it reads nothing (so it is
   // not run again) and keeps what it had. A screen first mounted behind (after going back) reads once.
-  const live = useLiveQuery(() => (screen.front() || last.current === undefined ? query() : last.current), [turn, ...deps]);
+  const live = useLiveQuery(() => (!started ? undefined : screen.front() || last.current === undefined ? query() : last.current), [turn, started, ...deps]);
   if (live !== undefined) last.current = live;
   return live ?? last.current;
 }

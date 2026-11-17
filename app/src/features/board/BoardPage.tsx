@@ -9,7 +9,7 @@ import { lastChange, leftBoardAt, type Phase } from '../../domain/flow';
 import { coverIndex } from '../../services/cover';
 import { loadDebtors } from '../../services/debts';
 import { archiveJob, phaseOf } from '../../services/flow';
-import { bundleAmountDue, loadOrderBundle, type OrderBundle } from '../../services/orders';
+import { bundleAmountDue, loadOrderBundle, loadRowBundles, type OrderBundle } from '../../services/orders';
 import { useBoardView, type BoardTab } from '../../ui/boardView';
 import { EmptyState, List, PageHeader, PageSkeleton, ScrollTabs, undoToast, type TabItem } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
@@ -42,11 +42,9 @@ function keep(b: OrderBundle): OrderBundle {
 }
 
 async function loadBoard(showArchive: boolean) {
-  const orders = await db.orders.filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled').toArray();
-  const [open, closed] = await Promise.all([
-    Promise.all(orders.map((o) => loadOrderBundle(o.id))),
-    showArchive ? loadClosed() : undefined,
-  ]);
+  // The jobs not closed, by the stage's index (v0.37: the closed history is not read).
+  const orders = await db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
+  const [open, closed] = await Promise.all([Promise.all(orders.map((o) => loadOrderBundle(o.id))), showArchive ? loadClosed() : undefined]);
   const bundles = open.filter((b): b is OrderBundle => !!b).map(keep);
   const covers = await coverIndex([...bundles, ...(closed ?? [])].map((b) => b.vehicle.id));
   const ids = new Set(orders.map((o) => o.id));
@@ -64,7 +62,8 @@ async function loadClosed() {
   const orders = (await db.orders.filter((o) => (o.stage === 'closed' || o.stage === 'cancelled') && !o.imported?.history).toArray())
     .sort((a, b) => leftBoardAt(b).localeCompare(leftBoardAt(a)))
     .slice(0, 60);
-  return ((await Promise.all(orders.map((o) => loadOrderBundle(o.id)))).filter(Boolean) as OrderBundle[]).filter((b) => !(bundleAmountDue(b) > 0));
+  // As their rows show them (v0.37: not their journals, notes and photos — the most of a job).
+  return ((await loadRowBundles(orders)).filter(Boolean) as OrderBundle[]).filter((b) => !(bundleAmountDue(b) > 0));
 }
 
 /**
@@ -171,9 +170,10 @@ export function BoardPage() {
   const archive = filter === 'archive';
   const debtsTab = filter === 'debts';
   const live = useScreenLiveQuery(() => loadBoard(archive), [archive, refresh]);
-  // Who owes: one card per customer — the same cards and sums as "Money → Debts".
-  const debtors = useScreenLiveQuery(loadDebtors, [refresh]);
   const data = live ?? lastBoard;
+  // Who owes: one card per customer — the same cards and sums as "Money → Debts". Read once the board's cars are (the
+  // cars first — v0.37), and back on the board a moment after them.
+  const debtors = useScreenLiveQuery(() => (data ? loadDebtors() : undefined), [refresh, !!data], 300);
   // Every five minutes the rows' "how long" moves on (a row is not rendered again otherwise).
   const tick = Math.floor(Date.now() / 300_000);
   // The freshest first: the job something last happened on is on top.

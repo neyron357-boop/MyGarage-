@@ -60,7 +60,7 @@ export const FOLLOW_UP_DAYS = 3;
 const FOLLOW_UP_UNTIL = 14;
 /** An oil service is due again after about half a year (not reminded after more than a year). */
 export const SERVICE_DAYS = 180;
-const SERVICE_UNTIL = 400;
+export const SERVICE_UNTIL = 400;
 /** A part's return deadline shows this many days ahead. */
 const RETURN_AHEAD = 2;
 

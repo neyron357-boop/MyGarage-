@@ -1,8 +1,8 @@
 import { db } from '../db/db';
-import { addDays, nowIso } from '../domain/dates';
+import { addDays, hoursBetween, nowIso } from '../domain/dates';
 import { isAwaitingClient } from '../domain/items';
-import { FOLLOW_UP_DAYS, todayTasks, type OpenJob, type PastJob, type Task } from '../domain/today';
-import type { Customer, Vehicle } from '../domain/types';
+import { FOLLOW_UP_DAYS, SERVICE_DAYS, SERVICE_UNTIL, todayTasks, type OpenJob, type PastJob, type Task } from '../domain/today';
+import type { Customer, Order, Vehicle } from '../domain/types';
 import { phaseOf } from './flow';
 import type { OrderBundle } from './orders';
 
@@ -26,8 +26,20 @@ export async function loadPast(now = nowIso()): Promise<{ past: PastJob[]; vehic
   const closed = await db.orders.where('stage').equals('closed').toArray();
   const since = addDays(now, -420);
   const recent = closed.filter((o) => (o.closedAt ?? o.updatedAt) >= since);
+  // The lines tell one thing only — whether a car's last job was an oil service, half a year to a year ago (the
+  // reminder, `todayTasks`): only those jobs' lines are read (v0.37; "how is the car?" needs none), a day either side
+  // of that time.
+  const last = new Map<string, Order>();
+  for (const o of recent) {
+    const prev = last.get(o.vehicleId);
+    if (o.closedAt && (!prev || (prev.closedAt ?? '') < o.closedAt)) last.set(o.vehicleId, o);
+  }
+  const wanted = [...last.values()].filter((o) => {
+    const days = hoursBetween(o.closedAt!, now) / 24;
+    return days >= SERVICE_DAYS - 1 && days <= SERVICE_UNTIL + 1;
+  });
   const [items, customers, vehicles] = await Promise.all([
-    db.items.where('orderId').anyOf(recent.map((o) => o.id)).toArray(),
+    wanted.length ? db.items.where('orderId').anyOf(wanted.map((o) => o.id)).toArray() : [],
     db.customers.bulkGet([...new Set(recent.map((o) => o.customerId))]),
     db.vehicles.bulkGet([...new Set(recent.map((o) => o.vehicleId))]),
   ]);

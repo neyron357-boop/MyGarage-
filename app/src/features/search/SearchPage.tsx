@@ -3,7 +3,7 @@ import { IconBrandWhatsapp, IconHistory, IconPhone, IconPlus, IconUserSearch } f
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { db } from '../../db/db';
+import { db, whereAnyOf } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { matchJobs, splitWords, wordMatches, type JobMatch, type Term } from '../../domain/search';
@@ -25,7 +25,7 @@ export function useSearch(q: string) {
   return useScreenLiveQuery(async () => {
     const hits = await search(q);
     const ids = hits.map((h) => h.vehicle?.id).filter((x): x is string => !!x);
-    const orders = ids.length ? await db.orders.where('vehicleId').anyOf(ids).toArray() : [];
+    const orders = await whereAnyOf(db.orders, 'vehicleId', ids);
     return hits.map((h) => {
       const mine = h.vehicle ? orders.filter((o) => o.vehicleId === h.vehicle!.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
       const activeOrder = mine.find((o) => o.stage !== 'closed' && o.stage !== 'cancelled');

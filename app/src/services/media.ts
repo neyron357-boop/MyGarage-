@@ -174,8 +174,9 @@ let cardQueue: Promise<unknown> = Promise.resolve();
 
 /**
  * A photo at the size a card across the phone shows it (long side 1080 px — sharp on an iPhone, a
- * quarter of the stored photo's pixels): made once a session from the stored one, one photo at a time
- * (a board of cars does not decode twenty full photos at once). The thumbnail (400 px) is too soft there.
+ * quarter of the stored photo's pixels): made from the stored one the first time, one photo at a time
+ * (a board of cars does not decode twenty full photos at once), and kept beside it (v0.37: before, it was
+ * made again at every start of the app). The thumbnail (400 px) is too soft there.
  */
 export function cardUrl(id: string): Promise<string | undefined> {
   const key = `${id}:c`;
@@ -186,7 +187,12 @@ export function cardUrl(id: string): Promise<string | undefined> {
     if (again) return again;
     const rec = await db.mediaBlobs.get(id);
     if (!rec) return undefined;
-    const url = URL.createObjectURL((await shrinkPhoto(rec.blob, 1080)) ?? rec.blob);
+    let card = rec.card;
+    if (!card) {
+      card = await shrinkPhoto(rec.blob, 1080);
+      if (card) void db.mediaBlobs.update(id, { card }).catch(() => undefined);
+    }
+    const url = URL.createObjectURL(card ?? rec.blob);
     urlCache.set(key, url);
     return url;
   });

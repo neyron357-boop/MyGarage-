@@ -26,7 +26,7 @@ import { jobSummary } from '../../domain/jobSummary';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
 import { partsToFind } from '../../services/flow';
 import { openWhatsApp } from '../../services/messages';
-import { bundleAmountDue, type OrderBundle } from '../../services/orders';
+import { bundleAmountDue, prefetchBundle, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { useAction, useLang } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
@@ -271,6 +271,9 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
         <button
           type="button"
           className="job-card-open"
+          // The job read whole as the finger lands (v0.37): an archive's row holds only what it shows — the job opens
+          // at once all the same.
+          onPointerDown={() => prefetchBundle(b.order.id)}
           onClick={() => {
             if (press.consumeClick() || sw.consumeClick()) return;
             open();

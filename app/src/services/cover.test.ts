@@ -49,6 +49,28 @@ describe("the car's main photo", () => {
     const fresh = await addInspectionPhoto((await getOrCreateInspection(again.id, 'intake')).id, 'rear', photo(2));
     expect((await coverIndex([a.vehicleId])).get(a.vehicleId)).toBe(fresh.id);
   });
+
+  it('a regular with many visits: the latest visit that has photos, its best angle (v0.37: visits gone over the latest first)', async () => {
+    const first = await job('55555');
+    const car = first.vehicleId;
+    const other = await job('66666');
+    let at = Date.now() - 40 * 86_400_000;
+    const visits = [first.id];
+    await db.orders.update(first.id, { stage: 'closed', createdAt: new Date(at).toISOString() });
+    for (let n = 0; n < 34; n++) {
+      const v = await job('55555', car);
+      at += 86_400_000;
+      await db.orders.update(v.id, { stage: 'closed', createdAt: new Date(at).toISOString() });
+      visits.push(v.id);
+    }
+    // Photos on the 4th visit (a rear, then a front three-quarter) and on the 2nd; none on the thirty after.
+    const four = (await getOrCreateInspection(visits[3], 'intake')).id;
+    await addInspectionPhoto(four, 'rear', photo(1));
+    const best = await addInspectionPhoto(four, 'front_left', photo(2));
+    await addInspectionPhoto((await getOrCreateInspection(visits[1], 'intake')).id, 'front_left', photo(3));
+    const otherPhoto = await addInspectionPhoto((await getOrCreateInspection(other.id, 'intake')).id, 'front', photo(4));
+    expect(await coverIndex([car, other.vehicleId])).toEqual(new Map([[other.vehicleId, otherPhoto.id], [car, best.id]]));
+  });
 });
 
 describe("the car's photos, edited in their full-screen view", () => {
