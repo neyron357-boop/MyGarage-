@@ -53,8 +53,8 @@ describe('backup', () => {
     expect(await db.jobTemplates.count()).toBeGreaterThan(5);
     for (const [m, n, seed] of [[photo, 70_000, 7], [pdf, 5_000, 3]] as const) {
       const row = await db.mediaBlobs.get(m.id);
-      expect(row?.blob.size).toBe(n);
-      expect(new Uint8Array(await row!.blob.arrayBuffer())).toEqual(bytes(n, seed));
+      expect(row?.blob?.size).toBe(n);
+      expect(new Uint8Array(await row!.blob!.arrayBuffer())).toEqual(bytes(n, seed));
       expect((await db.media.get(m.id))?.sha256).toBe(m.sha256);
     }
   });
@@ -64,14 +64,14 @@ describe('backup', () => {
     const tables: Record<string, unknown[]> = {};
     for (const t of db.tables) if (t.name !== 'mediaBlobs') tables[t.name] = await t.toArray();
     const blobs = [];
-    for (const b of await db.mediaBlobs.toArray()) blobs.push({ id: b.id, blob: await blobToDataUrlNode(b.blob) });
+    for (const b of await db.mediaBlobs.toArray()) blobs.push({ id: b.id, blob: await blobToDataUrlNode(b.blob!) });
     const v1 = new Blob([JSON.stringify({ format: 'mygarage-backup', version: 1, exportedAt: new Date().toISOString(), tables, blobs })], { type: 'application/json' });
 
     await db.customers.clear();
     await importBackup(v1);
     await reopen();
     expect((await db.customers.get(c.id))?.phone).toBe('+971559876543');
-    expect((await db.mediaBlobs.get(photo.id))?.blob.size).toBe(70_000);
+    expect((await db.mediaBlobs.get(photo.id))?.blob?.size).toBe(70_000);
   });
 
   it('stores each file as its own copy, says what the backup holds, counts the files as they come back', async () => {
@@ -90,7 +90,7 @@ describe('backup', () => {
     expect(result).toEqual({ orders: 1, files: 2, lost: 0 });
     expect(steps[steps.length - 1]).toEqual([2, 2]);
     const row = (await db.mediaBlobs.get(photo.id))!;
-    expect(new Uint8Array(await row.blob.arrayBuffer())).toEqual(bytes(70_000, 7));
+    expect(new Uint8Array(await row.blob!.arrayBuffer())).toEqual(bytes(70_000, 7));
   });
 
   it('a file the device will not take does not stop the others — it is counted', async () => {
@@ -105,7 +105,7 @@ describe('backup', () => {
     spy.mockRestore();
     await reopen();
     expect(result).toEqual({ orders: 1, files: 1, lost: 1 });
-    expect((await db.mediaBlobs.get(photo.id))?.blob.size).toBe(70_000);
+    expect((await db.mediaBlobs.get(photo.id))?.blob?.size).toBe(70_000);
     expect(await db.mediaBlobs.get(pdf.id)).toBeUndefined();
   });
 

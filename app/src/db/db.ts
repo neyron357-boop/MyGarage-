@@ -37,6 +37,7 @@ import type {
   SupplierReturn,
   Vehicle,
 } from '../domain/types';
+import { installSyncHooks, isRemote, STAMP } from './syncHooks';
 
 /** Thrown when code tries to change a record that must stay as it was signed/issued. */
 export class ImmutableError extends Error {
@@ -83,6 +84,8 @@ export class GarageDB extends Dexie {
   notes!: Table<JobNote, string>;
   books!: Table<StoredBook, string>;
   creditPayments!: Table<CreditPayment, string>;
+  /** Records deleted here, waiting to be told to the server (v0.40). */
+  syncTombs!: Table<{ n?: number; t: string; k: string }, number>;
 
   constructor(name = 'mygarage') {
     super(name);
@@ -141,7 +144,49 @@ export class GarageDB extends Dexie {
     this.version(6).stores({
       incomeCategories: 'id, code',
     });
+    // v7 (v0.40): syncing with the garage's server — every record's stamp of its last change here, indexed (`_t`, see
+    // db/syncHooks.ts); a photo's files waiting to be sent (`up`); deletions waiting to be told (`syncTombs`).
+    this.version(7).stores({
+      settings: 'id, _t',
+      customers: 'id, name, phone, createdAt, _t',
+      vehicles: 'id, customerId, plateSearch, vin, _t',
+      ownerships: 'id, vehicleId, customerId, _t',
+      orders: 'id, number, customerId, vehicleId, stage, createdAt, _t',
+      events: 'id, orderId, at, _t',
+      inspections: 'id, orderId, _t',
+      damageMarks: 'id, inspectionId, _t',
+      addenda: 'id, inspectionId, _t',
+      media: 'id, ownerId, _t',
+      mediaBlobs: 'id, up',
+      items: 'id, orderId, supplierId, procurementStatus, _t',
+      versions: 'id, orderId, _t',
+      decisions: 'id, versionId, itemId, orderId, _t',
+      suppliers: 'id, name, _t',
+      supplierReturns: 'id, status, supplierId, orderId, _t',
+      payments: 'id, orderId, receivedAt, incomeId, _t',
+      invoices: 'id, orderId, number, issuedAt, _t',
+      debts: 'id, orderId, status, _t',
+      cashMovements: 'id, at, closingId, _t',
+      cashClosings: 'id, date, _t',
+      expenses: 'id, date, categoryId, orderId, vehicleId, customerId, _t',
+      incomes: 'id, date, orderId, vehicleId, customerId, _t',
+      expenseCategories: 'id, code, _t',
+      incomeCategories: 'id, code, _t',
+      employees: 'id, _t',
+      salaryPayments: 'id, employeeId, month, _t',
+      messages: 'id, orderId, customerId, _t',
+      jobTemplates: 'id, code, _t',
+      relatedRules: 'id, triggerTemplateCode, _t',
+      claims: 'id, orderId, vehicleId, _t',
+      incidents: 'id, orderId, _t',
+      counters: 'name, _t',
+      notes: 'id, orderId, createdAt, _t',
+      books: 'id, _t',
+      creditPayments: 'id, expenseId, date, _t',
+      syncTombs: '++n',
+    });
     installGuards(this);
+    installSyncHooks(this);
   }
 }
 
@@ -153,17 +198,18 @@ type Guarded = { name: string; hook: Table['hook'] };
  */
 function guard<T>(table: Table<T, string>, allowed: string[], isLocked: (obj: T) => boolean = () => true) {
   const t = table as unknown as Guarded;
-  t.hook('updating', (modifications: object, _key: unknown, obj: T) => {
-    if (!isLocked(obj)) return;
+  t.hook('updating', (modifications: object, _key: unknown, obj: T, trans: unknown) => {
+    // What the server brings was signed on another device (v0.40): taken as it is.
+    if (isRemote(trans) || !isLocked(obj)) return;
     const mods = modifications as Record<string, unknown>;
     // Dexie may report unchanged arrays/objects as modified, so compare values, not just keys.
     const bad = Object.keys(mods).filter(
-      (k) => !allowed.includes(k.split('.')[0]) && !sameValue(mods[k], valueAt(obj, k)),
+      (k) => k !== STAMP && !allowed.includes(k.split('.')[0]) && !sameValue(mods[k], valueAt(obj, k)),
     );
     if (bad.length) throw new ImmutableError(t.name, bad);
   });
-  t.hook('deleting', (key: unknown, obj: T) => {
-    if (purgeable.has(String(key))) return;
+  t.hook('deleting', (key: unknown, obj: T, trans: unknown) => {
+    if (isRemote(trans) || purgeable.has(String(key))) return;
     if (isLocked(obj)) throw new ImmutableError(t.name, ['(delete)']);
   });
 }

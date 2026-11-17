@@ -23,6 +23,8 @@ async function keep(ownerType: MediaOwner, ownerId: string, filename: string, ma
   if (existing) {
     const blob = await mediaBlob(existing.id);
     if (blob) return { blob, filename };
+    // Kept on the garage's server and out of reach now (v0.40): drawn again for this time, not kept twice.
+    return { blob: await make(), filename };
   }
   // Two taps (or a tap during the background generation after signing) must not store two PDFs.
   const running = inFlight.get(ownerId);

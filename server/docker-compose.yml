@@ -1,0 +1,37 @@
+# MyGarage in Docker: the server and Tailscale (a free https address reachable from any network — Funnel).
+#
+#   docker compose up -d --build          start (and after a reboot Docker starts them by itself)
+#   docker compose logs tailscale         the first time: the link to sign in to Tailscale
+#   http://localhost:8788                 the server's page on this computer: the address and the pairing code
+#
+# The data folder is C:\MyGarage (set MYGARAGE_DATA to use another one). Docker Desktop needs virtualisation on in the
+# computer's BIOS/UEFI.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: mygarage
+    environment:
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+      - TS_USERSPACE=true
+      # A key from the Tailscale admin page (Settings → Keys) signs in without the link: TS_AUTHKEY=tskey-auth-…
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+    volumes:
+      - ${MYGARAGE_DATA:-C:/MyGarage}/Служебное/tailscale:/var/lib/tailscale
+      - ./tailscale:/config:ro
+    ports:
+      # The server's page, for this computer only.
+      - "127.0.0.1:8788:8788"
+    restart: unless-stopped
+
+  server:
+    build: .
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    volumes:
+      - ${MYGARAGE_DATA:-C:/MyGarage}:/data
+    environment:
+      - TZ=Asia/Dubai
+    restart: unless-stopped

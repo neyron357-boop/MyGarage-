@@ -83,7 +83,7 @@ describe("the car's photos, edited in their full-screen view", () => {
     expect(await db.mediaBlobs.get(vin.id)).toBeUndefined();
     await restoreCarPhoto(removed);
     expect(await vinPhotoOf(o.vehicleId)).toBe(vin.id);
-    expect((await db.mediaBlobs.get(vin.id))?.blob.size).toBe(3);
+    expect((await db.mediaBlobs.get(vin.id))?.blob?.size).toBe(3);
 
     // The Mulkiya photographed in the check-in act: shown on the chip, not the car's own — it is not taken off.
     const act = await addInspectionPhoto((await getOrCreateInspection(o.id, 'intake')).id, 'mulkiya', photo(2));

@@ -365,8 +365,14 @@ export interface Media {
 
 export interface MediaBlob {
   id: string;
-  blob: Blob;
+  /**
+   * The file itself. Gone from the phone once the garage's server has it (v0.40: `up` = 1, the small previews stay):
+   * read through `services/media.ts`, which brings it from the server.
+   */
+  blob?: Blob;
   thumb?: Blob;
+  /** Sent to the server (1) or waiting (0); none — from before syncing (v0.40). */
+  up?: number;
   /**
    * The photo at a board card's size (1080 px, v0.37), made the first time a card shows it and kept: not made again at
    * every start. A photo's file never changes (a turned photo is a new one), so this copy never goes stale.
