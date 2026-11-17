@@ -28,6 +28,12 @@ async function launchBrowser() {
 (async () => {
   const browser = await launchBrowser();
   const errors = [];
+  // What the PC layout must be, checked on the way (the first size and theme): a failure is an error, not a picture.
+  const fails = [];
+  const check = (what, ok, info) => {
+    console.log(ok ? 'ok  ' : 'FAIL', what, ok ? '' : JSON.stringify(info ?? ''));
+    if (!ok) fails.push(what);
+  };
   for (const width of SIZES) {
     const height = width >= 1900 ? 1080 : 900;
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, locale: 'ru-RU' });
@@ -59,18 +65,48 @@ async function launchBrowser() {
       await settle(1200);
       await p.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
       await shot('01-board');
+      const first = width === SIZES[0] && scheme === SCHEMES[0];
+      if (first) {
+        // The lanes fill the window (the page does not scroll), each with its count; all of them in sight.
+        const lanes = await p.evaluate(() => {
+          const k = document.querySelector('.kanban');
+          return {
+            docScroll: document.scrollingElement.scrollHeight - innerHeight,
+            heads: document.querySelectorAll('.kanban-head .kanban-count').length,
+            cols: document.querySelectorAll('.kanban-col').length,
+            bottom: Math.round(k.getBoundingClientRect().bottom),
+            overflowX: k.scrollWidth - k.clientWidth,
+          };
+        });
+        check('board: lanes the height of the window, a head with its count each, no sideways scroll', lanes.docScroll <= 1 && lanes.heads === lanes.cols && lanes.cols > 0 && Math.abs(lanes.bottom - height) <= 2 && lanes.overflowX <= 1, lanes);
+      }
       // A right click on a card: its menu where the mouse is.
-      await p.locator('.job-card').first().click({ button: 'right' });
+      const card = p.locator('.job-card').first();
+      const cb = await card.boundingBox();
+      await card.click({ button: 'right', position: { x: 60, y: 40 } });
       await settle(500);
       await shot('01b-board-menu');
+      if (first) {
+        const menu = await p.locator('.mantine-Menu-dropdown').boundingBox();
+        const items = await p.locator('.mantine-Menu-dropdown .mantine-Menu-item').allInnerTexts();
+        check("board: a right click opens the card's menu at the mouse", !!menu && Math.abs(menu.x - (cb.x + 60)) < 30 && Math.abs(menu.y - (cb.y + 40)) < 30 && items.includes('Открыть') && items.includes('Удалить заказ'), { menu, items });
+      }
       await p.keyboard.press('Escape');
       await settle(300);
       // «?» — the keys.
       await p.keyboard.press('Shift+Slash');
       await settle(500);
       await shot('01c-keys');
+      if (first) check('keys: «?» shows the list of keys', await p.getByRole('dialog').getByText('Новый заказ').isVisible());
       await p.keyboard.press('Escape');
       await settle(400);
+      if (first) {
+        // N — a new job, from the board.
+        await p.keyboard.press('KeyN');
+        await settle(700);
+        check('keys: N opens a new job', (await p.evaluate(() => location.hash)).startsWith('#/orders/new'));
+        await go('#/', 700);
+      }
       await p.getByRole('button', { name: /^Архив/ }).click();
       await settle(900);
       await shot('02-archive');
@@ -82,6 +118,38 @@ async function launchBrowser() {
         await p.locator('.job-row').filter({ hasText: step }).first().locator('.job-card-open').click();
         await settle(1100);
         await shot(`03${k}-job`);
+        if (first && k === 'a') {
+          // Two columns: the lines on the left, the car and the job's tiles on the right, level at the top.
+          const cols = await p.evaluate(() => {
+            const r = (q) => document.querySelector(q)?.getBoundingClientRect();
+            const main = r('.job-desk-main');
+            const aside = r('.job-desk-aside');
+            const more = document.querySelector('.job-more-btn');
+            return main && aside && more ? { mainRight: Math.round(main.right), asideLeft: Math.round(aside.left), top: Math.round(Math.abs(main.top - aside.top)), tiles: document.querySelectorAll('.job-desk-actions .action-tile').length, more: getComputedStyle(more).display } : null;
+          });
+          check('job: lines and the car side by side, the "…" tiles beside them', !!cols && cols.mainRight < cols.asideLeft && cols.top < 12 && cols.tiles > 3 && cols.more === 'none', cols);
+          // 2 — a part's sheet; Escape closes it.
+          await p.keyboard.press('2');
+          await settle(700);
+          check('keys: 2 on a job adds a part', await p.getByRole('dialog').getByText('Добавить запчасть').isVisible());
+          const sheet = await p.locator('.mantine-Modal-content').last().boundingBox();
+          check('sheets: 520 px wide on a PC', !!sheet && Math.abs(sheet.width - 520) <= 2, sheet);
+          await p.keyboard.press('Escape');
+          await settle(500);
+        }
+        if (k === 'b') {
+          // A line under the mouse: its swipes as buttons at its end.
+          const line = p.locator('.job-desk-main .list-row.swipe-row').first();
+          await line.hover({ position: { x: 120, y: 20 } });
+          await settle(400);
+          await shot('03b2-job-line-hover');
+          if (first) {
+            const btns = await line.locator('.row-hover-btn').allInnerTexts();
+            const shown = await line.locator('.row-hover').evaluate((el) => getComputedStyle(el).opacity);
+            check("job: a line's swipes are buttons under the mouse", btns.length > 0 && shown === '1', { btns, shown });
+          }
+          await p.mouse.move(5, 5);
+        }
       }
       await p.getByRole('button', { name: 'Запчасть', exact: true }).first().click();
       await settle(700);
@@ -94,10 +162,35 @@ async function launchBrowser() {
       await shot('03d-job-notes');
       await go('#/orders/new', 900);
       await shot('04-new-order');
+      if (first) {
+        // The car makes run past the edge: the mouse's wheel brings them in.
+        const row = p.locator('.chip-row:not(.wrap)').filter({ hasText: 'Toyota' }).first();
+        const rb = await row.boundingBox();
+        await p.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+        await p.mouse.wheel(0, 300);
+        await settle(300);
+        const left = await row.evaluate((el) => el.scrollLeft);
+        check('wheel: a sideways row of chips scrolls with the mouse wheel', left > 100, { left });
+        await p.mouse.move(5, 5);
+      }
       await go('#/search?q=' + encodeURIComponent('масло'), 1200);
       await shot('05-search');
       await go('#/customers', 900);
       await shot('06-customers');
+      if (first) {
+        // A click on a head sorts by it (the most visits first), once more — the other way.
+        const visits = () => p.evaluate(() => [...document.querySelectorAll('.dt tbody tr[data-row]')].map((tr) => Number(tr.children[3].textContent)));
+        await p.locator('.dt th').filter({ hasText: 'Визиты' }).locator('button').click();
+        await settle(300);
+        const down = await visits();
+        await p.locator('.dt th').filter({ hasText: 'Визиты' }).locator('button').click();
+        await settle(300);
+        const up = await visits();
+        const sorted = (a, d) => a.every((v, i) => !i || (d ? a[i - 1] >= v : a[i - 1] <= v));
+        check('customers: a table sorted by a click on a head', down.length > 1 && sorted(down, true) && sorted(up, false), { down, up });
+        await p.evaluate(() => localStorage.removeItem('mygarage.sort.customers'));
+        await go('#/customers', 700);
+      }
       await p.locator('.list-row.clickable, tr[data-row]').first().click();
       await settle(900);
       await shot('06b-customer');
@@ -124,7 +217,9 @@ async function launchBrowser() {
     await ctx.close();
   }
   console.log('ERRORS:', errors.length ? errors.join('\n') : 'none');
+  console.log(fails.length ? `FAILED: ${fails.join('; ')}` : 'all checks passed');
   await browser.close();
+  if (fails.length || errors.length) process.exit(1);
 })().catch((e) => {
   console.error('DESK SHOTS FAILED:', String((e && e.message) || e).split('\n')[0]);
   process.exit(1);

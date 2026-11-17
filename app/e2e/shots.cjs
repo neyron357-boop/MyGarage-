@@ -3,11 +3,28 @@ const fs = require('fs');
 const path = require('path');
 // Design review: screenshots of the main screens on a phone (light and dark) and on a PC.
 // Usage: start the dev server (npm run dev -- --port 5173), then: node e2e/shots.cjs [outDir]
-// SHOTS_CLOCK=2026-11-18T09:30:00+04:00 — the page's date stays at that moment (timers run as usual): two runs draw the same
-// times and durations, so their pictures can be compared pixel by pixel (the phone before and after a PC change).
+// SHOTS_SEED=1 — the page's random ids repeat run to run (a counter instead of crypto.randomUUID, a seeded Math.random): the
+// demo's records and everything made on the way get the same ids, so rows with the same time come in the same order. Two
+// runs started together (the same minute on the clock) then give the same pictures — compare the phone before and after
+// a change pixel by pixel (v0.41: the PC's redesign must not move a pixel of the phone).
 const OUT = process.argv[2] || path.join(__dirname, '..', 'test-results', 'design');
 const BASE = process.env.BASE_URL || 'http://localhost:5173/';
-const CLOCK = process.env.SHOTS_CLOCK ? new Date(process.env.SHOTS_CLOCK) : undefined;
+const SEED = !!process.env.SHOTS_SEED;
+const seeded = () => {
+  // The count goes on over a reload (the records made before it keep their ids).
+  let n = Number(sessionStorage.getItem('shots.seed') || 0);
+  let r = 0x2f6b9a3d;
+  Math.random = () => {
+    r = (r + 0x6d2b79f5) | 0;
+    let t = Math.imul(r ^ (r >>> 15), 1 | r);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  crypto.randomUUID = () => {
+    sessionStorage.setItem('shots.seed', String(++n));
+    return `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+  };
+};
 fs.mkdirSync(OUT, { recursive: true });
 
 async function launchBrowser() {
@@ -26,7 +43,7 @@ async function launchBrowser() {
 (async () => {
   const browser = await launchBrowser();
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, locale: 'ru-RU' });
-  if (CLOCK) await ctx.clock.setFixedTime(CLOCK);
+  if (SEED) await ctx.addInitScript(seeded);
   await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   const errors = [];
@@ -213,7 +230,7 @@ async function launchBrowser() {
   await page.locator('.screen[data-role="top"]').getByText(/^(Светлая|Light)$/).click();
 
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, locale: 'ru-RU' });
-  if (CLOCK) await desk.clock.setFixedTime(CLOCK);
+  if (SEED) await desk.addInitScript(seeded);
   await desk.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const dp = await desk.newPage();
   // The computer's browser has its own (empty) storage: the demo first, as on the phone.

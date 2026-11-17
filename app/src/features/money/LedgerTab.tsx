@@ -379,7 +379,6 @@ export function LedgerTab() {
         );
       },
     },
-    { key: 'way', label: t('desk.col.way'), cell: (e) => (e.method ? wayLabel(t, e.method, e.kind) : ''), muted: true, nowrap: true, width: 116 },
     {
       key: 'amount',
       label: t('desk.col.amount'),
@@ -395,8 +394,9 @@ export function LedgerTab() {
       align: 'right',
       nowrap: true,
       muted: true,
-      width: 120,
-      cell: (e) => (e.purse === 'cash' ? formatAed(e.cashAfter).replace(/^-/, '−') : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')),
+      width: 132,
+      // The cash after it, as the money sheet's «Cash Balance»; past the cash box — how it went (card, transfer, owner).
+      cell: (e) => (e.purse === 'cash' ? formatAed(e.cashAfter).replace(/^-/, '−') : e.method ? wayLabel(t, e.method, e.kind) : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')),
     },
   ];
   const deskBook = (

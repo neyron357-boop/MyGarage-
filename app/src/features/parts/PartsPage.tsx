@@ -168,12 +168,12 @@ export function PartsPage() {
         );
       },
     },
-    { key: 'plate', label: t('desk.col.car'), cell: (i) => (plateOf(i) ? <PlateText plate={plateOf(i)!.plate} size="xs" /> : null), sort: (i) => plateOf(i)?.plate.number ?? '', width: 150 },
+    { key: 'plate', label: t('desk.col.car'), cell: (i) => (plateOf(i) ? <PlateText plate={plateOf(i)!.plate} size="xs" /> : null), sort: (i) => plateOf(i)?.plate.number ?? '', width: 136 },
     {
       key: 'job',
       label: t('desk.col.job'),
       sort: (i) => byId.get(i.orderId)?.number ?? '',
-      width: 96,
+      width: 92,
       cell: (i) => (
         <Button
           size="compact-sm"
@@ -187,9 +187,9 @@ export function PartsPage() {
         </Button>
       ),
     },
-    { key: 'supplier', label: t('desk.col.supplier'), cell: (i) => <span className="dt-clip">{i.supplierId ? sName(i.supplierId) : ''}</span>, sort: (i) => (i.supplierId ? sName(i.supplierId) : '') },
-    { key: 'expected', label: t('desk.col.expected'), cell: (i) => (i.expectedAt ? formatDate(i.expectedAt) : ''), sort: (i) => i.expectedAt ?? '', muted: true, nowrap: true, width: 120 },
-    { key: 'cost', label: t('desk.col.cost'), cell: (i) => (i.costPriceFils !== undefined ? <Money fils={itemCostPaid(i)} /> : null), sort: (i) => (i.costPriceFils !== undefined ? itemCostPaid(i) : -1), desc: true, align: 'right', nowrap: true, width: 140 },
+    { key: 'supplier', label: t('desk.col.supplier'), cell: (i) => <span className="dt-clip">{i.supplierId ? sName(i.supplierId) : ''}</span>, sort: (i) => (i.supplierId ? sName(i.supplierId) : ''), width: '18%' },
+    { key: 'expected', label: t('desk.col.expected'), cell: (i) => (i.expectedAt ? formatDate(i.expectedAt) : ''), sort: (i) => i.expectedAt ?? '', muted: true, nowrap: true, width: 112 },
+    { key: 'cost', label: t('desk.col.cost'), cell: (i) => (i.costPriceFils !== undefined ? <Money fils={itemCostPaid(i)} /> : null), sort: (i) => (i.costPriceFils !== undefined ? itemCostPaid(i) : -1), desc: true, align: 'right', nowrap: true, width: 128 },
     {
       key: 'next',
       label: '',

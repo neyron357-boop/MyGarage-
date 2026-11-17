@@ -1,7 +1,7 @@
 import { Kbd, Menu, Modal, Text } from '@mantine/core';
 import { useHotkeys, type HotkeyItem } from '@mantine/hooks';
 import type { Icon } from '@tabler/icons-react';
-import { useLayoutEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useLayoutEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -12,11 +12,40 @@ import { useLocation, useNavigate } from 'react-router-dom';
  * not change by a pixel.
  */
 
+/**
+ * Inside the PC shell (provided by `DesktopShell`): a shared component that has something of the computer's own (a
+ * row's swipes as buttons under the mouse) asks this — no media query per row; the phone's shell never provides it.
+ */
+export const DeskContext = createContext(false);
+export const useDesk = () => useContext(DeskContext);
+
 /** Marks the document as the PC's while the PC shell is on (before the first paint: no frame without its layout). */
 export function useDeskShell() {
   useLayoutEffect(() => {
     document.documentElement.classList.add('desk');
     return () => document.documentElement.classList.remove('desk');
+  }, []);
+}
+
+/**
+ * A sideways row of chips or tabs (car makes, suppliers, the steps) scrolls with the mouse's wheel on a PC: an ordinary
+ * wheel only goes up and down, and the chips past the edge could not be reached. At the row's end the wheel scrolls
+ * the page again.
+ */
+export function useDeskWheel() {
+  useLayoutEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      const row = (e.target as Element | null)?.closest?.<HTMLElement>('.chip-row:not(.wrap), .scroll-tabs');
+      if (!row || row.scrollWidth <= row.clientWidth + 1) return;
+      const dy = e.deltaMode === 1 ? e.deltaY * 32 : e.deltaY;
+      const max = row.scrollWidth - row.clientWidth;
+      if ((dy > 0 && row.scrollLeft >= max - 1) || (dy < 0 && row.scrollLeft <= 0)) return;
+      e.preventDefault();
+      row.scrollLeft = Math.max(0, Math.min(max, row.scrollLeft + dy));
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
   }, []);
 }
 

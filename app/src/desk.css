@@ -102,7 +102,7 @@ html.desk .kanban {
   flex: 1;
   min-height: 0;
   align-items: stretch;
-  gap: 14px;
+  gap: 12px;
   padding-bottom: 0;
   /* Room at the sides for the cards' lift (the lanes' scroll would cut it), the lanes still level with the title. */
   margin-inline: -6px;
@@ -566,6 +566,66 @@ html.desk .dt-group-head {
   }
 }
 
+/* ---------- A row's swipes as buttons under the mouse (ListRow: a job's line — agreed, done, off) ---------- */
+/* No finger on a PC: what a swipe uncovers shows at the row's end while the mouse is on it (or a key has reached
+   it), over its price, on the row's own colour — one click, the same action. */
+html.desk .row-hover {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 0 32px;
+  background-color: var(--app-card);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 26px);
+  mask-image: linear-gradient(to right, transparent, black 26px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+/* Under the mouse the row is tinted: so is the strip over it. */
+html.desk .list-row.clickable > .row-hover {
+  background-image: linear-gradient(color-mix(in srgb, var(--app-press) 50%, transparent), color-mix(in srgb, var(--app-press) 50%, transparent));
+}
+html.desk .list-row:focus-within > .row-hover {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: hover) and (pointer: fine) {
+  html.desk .list-row:hover > .row-hover {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+html.desk .row-hover-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 14%, var(--app-card));
+  color: var(--c-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+html.desk .row-hover-btn:hover {
+  background: var(--c);
+  color: #fff;
+}
+html.desk .row-hover-btn:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 1px;
+}
+
 /* ---------- Under the mouse: what can be clicked answers before the click ---------- */
 @media (hover: hover) and (pointer: fine) {
   html.desk .chip:not([data-active='true']):hover {
@@ -602,6 +662,7 @@ html.desk .sticky-bar {
 }
 
 /* ---------- Sheets: a little wider on a PC (a form reads in fewer lines) ---------- */
-html.desk {
+/* (Mantine sets the sizes on each modal's root, so they are set there.) */
+html.desk .mantine-Modal-root {
   --modal-size-md: calc(32.5rem * var(--mantine-scale));
 }

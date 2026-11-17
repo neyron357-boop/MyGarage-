@@ -40,6 +40,7 @@ import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
 import { useScreen, useScreenTitle, useStack } from './stack';
 import { useSwipeRow, type SwipeSpec } from './swipe';
+import { useDesk } from './desk';
 import { onCelebrate, useAutoAnimate, useRolling } from './motion';
 import { createPortal } from 'react-dom';
 
@@ -541,6 +542,8 @@ export function ListRow({
   grip?: ReactNode;
 }) {
   const sw = useSwipeRow({ trailing, leading });
+  // On a PC (v0.41) there is no finger to swipe with: the same actions are buttons that show under the mouse.
+  const desk = useDesk();
   const swipes = !!(trailing || leading);
   // A long press and a swipe on the same row: both see the finger.
   const h = handlers as Partial<Record<'onTouchStart' | 'onTouchMove' | 'onTouchEnd' | 'onTouchCancel', (e: React.TouchEvent<HTMLDivElement>) => void>> | undefined;
@@ -602,6 +605,27 @@ export function ListRow({
       {right}
       {chevron && <IconChevronRight size={18} stroke={2.4} className="chevron" aria-hidden />}
       {grip}
+      {desk && swipes && (
+        <span className="row-hover">
+          {[leading, trailing]
+            .filter((s): s is SwipeSpec => !!s)
+            .map((s) => (
+              <button
+                key={s.label}
+                type="button"
+                className="row-hover-btn"
+                style={{ '--c': `var(--mantine-color-${s.color}-6)`, '--c-ink': `var(--mantine-color-${s.color}-light-color)` } as React.CSSProperties}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  s.onCommit();
+                }}
+              >
+                <s.icon size={16} stroke={2} aria-hidden />
+                {s.label}
+              </button>
+            ))}
+        </span>
+      )}
     </div>
   );
 }

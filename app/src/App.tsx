@@ -44,7 +44,7 @@ import { useBackClosesSheets } from './ui/backCloses';
 import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useViewportSync } from './ui/stack';
-import { DeskKeys, deskPage, useDeskShell } from './ui/desk';
+import { DeskContext, DeskKeys, deskPage, useDeskShell, useDeskWheel } from './ui/desk';
 import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
 import { cssResolver, phoneTheme, theme } from './ui/theme';
@@ -270,7 +270,9 @@ function DesktopShell() {
   const location = useLocation();
   // The computer's own layout (v0.41): every rule of it is under html.desk, which the phone never has.
   useDeskShell();
+  useDeskWheel();
   return (
+    <DeskContext.Provider value>
     <AppShell navbar={{ width: 256, breakpoint: 0 }} padding={0}>
       <ScrollManager />
       <AppShell.Navbar p="sm" className="app-nav" aria-label={t('nav.menu')}>
@@ -293,6 +295,7 @@ function DesktopShell() {
       <PwaUpdater />
       <UnsavedGuard />
     </AppShell>
+    </DeskContext.Provider>
   );
 }
 

@@ -113,7 +113,8 @@ function Kanban({ jobs, covers, swipe, tick, order, compact }: { jobs: Job[]; co
   const { t } = useTranslation();
   const ref = useEdgeFade();
   const lanes = (order.filter((k) => isStep(k)) as Phase[]).map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
-  const cols = lanes.map((l) => (l.list.length ? `minmax(${compact ? 220 : 236}px, 1fr)` : '46px')).join(' ');
+  // Every step's lane in sight at 1440 (four busy, three folded): a busy lane from 224 px, a folded one 40.
+  const cols = lanes.map((l) => (l.list.length ? `minmax(${compact ? 212 : 224}px, 1fr)` : '40px')).join(' ');
   // Each lane's scroll is kept as it moves, and put back when the board comes back.
   useLayoutEffect(() => {
     const el = ref.current;
