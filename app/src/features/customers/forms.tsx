@@ -3,7 +3,8 @@ import { IconChevronDown } from '@tabler/icons-react';
 import { formatPhone } from '../../domain/phone';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Customer, Plate, Vehicle } from '../../domain/types';
+import type { Customer, Plate, Vehicle, VehicleType } from '../../domain/types';
+import { VEHICLE_TYPES, vehicleTypeOf } from '../../domain/vehicleType';
 import { createCustomer, createVehicle, suggestCustomers, updateCustomer, updateVehicle, type CustomerInput, type VehicleInput } from '../../services/customers';
 import { setJobCustomer } from '../../services/orders';
 import { PersonAvatar } from '../../ui/components';
@@ -138,6 +139,18 @@ export function VehicleFields({ value, onChange, compact }: { value: VehicleInpu
         <TextInput label={t('vehicle.engine')} placeholder="2.5" value={value.engine ?? ''} onChange={(e) => set('engine', e.currentTarget.value)} />
         <TextInput label={t('vehicle.color')} value={value.color ?? ''} onChange={(e) => set('color', e.currentTarget.value)} />
       </SimpleGrid>
+      {/* The body (v0.46, a fleet's reports): chosen, or — empty — the one the make and model tell, shown greyed. */}
+      <Select
+        label={t('vehicle.body')}
+        value={value.type ?? null}
+        clearable
+        placeholder={(() => {
+          const guess = vehicleTypeOf(value.make, value.model);
+          return guess ? t(`vehicle.bodyTypes.${guess}`) : undefined;
+        })()}
+        data={VEHICLE_TYPES.map((k) => ({ value: k, label: t(`vehicle.bodyTypes.${k}`) }))}
+        onChange={(k) => set('type', (k as VehicleType | null) ?? undefined)}
+      />
       <TextInput label="VIN" maxLength={17} value={value.vin ?? ''} onChange={(e) => set('vin', e.currentTarget.value.toUpperCase())} styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', letterSpacing: '0.06em' } }} />
       <Textarea label={t('common.notes')} autosize minRows={2} value={value.notes ?? ''} onChange={(e) => set('notes', e.currentTarget.value)} />
     </Stack>
