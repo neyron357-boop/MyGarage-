@@ -12,7 +12,7 @@ import { addMedia, mediaBlob } from '../media';
 import { checkIn } from '../orders';
 import { ensureSeed } from '../seed';
 import { forgetSyncMemory, resetSyncState, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
-import { applyChanges, changeServerAddress, pairDevice, sendLocalData, syncNow, takeServerData } from './engine';
+import { applyChanges, changeServerAddress, finishPairing, makeMain, pairDevice, syncNow } from './engine';
 
 /*
  * Two devices and the garage's own server (server/src/main.mjs, started here as it runs on the computer): what one
@@ -112,8 +112,23 @@ afterAll(() => {
 describe('syncing with the garage’s server (v0.40)', () => {
   let orderId = '';
   let photoId = '';
+  let demoId = '';
 
-  it('the first device sends everything it has; its photo leaves it once the server has it', async () => {
+  it('a computer first: its data goes to the empty server — it does not become the main device', async () => {
+    as('pc-demo');
+    await ensureSeed();
+    const demo = await checkIn({ plate: { emirate: 'DXB', code: 'A', number: '12345' }, make: 'Toyota', model: 'Camry', name: 'Demo customer', phone: '0501112233', docLanguage: 'en', complaint: 'Demo', arrivedNow: true });
+    demoId = demo.id;
+    await db.counters.put({ name: 'order', value: 1008 });
+    const paired = await pairDevice(url, await newCode(), 'Windows PC');
+    expect(paired.server).toBe(0);
+    await finishPairing(paired, 'send');
+    expect(syncState().lastError).toBeUndefined();
+    expect(store.record('orders', demo.id)?.complaint).toBe('Demo');
+    expect(syncState().main ?? null).toBeNull();
+  });
+
+  it('the phone with its data becomes the main device: the computer’s data leaves the server; nothing of it comes to the phone; its photo leaves it once the server has it', async () => {
     as('phone');
     await ensureSeed();
     const o = await checkIn({ plate: { emirate: 'DXB', code: 'Q', number: '52594' }, make: 'Toyota', model: 'Camry', name: 'Ahmed', phone: '0507778899', docLanguage: 'en', complaint: 'Brake noise', arrivedNow: true });
@@ -121,10 +136,24 @@ describe('syncing with the garage’s server (v0.40)', () => {
     await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake pads', unitPriceFils: 25000 });
     const photo = await addMedia({ ownerType: 'order', ownerId: o.id, slot: 'car', file: new Blob([bytes(70_000, 7)], { type: 'image/jpeg' }), compress: false });
     photoId = photo.id;
+    const ordersBefore = await db.orders.count();
+    const counterBefore = (await db.counters.get('order'))!.value;
     const paired = await pairDevice(url, await newCode(), 'iPhone');
-    expect(paired).toEqual({ server: 0, local: 1 });
-    await sendLocalData();
+    expect(paired).toMatchObject({ server: 1, local: 1, main: null });
+    // Nothing is synced until the choice is made.
+    expect(syncConfig()).toBeNull();
+    await syncNow();
+    expect(store.record('orders', o.id)).toBeUndefined();
+    await finishPairing(paired, 'main');
     expect(syncState().lastError).toBeUndefined();
+    expect(syncState().main?.name).toBe('iPhone');
+    expect(store.record('orders', o.id)?.complaint).toBe('Brake noise');
+    expect(store.record('orders', demoId)).toBeUndefined();
+    expect(store.record('counters', 'order')?.value).toBe(counterBefore);
+    // The phone is as it was: nothing of the computer's came in, its numbers did not jump.
+    expect(await db.orders.count()).toBe(ordersBefore);
+    expect(await db.orders.get(demoId)).toBeUndefined();
+    expect((await db.counters.get('order'))?.value).toBe(counterBefore);
     expect(store.record('orders', o.id)?.complaint).toBe('Brake noise');
     expect(store.record('orders', o.id)?._t).toBeUndefined();
     expect(store.file(photo.id, 'blob')?.size).toBe(70_000);
@@ -136,12 +165,28 @@ describe('syncing with the garage’s server (v0.40)', () => {
     expect((await mediaBlob(photo.id))?.size).toBe(70_000);
   });
 
+  it('the computer that was first now has the phone’s data: its own left, its numbers went back to the phone’s', async () => {
+    as('pc-demo');
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+    expect(await db.orders.get(demoId)).toBeUndefined();
+    expect((await db.orders.get(orderId))?.complaint).toBe('Brake noise');
+    expect((await db.counters.get('order'))?.value).toBe(store.record('counters', 'order')?.value);
+    expect(syncState().main?.name).toBe('iPhone');
+    // It may not make its own data the garage's: refused before anything is sent.
+    await db.orders.update(orderId, { complaint: 'pc wants to win' });
+    await makeMain();
+    expect(syncState().lastError).toBe('main');
+    expect(store.record('orders', orderId)?.complaint).toBe('Brake noise');
+  });
+
   it('another device takes the garage’s data from the server — the photo too, when it is opened', async () => {
     as('pc');
     await ensureSeed();
     const paired = await pairDevice(`${url}/#pair=000000`, await newCode(), 'PC');
     expect(paired.server).toBe(1);
-    await takeServerData();
+    expect(paired.main?.name).toBe('iPhone');
+    await finishPairing(paired, 'take');
     expect((await db.orders.get(orderId))?.complaint).toBe('Brake noise');
     expect(await db.items.where('orderId').equals(orderId).count()).toBe(1);
     expect(await db.mediaBlobs.get(photoId)).toBeUndefined();

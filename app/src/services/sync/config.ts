@@ -34,6 +34,10 @@ export interface SyncState {
   /** Photos and files sent, and the space they no longer take here. */
   uploaded?: number;
   freedBytes?: number;
+  /** This device's data is becoming the garage's (v0.41.1): sent whole, then the server keeps only it. */
+  replacing?: boolean;
+  /** The device whose data is the garage's, as the server last said. */
+  main?: { id: string; name: string } | null;
 }
 
 const CONFIG_KEY = 'mygarage.sync';

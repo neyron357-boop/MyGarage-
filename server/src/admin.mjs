@@ -66,7 +66,7 @@ async function load() {
   document.getElementById('folder').textContent = s.dataDir;
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel);
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
-    '<div class="row"><span>' + esc(d.name) + '<br><span class="dim">был на связи: ' + when(d.last_seen) + '</span></span>' +
+    '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br><span class="dim">был на связи: ' + when(d.last_seen) + '</span></span>' +
     (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
       ? '<span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end"><span class="dim">перестанет получать данные</span>' +
         '<button class="red" onclick="revoke(\\'' + d.id + '\\')">Отключить</button><button class="ghost" onclick="askRevoke(\\'\\')">Отмена</button></span>'
@@ -127,6 +127,7 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel }) {
         publicUrl: publicUrl(),
         code: pairing.current(),
         devices: store.devices(),
+        main: store.mainDevice(),
         lastBackup: store.metaGet('lastBackup'),
         tunnel: { available: !!tunnel && !!config.tunnelExe && tunnel.available(), on: !!tunnel?.on(), url: tunnel?.url() ?? '' },
         ...store.counts(),

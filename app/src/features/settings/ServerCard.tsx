@@ -1,11 +1,11 @@
 import { Button, Loader, Modal, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconCloud, IconCloudOff, IconPhoto, IconRefresh } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dayShort, formatDateTime } from '../../domain/dates';
 import { parseAddress, SyncError } from '../../services/sync/api';
 import { setOffload, useSync } from '../../services/sync/config';
-import { changeServerAddress, forgetSync, pairDevice, sendLocalData, syncNow, takeServerData } from '../../services/sync/engine';
+import { cancelPairing, changeServerAddress, finishPairing, forgetSync, makeMain, pairDevice, syncNow, type Pairing } from '../../services/sync/engine';
 import { ConfirmModal, FormRow, RowGroup } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { formatBytes } from '../../ui/device';
@@ -16,6 +16,10 @@ import { LazySheet } from '../../ui/lazy';
  * «Настройки → Данные → Сервер» (v0.40): this device paired with the garage's server on the computer — the address and
  * the code its page shows; then how syncing stands, the photos kept there and the space they freed here, «Освобождать
  * память» (originals leave the phone), «Отключить».
+ *
+ * The phone is the main device (v0.41.1, the user's rule): a phone with data, connecting, makes its data the garage's
+ * (the server's and the other devices' replaced); a computer with data, connecting to a garage that has data, takes it.
+ * Nothing is synced before the choice; two sets of data are never mixed.
  */
 
 /** What this device is called on the server's page. */
@@ -28,6 +32,8 @@ function deviceName(): string {
   if (/Mac OS X/.test(ua)) return 'Mac';
   return 'Device';
 }
+/** A phone (or a tablet): its data may become the garage's. */
+const mobile = (name: string) => /^(iPhone|iPad|Android)$/.test(name);
 
 function useErrorText() {
   const { t } = useTranslation();
@@ -49,21 +55,29 @@ function PairSheet({ opened, onClose }: { opened: boolean; onClose: () => void }
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [both, setBoth] = useState(false);
+  /** Both have data: this phone's may become the garage's, or this device takes the garage's. */
+  const [ask, setAsk] = useState<{ canMain: boolean } | null>(null);
+  // Paired, the choice not made: kept here, not in state — a sheet closing after the choice must not see it as cancelled.
+  const pending = useRef<Pairing | null>(null);
+  const finish = (how: 'send' | 'main' | 'take') => {
+    const p = pending.current;
+    pending.current = null;
+    setAsk(null);
+    onClose();
+    if (p) void finishPairing(p, how);
+  };
   const pair = async () => {
     setBusy(true);
     setError('');
     try {
-      const r = await pairDevice(address, code, deviceName());
+      const name = deviceName();
+      const r = await pairDevice(address, code, name);
+      pending.current = r;
       haptic('success');
-      if (!r.server) {
-        // The first device: everything here goes to the server.
-        onClose();
-        void sendLocalData();
-      } else if (!r.local) {
-        onClose();
-        void takeServerData();
-      } else setBoth(true);
+      // An empty server: this device's data goes there (a phone's becomes the garage's — the main one).
+      if (!r.server) finish(mobile(name) && r.local ? 'main' : 'send');
+      else if (!r.local) finish('take');
+      else setAsk({ canMain: mobile(name) && !r.main });
     } catch (e) {
       haptic('error');
       setError(errorText(e));
@@ -73,7 +87,7 @@ function PairSheet({ opened, onClose }: { opened: boolean; onClose: () => void }
   };
   return (
     <>
-      <Modal opened={opened && !both} onClose={onClose} title={t('sync.connect')}>
+      <Modal opened={opened && !ask} onClose={onClose} title={t('sync.connect')}>
         <Stack gap="md">
           <TextInput
             label={t('sync.address')}
@@ -102,24 +116,35 @@ function PairSheet({ opened, onClose }: { opened: boolean; onClose: () => void }
         </Stack>
       </Modal>
       <ConfirmModal
-        opened={both}
+        opened={!!ask}
         onClose={() => {
-          // Not taken: not paired either (nothing was sent).
-          if (both) forgetSync();
-          setBoth(false);
+          // Closed without a choice: not connected (nothing was sent), the server forgets this device.
+          if (pending.current) cancelPairing(pending.current);
+          pending.current = null;
+          setAsk(null);
           onClose();
         }}
         title={t('sync.takeTitle')}
-        confirmLabel={t('sync.take')}
-        color="red"
+        confirmLabel={ask?.canMain ? t('sync.mainAsk') : t('sync.take')}
+        color={ask?.canMain ? undefined : 'red'}
+        secondary={
+          ask?.canMain
+            ? {
+                label: t('sync.take'),
+                color: 'red',
+                onClick: async () => {
+                  finish('take');
+                  return true;
+                },
+              }
+            : undefined
+        }
         onConfirm={async () => {
-          setBoth(false);
-          onClose();
-          void takeServerData();
+          finish(ask?.canMain ? 'main' : 'take');
           return true;
         }}
       >
-        <Text size="sm">{t('sync.takeText')}</Text>
+        <Text size="sm">{ask?.canMain ? t('sync.mainText') : t('sync.takeText')}</Text>
       </ConfirmModal>
     </>
   );
@@ -173,7 +198,8 @@ export function ServerCard() {
   const [pairing, setPairing] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [moving, setMoving] = useState(false);
-  const errors: Record<string, string> = { offline: t('sync.err.offline'), revoked: t('sync.err.revoked') };
+  const [making, setMaking] = useState(false);
+  const errors: Record<string, string> = { offline: t('sync.err.offline'), revoked: t('sync.err.revoked'), main: t('sync.err.main') };
   if (!config)
     return (
       <>
@@ -189,6 +215,9 @@ export function ServerCard() {
   const last = state.lastAt ? dayShort(state.lastAt) : undefined;
   const when = state.lastAt ? (last?.word ? `${t(`common.${last.word}`)} ${formatDateTime(state.lastAt).slice(11)}` : formatDateTime(state.lastAt)) : t('sync.never');
   const status = state.busy ? t('sync.syncing') : state.lastError ? (errors[state.lastError] ?? t('sync.err.other', { message: state.lastError })) : when;
+  const isMain = !!state.main && state.main.id === config.deviceId;
+  // A phone may make its data the garage's while there is no main device (or it is the main one: sent again).
+  const mayMain = mobile(config.deviceName) && (!state.main || isMain);
   return (
     <>
       <RowGroup title={t('sync.title')} mt={0} note={state.pending ? t('sync.pending', { count: state.pending }) : undefined}>
@@ -210,6 +239,11 @@ export function ServerCard() {
             </Button>
           </span>
         </FormRow>
+        <FormRow label={t('sync.main')} onClick={mayMain ? () => setMaking(true) : undefined} chevron={mayMain}>
+          <Text size="sm" c={isMain ? 'green' : 'dimmed'} data-sync-main>
+            {isMain ? t('sync.thisDevice') : (state.main?.name ?? '—')}
+          </Text>
+        </FormRow>
         <FormRow label={t('sync.photos')}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <IconPhoto size={17} color="var(--mantine-color-cobalt-6)" />
@@ -229,6 +263,18 @@ export function ServerCard() {
         </FormRow>
       </RowGroup>
       <LazySheet opened={moving}>{(o) => <AddressSheet opened={o} current={config.url} onClose={() => setMoving(false)} />}</LazySheet>
+      <ConfirmModal
+        opened={making}
+        onClose={() => setMaking(false)}
+        title={t('sync.mainTitle')}
+        confirmLabel={t('sync.mainMake')}
+        onConfirm={async () => {
+          void makeMain();
+          return true;
+        }}
+      >
+        <Text size="sm">{t('sync.mainText')}</Text>
+      </ConfirmModal>
       <ConfirmModal
         opened={leaving}
         onClose={() => setLeaving(false)}

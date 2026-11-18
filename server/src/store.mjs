@@ -155,6 +155,45 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     return rev;
   }
 
+  /**
+   * The main device's data becomes the garage's (v0.41.1, the user's rule: «the phone is the main source»): every
+   * record it does not have is deleted here — and so on the other devices; its job numbers are taken as they are, a
+   * lower one too (`reset`: the devices take it although numbers only go up otherwise). `keys`: `{table: [id…]}`.
+   */
+  function replace(deviceId, keys, counters) {
+    if (!keys || typeof keys !== 'object') throw httpError(400, 'keys');
+    const have = new Map(Object.entries(keys).map(([t, ids]) => [t, new Set(Array.isArray(ids) ? ids.map(String) : [])]));
+    const given = new Map();
+    for (const c of Array.isArray(counters) ? counters : []) {
+      if (c && typeof c.name === 'string' && Number.isFinite(Number(c.value))) given.set(c.name, Number(c.value));
+    }
+    const at = now();
+    let removed = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of db.prepare('SELECT tbl, id FROM records WHERE deleted = 0').all()) {
+        if (r.tbl === 'counters' ? given.has(r.id) : have.get(r.tbl)?.has(r.id)) continue;
+        putRecord.run(r.tbl, r.id, null, 1, ++rev, deviceId, at);
+        removed++;
+      }
+      for (const [name, value] of given) putRecord.run('counters', name, JSON.stringify({ name, value, reset: true }), 0, ++rev, deviceId, at);
+      db.prepare("INSERT INTO meta (key, value) VALUES ('mainDevice', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(deviceId);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      rev = Number(db.prepare('SELECT COALESCE(MAX(rev), 0) AS r FROM records').get().r);
+      throw e;
+    }
+    return { rev, removed };
+  }
+
+  /** The device whose data is the garage's (none yet, or it was cut off: none). */
+  function mainDevice() {
+    const id = db.prepare("SELECT value FROM meta WHERE key = 'mainDevice'").get()?.value;
+    const d = id ? db.prepare('SELECT id, name, revoked FROM devices WHERE id = ?').get(id) : undefined;
+    return d && !d.revoked ? { id: d.id, name: d.name } : null;
+  }
+
   /** What changed after `since` (other devices' changes), oldest first. */
   function pull(deviceId, since, limit = 500) {
     const rows = pullRows.all(Number(since) || 0, deviceId, Math.min(Math.max(Number(limit) || 500, 1), 2000));
@@ -272,7 +311,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  return { dataDir, push, pull, counts, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
+  return { dataDir, push, pull, replace, mainDevice, counts, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
 }
 
 export function httpError(status, message) {

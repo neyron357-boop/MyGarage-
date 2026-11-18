@@ -13,6 +13,12 @@ import { offloadOn, resetSyncState, setSyncConfig, setSyncState, syncConfig, syn
  *
  * Photos and PDFs, once the server has them, leave the phone (`offloadOn`): their small previews (and a card's photo)
  * stay, the original is fetched from the server when it is opened (`remoteMedia`). Signatures and small files stay.
+ *
+ * The main device (v0.41.1, the user's rule: «the iPhone's data is the main source; at the first sync what is on the
+ * phone shows on the other devices, and nothing of theirs comes into it»): a phone with data, connecting, makes its
+ * data the garage's — sent whole, then everything it does not have is deleted on the server and so on every other
+ * device (`makeMain`, `/api/sync/replace`). Nothing is synced until the device's choice is made (`finishPairing`);
+ * two sets of data are never mixed at a first connection: one replaces the other. After that, both ways.
  */
 
 type Row = Record<string, unknown>;
@@ -90,7 +96,13 @@ export async function applyChanges(changes: Change[]): Promise<void> {
         if (local) await table.delete(c.k);
         continue;
       }
-      if (c.t === 'counters' && local && Number(local.value) > Number(c.d.value)) continue;
+      if (c.t === 'counters') {
+        // Numbers only go up — unless the main device's own are given (`reset`): taken as they are.
+        const { reset, ...counter } = c.d;
+        if (local && Number(local.value) > Number(counter.value) && !reset) continue;
+        await table.put({ ...counter, [STAMP]: 0 });
+        continue;
+      }
       await table.put({ ...c.d, [STAMP]: 0 });
     }
   });
@@ -100,13 +112,33 @@ async function pullRecords(cfg: SyncConfig): Promise<number> {
   let cursor = syncState().cursor;
   let n = 0;
   for (;;) {
-    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean }>(cfg, `/api/sync/pull?since=${cursor}&limit=1000`, { timeout: 90_000 });
+    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean; main?: MainDevice | null }>(cfg, `/api/sync/pull?since=${cursor}&limit=1000`, { timeout: 90_000 });
     if (res.changes.length) await applyChanges(res.changes);
+    if (res.main !== undefined) setSyncState({ main: res.main });
     n += res.changes.length;
     cursor = res.cursor;
     setSyncState({ cursor });
     if (!res.more) return n;
   }
+}
+
+/** Another device is the main one: this one may not replace the garage's data (nothing is sent — nothing is mixed). */
+async function mayBeMain(cfg: SyncConfig): Promise<void> {
+  const st = await callJson<{ main?: MainDevice | null }>(cfg, '/api/status', { timeout: 30_000 });
+  setSyncState({ main: st.main ?? null });
+  if (st.main && st.main.id !== cfg.deviceId) throw new SyncError(409, 'main');
+}
+
+/** The main device's data becomes the garage's: what it does not have is deleted on the server (and the others). */
+async function replaceServer(cfg: SyncConfig): Promise<void> {
+  const keys: Record<string, string[]> = {};
+  let counters: { name: string; value: number }[] = [];
+  for (const table of synced()) {
+    if (table.name === 'counters') counters = ((await table.toArray()) as { name: string; value: number }[]).map((c) => ({ name: c.name, value: c.value }));
+    else keys[table.name] = (await table.toCollection().primaryKeys()).map(String);
+  }
+  await callJson(cfg, '/api/sync/replace', { method: 'POST', body: { keys, counters }, timeout: 90_000 });
+  setSyncState({ replacing: false, main: { id: cfg.deviceId, name: cfg.deviceName } });
 }
 
 /* ---------- Photos and files ---------- */
@@ -196,14 +228,18 @@ export function syncNow(): Promise<void> {
     again = true;
     return running;
   }
+  const cfg = syncConfig();
+  // Not connected: nothing to do (checked before `running` is set — a run that ended at once would leave it set).
+  if (!cfg) return Promise.resolve();
   running = (async () => {
-    const cfg = syncConfig();
-    if (!cfg) return;
     setSyncState({ busy: true }, false);
     try {
       do {
         again = false;
+        const replacing = syncState().replacing;
+        if (replacing) await mayBeMain(cfg);
         await pushRecords(cfg);
+        if (replacing) await replaceServer(cfg);
         await pullRecords(cfg);
         await pushMedia(cfg);
         await offloadSent();
@@ -248,16 +284,56 @@ export function startSync() {
 
 /* ---------- Pairing ---------- */
 
-/** This device paired with the server (the code shown on the computer). Returns how much each side has. */
-export async function pairDevice(address: string, code: string, name: string): Promise<{ server: number; local: number }> {
+export interface MainDevice {
+  id: string;
+  name: string;
+}
+/** A device paired, its choice not made yet: nothing is kept or synced until `finishPairing`. */
+export interface Pairing {
+  config: SyncConfig;
+  /** The server's jobs (none — an empty server). */
+  server: number;
+  /** This device's jobs. */
+  local: number;
+  /** The device whose data is the garage's, if there is one. */
+  main: MainDevice | null;
+}
+
+/** This device paired with the server (the code shown on the computer): how much each side has; nothing synced yet. */
+export async function pairDevice(address: string, code: string, name: string): Promise<Pairing> {
   const parsed = parseAddress(address);
   const pin = (code || parsed.code || '').replace(/\D/g, '');
   if (!parsed.url || !addressAllowed(parsed.url)) throw new SyncError(0, 'address');
   if (pin.length !== 6) throw new SyncError(0, 'code');
-  const res = await callJson<{ token: string; deviceId: string; records: number; byTable?: Record<string, number> }>({ url: parsed.url, token: '' }, '/api/pair', { method: 'POST', body: { code: pin, name } });
-  setSyncConfig({ url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso() });
-  resetSyncState();
-  return { server: res.byTable?.orders ?? (res.records ? 1 : 0), local: await db.orders.count() };
+  const res = await callJson<{ token: string; deviceId: string; records: number; byTable?: Record<string, number>; main?: MainDevice | null }>({ url: parsed.url, token: '' }, '/api/pair', { method: 'POST', body: { code: pin, name } });
+  return {
+    config: { url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso() },
+    server: res.byTable?.orders ?? (res.records ? 1 : 0),
+    local: await db.orders.count(),
+    main: res.main ?? null,
+  };
+}
+
+/**
+ * The choice made: «send» — this device's data goes to the (empty) server; «main» — it becomes the garage's, replacing
+ * the server's; «take» — the server's replaces this device's.
+ */
+export async function finishPairing(p: Pairing, how: 'send' | 'main' | 'take'): Promise<void> {
+  setSyncConfig(p.config);
+  if (how === 'take') return takeServerData();
+  if (how === 'main') return makeMain();
+  return sendLocalData();
+}
+
+/** Not connected after all: the server forgets this device (it never sent anything). */
+export function cancelPairing(p: Pairing) {
+  void callJson(p.config, '/api/forget', { method: 'POST', timeout: 10_000 }).catch(() => undefined);
+}
+
+/** This device's data becomes the garage's: sent whole; what it does not have goes from the server and the others. */
+export async function makeMain(): Promise<void> {
+  resetSyncState({ replacing: true });
+  await syncNow();
 }
 
 /** The first device: everything here goes to the server. */
@@ -291,8 +367,10 @@ export async function changeServerAddress(address: string): Promise<void> {
   scheduleSync(0);
 }
 
-/** Disconnected: the data here stays; it is not sent any more. */
+/** Disconnected: the data here stays; it is not sent any more (the server forgets this device). */
 export function forgetSync() {
+  const cfg = syncConfig();
+  if (cfg) void callJson(cfg, '/api/forget', { method: 'POST', timeout: 10_000 }).catch(() => undefined);
   setSyncConfig(null);
   resetSyncState();
 }

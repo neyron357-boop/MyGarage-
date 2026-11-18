@@ -75,20 +75,23 @@ function backupNow() {
 
 const api = createServer(createApi({ store, config, pairing, log, onSeen }));
 api.requestTimeout = 0;
-api.listen(config.port, config.host, () => log(`MyGarage server ${VERSION}: API http://${config.host}:${config.port}, data ${config.dataDir}`));
+api.listen(config.port, config.host, () => {
+  log(`MyGarage server ${VERSION}: API http://${config.host}:${config.port}, data ${config.dataDir}`);
+  // Turned on by the owner on this computer's page: on again with the server (the one still running is kept).
+  if (store.metaGet('tunnel') === 'on' && config.tunnelExe) tunnel.start();
+});
 const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();
 setInterval(askTailscale, 5 * 60_000).unref();
-// Turned on by the owner on this computer's page: on again with the server.
-if (store.metaGet('tunnel') === 'on' && config.tunnelExe) tunnel.start();
 backupNow();
 setInterval(backupNow, 60 * 60_000).unref();
 
 function stop() {
   log('stopping');
-  tunnel.stop();
+  // The tunnel goes on: the server started next keeps it, and its address.
+  tunnel.detach();
   api.close();
   admin.close();
   store.close();

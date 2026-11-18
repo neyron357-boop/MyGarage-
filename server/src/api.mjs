@@ -13,6 +13,8 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/status                     — how much is kept here
  *   POST /api/sync/push {changes}        — the device's changes
  *   GET  /api/sync/pull?since=N          — other devices' changes after N
+ *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
+ *   POST /api/forget                     — this device leaves (its key no longer works)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb
  *   GET  /api/media/:id/:variant         — the file back
  *
@@ -100,14 +102,30 @@ export function createApi({ store, config, pairing, log, onSeen }) {
         pairing.take(String(body.code ?? ''));
         const d = store.addDevice(body.name);
         log(`paired: ${body.name ?? 'device'} (${d.id})`);
-        return send(res, 200, { token: d.token, deviceId: d.id, ...store.counts() });
+        return send(res, 200, { token: d.token, deviceId: d.id, main: store.mainDevice(), ...store.counts() });
       }
 
       const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
       const device = store.deviceOf(token);
       if (!device) throw httpError(401, 'not paired');
 
-      if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ok: true, version: VERSION, device: device.name, ...store.counts() });
+      if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ok: true, version: VERSION, device: device.name, main: store.mainDevice(), ...store.counts() });
+
+      // The main device's data becomes the garage's: only it may do this (or any device, while there is none).
+      if (req.method === 'POST' && url.pathname === '/api/sync/replace') {
+        const main = store.mainDevice();
+        if (main && main.id !== device.id) throw httpError(409, `the main device is ${main.name}`);
+        const body = await readJson(req);
+        const r = store.replace(device.id, body.keys, body.counters);
+        log(`main device: ${device.name} (${device.id}); ${r.removed} records it did not have deleted`);
+        return send(res, 200, { ok: true, ...r });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/forget') {
+        store.revoke(device.id);
+        log(`left: ${device.name} (${device.id})`);
+        return send(res, 200, { ok: true });
+      }
 
       if (req.method === 'POST' && url.pathname === '/api/sync/push') {
         const body = await readJson(req);
@@ -116,7 +134,7 @@ export function createApi({ store, config, pairing, log, onSeen }) {
       }
 
       if (req.method === 'GET' && url.pathname === '/api/sync/pull') {
-        return send(res, 200, store.pull(device.id, url.searchParams.get('since'), url.searchParams.get('limit')));
+        return send(res, 200, { ...store.pull(device.id, url.searchParams.get('since'), url.searchParams.get('limit')), main: store.mainDevice() });
       }
 
       if (parts[0] === 'api' && parts[1] === 'media' && parts.length === 4) {

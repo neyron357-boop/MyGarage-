@@ -1611,6 +1611,12 @@ export const en: typeof ru = {
     takeTitle: 'The server already has data',
     takeText: 'Take the garage’s data onto this device? Everything on it now will be replaced by the server’s data.',
     take: 'Take from the server',
+    main: 'Main device',
+    thisDevice: 'This device',
+    mainAsk: 'This phone’s data is the main',
+    mainTitle: 'Make this phone’s data the main?',
+    mainText: 'Everything on the server and on the other devices will be replaced with this phone’s data.',
+    mainMake: 'Make main',
     err: {
       offline: 'No connection to the server',
       revoked: 'This device was disconnected on the server',
@@ -1619,6 +1625,7 @@ export const en: typeof ru = {
       wrongCode: 'Wrong or expired code',
       tooMany: 'Too many tries — wait 10 minutes',
       other: 'Error: {{message}}',
+      main: 'Another device is the main one',
     },
   },
   suppliers: {

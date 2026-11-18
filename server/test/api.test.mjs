@@ -156,6 +156,32 @@ describe('MyGarage server', () => {
     assert.equal(fs.readdirSync(path.join(dir, 'Резервные копии')).length, 1);
   });
 
+  it('the main device’s data becomes the garage’s: what it lacks is deleted for everyone, its numbers taken as they are', async () => {
+    const pc = await pair('PC demo');
+    await call('/api/sync/push', { token: pc, method: 'POST', body: { changes: [{ t: 'orders', k: 'demo-1', d: { id: 'demo-1', number: 1001 } }, { t: 'counters', k: 'order', d: { name: 'order', value: 1008 } }] } });
+    const phone = await pair('iPhone 2');
+    await call('/api/sync/push', { token: phone, method: 'POST', body: { changes: [{ t: 'orders', k: 'real-1', d: { id: 'real-1', number: 307 } }] } });
+    const keys = { orders: ['real-1'] };
+    const r = await call('/api/sync/replace', { token: phone, method: 'POST', body: { keys, counters: [{ name: 'order', value: 307 }] } });
+    assert.equal(r.status, 200);
+    assert.equal(store.record('orders', 'demo-1'), undefined);
+    assert.equal(store.record('orders', 'real-1').number, 307);
+    assert.equal(store.record('counters', 'order').value, 307);
+    assert.equal(store.mainDevice().name, 'iPhone 2');
+    // The other device is told: the demo order goes, the lower number comes (marked to be taken).
+    const got = await (await call('/api/sync/pull?since=0', { token: pc })).json();
+    assert.deepEqual(got.changes.find((c) => c.k === 'demo-1').d, null);
+    assert.deepEqual(got.changes.find((c) => c.t === 'counters' && c.k === 'order').d, { name: 'order', value: 307, reset: true });
+    assert.equal(got.main.name, 'iPhone 2');
+    // Only the main device may do it again.
+    assert.equal((await call('/api/sync/replace', { token: pc, method: 'POST', body: { keys: {} } })).status, 409);
+    assert.equal((await (await call('/api/status', { token: pc })).json()).main.name, 'iPhone 2');
+    // A device that leaves: its key no longer works; the main one gone — no main device.
+    assert.equal((await call('/api/forget', { token: phone, method: 'POST' })).status, 200);
+    assert.equal((await call('/api/status', { token: phone })).status, 401);
+    assert.equal(store.mainDevice(), null);
+  });
+
   it('a device cut off on the computer is refused', async () => {
     const id = store.devices().find((d) => d.name === 'PC').id;
     store.revoke(id);
