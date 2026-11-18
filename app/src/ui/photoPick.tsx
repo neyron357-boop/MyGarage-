@@ -1,20 +1,24 @@
 import { useRef, type ReactNode } from 'react';
-import { haptic } from './haptics';
+import { haptic, isApple } from './haptics';
 
 /*
  * A photo for one place (the car's photo, its VIN, the Mulkiya, a damage point): a tap opens the camera, a hold the
- * phone's photos (a right click on a PC too). The iPhone opens a picker only right in a touch, not from a timer while
+ * phone's photos (a right click on a PC too). A phone opens a picker only right in a touch, not from a timer while
  * the finger is down: so after the hold the tile swells and rings ("let go to choose"), and the photos open when the
- * finger lets go — only the photos: the click that would open the camera is held back. (A file input without
+ * finger lets go — only the photos: the click that would open the camera does nothing. (A file input without
  * `capture` is all a web page has: the iPhone shows its own short menu — Photo Library first — not the library
  * itself; with `capture` the camera opens at once.)
  *
- * A finger that moves on before the hold — a scroll, the page's swipe — cancels the press: nothing opens, not even
- * the camera on the click a drifting tap may still bring. Once the hold is there, the thumb may shift a little as it
- * lifts. The hold is told by how long the press lasted, wherever the release lands: at the touch's end (where it can
- * still be held back — the click that would open the camera then never comes), or at that click itself — the iPhone
- * may take a long, still press over for its own gestures (the page gets `touchcancel`) and still end it with a
- * click; that click opens the photos too. A mouse held down works the same.
+ * On an iPhone the photos open from the click the release brings (v0.46.1): a long, still press is the iPhone's own
+ * gesture — iOS 27 sends no pointer end for it, and a picker opened at the touch's end does not show — but the press
+ * still ends in a click, and a click opens a picker always. Android (and a PC's touch screen) open them at the
+ * touch's end, and its click is held back.
+ *
+ * Only a finger that moves on before the hold — a scroll, the page's swipe — cancels the press: nothing opens, not
+ * even the camera on the click a drifting tap may still bring. A touch the phone takes over while the finger stays
+ * still (`pointercancel`, `touchcancel`) is not a scroll: the press is kept, and the click that ends it tells a tap
+ * from a hold. Once the hold is there, the thumb may shift a little as it lifts. The hold is told by how long the
+ * press lasted, by the events' own clocks, wherever the release lands. A mouse held down works the same.
  */
 
 const HOLD_MS = 450;
@@ -115,13 +119,15 @@ export function usePhotoPick(onFiles: (files: File[]) => void, opts: { /** Sever
    * The finger is off — or the iPhone took the touch over, the finger still down (then the press is measured
    * to the click that ends it). The swell goes soon if no click comes to use it.
    */
-  const lifted = (e: React.PointerEvent<HTMLElement>, off: boolean) => {
+  const lifted = (at: number, off: boolean) => {
     window.clearTimeout(timer.current);
     timer.current = undefined;
-    if (off && pressedAt.current > 0 && !releasedAt.current) releasedAt.current = e.timeStamp;
+    if (off && pressedAt.current > 0 && !releasedAt.current) releasedAt.current = at;
     window.clearTimeout(fade.current);
     fade.current = window.setTimeout(unswell, off ? 700 : 4000);
   };
+  /** The finger's own touch: still on the tile while it moves, the one that went at its end (another may rest on the glass). */
+  const own = (e: React.TouchEvent<HTMLElement>) => (e.type === 'touchmove' ? e.targetTouches[0] : undefined) ?? e.changedTouches[0];
 
   return {
     handlers: {
@@ -148,23 +154,26 @@ export function usePhotoPick(onFiles: (files: File[]) => void, opts: { /** Sever
       onPointerMove: (e) => {
         if (moved(e.clientX, e.clientY, e.timeStamp)) cancel();
       },
-      onPointerUp: (e) => lifted(e, true),
-      // Before the hold, the touch taken away is a scroll starting: the press is gone. After it, the iPhone's own
-      // long-press gesture took it — a click may still come, and the press is kept for that click to tell.
-      onPointerCancel: (e) => {
-        if (!heldBy(e.timeStamp)) cancel();
-        else lifted(e, false);
-      },
-      // A scroll goes on in touches after the pointer was taken away: still a cancelled press. The tile's own finger
-      // (another may rest on the glass).
+      onPointerUp: (e) => lifted(e.timeStamp, true),
+      // The phone took the touch over, the finger still down (a scroll is told by the moves, not by this): the press
+      // is kept for the click that ends it to tell. A swell not there yet does not come (the touch may be a scroll's).
+      onPointerCancel: () => lifted(0, false),
+      // A scroll goes on in touches after the pointer was taken away: still a cancelled press.
       onTouchMove: (e) => {
-        const t = e.targetTouches[0] ?? e.changedTouches[0];
+        const t = own(e);
         if (t && moved(t.clientX, t.clientY, e.timeStamp)) cancel();
       },
       onTouchEnd: (e) => {
         fingerUpAt.current = performance.now();
-        if (!isHold(releasedAt.current || e.timeStamp)) return;
-        // Right in the touch, so the iPhone opens it; the click that would open the camera does not come — or, where the
+        const t = own(e);
+        // Lifted far from where it was pressed (moves the page did not get): a drag, not a hold.
+        if (t && moved(t.clientX, t.clientY, e.timeStamp)) return cancel();
+        lifted(e.timeStamp, true);
+        if (!isHold()) return;
+        // The iPhone: the click this release brings opens the photos (consumeClick) — nothing here, and the touch's
+        // end is not held back, or that click would not come.
+        if (isApple()) return;
+        // Right in the touch, so the phone opens it; the click that would open the camera does not come — or, where the
         // touch's end cannot be held back (another finger on the glass makes it a gesture), is swallowed when it does.
         if (e.cancelable) e.preventDefault();
         used.current = true;
@@ -174,7 +183,9 @@ export function usePhotoPick(onFiles: (files: File[]) => void, opts: { /** Sever
       },
       onTouchCancel: (e) => {
         fingerUpAt.current = performance.now();
-        if (!heldBy(e.timeStamp)) cancel();
+        const t = own(e);
+        if (t && moved(t.clientX, t.clientY, e.timeStamp)) cancel();
+        else lifted(0, false);
       },
       onContextMenu: (e) => {
         // A right click on a PC; Android sends it for a long press too — the photos open once, here.
@@ -199,8 +210,9 @@ export function usePhotoPick(onFiles: (files: File[]) => void, opts: { /** Sever
         cancelledAt.current = 0;
         if (recent) return true;
       }
-      // Never released and long gone: not this click's press.
+      // Never released and long gone, or released a while ago: not this click's press.
       if (pressedAt.current > 0 && !releasedAt.current && performance.now() - pressedAt.current > STALE_MS) forget();
+      if (releasedAt.current > 0 && performance.now() - releasedAt.current > SWALLOW_MS) forget();
       const hold = isHold();
       forget();
       if (hold) {

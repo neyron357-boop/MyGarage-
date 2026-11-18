@@ -82,6 +82,14 @@ describe('readings voted into one plate', () => {
     expect(pickPlate([{ guesses: [g('A', '12345')], confidence: 30 }])?.sure).toBe(false);
   });
 
+  it('a reading unsure of itself is never sure alone, however its code weighs — another that gives it makes it (v0.46.1)', () => {
+    const glyphs = { guesses: [{ ...g('W', '30169'), score: 7 }], confidence: 60, unsure: true };
+    expect(pickPlate([glyphs])).toMatchObject({ code: 'W', number: '30169', sure: false });
+    expect(pickPlate([glyphs, { guesses: platesInLine('30169'), confidence: 40 }])?.sure).toBe(true);
+    // The same reading not marked unsure: one clean reading with its code, as before.
+    expect(pickPlate([{ ...glyphs, unsure: undefined }])?.sure).toBe(true);
+  });
+
   it('the emirate named by any reading', () => {
     const p = pickPlate([{ guesses: [g('A', '12345')] }, { guesses: platesInLine('DUBAI'), emirate: emirateIn('DUBAI') }, { guesses: [g('A', '12345', 'DXB')] }]);
     expect(p).toMatchObject({ emirate: 'DXB', code: 'A', number: '12345' });

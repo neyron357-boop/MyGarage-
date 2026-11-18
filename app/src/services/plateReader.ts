@@ -214,7 +214,9 @@ async function readPlateNow(blob: Blob): Promise<PlateFound | undefined> {
       const b = glyphs.numberBox;
       const line: TextLine = { cx: (b.x0 + b.x1 + 1) / 2, cy: (b.y0 + b.y1 + 1) / 2, w: b.x1 - b.x0 + 1, h: glyphs.row.h, angle: glyphs.row.angle, score: glyphs.row.score };
       const guess = { emirate: glyphs.emirate, code: glyphs.code, number: glyphs.number, score: 3 + (glyphs.code ? 4 : 0) };
-      votes.push({ guesses: [guess], confidence: glyphs.sure ? 90 : 60, emirate: glyphs.emirate, line });
+      // Unsure by its characters (its digits read apart, or put right by their shapes): another reading must give it too
+      // (v0.46.1 — W 30169 went in for V 80769 as sure, its code alone carrying it).
+      votes.push({ guesses: [guess], confidence: glyphs.sure ? 90 : 60, emirate: glyphs.emirate, line, unsure: !glyphs.sure });
       if (glyphs.sure) votes.push({ guesses: [glyphs.codeSure ? guess : { ...guess, code: '' }], confidence: 90, emirate: glyphs.emirate, line });
     }
     let w = await engine();

@@ -155,6 +155,11 @@ export interface PlateVote {
   confidence?: number;
   /** The emirate the reading named (its word may stand on a line of its own, above the number). */
   emirate?: Emirate;
+  /**
+   * The reading said itself it is not sure (v0.46.1: the characters' way, its digits read apart and not agreed): it counts
+   * for its number, but alone never makes the pick sure — only another reading that gives the same does.
+   */
+  unsure?: boolean;
 }
 
 export interface PlatePick {
@@ -189,7 +194,7 @@ export function pickPlate(votes: PlateVote[]): PlatePick | undefined {
       const weight = g.score * (0.5 + (v.confidence ?? 50) / 100);
       e.score += weight;
       e.agree++;
-      e.best = Math.max(e.best, g.score + (v.confidence ?? 50) / 50);
+      if (!v.unsure) e.best = Math.max(e.best, g.score + (v.confidence ?? 50) / 50);
       // A code weighs what its guess weighs: one read with the number, clean, outweighs one guessed out of a run of digits
       // or read apart from it (a reading's own confidence says little of one character).
       if (g.code) {

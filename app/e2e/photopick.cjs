@@ -279,6 +279,9 @@ async function launch() {
     }, ids.order);
     const row = front('.list-row').filter({ hasText: 'FINGER TEST FILTER' }).first();
     await row.waitFor();
+    // The job's card has grown since (VIN, mileage, driver, suppliers): the new line may lie under the bottom bar.
+    await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(300);
     await tap(row);
     const sheet = page.getByRole('dialog').first();
     const chips = sheet.locator('[aria-label="Поставщик"] button.chip');

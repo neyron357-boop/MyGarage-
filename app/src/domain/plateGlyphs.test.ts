@@ -234,6 +234,25 @@ describe('a plate found by its characters (v0.32)', () => {
     expect(rightedByShapes('69017', shapes)).toBeUndefined();
   });
 
+  it('a wide mark with no hole read as a 1: its top tells a 7 (a bar across) from an open 4 (two tips) (v0.46.1)', () => {
+    const seven = art(['#####', '....#', '...#.', '..#..', '..#..']);
+    const four = art(['#...#', '#...#', '#####', '....#', '....#']);
+    const eight = art(['#####', '#...#', '#####', '#...#', '#####']);
+    const W = 3 * 28;
+    const ink = new Uint8Array(W * 28);
+    [eight, seven, four].forEach((c, i) => {
+      for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) ink[(y + 4) * W + i * 28 + x + 4] = c.ink[y * 20 + x];
+    });
+    const shapes = shapesOf(ink, W, 28);
+    expect(shapes.map((s) => s.holes.length)).toEqual([2, 0, 0]);
+    expect(shapes[1].top).toBeGreaterThanOrEqual(0.9);
+    expect(shapes[2].top).toBeLessThanOrEqual(0.5);
+    // V 80769's way: the 8 read as a 3, the 7 as a 1 — both put right (the 3 by its two holes, the 1 by its top).
+    expect(rightedByShapes('314', shapes)).toBe('874');
+    expect(rightedByShapes('311', shapes)).toBe('874');
+    expect(fitsShapes('874', shapes)).toBe(true);
+  });
+
   it('the code’s likely words come in order — a thin bar (a frame’s edge) after a letter (v0.33)', () => {
     const W = 260;
     const H = 120;

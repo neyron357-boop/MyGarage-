@@ -347,6 +347,11 @@ export function sheared(ink: Uint8Array, W: number, H: number, s: number): { ink
 export interface MarkShape {
   wide: number;
   holes: { at: number; tall: number }[];
+  /**
+   * How much of its width its top has ink in (v0.46.1): a 7's bar runs across (near 1), a 4 comes to a point or two tips
+   * there. Only to tell digits apart that its holes and width both allow.
+   */
+  top?: number;
 }
 
 /**
@@ -375,7 +380,17 @@ export function shapesOf(ink: Uint8Array, W: number, H: number): MarkShape[] {
       .filter((p) => p.area >= least && p.x0 > 0 && p.y0 > 0 && p.x1 < bw - 1 && p.y1 < bh - 1)
       .map((p) => ({ at: ((p.y0 + p.y1) / 2 - 1) / gh(g), tall: gh(p) / gh(g) }))
       .sort((a, b) => a.at - b.at);
-    return { wide: gw(g) / gh(g), holes };
+    // The top eighth of the mark: the columns with ink of its own there.
+    const band = Math.max(1, Math.round(gh(g) * 0.125));
+    let inked = 0;
+    for (let x = g.x0; x <= g.x1; x++) {
+      for (let y = g.y0; y < g.y0 + band; y++)
+        if (labels[y * W + x] === id) {
+          inked++;
+          break;
+        }
+    }
+    return { wide: gw(g) / gh(g), holes, top: inked / gw(g) };
   });
 }
 
@@ -407,6 +422,15 @@ export function fitsShapes(digits: string, shapes: MarkShape[]): boolean {
 const ALIKE = ['0689352', '174'];
 
 /**
+ * Between digits the holes and the width both allow (a wide mark with no hole read as a 1: a 7 or an open 4), the top
+ * tells: a 7's bar runs across it, a 4's top is a point (or two tips). Between, it does not tell.
+ */
+const TOP: Record<string, (s: MarkShape) => boolean> = {
+  '7': (s) => (s.top ?? 0) >= 0.7,
+  '4': (s) => s.top !== undefined && s.top <= 0.5,
+};
+
+/**
  * A reading put right by its marks' shapes, where it is wrong in a way only one digit could right at each place (an 8 read
  * where a mark has one hole high — a 9). Undefined — nothing to right, or more than one way.
  */
@@ -420,7 +444,8 @@ export function rightedByShapes(digits: string, shapes: MarkShape[]): string | u
       continue;
     }
     const group = ALIKE.find((g) => g.includes(d)) ?? '';
-    const could = [...group].filter((x) => x !== d && DIGIT[x](shapes[i]));
+    let could = [...group].filter((x) => x !== d && DIGIT[x](shapes[i]));
+    if (could.length > 1 && could.every((x) => TOP[x])) could = could.filter((x) => TOP[x](shapes[i]));
     if (could.length !== 1) return undefined;
     out += could[0];
   }

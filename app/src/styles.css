@@ -2922,20 +2922,22 @@ html.kb .tab-bar-wrap {
 /* ---------- Fit to cell: amounts never run over their neighbours ---------- */
 /* Tiles (.kpi) and figure cells (.amount-cell, three or two across on a phone) are size containers.
    An amount in them keeps its size while it fits, and gets just small enough when it does not: the
-   Money component tells how many characters the figure has (--chars), the cell's width does the rest. */
+   Money component tells how many characters the figure has (--chars), the cell's width does the rest. The size is
+   `!important`: Money's own `font-size: inherit` (Mantine writes it on the element) beat it before v0.46.1 — and
+   «1,816.50 AED» ran out of its tile in Debts. */
 .kpi,
 .amount-cell {
   container-type: inline-size;
   min-width: 0;
 }
 :is(.kpi, .amount-cell) .money {
-  font-size: min(1em, calc(100cqi / (var(--chars, 6) * 0.6 + 1.7)));
+  font-size: min(1em, calc(100cqi / (var(--chars, 6) * 0.6 + 1.7))) !important;
 }
 /* Very narrow (three tiles in a row): the currency goes under the figure, so the figure can be bigger. */
 @container (max-width: 130px) {
   :is(.kpi, .amount-cell) .money {
     white-space: normal;
-    font-size: min(1em, calc(100cqi / (var(--chars, 6) * 0.6 + 0.3)));
+    font-size: min(1em, calc(100cqi / (var(--chars, 6) * 0.6 + 0.3))) !important;
   }
   :is(.kpi, .amount-cell) .money .cur {
     display: block;

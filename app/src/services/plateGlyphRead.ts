@@ -725,12 +725,23 @@ export async function readByGlyphs(
   // The holes, seen the same both ways, outweigh the count: a reading they do not allow (an 8 where one hole is) gives way
   // to one they allow that two readings gave; seen differently, they only part a tie.
   const plain = holes.length === 2 && holes[0].join() === holes[1].join();
-  // None of the readings fits the marks' shapes, both ways seen alike: the most read one put right by them, if only one
-  // digit could stand at each place it is wrong (a blurred 9 read as an 8 by every reading).
+  // None of the readings fits the marks' shapes, both ways seen alike: each put right by them, where only one digit could
+  // stand at each place it is wrong (a blurred 9 read as an 8 by every reading); the readings put right the same count
+  // together (v0.46.1 — 30169, 20189 and 20169, put right, are all 80769: an 8 with two holes, a 7 read as a 1).
   let righted: string | undefined;
   if (plain && ranked.length && !ranked.some(([t]) => fits(t))) {
-    righted = rightedByShapes(ranked[0][0], shapes[0]);
-    if (righted) ranked.unshift([righted, { n: ranked[0][1].n, c: ranked[0][1].c }]);
+    const put = new Map<string, { n: number; c: number }>();
+    for (const [t, e] of ranked) {
+      const r = rightedByShapes(t, shapes[0]);
+      if (!r) continue;
+      const p = put.get(r) ?? { n: 0, c: 0 };
+      put.set(r, { n: p.n + e.n, c: p.c + e.c });
+    }
+    const best = [...put.entries()].sort((a, b) => b[1].n - a[1].n || b[1].c - a[1].c)[0];
+    if (best) {
+      righted = best[0];
+      ranked.unshift(best);
+    }
   }
   const rival = ranked.find(([t, e]) => t !== final.text && fits(t) && (plain ? e.n >= 2 : e.n >= final.n - 1));
   if (rival && !fits(final.text)) (final = { text: rival[0], n: rival[1].n }), (sure = final.n >= 2);
@@ -740,6 +751,6 @@ export async function readByGlyphs(
   // Fewer or more digits than its marks, and their shapes do not allow it: not sure (777 read as 11).
   const marksN = shapes[0]?.length ?? 0;
   if (marksN && final.text.length !== marksN && !fits(final.text)) sure = false;
-  trace('number', { reads: numReads.map((r) => r.text), holes, pick: final.text, n: final.n, sure, righted });
+  trace('number', { reads: numReads.map((r) => r.text), holes, shapes, pick: final.text, n: final.n, sure, righted });
   return { number: final.text, sure, code, codeSure, emirate, row, numberBox: boxOf(digits), codeBox };
 }

@@ -186,7 +186,7 @@ describe('messages of v0.7', () => {
   });
   it('request to a seller, options for the customer, the work report, the mechanic task', () => {
     expect(partRequestText({ make: 'Toyota', model: 'Camry', year: 2018, vin: 'JT123' }, { titleEn: 'Headlight LH', partNumber: '81150-06B20', qty: 1 })).toBe(
-      'Toyota Camry 2018\nVIN: JT123\n\nPart: Headlight LH\nPart No: 81150-06B20\n\nPrice and availability, please: original / aftermarket / used?',
+      'Toyota Camry 2018\nVIN: JT123\n\nPart: Headlight LH\nPart No: 81150-06B20\n\nPrice and availability, please: original / aftermarket?',
     );
     const opts = optionsText(ctx(), 'en', 'Front brake pads', [
       { kind: 'oem', gross: 47250, days: 2 },

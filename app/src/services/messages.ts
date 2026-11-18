@@ -156,7 +156,7 @@ export function partRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year'
   if (vehicle.vin) out.push(`VIN: ${vehicle.vin}`);
   out.push('', `Part: ${item.titleEn || item.titleRu || ''}${item.qty > 1 ? ` × ${item.qty}` : ''}`);
   if (item.partNumber) out.push(`Part No: ${item.partNumber}`);
-  out.push('', 'Price and availability, please: original / aftermarket / used?');
+  out.push('', 'Price and availability, please: original / aftermarket?');
   return out.join('\n');
 }
 
@@ -166,7 +166,7 @@ export function partsRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year
   const out = [car];
   if (vehicle.vin) out.push(`VIN: ${vehicle.vin}`);
   out.push('', ...items.map((i, k) => `${k + 1}. ${i.titleEn || i.titleRu || ''}${i.qty > 1 ? ` × ${i.qty}` : ''}${i.partNumber ? ` (${i.partNumber})` : ''}`));
-  out.push('', 'Price and availability, please: original / aftermarket / used?');
+  out.push('', 'Price and availability, please: original / aftermarket?');
   return out.join('\n');
 }
 
