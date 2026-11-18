@@ -272,6 +272,38 @@ describe('MyGarage server', () => {
     assert.equal(store.mainDevice().id, second.deviceId);
   });
 
+  it('a photo’s card is kept beside it; a file is given in parts; a picture’s own address (media key) reads files only', async () => {
+    const { code } = pairing.issue();
+    const paired = await (await call('/api/pair', { method: 'POST', body: { code, name: 'Viewer', install: 'install-viewer-123456' } })).json();
+    const t = paired.token;
+    assert.equal(typeof paired.mediaKey, 'string');
+    const bytes = new Uint8Array(5000).map((_, i) => i % 251);
+    await call('/api/sync/push', { token: t, method: 'POST', body: { changes: [{ t: 'media', k: 'pic-1', d: { id: 'pic-1', kind: 'photo', mime: 'image/jpeg', createdAt: '2026-11-18T06:00:00.000Z' } }] } });
+    for (const v of ['blob', 'card']) {
+      const r = await call(`/api/media/pic-1/${v}`, { token: t, method: 'PUT', body: v === 'card' ? bytes.slice(0, 1200) : bytes, headers: { 'Content-Type': 'image/jpeg', 'X-Size': String(v === 'card' ? 1200 : 5000) } });
+      assert.equal(r.status, 200);
+    }
+    assert.equal((await (await call('/api/media/pic-1/card', { token: t })).arrayBuffer()).byteLength, 1200);
+    // In parts: the first 100 bytes, the last 10, an address past the end.
+    const part = await call('/api/media/pic-1/blob', { token: t, headers: { Range: 'bytes=0-99' } });
+    assert.equal(part.status, 206);
+    assert.equal(part.headers.get('content-range'), 'bytes 0-99/5000');
+    assert.deepEqual(new Uint8Array(await part.arrayBuffer()), bytes.slice(0, 100));
+    const tail = await call('/api/media/pic-1/blob', { token: t, headers: { Range: 'bytes=-10' } });
+    assert.deepEqual(new Uint8Array(await tail.arrayBuffer()), bytes.slice(4990));
+    assert.equal((await call('/api/media/pic-1/blob', { token: t, headers: { Range: 'bytes=9000-' } })).status, 416);
+    // By the address with the media key (no device key): files only, and only while the device is connected.
+    const own = `/api/media/pic-1/blob?d=${paired.deviceId}&k=${paired.mediaKey}`;
+    const r = await fetch(base + own);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('accept-ranges'), 'bytes');
+    assert.equal((await r.arrayBuffer()).byteLength, 5000);
+    assert.equal((await fetch(base + `/api/media/pic-1/blob?d=${paired.deviceId}&k=wrong`)).status, 401);
+    assert.equal((await fetch(base + `/api/status?d=${paired.deviceId}&k=${paired.mediaKey}`)).status, 401);
+    store.revoke(paired.deviceId);
+    assert.equal((await fetch(base + own)).status, 401);
+  });
+
   it('an older app is told to update: it may not connect or send', async () => {
     const { code } = pairing.issue();
     const pairOld = await call('/api/pair', { method: 'POST', body: { code, name: 'old' }, headers: { 'X-Sync': '' } });

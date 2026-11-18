@@ -16,14 +16,16 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/sync/events                — a stream: told at once when other devices' changes are kept (v0.41.2)
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/forget                     — this device leaves (its key no longer works)
- *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb
- *   GET  /api/media/:id/:variant         — the file back
+ *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
+ *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
+ *                                          by the device's key, or by `?d=<device>&k=<media key>` — a picture or a
+ *                                          video element's own address (it cannot send a key; this one reads files only)
  *
  * Every call but the first two needs the device's key (`Authorization: Bearer …`). Only the app's own address may call
  * it from a page (CORS).
  */
 
-const VARIANTS = new Set(['blob', 'thumb']);
+const VARIANTS = new Set(['blob', 'thumb', 'card']);
 /**
  * The app's sync rules this server needs (v0.41.2): an older app (no `X-Sync: 2`) sends everything it has at
  * connecting, before the choice, and over newer records — it may not send or connect; it is told to update.
@@ -31,6 +33,32 @@ const VARIANTS = new Set(['blob', 'thumb']);
 const SYNC = 2;
 const UPDATE = 'Обновите приложение: закройте его и откройте снова';
 const ID = /^[A-Za-z0-9._-]{1,120}$/;
+
+/** A file sent whole, or the part asked for (`Range: bytes=a-b`): a video starts as soon as its first part is in. */
+function sendFile(req, res, f) {
+  const head = {
+    'Content-Type': f.type || 'application/octet-stream',
+    'Cache-Control': 'private, max-age=31536000, immutable',
+    'Accept-Ranges': 'bytes',
+  };
+  const size = Number(f.size) || fs.statSync(f.abs).size;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+  if (m && (m[1] !== '' || m[2] !== '')) {
+    let start = m[1] === '' ? Math.max(0, size - Number(m[2])) : Number(m[1]);
+    const end = m[1] === '' || m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+    if (!(start <= end) || start >= size) {
+      res.writeHead(416, { ...head, 'Content-Range': `bytes */${size}` });
+      return res.end();
+    }
+    start = Math.max(0, start);
+    res.writeHead(206, { ...head, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}` });
+    if (req.method === 'HEAD') return res.end();
+    return pipeline(fs.createReadStream(f.abs, { start, end }), res);
+  }
+  res.writeHead(200, { ...head, 'Content-Length': size });
+  if (req.method === 'HEAD') return res.end();
+  return pipeline(fs.createReadStream(f.abs), res);
+}
 
 function send(res, status, body, headers = {}) {
   const json = JSON.stringify(body);
@@ -77,7 +105,7 @@ export function createPairing() {
   };
 }
 
-export function createApi({ store, config, pairing, log, onSeen, events }) {
+export function createApi({ store, config, pairing, log, onSeen, events, cards }) {
   return async function api(req, res) {
     const origin = req.headers.origin;
     const allowed = origin && config.origins.includes(origin);
@@ -104,6 +132,15 @@ export function createApi({ store, config, pairing, log, onSeen, events }) {
 
       if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, app: 'mygarage-server', version: VERSION });
 
+      if ((req.method === 'GET' || req.method === 'HEAD') && parts[0] === 'api' && parts[1] === 'media' && parts.length === 4 && url.searchParams.has('k')) {
+        const [, , id, variant] = parts;
+        if (!ID.test(id) || !VARIANTS.has(variant)) throw httpError(400, 'bad media address');
+        if (!store.mediaDevice(url.searchParams.get('d'), url.searchParams.get('k'))) throw httpError(401, 'not paired');
+        const f = store.file(id, variant);
+        if (!f) throw httpError(404, 'no such file');
+        return sendFile(req, res, f);
+      }
+
       const modern = Number(req.headers['x-sync']) >= SYNC;
       if (req.method === 'POST' && url.pathname === '/api/pair') {
         if (!modern) throw httpError(426, UPDATE);
@@ -112,14 +149,14 @@ export function createApi({ store, config, pairing, log, onSeen, events }) {
         const d = store.addDevice(body.name, body.install);
         for (const old of d.was) events?.drop(old);
         log(`paired: ${body.name ?? 'device'} (${d.id})${d.rejoined ? ` — the same app again (was ${d.was.join(', ')})` : ''}`);
-        return send(res, 200, { token: d.token, deviceId: d.id, rejoined: d.rejoined, main: store.mainDevice(), ...store.counts() });
+        return send(res, 200, { token: d.token, deviceId: d.id, mediaKey: store.mediaKey(d.id), rejoined: d.rejoined, main: store.mainDevice(), ...store.counts() });
       }
 
       const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
       const device = store.deviceOf(token);
       if (!device) throw httpError(401, 'not paired');
 
-      if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ok: true, version: VERSION, device: device.name, main: store.mainDevice(), ...store.counts() });
+      if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ok: true, version: VERSION, device: device.name, mediaKey: store.mediaKey(device.id), main: store.mainDevice(), ...store.counts() });
 
       // The main device's data becomes the garage's: only it may do this (or any device, while there is none).
       if (req.method === 'POST' && url.pathname === '/api/sync/replace') {
@@ -155,7 +192,7 @@ export function createApi({ store, config, pairing, log, onSeen, events }) {
       }
 
       if (req.method === 'GET' && url.pathname === '/api/sync/pull') {
-        return send(res, 200, { ...store.pull(device.id, url.searchParams.get('since'), url.searchParams.get('limit')), main: store.mainDevice() });
+        return send(res, 200, { ...store.pull(device.id, url.searchParams.get('since'), url.searchParams.get('limit')), main: store.mainDevice(), mediaKey: store.mediaKey(device.id) });
       }
 
       if (parts[0] === 'api' && parts[1] === 'media' && parts.length === 4) {
@@ -183,6 +220,8 @@ export function createApi({ store, config, pairing, log, onSeen, events }) {
             if (Number.isFinite(expected) && expected !== size) throw httpError(400, `size ${size} ≠ ${expected}`);
             const sha256 = h.digest('hex');
             const rel = store.keepFile(id, variant, type, tmp, size, sha256);
+            // A photo sent without its card (an older app): this computer makes one.
+            if (variant === 'blob' && /^image\/jpeg/.test(type) && !store.file(id, 'card')) cards?.later();
             return send(res, 200, { ok: true, size, sha256, path: rel });
           } finally {
             fs.rmSync(tmp, { force: true });
@@ -191,9 +230,7 @@ export function createApi({ store, config, pairing, log, onSeen, events }) {
         if (req.method === 'GET' || req.method === 'HEAD') {
           const f = store.file(id, variant);
           if (!f) throw httpError(404, 'no such file');
-          res.writeHead(200, { 'Content-Type': f.type || 'application/octet-stream', 'Content-Length': f.size, 'Cache-Control': 'private, max-age=31536000, immutable' });
-          if (req.method === 'HEAD') return res.end();
-          return pipeline(fs.createReadStream(f.abs), res);
+          return sendFile(req, res, f);
         }
       }
       throw httpError(404, 'not found');

@@ -2,7 +2,8 @@ import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { sha256Bytes, toHex } from '../domain/sha256';
 import type { Media, MediaBlob, MediaOwner } from '../domain/types';
-import { remoteMedia } from './sync/engine';
+import { CARD_SIDE, shrinkPhoto } from './photoSize';
+import { onMediaArrived, remoteMedia, remoteMediaSrc, sendCard } from './sync/engine';
 
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
@@ -189,67 +190,117 @@ export function cachedCardUrl(id: string): string | undefined {
   return urlCache.get(`${id}:c`);
 }
 
+/** Cards made here from an original: one at a time (a board of cars does not decode twenty full photos at once). */
 let cardQueue: Promise<unknown> = Promise.resolve();
+const cardJobs = new Map<string, Promise<string | undefined>>();
+
+async function keepCard(id: string, had: boolean, card: Blob): Promise<void> {
+  try {
+    if (had) await db.mediaBlobs.update(id, { card });
+    else await db.mediaBlobs.put({ id, card, up: 1 });
+  } catch {
+    // kept for this visit only (shown from memory)
+  }
+}
 
 /**
- * A photo at the size a card across the phone shows it (long side 1080 px — sharp on an iPhone, a
- * quarter of the stored photo's pixels): made from the stored one the first time, one photo at a time
- * (a board of cars does not decode twenty full photos at once), and kept beside it (v0.37: before, it was
- * made again at every start of the app). The thumbnail (400 px) is too soft there.
+ * A photo at the size a card across the phone shows it (long side 1080 px — sharp on an iPhone, about a third of the
+ * stored photo's bytes), kept beside it once made or brought (v0.37: not made again at every start). Not here: the
+ * server's card (v0.41.3: sent with the photo, or made by the garage's computer) — brought alongside the others, not
+ * one at a time; only when the server has none is it made here from the original, and sent back for the others.
  */
 export function cardUrl(id: string): Promise<string | undefined> {
   const key = `${id}:c`;
   const cached = urlCache.get(key);
   if (cached) return Promise.resolve(cached);
-  const job = cardQueue.then(async () => {
-    const again = urlCache.get(key);
-    if (again) return again;
+  const running = cardJobs.get(id);
+  if (running) return running;
+  const job = (async () => {
     const rec = await db.mediaBlobs.get(id);
     let card = rec?.card;
-    let source: Blob | undefined;
-    if (!card) {
-      // The original here, or brought from the server once (the card it makes is kept here: a board stays a board).
-      source = rec?.blob ?? (await remoteMedia(id, 'blob'));
-      if (!source) return undefined;
-      card = await shrinkPhoto(source, 1080);
-      if (card) {
-        if (rec) void db.mediaBlobs.update(id, { card }).catch(() => undefined);
-        else void db.mediaBlobs.put({ id, card, up: 1 }).catch(() => undefined);
-      }
+    if (!card && !rec?.blob) {
+      card = await remoteMedia(id, 'card');
+      if (card) await keepCard(id, !!rec, card);
     }
-    const shown = card ?? source;
+    let shown = card;
+    if (!shown) {
+      shown = (await (cardQueue = cardQueue.then(async () => {
+        // The original here, or brought from the server once (the card it makes is kept here: a board stays a board).
+        const source = rec?.blob ?? (await remoteMedia(id, 'blob'));
+        if (!source) return undefined;
+        const made = await shrinkPhoto(source, CARD_SIDE);
+        if (made) {
+          await keepCard(id, !!rec, made);
+          // Made from the server's original: the server keeps it too — the next device brings the card, not the photo.
+          if (!rec?.blob) sendCard(id, made);
+        } else if (!rec?.blob) await keepCard(id, !!rec, source);
+        return made ?? source;
+      }).catch(() => undefined))) as Blob | undefined;
+    }
     if (!shown) return undefined;
     const url = URL.createObjectURL(shown);
     urlCache.set(key, url);
     return url;
-  });
-  cardQueue = job.catch(() => undefined);
+  })().finally(() => cardJobs.delete(id));
+  cardJobs.set(id, job);
   return job;
 }
 
-/** The photo with its long side at `side` px (decoded off the main thread); none when it is that small already. */
-async function shrinkPhoto(blob: Blob, side: number): Promise<Blob | undefined> {
-  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined' || !blob.type.startsWith('image/')) return undefined;
-  try {
-    const bmp = await createImageBitmap(blob);
-    const scale = side / Math.max(bmp.width, bmp.height);
-    if (scale >= 0.85) {
-      bmp.close();
-      return undefined;
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(bmp.width * scale);
-    canvas.height = Math.round(bmp.height * scale);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return undefined;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    bmp.close();
-    return (await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.82))) ?? undefined;
-  } catch {
-    return undefined;
-  }
+/**
+ * A photo at a card's size as a file (v0.41.3: sharing a job — sharp enough, a third of the original's bytes): the one
+ * kept here, else the server's; the photo itself when it is small or no card can be had.
+ */
+export async function cardBlob(id: string): Promise<Blob | undefined> {
+  await cardUrl(id).catch(() => undefined);
+  const rec = await db.mediaBlobs.get(id);
+  return rec?.card ?? rec?.blob ?? (await remoteMedia(id, 'card')) ?? (await remoteMedia(id, 'blob'));
 }
+
+const srcCache = new Map<string, string>();
+
+/** The address a picture or a video element loads by itself, made before (`mediaSrc`). */
+export function cachedMediaSrc(id: string): string | undefined {
+  return urlCache.get(`${id}:f`) ?? srcCache.get(id);
+}
+
+/**
+ * The address a picture or a video element loads by itself (v0.41.3): its own copy when it is here; else the server's
+ * — the browser streams it (a video plays as it comes, its first frame without the rest), shows it as it arrives and
+ * keeps it. Without that address (an older connection), the file is brought whole, as before.
+ */
+export async function mediaSrc(id: string): Promise<string | undefined> {
+  const made = cachedMediaSrc(id);
+  if (made) return made;
+  const rec = await db.mediaBlobs.get(id);
+  if (!rec?.blob) {
+    const remote = remoteMediaSrc(id, 'blob');
+    if (remote) {
+      srcCache.set(id, remote);
+      return remote;
+    }
+  }
+  return mediaUrl(id, false);
+}
+
+/**
+ * Photos that came from another device (v0.41.3): their previews — and a car's main photos, their cards — brought now,
+ * two at a time, so the board and the job show them at once when they are opened.
+ */
+async function warm(list: { id: string; card: boolean }[]) {
+  const queue = [...list];
+  const worker = async () => {
+    for (let x = queue.shift(); x; x = queue.shift()) {
+      try {
+        await fileOf(x.id, true);
+        if (x.card) await cardUrl(x.id);
+      } catch {
+        // later, when it is shown
+      }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+onMediaArrived((list) => void warm(list));
 
 export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

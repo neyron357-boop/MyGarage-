@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { liveLines } from '../../domain/flow';
 import { formatPlate } from '../../domain/plates';
 import { coverOf } from '../../services/cover';
-import { mediaBlob } from '../../services/media';
+import { cardBlob } from '../../services/media';
 import { jobShareText } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { copyText } from '../../ui/clipboard';
@@ -29,7 +29,8 @@ export function ShareJobButton({ b }: { b: OrderBundle }) {
   useEffect(() => {
     let alive = true;
     const timer = window.setTimeout(async () => {
-      const blob = cover ? await mediaBlob(cover) : undefined;
+      // The card's size (v0.41.3): what a chat shows anyway, a third of the original's bytes from the server.
+      const blob = cover ? await cardBlob(cover) : undefined;
       if (alive) setPhoto(blob ? new File([blob], `${name}.jpg`, { type: blob.type || 'image/jpeg' }) : undefined);
     }, 900);
     return () => {

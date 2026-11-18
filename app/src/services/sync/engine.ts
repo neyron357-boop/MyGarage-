@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import { db } from '../../db/db';
 import { LOCAL_TABLES, markRemote, nextStamp, onLocalChange, STAMP } from '../../db/syncHooks';
 import { nowIso } from '../../domain/dates';
+import { cardOf } from '../photoSize';
 import { addressAllowed, callJson, getFile, parseAddress, putFile, SyncError } from './api';
 import { installId, offloadOn, resetSyncState, setSyncConfig, setSyncState, syncConfig, syncState, type SyncConfig } from './config';
 
@@ -47,7 +48,8 @@ function strip(row: Row): Row {
 /** Photos whose own files are not on the server yet (sent first, then the photo's record — `held`). */
 async function filesWaiting(ids: string[]): Promise<Set<string>> {
   const rows = await db.mediaBlobs.bulkGet(ids);
-  return new Set(ids.filter((_, i) => rows[i] && rows[i]!.up !== 1));
+  // A photo goes once its preview and card are there (`ready`, v0.41.3): its original follows.
+  return new Set(ids.filter((_, i) => rows[i] && rows[i]!.up !== 1 && rows[i]!.ready !== 1));
 }
 
 /** What changed here since the last push (everything, the first time), sent in parts. */
@@ -144,9 +146,14 @@ async function pullRecords(cfg: SyncConfig): Promise<number> {
   let cursor = syncState().cursor;
   let n = 0;
   for (;;) {
-    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean; main?: MainDevice | null }>(cfg, `/api/sync/pull?since=${cursor}&limit=1000`, { timeout: 90_000 });
+    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean; main?: MainDevice | null; mediaKey?: string }>(cfg, `/api/sync/pull?since=${cursor}&limit=1000`, { timeout: 90_000 });
     if (res.changes.length) await applyChanges(res.changes);
     if (res.main !== undefined) setSyncState({ main: res.main });
+    // This device's key for its pictures and videos (given since v0.41.3): kept with the connection.
+    const now = syncConfig();
+    if (res.mediaKey && now && now.token === cfg.token && now.mediaKey !== res.mediaKey) setSyncConfig({ ...now, mediaKey: res.mediaKey });
+    const photos = res.changes.filter((c) => c.t === 'media' && c.d && c.d.kind === 'photo');
+    if (photos.length) arrived?.(photos.map((c) => ({ id: c.k, card: isCover(String(c.d!.slot ?? '')) })));
     n += res.changes.length;
     cursor = res.cursor;
     setSyncState({ cursor });
@@ -177,6 +184,17 @@ async function replaceServer(cfg: SyncConfig): Promise<void> {
 
 /* ---------- Photos and files ---------- */
 
+/** Photo slots that may be a car's main photo (services/cover.ts): their cards are brought ahead. */
+const COVERS = new Set(['cover', 'front_left', 'front_right', 'front', 'rear_left', 'rear_right', 'left', 'right', 'rear']);
+const isCover = (slot: string) => COVERS.has(slot);
+
+type Arrived = (list: { id: string; card: boolean }[]) => void;
+let arrived: Arrived | null = null;
+/** Told of the photos that came from other devices (services/media.ts brings their previews ahead). */
+export function onMediaArrived(fn: Arrived) {
+  arrived = fn;
+}
+
 /** Sends the photos' files; true when a photo whose record was held can go now (its record is sent at once). */
 async function pushMedia(cfg: SyncConfig): Promise<boolean> {
   if (!syncState().mediaScanned) {
@@ -191,8 +209,22 @@ async function pushMedia(cfg: SyncConfig): Promise<boolean> {
     if (!row || row.up) continue;
     const media = await db.media.get(id);
     if (media) {
-      if (row.blob) await putFile(cfg, id, 'blob', row.blob);
+      // The small ones first (v0.41.3): the preview, and a photo's card — the photo can show on the other devices
+      // (its record goes now), while its original is still on its way.
       if (row.thumb) await putFile(cfg, id, 'thumb', row.thumb);
+      if (media.kind === 'photo' && row.blob) {
+        const card = row.card ?? (await cardOf(row.blob));
+        if (card) {
+          await putFile(cfg, id, 'card', card);
+          if (!row.card) await db.mediaBlobs.update(id, { card });
+        }
+        await db.mediaBlobs.update(id, { ready: 1 });
+        if (syncState().held?.includes(id)) {
+          released = true;
+          void syncRecords();
+        }
+      }
+      if (row.blob) await putFile(cfg, id, 'blob', row.blob);
     }
     const off = !!media && offloadOn() && !!row.blob && row.blob.size >= OFFLOAD_MIN && media.kind !== 'signature';
     await db.mediaBlobs
@@ -234,7 +266,7 @@ async function offloadSent(): Promise<void> {
 
 const inflight = new Map<string, Promise<Blob | undefined>>();
 /** A photo's (PDF's…) file from the server, when it is not on this device (none — no server, offline, not there). */
-export function remoteMedia(id: string, variant: 'blob' | 'thumb'): Promise<Blob | undefined> {
+export function remoteMedia(id: string, variant: 'blob' | 'thumb' | 'card'): Promise<Blob | undefined> {
   const cfg = syncConfig();
   if (!cfg) return Promise.resolve(undefined);
   const key = `${id}:${variant}`;
@@ -246,6 +278,22 @@ export function remoteMedia(id: string, variant: 'blob' | 'thumb'): Promise<Blob
     inflight.set(key, p);
   }
   return p;
+}
+
+/**
+ * A file's own address on the server (v0.41.3): a picture or a video element loads it by itself — streamed, shown as it
+ * comes, kept by the browser. None without this device's media key (connected before it was given: the next sync).
+ */
+export function remoteMediaSrc(id: string, variant: 'blob' | 'thumb' | 'card' = 'blob'): string | undefined {
+  const cfg = syncConfig();
+  if (!cfg?.mediaKey) return undefined;
+  return `${cfg.url}/api/media/${encodeURIComponent(id)}/${variant}?d=${encodeURIComponent(cfg.deviceId)}&k=${encodeURIComponent(cfg.mediaKey)}`;
+}
+
+/** A card made here from the server's original: the server keeps it too (best effort). */
+export function sendCard(id: string, card: Blob) {
+  const cfg = syncConfig();
+  if (cfg) void putFile(cfg, id, 'card', card).catch(() => undefined);
 }
 
 /* ---------- Running ---------- */
@@ -496,13 +544,13 @@ export async function pairDevice(address: string, code: string, name: string): P
   const pin = (code || parsed.code || '').replace(/\D/g, '');
   if (!parsed.url || !addressAllowed(parsed.url)) throw new SyncError(0, 'address');
   if (pin.length !== 6) throw new SyncError(0, 'code');
-  const res = await callJson<{ token: string; deviceId: string; records: number; byTable?: Record<string, number>; main?: MainDevice | null; rejoined?: boolean }>(
+  const res = await callJson<{ token: string; deviceId: string; mediaKey?: string; records: number; byTable?: Record<string, number>; main?: MainDevice | null; rejoined?: boolean }>(
     { url: parsed.url, token: '' },
     '/api/pair',
     { method: 'POST', body: { code: pin, name, install: installId() } },
   );
   return {
-    config: { url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso() },
+    config: { url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso(), mediaKey: res.mediaKey },
     server: res.byTable?.orders ?? (res.records ? 1 : 0),
     local: await db.orders.count(),
     main: res.main ?? null,

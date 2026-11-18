@@ -246,6 +246,8 @@ describe('syncing with the garage’s server (v0.40)', () => {
     await syncNow();
     expect(store.file(photo.id, 'blob')?.size).toBe(90_000);
     expect(store.record('media', photo.id)?.id).toBe(photo.id);
+    // Its card went with it (here the photo is small: its own card).
+    expect(store.file(photo.id, 'card')?.size).toBe(90_000);
     expect(syncState().held).toEqual([]);
   });
 

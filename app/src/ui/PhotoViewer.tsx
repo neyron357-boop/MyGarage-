@@ -3,7 +3,7 @@ import { IconChevronLeft, IconChevronRight, IconDownload, IconRotate, IconShare2
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { mediaBlob, mediaUrl } from '../services/media';
+import { cardUrl, mediaBlob, mediaSrc, mediaUrl } from '../services/media';
 import { useHistoryLayer, useLockScroll } from './historyLayer';
 import { canShareFile, shareOrDownload } from './share';
 
@@ -68,8 +68,20 @@ function useFullUrl(id?: string) {
   useEffect(() => {
     let alive = true;
     if (!id) return;
-    void mediaUrl(id, true).then((u) => alive && u && setShown((s) => (s?.id === id && s.full ? s : { id, url: u, full: false })));
-    void mediaUrl(id, false).then((u) => alive && u && setShown({ id, url: u, full: true }));
+    const better = (u: string | undefined, full: boolean) => alive && u && setShown((s) => (s?.id === id && s.full ? s : { id, url: u, full }));
+    void mediaUrl(id, true).then((u) => better(u, false));
+    // v0.41.3: the card (1080 px — about the screen's own) next, then the original once it is in — never a frame
+    // emptied while it comes.
+    void cardUrl(id).then((u) => better(u, false));
+    void mediaSrc(id).then(async (u) => {
+      if (!u || !alive) return;
+      if (!u.startsWith('blob:')) {
+        const im = new Image();
+        im.src = u;
+        await im.decode().catch(() => undefined);
+      }
+      if (alive) setShown({ id, url: u, full: true });
+    });
     return () => {
       alive = false;
     };

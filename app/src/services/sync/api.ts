@@ -73,7 +73,7 @@ export async function callJson<T>(cfg: Pick<SyncConfig, 'url' | 'token'>, path: 
 }
 
 /** A file sent; the server says how much came — anything else is a failure (the file stays here). */
-export async function putFile(cfg: SyncConfig, id: string, variant: 'blob' | 'thumb', blob: Blob): Promise<void> {
+export async function putFile(cfg: SyncConfig, id: string, variant: 'blob' | 'thumb' | 'card', blob: Blob): Promise<void> {
   const res = await timed(
     `${cfg.url}/api/media/${encodeURIComponent(id)}/${variant}`,
     { method: 'PUT', headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': blob.type || 'application/octet-stream', 'X-Size': String(blob.size) }, body: blob },
@@ -85,7 +85,7 @@ export async function putFile(cfg: SyncConfig, id: string, variant: 'blob' | 'th
 }
 
 /** A file back from the server (none — not there). */
-export async function getFile(cfg: SyncConfig, id: string, variant: 'blob' | 'thumb'): Promise<Blob | undefined> {
+export async function getFile(cfg: SyncConfig, id: string, variant: 'blob' | 'thumb' | 'card'): Promise<Blob | undefined> {
   const res = await timed(`${cfg.url}/api/media/${encodeURIComponent(id)}/${variant}`, { headers: { Authorization: `Bearer ${cfg.token}` } }, 120_000);
   if (res.status === 404) return undefined;
   if (!res.ok) throw await failure(res);

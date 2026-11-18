@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiDate, dubaiTime } from '../../domain/dates';
 import type { JobNote } from '../../domain/types';
 import { flatPeaks } from '../../domain/waveform';
-import { cachedMediaUrl, mediaBlob, mediaUrl } from '../../services/media';
+import { cachedMediaSrc, mediaBlob, mediaSrc } from '../../services/media';
 import { addNote, removeNote, restoreNote, setNotePeaks, type RemovedNote } from '../../services/notes';
 import { copyText } from '../../ui/clipboard';
 import { MediaImage, StickyBar, undoToast } from '../../ui/components';
@@ -160,7 +160,7 @@ function usePlayer(list: JobNote[]) {
       if (!n.mediaId) return;
       const ask = ++asked.current;
       // An iPhone plays only right in the tap: the address made ahead (by the bubble) is used at once.
-      const url = cachedMediaUrl(n.mediaId) ?? (await mediaUrl(n.mediaId));
+      const url = cachedMediaSrc(n.mediaId) ?? (await mediaSrc(n.mediaId));
       // A later tap (or the chat gone) while the recording was being read: this one is over.
       if (!url || ask !== asked.current || !alive.current) return;
       api.current.play(n, api.current.open(n, url, at));
@@ -195,7 +195,7 @@ function usePlayer(list: JobNote[]) {
       const ask = ++asked.current;
       // Another note: it becomes the current one there, paused — play goes on from that point.
       void (async () => {
-        const url = cachedMediaUrl(id) ?? (await mediaUrl(id));
+        const url = cachedMediaSrc(id) ?? (await mediaSrc(id));
         if (!url || ask !== asked.current || !alive.current) return;
         api.current.open(n, url, at);
         setCur({ id: n.id, playing: false });
@@ -274,9 +274,10 @@ function VoiceNote({
       window.clearTimeout(later);
     };
   }, [n.peaks, n.mediaId]);
-  // The recording's address made ahead: the tap on play then reaches it at once.
+  // The recording's address made ahead: the tap on play then reaches it at once (on the server — its address only, the
+  // sound streams when played).
   useEffect(() => {
-    if (n.mediaId) void mediaUrl(n.mediaId);
+    if (n.mediaId) void mediaSrc(n.mediaId);
   }, [n.mediaId]);
   const wave = useRef<HTMLDivElement>(null);
   // Where the finger has the dot (the sound jumps there when it lets go).
@@ -375,7 +376,8 @@ function NoteVideo({ id, onOpen }: { id: string; onOpen: (url: string) => void }
   const [len, setLen] = useState<number>();
   useEffect(() => {
     let alive = true;
-    void mediaUrl(id).then((u) => alive && setUrl(u));
+    // v0.41.3: the server's own address — the first frame comes with a little of the video, not all of it.
+    void mediaSrc(id).then((u) => alive && setUrl(u));
     return () => {
       alive = false;
     };

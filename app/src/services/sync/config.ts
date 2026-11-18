@@ -13,6 +13,8 @@ export interface SyncConfig {
   deviceId: string;
   deviceName: string;
   pairedAt: string;
+  /** This device's key for its pictures and videos only (v0.41.3): an element loads them by their address with it. */
+  mediaKey?: string;
 }
 
 export interface SyncState {

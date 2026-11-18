@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { createAdmin } from './admin.mjs';
 import { createApi, createPairing } from './api.mjs';
+import { createCards } from './cards.mjs';
 import { createEvents } from './events.mjs';
 import { loadConfig, VERSION } from './config.mjs';
 import { DIRS, openStore } from './store.mjs';
@@ -32,6 +33,7 @@ function log(msg) {
 const store = openStore(config.dataDir, { keepBackups: config.keepBackups, log });
 const pairing = createPairing();
 const events = createEvents();
+const cards = createCards({ store, dataDir: config.dataDir, log });
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
@@ -75,7 +77,7 @@ function backupNow() {
   }
 }
 
-const api = createServer(createApi({ store, config, pairing, log, onSeen, events }));
+const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards }));
 // Streams stay open (events): no idle cut-off on this side.
 api.keepAliveTimeout = 65_000;
 api.requestTimeout = 0;
@@ -91,6 +93,9 @@ askTailscale();
 setInterval(askTailscale, 5 * 60_000).unref();
 backupNow();
 setInterval(backupNow, 60 * 60_000).unref();
+// Photos kept before v0.41.3 get their card (a third of the bytes for the board and the viewer).
+cards.later(3000);
+setInterval(() => cards.later(0), 30 * 60_000).unref();
 
 function stop() {
   log('stopping');

@@ -284,6 +284,39 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     return rel;
   }
 
+  /** JPEG photos kept here with no card yet (v0.41.3) — for this computer to make them. */
+  function photosWithoutCard(limit = 40) {
+    const rows = db
+      .prepare(
+        "SELECT f.id, f.path FROM files f WHERE f.variant = 'blob' AND f.type = 'image/jpeg' AND NOT EXISTS (SELECT 1 FROM files c WHERE c.id = f.id AND c.variant = 'card') ORDER BY f.at DESC LIMIT ?",
+      )
+      .all(limit);
+    return rows.map((r) => ({ id: r.id, abs: path.join(dataDir, r.path) })).filter((r) => fs.existsSync(r.abs));
+  }
+
+  /**
+   * A device's key for its pictures and videos only (v0.41.3): a picture or a video element loads by an address, it
+   * cannot send the device's own key — this one reads files and nothing else.
+   */
+  function mediaKey(deviceId) {
+    let secret = db.prepare("SELECT value FROM meta WHERE key = 'mediaSecret'").get()?.value;
+    if (!secret) {
+      secret = crypto.randomBytes(32).toString('hex');
+      db.prepare("INSERT INTO meta (key, value) VALUES ('mediaSecret', ?) ON CONFLICT (key) DO NOTHING").run(secret);
+      secret = db.prepare("SELECT value FROM meta WHERE key = 'mediaSecret'").get().value;
+    }
+    return crypto.createHmac('sha256', secret).update(String(deviceId)).digest('base64url').slice(0, 32);
+  }
+  /** The device of a file address (its id and media key), if it is still connected. */
+  function mediaDevice(deviceId, key) {
+    if (!deviceId || !key) return undefined;
+    const d = db.prepare('SELECT id, name, revoked FROM devices WHERE id = ?').get(String(deviceId));
+    if (!d || d.revoked) return undefined;
+    const want = Buffer.from(mediaKey(d.id));
+    const got = Buffer.from(String(key));
+    return want.length === got.length && crypto.timingSafeEqual(want, got) ? { id: d.id, name: d.name } : undefined;
+  }
+
   function file(id, variant) {
     const f = getFile.get(id, variant);
     if (!f) return undefined;
@@ -327,7 +360,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  return { dataDir, push, pull, replace, mainDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
+  return { dataDir, push, pull, replace, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
 }
 
 export function httpError(status, message) {

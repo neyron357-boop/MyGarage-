@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Button, Group, Image, Modal, SimpleGrid, Stack, Text, TextInput, Title, Tooltip, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, Modal, SimpleGrid, Stack, Text, TextInput, Title, Tooltip, UnstyledButton } from '@mantine/core';
 import {
   IconAlertTriangle,
   IconArchive,
@@ -32,7 +32,7 @@ import { useNavigate } from 'react-router-dom';
 import { formatAed, parseAed } from '../domain/money';
 import { normalizePlate } from '../domain/plates';
 import type { Emirate, Plate, Stage } from '../domain/types';
-import { cachedCardUrl, cachedMediaUrl, cardUrl, mediaUrl } from '../services/media';
+import { cachedCardUrl, cachedMediaUrl, cardUrl, mediaSrc, mediaUrl } from '../services/media';
 import { LazySheet } from './lazy';
 import { useLongPress } from './longPress';
 import { actionStart, tapSettled } from './tapGuard';
@@ -1103,27 +1103,66 @@ export function MoneyInput({
   );
 }
 
+/** A picture that fades in once it is decoded (`.media-pic`); one known before (`at`) is there at once. */
+function RevealImg({ src, at }: { src: string; at: boolean }) {
+  const [shown, setShown] = useState(at);
+  return (
+    <img
+      src={src}
+      alt=""
+      decoding="async"
+      draggable={false}
+      className="media-pic"
+      data-in={shown || undefined}
+      onLoad={(e) => {
+        if (shown) return;
+        const img = e.currentTarget;
+        // Decoded first, then faded in: no half-drawn frame.
+        void (img.decode ? img.decode().catch(() => undefined) : Promise.resolve()).then(() => setShown(true));
+      }}
+    />
+  );
+}
+
 /**
  * A stored photo: the thumbnail (400 px, lists), the card size (`card`, 1080 px — a card across the
  * phone) or the photo itself. One shown before is drawn at once (a list coming back, a row rendered
- * again); a new one waits in a quiet square (no spinner per photo), then is decoded off the main thread.
+ * again). A new one (v0.41.3, the user: «сначала чёрный фон, потом резко появляется»): the small preview at once
+ * (it is here, or 30 KB from the server), the sharp one fading in over it as it comes; no spinner per photo.
  */
 export function MediaImage({ id, thumb = true, card, h = 90, w, radius = 'md', onClick }: { id: string; thumb?: boolean; card?: boolean; h?: number | string; w?: number | string; radius?: string; onClick?: () => void }) {
-  const key = `${id}:${card ? 'c' : thumb}`;
-  const cached = () => (card ? cachedCardUrl(id) : cachedMediaUrl(id, thumb));
-  const [loaded, setLoaded] = useState<{ key: string; url?: string }>();
-  const url = cached() ?? (loaded?.key === key ? loaded.url : undefined);
+  const sharp = !!card || !thumb;
+  const bigKey = `${id}:${card ? 'c' : 'f'}`;
+  const knownBig = () => (card ? cachedCardUrl(id) : thumb ? undefined : cachedMediaUrl(id, false));
+  // What was there when this photo first showed: drawn at once, not faded in.
+  const [atMount] = useState(() => ({ small: cachedMediaUrl(id, true), big: knownBig() }));
+  const [small, setSmall] = useState<{ id: string; url?: string }>();
+  const [big, setBig] = useState<{ key: string; url?: string }>();
+  const bigUrl = sharp ? (knownBig() ?? (big?.key === bigKey ? big.url : undefined)) : undefined;
+  const smallUrl = cachedMediaUrl(id, true) ?? (small?.id === id ? small.url : undefined);
   useEffect(() => {
-    if (cached()) return;
     let alive = true;
-    void (card ? cardUrl(id) : mediaUrl(id, thumb)).then((u) => alive && setLoaded({ key, url: u }));
+    // The sharp one known: nothing else is needed.
+    if (sharp && knownBig()) return;
+    if (!cachedMediaUrl(id, true)) void mediaUrl(id, true).then((u) => alive && setSmall({ id, url: u }));
+    if (sharp) void (card ? cardUrl(id) : mediaSrc(id)).then((u) => alive && setBig({ key: bigKey, url: u }));
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  if (!url) return <Box h={h} w={w ?? h} className="surface-soft" style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0 }} />;
-  return <Image src={url} h={h} w={w ?? h} radius={radius} fit="cover" onClick={onClick} style={onClick ? { cursor: 'zoom-in' } : undefined} alt="" decoding="async" />;
+  }, [bigKey, sharp]);
+  return (
+    <Box
+      h={h}
+      w={w ?? h}
+      className="surface-soft media-reveal"
+      onClick={onClick}
+      style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0, cursor: onClick ? 'zoom-in' : undefined }}
+    >
+      {smallUrl && !(sharp && bigUrl && bigUrl === atMount.big) && <RevealImg key={`s:${smallUrl}`} src={smallUrl} at={smallUrl === atMount.small} />}
+      {bigUrl && <RevealImg key={`b:${bigUrl}`} src={bigUrl} at={bigUrl === atMount.big} />}
+    </Box>
+  );
 }
 
 export function InfoTip({ label, children }: { label: string; children: ReactNode }) {

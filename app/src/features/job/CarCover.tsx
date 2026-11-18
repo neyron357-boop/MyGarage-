@@ -74,7 +74,7 @@ export function CarCover({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpt
     <>
       {cover.id ? (
         <button type="button" className="action-tile job-cover" aria-label={t('job.carPhoto')} {...pick.handlers} onClick={() => !pick.consumeClick() && setViewing(true)}>
-          <MediaImage id={cover.id} thumb={false} h="100%" w="100%" radius="0" />
+          <MediaImage id={cover.id} card h="100%" w="100%" radius="0" />
         </button>
       ) : (
         <button type="button" className="action-tile job-cover" data-empty="true" aria-label={t('job.carPhoto')} {...pick.handlers} onClick={() => !pick.consumeClick() && pick.camera()}>

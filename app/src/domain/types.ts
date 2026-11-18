@@ -373,6 +373,8 @@ export interface MediaBlob {
   thumb?: Blob;
   /** Sent to the server (1) or waiting (0); none — from before syncing (v0.40). */
   up?: number;
+  /** Its preview and card are on the server (v0.41.3): the photo shows on the other devices while the original goes. */
+  ready?: number;
   /**
    * The photo at a board card's size (1080 px, v0.37), made the first time a card shows it and kept: not made again at
    * every start. A photo's file never changes (a turned photo is a new one), so this copy never goes stale.
