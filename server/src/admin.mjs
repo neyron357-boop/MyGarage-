@@ -158,6 +158,16 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
       if (opts.apply === true) events?.changed(r.rev, null);
       return json(r);
     }
+    // Records written by the garage itself (v0.42.3: Eaglecart jobs brought in here): this computer only, by hand —
+    // every device takes them, as they are.
+    if (req.method === 'POST' && url.pathname === '/records') {
+      let body = '';
+      for await (const c of req) body += c;
+      const { changes } = JSON.parse(body || '{}');
+      const rev = store.push(null, Array.isArray(changes) ? changes : [], { server: true });
+      events?.changed(rev, null);
+      return json({ ok: true, rev, n: Array.isArray(changes) ? changes.length : 0 });
+    }
     if (req.method === 'POST' && url.pathname === '/revoke') {
       store.revoke(url.searchParams.get('id') || '');
       events?.drop(url.searchParams.get('id') || '');
