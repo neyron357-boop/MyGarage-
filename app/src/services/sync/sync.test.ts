@@ -12,7 +12,8 @@ import { addMedia, mediaBlob } from '../media';
 import { checkIn } from '../orders';
 import { ensureSeed } from '../seed';
 import { forgetSyncMemory, installId, resetSyncState, restoreInstallId, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
-import { applyChanges, changeServerAddress, eventRev, finishPairing, makeMain, pairDevice, syncNow } from './engine';
+import { SyncError } from './api';
+import { applyChanges, changeServerAddress, eventRev, finishPairing, lastingError, makeMain, pairDevice, syncNow } from './engine';
 
 /*
  * Two devices and the garage's own server (server/src/main.mjs, started here as it runs on the computer): what one
@@ -302,6 +303,24 @@ describe('syncing with the garage’s server (v0.40)', () => {
     expect(syncConfig()!.url).toBe(before);
     await changeServerAddress(before.replace('127.0.0.1', 'localhost'));
     expect(syncConfig()!.url).toBe(before.replace('127.0.0.1', 'localhost'));
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+  });
+
+  it('a server out of reach is not a message: tried again quietly, and found again by itself (v0.42.1)', async () => {
+    as('pc');
+    const here = syncConfig()!;
+    // The server starting again, no network: nothing said — only what the person must put right is.
+    setSyncConfig({ ...here, url: 'http://127.0.0.1:1' });
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+    expect(lastingError(new SyncError(0, 'offline'))).toBeUndefined();
+    expect(lastingError(new SyncError(502, 'Bad Gateway'))).toBeUndefined();
+    expect(lastingError(new SyncError(426, 'update'))).toBe('update');
+    expect(lastingError(new SyncError(409, 'main'))).toBe('main');
+    expect(lastingError(new SyncError(401, 'not paired'))).toBe('revoked');
+    // Back: it syncs as before.
+    setSyncConfig(here);
     await syncNow();
     expect(syncState().lastError).toBeUndefined();
   });

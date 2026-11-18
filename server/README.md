@@ -24,6 +24,8 @@
   (любое можно отключить), папка данных.
 - Поставить автозапуск и запустить: `powershell -ExecutionPolicy Bypass -File server\windows\install-autostart.ps1`
 - Убрать автозапуск и остановить: `powershell -ExecutionPolicy Bypass -File server\windows\uninstall-autostart.ps1`
+- Сервер сторожит сам запуск (v0.42.1): остановился по любой причине — через 2 секунды он снова работает; ошибки
+  пишутся в `Служебное\server.log`.
 - Перезапустить (после обновления): `powershell -ExecutionPolicy Bypass -File server\windows\restart.ps1` — туннель
   Cloudflare работает отдельно от сервера, поэтому адрес у телефонов остаётся тот же (меняется только после
   перезагрузки ПК).

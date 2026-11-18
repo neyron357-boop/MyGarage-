@@ -317,13 +317,25 @@ async function pendingCount(): Promise<number> {
   return n;
 }
 
+/**
+ * What only the person can put right (v0.42.1, the user: «пишет нет связи с сервером — исправь, чтобы не было никогда
+ * таких сообщений»): this device cut off on the server, an app too old for it, another device the main one. Anything
+ * else — no network, the server starting again, the tunnel's moment, the app just back from the background — is not
+ * a message: it is tried again, quietly, in seconds (what waits stays here and goes then).
+ */
+export function lastingError(e: unknown): 'revoked' | 'update' | 'main' | undefined {
+  if (!(e instanceof SyncError)) return undefined;
+  return e.status === 401 ? 'revoked' : e.status === 426 ? 'update' : e.status === 409 ? 'main' : undefined;
+}
+
 function failed(e: unknown) {
   failures++;
-  const err = e instanceof SyncError ? (e.status === 401 ? 'revoked' : e.status === 0 ? 'offline' : e.message) : String((e as Error)?.message ?? e);
+  const err = lastingError(e);
   setSyncState({ lastError: err, busy: false });
   void pendingCount().then((pending) => setSyncState({ pending }, false), () => undefined);
-  // Tried again later, less often each time it fails (at most every 10 minutes).
-  if (err !== 'revoked') scheduleSync(Math.min(10 * 60_000, 15_000 * 2 ** Math.min(failures, 6)));
+  // Tried again soon, a little less often each time (2, 4, 8 … at most every 30 s) — the server started again is
+  // found in seconds.
+  if (err !== 'revoked') scheduleSync(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)));
 }
 
 /** Records: send, take — once at a time (asked again meanwhile: once more after). */
@@ -460,8 +472,9 @@ function listen() {
           if (!through) {
             through = true;
             streamTries = 0;
-            setSyncState({ live: true }, false);
           }
+          // Said again with each event and ping (15 s), should anything have put it out meanwhile.
+          if (!syncState().live) setSyncState({ live: true }, false);
           // Another device's changes (or ones missed while the stream was closed): taken now.
           if (rev !== undefined && rev > syncState().cursor) void syncRecords();
         }
@@ -473,7 +486,8 @@ function listen() {
       setSyncState({ live: false }, false);
       if (reconnect && !ctl.signal.aborted && syncConfig()?.token === cfg.token) {
         streamTries++;
-        reopen = setTimeout(listen, Math.min(30_000, 1000 * 2 ** Math.min(streamTries, 5)));
+        // Again in 2, 4, then every 5 s: the server back (it starts again in two seconds) is heard at once.
+        reopen = setTimeout(listen, Math.min(5_000, 1000 * 2 ** Math.min(streamTries, 3)));
       }
     }
   })();

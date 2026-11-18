@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createServer } from 'node:http';
+import http, { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -302,6 +302,40 @@ describe('MyGarage server', () => {
     assert.equal((await fetch(base + `/api/status?d=${paired.deviceId}&k=${paired.mediaKey}`)).status, 401);
     store.revoke(paired.deviceId);
     assert.equal((await fetch(base + own)).status, 401);
+  });
+
+  it('a device that stops listening mid-file does not stop the server (v0.42.1)', async () => {
+    const { code } = pairing.issue();
+    const paired = await (await call('/api/pair', { method: 'POST', body: { code, name: 'Leaver', install: 'install-leaver-123456' } })).json();
+    const t = paired.token;
+    // A video's size: more than the connection holds, so the server is still sending when the device goes.
+    const big = new Uint8Array(24 * 1024 * 1024).fill(7);
+    await call('/api/sync/push', { token: t, method: 'POST', body: { changes: [{ t: 'media', k: 'vid-1', d: { id: 'vid-1', kind: 'video', mime: 'video/mp4', createdAt: '2026-11-18T07:00:00.000Z' } }] } });
+    assert.equal((await call('/api/media/vid-1/blob', { token: t, method: 'PUT', body: big, headers: { 'Content-Type': 'video/mp4', 'X-Size': String(big.length) } })).status, 200);
+    const stray = [];
+    const onStray = (e) => stray.push(e);
+    process.on('unhandledRejection', onStray);
+    try {
+      // Whole, and in parts (a video element): the first piece read, then the device gone.
+      for (const range of [undefined, 'bytes=0-']) {
+        await new Promise((resolve) => {
+          const req = http.get(`${base}/api/media/vid-1/blob?d=${paired.deviceId}&k=${paired.mediaKey}`, { headers: range ? { Range: range } : {} }, (res) => {
+            res.once('data', () => {
+              req.destroy();
+              resolve();
+            });
+          });
+          req.on('error', () => resolve());
+        });
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    } finally {
+      process.off('unhandledRejection', onStray);
+    }
+    assert.deepEqual(stray.map((e) => String(e?.code ?? e)), []);
+    assert.equal((await call('/api/health')).status, 200);
+    const again = await call('/api/media/vid-1/blob', { token: t, headers: { Range: 'bytes=0-9' } });
+    assert.equal(again.status, 206);
   });
 
   it('an older app is told to update: it may not connect or send', async () => {

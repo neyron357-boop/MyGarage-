@@ -478,7 +478,8 @@ async function launchBrowser() {
     await shot('30a-job-no-photo');
     const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Фото машины' }).click()]);
     await chooser.setFiles({ name: 'car.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
-    await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
+    // The preview, then the sharp one fading in over it (v0.41.3): one or two pictures for a moment.
+    await page.getByRole('button', { name: 'Фото машины' }).locator('img').first().waitFor();
     // The VIN photo, beside the mechanics: a tap takes it, then its thumbnail opens it full screen.
     await shot('30a2-vin-empty');
     // v0.21: on the empty VIN and Mulkiya chips a hold opens the phone's photos — only them (no camera after it).
@@ -763,7 +764,8 @@ async function launchBrowser() {
     if (await page.getByRole('button', { name: 'Nissan', exact: true }).count()) throw new Error('a known car needs no make');
     await shot('30c-known-car');
     await page.getByRole('button', { name: 'Принять' }).click();
-    await page.getByRole('button', { name: 'Фото машины' }).locator('img').waitFor();
+    // The preview, then the sharp one fading in over it (v0.41.3): one or two pictures for a moment.
+    await page.getByRole('button', { name: 'Фото машины' }).locator('img').first().waitFor();
     await page.getByText('Nissan Sunny').first().waitFor();
     // Several lines off at once: “…” → Select, tap two, Delete · 2; Undo brings them back.
     const dlg = page.getByRole('dialog');

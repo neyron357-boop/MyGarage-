@@ -109,3 +109,11 @@ function stop() {
 }
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
+// Nothing stops the server unseen (v0.42.1, the user: «пишет нет связи с сервером»): a promise no one waited for is
+// written down and the server goes on; anything worse is written down, and the server ends — the Windows launcher
+// (windows/install-autostart.ps1) or Docker starts it again at once.
+process.on('unhandledRejection', (e) => log(`unhandled: ${e?.stack || e}`));
+process.on('uncaughtException', (e) => {
+  log(`stopped by an error: ${e?.stack || e}`);
+  process.exit(1);
+});

@@ -122,8 +122,12 @@ export function setSyncState(patch: Partial<SyncState>, keep = true) {
   notify();
 }
 export function resetSyncState(patch: Partial<SyncState> = {}) {
-  stateCache = { ...INITIAL, ...patch };
-  kv.set(STATE_KEY, JSON.stringify(stateCache));
+  // The stream open now stays open (v0.42.1: a computer connected just after its stream had opened showed no
+  // «На связи» at all); only what is kept starts again.
+  const { live, busy } = syncState();
+  stateCache = { ...INITIAL, live, busy, ...patch };
+  const { busy: _b, pending: _p, live: _l, ...lasting } = stateCache;
+  kv.set(STATE_KEY, JSON.stringify(lasting));
   notify();
 }
 

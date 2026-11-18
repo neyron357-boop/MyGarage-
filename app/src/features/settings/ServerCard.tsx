@@ -202,7 +202,8 @@ export function ServerCard() {
   const [leaving, setLeaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const [making, setMaking] = useState(false);
-  const errors: Record<string, string> = { offline: t('sync.err.offline'), revoked: t('sync.err.revoked'), main: t('sync.err.main') };
+  // Only what the person must put right is said (v0.42.1): no network, the server starting again — tried again quietly.
+  const errors: Record<string, string> = { revoked: t('sync.err.revoked'), main: t('sync.err.main'), update: t('sync.err.update') };
   if (!config)
     return (
       <>
@@ -218,7 +219,8 @@ export function ServerCard() {
   const last = state.lastAt ? dayShort(state.lastAt) : undefined;
   const when = state.lastAt ? (last?.word ? `${t(`common.${last.word}`)} ${formatDateTime(state.lastAt).slice(11)}` : formatDateTime(state.lastAt)) : t('sync.never');
   // The stream open (v0.41.2): other devices' changes come the moment they are made — «На связи».
-  const status = state.lastError ? (errors[state.lastError] ?? t('sync.err.other', { message: state.lastError })) : state.live ? t('sync.live') : state.busy ? t('sync.syncing') : when;
+  const problem = state.lastError ? errors[state.lastError] : undefined;
+  const status = problem ?? (state.live ? t('sync.live') : state.busy ? t('sync.syncing') : when);
   const isMain = !!state.main && state.main.id === config.deviceId;
   // A phone may make its data the garage's while there is no main device (or it is the main one: sent again).
   const mayMain = mobile(config.deviceName) && (!state.main || isMain);
@@ -227,7 +229,7 @@ export function ServerCard() {
       <RowGroup title={t('sync.title')} mt={0} note={state.pending ? t('sync.pending', { count: state.pending }) : undefined}>
         <FormRow label={t('sync.server')} onClick={() => setMoving(true)} chevron>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            {state.lastError ? <IconCloudOff size={18} color="var(--mantine-color-orange-6)" /> : <IconCloud size={18} color="var(--mantine-color-green-6)" />}
+            {problem ? <IconCloudOff size={18} color="var(--mantine-color-orange-6)" /> : <IconCloud size={18} color={state.live ? 'var(--mantine-color-green-6)' : 'var(--mantine-color-dimmed)'} />}
             <Text truncate size="sm" c="dimmed" data-sync-host>
               {host}
             </Text>
@@ -235,7 +237,7 @@ export function ServerCard() {
         </FormRow>
         <FormRow label={t('sync.status')}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <Text size="sm" c={state.lastError ? 'orange' : state.live ? 'green' : 'dimmed'} data-sync-status>
+            <Text size="sm" c={problem ? 'orange' : state.live ? 'green' : 'dimmed'} data-sync-status>
               {status}
             </Text>
             <Button size="compact-sm" variant="light" leftSection={state.busy ? <Loader size={14} /> : <IconRefresh size={15} />} disabled={state.busy} onClick={() => void syncNow()}>

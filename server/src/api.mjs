@@ -34,6 +34,16 @@ const SYNC = 2;
 const UPDATE = 'Обновите приложение: закройте его и откройте снова';
 const ID = /^[A-Za-z0-9._-]{1,120}$/;
 
+/**
+ * The file's bytes to the device. A device that stops listening mid-file (a picture scrolled away, a video closed, the
+ * app gone to the background) only ends this answer: v0.41.3 left the broken pipe unhandled, and it stopped the server.
+ */
+function pour(rs, res) {
+  return pipeline(rs, res).catch(() => {
+    // the device went away: nothing more to send
+  });
+}
+
 /** A file sent whole, or the part asked for (`Range: bytes=a-b`): a video starts as soon as its first part is in. */
 function sendFile(req, res, f) {
   const head = {
@@ -53,11 +63,11 @@ function sendFile(req, res, f) {
     start = Math.max(0, start);
     res.writeHead(206, { ...head, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}` });
     if (req.method === 'HEAD') return res.end();
-    return pipeline(fs.createReadStream(f.abs, { start, end }), res);
+    return pour(fs.createReadStream(f.abs, { start, end }), res);
   }
   res.writeHead(200, { ...head, 'Content-Length': size });
   if (req.method === 'HEAD') return res.end();
-  return pipeline(fs.createReadStream(f.abs), res);
+  return pour(fs.createReadStream(f.abs), res);
 }
 
 function send(res, status, body, headers = {}) {

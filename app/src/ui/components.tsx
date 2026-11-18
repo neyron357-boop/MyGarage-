@@ -1167,9 +1167,19 @@ export function MoneyInput({
   );
 }
 
-/** A picture that fades in once it is decoded (`.media-pic`); one known before (`at`) is there at once. */
-function RevealImg({ src, at }: { src: string; at: boolean }) {
+/**
+ * A picture that fades in once it is decoded (`.media-pic`); one known before (`at`) is there at once. `onIn` — once
+ * it is fully in (its fade over): the preview under it may go.
+ */
+function RevealImg({ src, at, onIn }: { src: string; at: boolean; onIn?: () => void }) {
   const [shown, setShown] = useState(at);
+  useEffect(() => {
+    if (!shown || at || !onIn) return;
+    // The fade is --dur-3 (300 ms); without motion (reduced) there is no fade to wait for — the same moment then.
+    const t = setTimeout(onIn, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown]);
   return (
     <img
       src={src}
@@ -1202,6 +1212,8 @@ export function MediaImage({ id, thumb = true, card, h = 90, w, radius = 'md', o
   const [atMount] = useState(() => ({ small: cachedMediaUrl(id, true), big: knownBig() }));
   const [small, setSmall] = useState<{ id: string; url?: string }>();
   const [big, setBig] = useState<{ key: string; url?: string }>();
+  // The sharp one faded in over the preview: the preview goes (one picture in the frame, not two).
+  const [covered, setCovered] = useState<string>();
   const bigUrl = sharp ? (knownBig() ?? (big?.key === bigKey ? big.url : undefined)) : undefined;
   const smallUrl = cachedMediaUrl(id, true) ?? (small?.id === id ? small.url : undefined);
   useEffect(() => {
@@ -1223,8 +1235,8 @@ export function MediaImage({ id, thumb = true, card, h = 90, w, radius = 'md', o
       onClick={onClick}
       style={{ borderRadius: radius === '0' ? 0 : `var(--mantine-radius-${radius})`, flexShrink: 0, cursor: onClick ? 'zoom-in' : undefined }}
     >
-      {smallUrl && !(sharp && bigUrl && bigUrl === atMount.big) && <RevealImg key={`s:${smallUrl}`} src={smallUrl} at={smallUrl === atMount.small} />}
-      {bigUrl && <RevealImg key={`b:${bigUrl}`} src={bigUrl} at={bigUrl === atMount.big} />}
+      {smallUrl && !(sharp && bigUrl && (bigUrl === atMount.big || bigUrl === covered)) && <RevealImg key={`s:${smallUrl}`} src={smallUrl} at={smallUrl === atMount.small} />}
+      {bigUrl && <RevealImg key={`b:${bigUrl}`} src={bigUrl} at={bigUrl === atMount.big} onIn={() => setCovered(bigUrl)} />}
     </Box>
   );
 }
