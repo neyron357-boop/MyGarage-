@@ -32,6 +32,7 @@ import {
   IconScale,
   IconSend,
   IconSignature,
+  IconSteeringWheel,
   IconTool,
   IconTrash,
   IconUser,
@@ -94,6 +95,7 @@ import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { useSendVersion } from './sendVersion';
 import { DueChip, DueSheet } from './Due';
+import { DriverLine, DriverSheet } from './Driver';
 import { JobCardChip } from './JobCard';
 import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
 import { MechanicSheet } from './MechanicSheet';
@@ -145,6 +147,7 @@ interface Tile {
 const TILE_COLOR: Record<string, string> = {
   customer: 'blue',
   car: 'indigo',
+  driver: 'violet',
   scanner: 'cyan',
   due: 'yellow',
   invoice: 'grape',
@@ -521,6 +524,8 @@ export function JobPage() {
   const [send, setSend] = useState<SendRequest | null>(null);
   const [mechanicOpen, setMechanicOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
+  // Who brought the car (v0.43): a company's driver, picked in one tap.
+  const [driverOpen, setDriverOpen] = useState(false);
   // The profit is the manager's: hidden (blurred) until tapped, in case the customer sees the screen.
   const [profitShown, setProfitShown] = useState(false);
   // The job for the owner to check (v0.29): its picture — parts bought and sold, from whom, the profit.
@@ -831,6 +836,8 @@ export function JobPage() {
   const tiles: Tile[] = [];
   tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
   tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
+  // Who brought the car: a company's job has it on its card too; a private customer's — here only.
+  tiles.push({ key: 'driver', icon: IconSteeringWheel, onClick: () => setDriverOpen(true) });
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
   // When the car was promised: rarely needed (the user's call, v0.17.3) — a tile here; once set, its chip on the card.
   if (open && phase !== 'booked') tiles.push({ key: 'due', icon: IconClock, onClick: () => setDueOpen(true) });
@@ -1018,6 +1025,7 @@ export function JobPage() {
           </Group>
         )}
       </Group>
+      <DriverLine driver={b.order.driver} company={c.type === 'company'} open={open} onOpen={() => setDriverOpen(true)} />
       {(open || !!b.order.complaint) && (
         <UnstyledButton className="job-line job-complaint" mt="sm" onClick={open ? () => setComplaintOpen(true) : undefined} aria-label={t('job.complaint')}>
           <IconMessage2 size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
@@ -1271,6 +1279,7 @@ export function JobPage() {
         )}
       </LazySheet>
       <DueSheet order={b.order} lang={lang} opened={dueOpen} onClose={() => setDueOpen(false)} />
+      <DriverSheet order={b.order} opened={driverOpen} onClose={() => setDriverOpen(false)} />
       <LazySheet opened={mechanicOpen}>
         {(o) => (
           <MechanicSheet b={b} opened={o} onClose={() => setMechanicOpen(false)} />

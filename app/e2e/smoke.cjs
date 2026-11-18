@@ -2668,6 +2668,73 @@ async function launchBrowser() {
     }, paid.paid.order);
     if (!back[0] || !back[1]) throw new Error('Undo did not bring it back: ' + JSON.stringify(back));
   });
+  await step('v0.43: a company’s driver — typed at check-in; offered at once on its other car, one tap; his phone changed on a job (the job before keeps the old one); the company’s drivers with their jobs; still there after a reload', async () => {
+    const ids = await page.evaluate(async () => {
+      const { createCustomer, createVehicle } = await import('/src/services/customers.ts');
+      const c = await createCustomer({ name: 'Rashid', phone: '', preferredChannel: 'whatsapp', docLanguage: 'en', type: 'company', companyName: 'ABC TRANSPORT LLC' });
+      const hiace = await createVehicle(c.id, { plate: { emirate: 'DXB', code: 'T', number: '43210' }, make: 'Toyota', model: 'Hiace' });
+      const urvan = await createVehicle(c.id, { plate: { emirate: 'DXB', code: 'T', number: '43211' }, make: 'Nissan', model: 'Urvan' });
+      return { c: c.id, hiace: hiace.id, urvan: urvan.id };
+    });
+    const jobId = () => page.evaluate(() => location.hash.split('/').pop());
+    // «Новый заказ» for the company's Hiace: «Водитель» under the customer — a new one typed.
+    await page.goto(BASE + '#/orders/new?vehicleId=' + ids.hiace);
+    await page.getByLabel('Водитель: Имя').fill('Muhammad');
+    await page.getByLabel('Водитель: Телефон').fill('050 111 2233');
+    await shot('45a-new-order-driver');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.waitForURL(/#\/orders\/(?!new)[\w-]+$/);
+    const driverLine = front('.job-driver');
+    await driverLine.filter({ hasText: 'Muhammad' }).filter({ hasText: '+971 50 111 2233' }).first().waitFor();
+    const first = await jobId();
+    await shot('45b-job-driver');
+    // Its other car: Muhammad offered before anything is typed — accepted without him, then picked on the job, one tap.
+    await page.goto(BASE + '#/orders/new?vehicleId=' + ids.urvan);
+    await page.locator('.suggest', { hasText: 'Muhammad' }).first().waitFor();
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.waitForURL(/#\/orders\/(?!new)[\w-]+$/);
+    await page.waitForFunction((f) => !location.hash.endsWith(f), first);
+    const second = await jobId();
+    await front('.job-driver').filter({ hasText: 'Водитель' }).first().click();
+    const dlg = page.getByRole('dialog');
+    await dlg.locator('.suggest', { hasText: 'Muhammad' }).first().click();
+    await dlg.waitFor({ state: 'detached' });
+    await front('.job-driver').filter({ hasText: 'Muhammad' }).first().waitFor();
+    // His new number, on this job: the list and this job follow; the Hiace's job keeps the one he had then.
+    await front('.job-driver').filter({ hasText: 'Muhammad' }).first().click();
+    await dlg.getByRole('button', { name: 'Изменить' }).click();
+    await dlg.getByLabel('Водитель: Телефон').fill('052 999 8877');
+    await shot('45c-driver-edit');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    await front('.job-driver').filter({ hasText: '+971 52 999 8877' }).first().waitFor();
+    const kept = await page.evaluate(
+      async ([a, b]) => {
+        const { db } = await import('/src/db/db.ts');
+        return { a: (await db.orders.get(a)).driver, b: (await db.orders.get(b)).driver, n: await db.drivers.count() };
+      },
+      [first, second],
+    );
+    if (kept.a.phone !== '+971501112233' || kept.b.phone !== '+971529998877' || kept.a.id !== kept.b.id || kept.n !== 1) throw new Error('drivers: ' + JSON.stringify(kept));
+    // The company's page: its drivers, each with his jobs and cars; his card — the job before with the number then.
+    await page.goto(BASE + '#/customers/' + ids.c);
+    // His row in «Водители» (with his avatar) — not a job's row, which has his name too; the section comes a moment later.
+    const row = front('.list-row').filter({ has: page.locator('.person-avatar') }).filter({ hasText: 'Muhammad' }).first();
+    await row.waitFor();
+    const text = await row.innerText();
+    if (!/2 работы/.test(text) || !/2 машины/.test(text)) throw new Error('the driver’s row: ' + text);
+    await row.click();
+    await dlg.locator('.list-row').first().waitFor();
+    if ((await dlg.locator('.list-row').count()) !== 2) throw new Error('his jobs: ' + (await dlg.locator('.list-row').count()));
+    await dlg.locator('.list-row').filter({ hasText: '+971 50 111 2233' }).first().waitFor();
+    await shot('45d-driver-card');
+    await page.keyboard.press('Escape');
+    await dlg.waitFor({ state: 'detached' });
+    // Opened again: the job's driver as it was.
+    await page.goto(BASE + '#/orders/' + first);
+    await page.reload();
+    await front('.job-driver').filter({ hasText: '+971 50 111 2233' }).first().waitFor();
+  });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
     await page.goto(BASE + '#/');

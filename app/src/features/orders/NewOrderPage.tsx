@@ -13,6 +13,8 @@ import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domai
 import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
 import { setCover } from '../../services/cover';
 import { checkIn } from '../../services/orders';
+import type { DriverDraft } from '../../services/drivers';
+import { DriverFields, PickedDriver } from '../job/Driver';
 import type { PlateFound } from '../../services/plateReader';
 import { haptic } from '../../ui/haptics';
 import { usePhotoPick } from '../../ui/photoPick';
@@ -259,6 +261,8 @@ export function NewOrderPage() {
   const [pickedCustomer, setPickedCustomer] = useState<Customer>();
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
+  // Who brought the car (v0.43): asked for a company's car — picked from its drivers in one tap, or typed.
+  const [driver, setDriver] = useState<DriverDraft>({ name: '', phone: '' });
   // Documents are in English by default, whatever language the app itself is in.
   const docLanguage: Lang = 'en';
   const [complaint, setComplaint] = useState('');
@@ -354,6 +358,7 @@ export function NewOrderPage() {
       // Typed fast and tapped at once: the lookup may not have caught up with the plate — it is looked up here too.
       const fresh = lookup === plate ? known : await findVehicleForCheckIn(plate).then((m) => (m && !m.activeOrder ? m : undefined));
       const car = picked ?? fresh;
+      const company = (car?.owner ?? pickedCustomer)?.type === 'company';
       const o = await checkIn({
         vehicleId: car?.vehicle.id,
         plate,
@@ -366,6 +371,7 @@ export function NewOrderPage() {
         complaint,
         arrivedNow: target !== 'book',
         bookedFor: target === 'book' ? bookedFor : undefined,
+        driver: company ? driver : undefined,
       });
       if (!picked) rememberEmirate(plate.emirate);
       // The photo is the car's main photo now (a fresh one of a car in the base takes the place of the old).
@@ -567,6 +573,19 @@ export function NewOrderPage() {
                 </>
               )}
 
+
+              {owner?.type === 'company' && (
+                <>
+                  <div className="group-title" style={{ marginTop: 22 }}>
+                    {t('driver.title')}
+                  </div>
+                  {driver.id ? (
+                    <PickedDriver driver={driver} onClear={() => setDriver({ name: '', phone: '' })} />
+                  ) : (
+                    <DriverFields value={driver} onChange={setDriver} onPick={(d) => setDriver({ id: d.id, name: d.name, phone: d.phone })} customerId={owner.id} vehicleId={known?.vehicle.id} />
+                  )}
+                </>
+              )}
 
               <RowGroup>
                 <FormRow label={t('newOrder.bookLater')}>

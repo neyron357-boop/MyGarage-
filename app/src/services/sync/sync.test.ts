@@ -268,6 +268,32 @@ describe('syncing with the garage’s server (v0.40)', () => {
     expect(await db.items.get(item.id)).toBeUndefined();
   });
 
+  it('a table added by an update (v0.43: drivers): what the device skipped before it was updated comes once, by itself', async () => {
+    as('pc');
+    const driverId = uid();
+    await db.drivers.add({ id: driverId, name: 'Muhammad', phone: '+971501112233', createdAt: '2026-11-18T10:00:00.000Z' });
+    await db.orders.update(orderId, { driver: { id: driverId, name: 'Muhammad', phone: '+971501112233' } });
+    await syncNow();
+    as('phone');
+    await syncNow();
+    expect(await db.drivers.get(driverId)).toBeDefined();
+    expect(syncState().tables).toContain('drivers');
+    // As the phone was on v0.42: the record skipped (no table to put it in), its cursor past it, no list of tables
+    // kept — but the job came whole, with its driver.
+    await applyChanges([{ t: 'drivers', k: driverId, d: null }]);
+    const { tables: _known, ...older } = syncState();
+    resetSyncState(older);
+    expect((await db.orders.get(orderId))?.driver?.name).toBe('Muhammad');
+    await syncNow();
+    expect((await db.drivers.get(driverId))?.name).toBe('Muhammad');
+    expect(syncState().tables).toContain('drivers');
+    // Once: nothing is taken again after that.
+    await applyChanges([{ t: 'drivers', k: driverId, d: null }]);
+    await syncNow();
+    expect(await db.drivers.get(driverId)).toBeUndefined();
+    await applyChanges([{ t: 'drivers', k: driverId, d: { id: driverId, name: 'Muhammad', phone: '+971501112233', createdAt: '2026-11-18T10:00:00.000Z' } }]);
+  });
+
   it('a record changed here and not sent yet is not overwritten — it goes up and wins', async () => {
     as('phone');
     await db.orders.update(orderId, { complaint: 'phone says' });

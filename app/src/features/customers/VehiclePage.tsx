@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
+import { formatPhone } from '../../domain/phone';
 import { changeVehicleOwner } from '../../services/customers';
 import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
@@ -117,7 +118,7 @@ export function VehiclePage() {
               ) : (
                 <List>
                   {orders.map((o) => (
-                    <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.createdAt)}`} subtitle={o.complaint || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
+                    <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.createdAt)}`} subtitle={[o.complaint, o.driver ? o.driver.name || formatPhone(o.driver.phone) : ''].filter(Boolean).join(' · ') || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
                   ))}
                 </List>
               )}

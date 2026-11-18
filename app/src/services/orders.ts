@@ -1,4 +1,5 @@
 import { db, purge, purgeJournal, uid } from '../db/db';
+import { setJobDriver, type DriverDraft } from './drivers';
 import { mechanicsOf, toggled } from '../domain/crew';
 import { hoursBetween, nowIso } from '../domain/dates';
 import { whatJobHolds, whyJobStays, type DeleteBlock } from '../domain/deletion';
@@ -109,6 +110,8 @@ export interface CheckInInput {
   complaint: string;
   arrivedNow: boolean;
   bookedFor?: string;
+  /** Who brought the car (v0.43, a company's driver): picked from the list or typed — none when both are empty. */
+  driver?: DriverDraft;
 }
 
 /**
@@ -117,7 +120,7 @@ export interface CheckInInput {
  * (they are filled in on an existing customer only where missing).
  */
 export async function checkIn(input: CheckInInput): Promise<Order> {
-  return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.counters, db.events], async () => {
+  return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.counters, db.events, db.drivers], async () => {
     let vehicle = input.vehicleId ? await db.vehicles.get(input.vehicleId) : undefined;
     let customer: Customer | undefined;
     if (vehicle) {
@@ -138,7 +141,11 @@ export async function checkIn(input: CheckInInput): Promise<Order> {
     if (!customer.name && input.name.trim()) fill.name = input.name;
     if (!customer.phone && input.phone.trim()) fill.phone = input.phone;
     if (fill.name !== undefined || fill.phone !== undefined) await updateCustomer(customer.id, fill);
-    return createOrder({ customerId: customer.id, vehicleId: vehicle.id, complaint: input.complaint, arrivedNow: input.arrivedNow, bookedFor: input.bookedFor });
+    const order = await createOrder({ customerId: customer.id, vehicleId: vehicle.id, complaint: input.complaint, arrivedNow: input.arrivedNow, bookedFor: input.bookedFor });
+    const dr = input.driver;
+    if (!dr || (!dr.id && !dr.name.trim() && !dr.phone.trim())) return order;
+    const d = await setJobDriver(order.id, dr);
+    return { ...order, driver: { id: d.id, name: d.name, phone: d.phone } };
   });
 }
 

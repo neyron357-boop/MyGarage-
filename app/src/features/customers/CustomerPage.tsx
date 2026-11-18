@@ -13,6 +13,7 @@ import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
 import { ContactTiles, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, PersonAvatar } from '../../ui/components';
 import { LinkedMoney } from '../money/MoneyEntry';
 import { OrderStatus } from '../job/phase';
+import { CustomerDrivers } from '../job/Driver';
 import { CustomerModal, VehicleModal } from './forms';
 
 export function CustomerPage() {
@@ -139,6 +140,8 @@ export function CustomerPage() {
                 </List>
               )}
             </Section>
+            {/* Who brought its cars (v0.43): a company's drivers, each with the jobs he brought. */}
+            <CustomerDrivers customerId={c.id} />
             <Section title={t('customer.orders')}>
               {orders.length === 0 ? (
                 <EmptyState>{t('customer.noOrders')}</EmptyState>
@@ -161,6 +164,7 @@ export function CustomerPage() {
                             <span>
                               {formatDate(o.createdAt)}
                               {o.complaint ? ` · ${o.complaint}` : ''}
+                              {o.driver ? ` · ${o.driver.name || formatPhone(o.driver.phone)}` : ''}
                             </span>
                             <Group gap={6}>
                               <OrderStatus orderId={o.id} stage={o.stage} />

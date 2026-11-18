@@ -143,7 +143,35 @@ export async function applyChanges(changes: Change[]): Promise<void> {
   });
 }
 
+/** The tables added in v0.43 — the first version that keeps the list of tables it took (`SyncState.tables`). */
+const ADDED_IN_V043 = ['drivers'];
+
+/**
+ * A table this version has and the one before it did not (v0.43: `drivers`): what the server had of it came while
+ * this device skipped it (`applyChanges` has nowhere to put it) and its cursor went past — taken once, from the start,
+ * that table only. Without a cursor yet (pairing) everything comes anyway.
+ */
+async function catchUp(cfg: SyncConfig): Promise<void> {
+  const now = synced().map((t) => t.name);
+  const st = syncState();
+  const known = st.tables ?? now.filter((n) => !ADDED_IN_V043.includes(n));
+  const fresh = now.filter((n) => !known.includes(n));
+  if (fresh.length && st.cursor > 0) {
+    const end = st.cursor;
+    let since = 0;
+    for (;;) {
+      const res = await callJson<{ changes: Change[]; cursor: number; more: boolean }>(cfg, `/api/sync/pull?since=${since}&limit=1000`, { timeout: 90_000 });
+      const theirs = res.changes.filter((c) => fresh.includes(c.t) && (c.r ?? 0) <= end);
+      if (theirs.length) await applyChanges(theirs);
+      since = res.cursor;
+      if (!res.more || since >= end) break;
+    }
+  }
+  if (!st.tables || now.some((n) => !st.tables!.includes(n))) setSyncState({ tables: now });
+}
+
 async function pullRecords(cfg: SyncConfig): Promise<number> {
+  await catchUp(cfg);
   let cursor = syncState().cursor;
   let n = 0;
   for (;;) {

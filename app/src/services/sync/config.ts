@@ -46,6 +46,11 @@ export interface SyncState {
   held?: string[];
   /** The stream is open: other devices' changes come the moment they are made (not kept between visits). */
   live?: boolean;
+  /**
+   * The tables this device took the server's changes into, up to `cursor` (v0.43). A table added since (an older
+   * version skipped its records — it had nowhere to put them) is taken once from the start (engine `catchUp`).
+   */
+  tables?: string[];
 }
 
 const CONFIG_KEY = 'mygarage.sync';

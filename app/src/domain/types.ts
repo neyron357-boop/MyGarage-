@@ -227,9 +227,36 @@ export interface Order {
   };
   /** "How is the car?" asked a few days after the car left (or the reminder dismissed): it leaves the Today list. */
   followedUpAt?: string;
+  /**
+   * Who brought the car this time (v0.43) — a company's driver mostly: as he was then (his name and phone may change
+   * in the list of drivers later; the job keeps them). Not the customer: the job, its invoices and debts stay theirs.
+   */
+  driver?: JobDriver;
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A driver of the garage's customers (v0.43) — a company's mostly: who brings its cars. Never a customer, never owes:
+ * the jobs he brings are the company's. One record however many cars (and companies) he brings.
+ */
+export interface Driver {
+  id: string;
+  name: string;
+  /** E.164, or '' when not known. */
+  phone: string;
+  createdAt: string;
+  updatedAt?: string;
+  /** Taken off the list: not offered any more; the jobs he brought keep him as they had him. */
+  archivedAt?: string;
+}
+
+/** The driver on a job (v0.43): his record in the list (`id`), with his name and phone as they were then. */
+export interface JobDriver {
+  id: string;
+  name: string;
+  phone: string;
 }
 
 /**

@@ -9,6 +9,7 @@ import type {
   Customer,
   DamageMark,
   Debt,
+  Driver,
   Employee,
   EstimateVersion,
   Expense,
@@ -84,6 +85,8 @@ export class GarageDB extends Dexie {
   notes!: Table<JobNote, string>;
   books!: Table<StoredBook, string>;
   creditPayments!: Table<CreditPayment, string>;
+  /** The customers' drivers (v0.43): who brings a company's cars; a job keeps its own (`order.driver`). */
+  drivers!: Table<Driver, string>;
   /** Records deleted here, waiting to be told to the server (v0.40). */
   syncTombs!: Table<{ n?: number; t: string; k: string }, number>;
 
@@ -184,6 +187,12 @@ export class GarageDB extends Dexie {
       books: 'id, _t',
       creditPayments: 'id, expenseId, date, _t',
       syncTombs: '++n',
+    });
+    // v8 (v0.43): the customers' drivers (synced like every table, `_t`); the jobs a driver brought, by `driver.id`.
+    // Nothing to move: a job from before has no driver, and stays so.
+    this.version(8).stores({
+      drivers: 'id, phone, _t',
+      orders: 'id, number, customerId, vehicleId, stage, createdAt, _t, driver.id',
     });
     installGuards(this);
     installSyncHooks(this);
