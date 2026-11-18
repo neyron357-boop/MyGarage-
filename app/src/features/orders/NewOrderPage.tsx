@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { CAR_MAKES, canonicalMake, canonicalModel, modelsFor, POPULAR_MAKES } from '../../domain/carCatalog';
+import { nowIso } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { EMIRATES } from '../../domain/plates';
 import { quickList } from '../../domain/quickLists';
@@ -22,6 +23,7 @@ import { dropCarShot, heldCarShot, heldPlate } from './carShot';
 import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { CarThumb } from '../job/CarCover';
+import { PrevVisit } from '../job/PrevVisit';
 import { DateTimeField } from '../../ui/DateFields';
 import { typedOnly, useAction, useLang, usePhone, useSettings } from '../../ui/hooks';
 import { DeskSplit } from '../../ui/desk';
@@ -252,6 +254,9 @@ export function NewOrderPage() {
   // One job per "Accept", however fast the second tap comes.
   const { run, busy } = useAction({ exclusive: true });
   const settings = useSettings();
+  const lang = useLang();
+  // A known car's last visit is the one before now (v0.44: its mileage then, under the car).
+  const [openedAt] = useState(nowIso);
   // On a PC (v0.42) the form is two columns: the car | what is wrong and whose it is.
   const onPhone = usePhone();
   const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
@@ -414,6 +419,7 @@ export function NewOrderPage() {
                       {t('newOrder.otherCar')}
                     </Button>
                   </Group>
+                  {!picked.activeOrder && settings && <PrevVisit order={{ id: '', vehicleId: picked.vehicle.id, createdAt: openedAt }} settings={settings} lang={lang} />}
                   {picked.activeOrder && (
                     <button type="button" className="suggest" style={{ marginTop: 12 }} onClick={() => navigate(`/orders/${picked.activeOrder!.id}`)}>
                       <Text size="sm" fw={600} style={{ flex: 1 }}>
@@ -454,6 +460,8 @@ export function NewOrderPage() {
                           </Text>
                         </Box>
                       </Group>
+                      {/* It comes again (v0.44): its last visit — when, its mileage then, what was done — as on the job's card. */}
+                      {settings && <PrevVisit order={{ id: '', vehicleId: auto.vehicle.id, createdAt: openedAt }} settings={settings} lang={lang} />}
                     </Box>
                   )}
                   {match?.activeOrder && (

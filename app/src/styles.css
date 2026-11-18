@@ -2093,6 +2093,24 @@ html.kb .tab-bar-wrap {
   box-shadow: 0 0 0 2px var(--app-card);
   pointer-events: none;
 }
+/* The mileage's sheet (features/job/Odometer.tsx, v0.44): the odometer's photo across it (a tap — full screen), the
+   car's last visit under the number. */
+.odo-photo {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--app-fill);
+  cursor: zoom-in;
+}
+.odo-prev {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--app-fill);
+}
+
 /* The sheet a read VIN is checked on: the line of the photo it was read off, then the VIN in its 17 places
    (a little apart after the maker's code and before the serial part), the doubtful ones in orange. */
 .vin-crop {

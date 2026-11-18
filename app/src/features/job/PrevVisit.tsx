@@ -5,7 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { hoursBetween, nowIso } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
+import { formatKm } from '../../domain/odometer';
 import type { Order, Settings } from '../../domain/types';
+import { mileageOfJob } from '../../services/mileage';
 import { useScreenLiveQuery } from '../../ui/hooks';
 
 /** The car's visit before this one, and whether its work is still under the garage's warranty. */
@@ -15,14 +17,15 @@ async function previousVisit(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'
     .filter((o) => o.id !== order.id && o.stage !== 'cancelled' && (o.closedAt ?? o.createdAt) <= order.createdAt)
     .sort((a, b) => (b.closedAt ?? b.createdAt).localeCompare(a.closedAt ?? a.createdAt))[0];
   if (!prev) return null;
-  const items = await db.items.where('orderId').equals(prev.id).toArray();
+  const [items, acts] = await Promise.all([db.items.where('orderId').equals(prev.id).toArray(), db.inspections.where('orderId').equals(prev.id).toArray()]);
   const done = items.filter((i) => i.kind !== 'discount' && i.kind !== 'fee' && (i.approvalState === 'approved' || i.done));
-  return { order: prev, titles: done.map((i) => itemTitle(i, lang)).filter(Boolean) };
+  // Its mileage then (v0.44): the job's own, or its act's or scanner report's.
+  return { order: prev, titles: done.map((i) => itemTitle(i, lang)).filter(Boolean), km: mileageOfJob(prev, acts) };
 }
 
 /**
- * "Был 12 д назад · Oil change, Brake pads" on the job's card when the car has been here before — the
- * last visit one tap away; within the garage's warranty period the row says so.
+ * "Был 12 д назад · 118 200 км · Oil change, Brake pads" on the job's card when the car has been here before — its
+ * mileage then (v0.44), the last visit one tap away; within the garage's warranty period the row says so.
  */
 export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'>; settings: Pick<Settings, 'warrantyLaborMonths'>; lang: 'ru' | 'en' }) {
   const { t } = useTranslation();
@@ -38,6 +41,7 @@ export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' |
       <IconHistory size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
       <Text size="sm" lineClamp={2} style={{ flex: 1 }}>
         {ago}
+        {prev.km !== undefined && <Text span inherit className="tnum" style={{ whiteSpace: 'nowrap' }}>{` · ${formatKm(prev.km)} ${t('unit.km')}`}</Text>}
         {prev.titles.length > 0 && <Text span inherit c="dimmed">{` · ${prev.titles.slice(0, 3).join(', ')}`}</Text>}
       </Text>
       {warranty && (

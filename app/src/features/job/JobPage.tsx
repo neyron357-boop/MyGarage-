@@ -96,6 +96,7 @@ import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { useSendVersion } from './sendVersion';
 import { DueChip, DueSheet } from './Due';
 import { DriverLine, DriverSheet } from './Driver';
+import { OdometerChip } from './Odometer';
 import { JobCardChip } from './JobCard';
 import { HANDOVER_CHECKS, HandoverChecks } from './HandoverChecks';
 import { MechanicSheet } from './MechanicSheet';
@@ -616,7 +617,7 @@ export function JobPage() {
     const done = inv ? inv.lines.filter((l) => l.kind !== 'discount').map((l) => lineName(l.description, l.kind)) : live.filter((i) => i.kind !== 'discount' && i.approvalState === 'approved').map((i) => itemTitle(i, docLang));
     const checks = HANDOVER_CHECKS.filter((c) => b.order.qcChecks?.[c]).map((c) => tt(`qc.${c}`));
     const scan = b.order.obdScans?.[b.order.obdScans.length - 1]?.odometer;
-    const mileageKm = b.handover?.mileageKm ?? b.intake?.mileageKm ?? (scan?.unit === 'km' ? scan.value : undefined);
+    const mileageKm = b.order.mileageKm ?? b.handover?.mileageKm ?? b.intake?.mileageKm ?? (scan?.unit === 'km' ? scan.value : undefined);
     setSend({
       text: reportText(ctx, docLang, { done, checks, mileageKm, warrantyMonths: b.settings.warrantyLaborMonths, warrantyKm: b.settings.warrantyLaborKm }),
       template: 'report',
@@ -1053,6 +1054,8 @@ export function JobPage() {
             <span>{t('suppliers.forJob')}</span>
           </button>
         )}
+        {/* The car's mileage on this visit (v0.44): the odometer's photo, read on the phone. */}
+        <OdometerChip order={b.order} open={open} />
       </div>
     </Box>
   );

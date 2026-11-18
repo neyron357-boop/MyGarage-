@@ -6,8 +6,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { itemAmounts, itemTitle } from '../../domain/items';
+import { formatKm } from '../../domain/odometer';
 import { formatPhone } from '../../domain/phone';
 import { changeVehicleOwner } from '../../services/customers';
+import { mileageHistory } from '../../services/mileage';
 import { EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section } from '../../ui/components';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DeskSplit } from '../../ui/desk';
@@ -37,13 +39,14 @@ export function VehiclePage() {
     const items = orderIds.length ? await db.items.where('orderId').anyOf(orderIds).toArray() : [];
     const declined = items.filter((i) => i.approvalState === 'declined');
     const decisions = orderIds.length ? await db.decisions.where('orderId').anyOf(orderIds).toArray() : [];
-    const mileage = (orderIds.length ? await db.inspections.where('orderId').anyOf(orderIds).toArray() : []).filter((i) => i.mileageKm !== undefined && i.locked).sort((a, c) => (a.signedAt ?? '').localeCompare(c.signedAt ?? ''));
+    // Its mileage by visit (v0.44): each job's own, else its act's or scanner report's — the earliest first.
+    const mileage = await mileageHistory(v.id);
     return { v, owner, orders, owners, customers, declined, decisions, mileage };
   }, [id]);
   if (data === undefined) return <PageSkeleton variant="detail" />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const { v, owner, orders, owners, customers, declined, decisions, mileage } = data;
-  const lastKm = mileage[mileage.length - 1]?.mileageKm;
+  const lastKm = mileage[mileage.length - 1]?.km;
   const declinedAt = (itemId: string) => decisions.filter((d) => d.itemId === itemId && d.decision === 'decline').pop()?.decidedAt;
   return (
     <>
@@ -90,7 +93,19 @@ export function VehiclePage() {
             </Box>
             <SimpleGrid cols={2} spacing="sm" mt="md">
               <Kpi label={t('customer.visitsTitle')} value={orders.length} />
-              <Kpi label={t('vehicle.lastMileage')} value={lastKm !== undefined ? `${lastKm.toLocaleString('ru-RU')} ${t('unit.km')}` : '—'} />
+              <Kpi label={t('vehicle.lastMileage')} value={
+                  lastKm !== undefined ? (
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      {formatKm(lastKm)}
+                      <Text span inherit fz="0.5em" c="dimmed">
+                        {' '}
+                        {t('unit.km')}
+                      </Text>
+                    </span>
+                  ) : (
+                    '—'
+                  )
+                } />
             </SimpleGrid>
           </>
         }
@@ -131,9 +146,9 @@ export function VehiclePage() {
                 <Box className="surface" p="md">
                   <Timeline bulletSize={22} lineWidth={2} active={mileage.length}>
                     {mileage.map((m) => (
-                      <Timeline.Item key={m.id} bullet={<IconGauge size={12} />} title={`${m.mileageKm?.toLocaleString('ru-RU')} ${t('unit.km')}`}>
+                      <Timeline.Item key={m.orderId} bullet={<IconGauge size={12} />} title={`${formatKm(m.km)} ${t('unit.km')}`}>
                         <Text size="xs" c="dimmed">
-                          {formatDate(m.signedAt)} · {t(m.kind === 'intake' ? 'intake.title' : 'handover.title')}
+                          {formatDate(m.at)} · №{m.number}
                         </Text>
                       </Timeline.Item>
                     ))}

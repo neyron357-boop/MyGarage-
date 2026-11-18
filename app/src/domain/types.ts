@@ -232,6 +232,10 @@ export interface Order {
    * in the list of drivers later; the job keeps them). Not the customer: the job, its invoices and debts stay theirs.
    */
   driver?: JobDriver;
+  /** The car's mileage on this visit, km (v0.44): read off the odometer's photo when sure, or typed / looked at. */
+  mileageKm?: number;
+  /** What the odometer's photo was read as when not sure, best first ([] — nothing read): waits to be looked at. */
+  mileageOffered?: number[];
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;

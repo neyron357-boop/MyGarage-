@@ -2735,6 +2735,82 @@ async function launchBrowser() {
     await page.reload();
     await front('.job-driver').filter({ hasText: '+971 50 111 2233' }).first().waitFor();
   });
+  await step('v0.44: the mileage — a car comes again: «Новый заказ» shows its last visit with its mileage; the odometer’s photo on the «Пробег» chip read by itself; how far it has gone since; the car’s page has it', async () => {
+    // A car whose last visit (closed in October) had its mileage noted.
+    const ids = await page.evaluate(async () => {
+      const { createCustomer, createVehicle } = await import('/src/services/customers.ts');
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { setJobMileage } = await import('/src/services/mileage.ts');
+      const { db } = await import('/src/db/db.ts');
+      const c = await createCustomer({ name: 'Odo Test', phone: '', preferredChannel: 'whatsapp', docLanguage: 'en', type: 'individual' });
+      const v = await createVehicle(c.id, { plate: { emirate: 'DXB', code: 'Q', number: '24680' }, make: 'Toyota', model: 'Land Cruiser' });
+      const visit = () => checkIn({ vehicleId: v.id, plate: { emirate: 'DXB', code: '', number: '' }, make: '', model: '', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      // Its visit in October (closed then), its mileage noted.
+      const before = await visit();
+      await setJobMileage(before.id, 118_200);
+      await db.orders.update(before.id, { stage: 'closed', closedAt: '2026-10-01T08:00:00.000Z', arrivedAt: '2026-10-01T07:00:00.000Z', createdAt: '2026-10-01T07:00:00.000Z' });
+      return { v: v.id };
+    });
+    // It comes again: «Новый заказ» for it — under the car, its last visit with its mileage then.
+    await page.goto(BASE + '#/orders/new?vehicleId=' + ids.v);
+    await front('.job-line').filter({ hasText: '118 200 км' }).first().waitFor();
+    await shot('46a-mileage-new-order');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    // The job's card: the same line.
+    await front('.job-foot').waitFor();
+    await front('.job-line').filter({ hasText: '118 200 км' }).first().waitFor();
+    // The chip: a tap — the camera; the dashboard's photo read on the phone, the sure mileage in by itself.
+    const chip = front('.job-foot').getByRole('button', { name: 'Пробег' });
+    await chip.scrollIntoViewIfNeeded();
+    const dashboard = await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 1400;
+      c.height = 800;
+      const g = c.getContext('2d');
+      g.fillStyle = '#0d0f12';
+      g.fillRect(0, 0, c.width, c.height);
+      g.fillStyle = '#e8eef4';
+      g.textAlign = 'center';
+      g.font = 'bold 220px Arial';
+      g.fillText('88', 700, 360);
+      g.font = '44px Arial';
+      g.fillText('km/h', 700, 430);
+      g.font = '50px Arial';
+      g.textAlign = 'left';
+      g.fillText('12:45', 90, 120);
+      g.textAlign = 'center';
+      g.font = '40px Arial';
+      g.fillText('TRIP A  345.6 km', 700, 620);
+      g.font = '54px Arial';
+      g.fillText('ODO  123456 km', 700, 720);
+      return c.toDataURL('image/jpeg', 0.9).split(',')[1];
+    });
+    // (The chip knows whether the job has a photo a moment after the card shows: no camera before.)
+    await page.waitForTimeout(300);
+    const [odo] = await Promise.all([page.waitForEvent('filechooser'), chip.click()]);
+    if (!(await odo.element().getAttribute('capture'))) throw new Error('a tap on the empty chip must open the camera');
+    await odo.setFiles({ name: 'odometer.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(dashboard, 'base64') });
+    await front('.job-foot').getByRole('button', { name: 'Пробег' }).filter({ hasText: '123 456 км' }).waitFor({ timeout: 60000 });
+    await page.getByText('Пробег с фото: 123 456 км').first().waitFor();
+    await shot('46b-mileage-read');
+    // Its sheet: the photo, the number, the last visit and how far since.
+    await front('.job-foot').getByRole('button', { name: 'Пробег' }).click();
+    const dlg = page.getByRole('dialog');
+    await dlg.getByText('118 200 км').first().waitFor();
+    await dlg.getByText('+5 256 км').first().waitFor();
+    await shot('46c-mileage-sheet');
+    // Typed less than last time: said in orange; put right and saved.
+    await dlg.getByLabel('Пробег, км').fill('18 456');
+    await dlg.getByText('Меньше, чем в прошлый раз').waitFor();
+    await dlg.getByLabel('Пробег, км').fill('123 460');
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    await front('.job-foot').getByRole('button', { name: 'Пробег' }).filter({ hasText: '123 460 км' }).waitFor();
+    // The car's page: its last mileage, and its mileage by visit.
+    await page.goto(BASE + '#/vehicles/' + ids.v);
+    await page.getByText('123 460 км').first().waitFor();
+    await page.getByText('118 200 км').first().waitFor();
+  });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
     await page.goto(BASE + '#/');
