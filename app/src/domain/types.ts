@@ -167,6 +167,11 @@ export interface ImportedFrom {
   /** Closed history (true) or a job carried over to continue in MyGarage (false). */
   history: boolean;
   importedAt: string;
+  /**
+   * Eaglecart's own double entries of this job (the same car, day and work under another number there), taken out of
+   * MyGarage: an import of Eaglecart does not bring them in again.
+   */
+  twins?: { jobId: string; jobNo: string }[];
 }
 
 export interface Order {

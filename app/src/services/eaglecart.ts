@@ -396,6 +396,8 @@ export function planEaglecartImport(data: EaglecartExport, existing: Existing, o
 async function loadExisting(): Promise<Existing> {
   const [customers, vehicles, orders] = await Promise.all([db.customers.toArray(), db.vehicles.toArray(), db.orders.toArray()]);
   const ids = new Set<string>([...customers.map((c) => c.id), ...vehicles.map((v) => v.id), ...orders.map((o) => o.id)]);
+  // Eaglecart's double entries taken out here (`imported.twins`): as if they were here — not brought in again.
+  for (const o of orders) for (const t of o.imported?.twins ?? []) ids.add(`ec-o-${t.jobId}`);
   const customerByPhone = new Map<string, string>();
   for (const c of customers) if (c.phone && !c.archivedAt && !customerByPhone.has(c.phone)) customerByPhone.set(c.phone, c.id);
   const vehicleByPlate = new Map<string, string>();

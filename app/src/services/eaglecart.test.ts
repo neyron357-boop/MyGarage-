@@ -147,6 +147,19 @@ describe('Eaglecart import', () => {
     expect((await db.orders.where('number').equals(2).toArray()).length).toBe(1);
   });
 
+  it("Eaglecart's own double entry, taken out here, is not brought in again", async () => {
+    await importEaglecart(sample(), opts);
+    // Job 2 turned out to be Eaglecart's second record of job 1: it goes, job 1 remembers it.
+    await db.items.where('orderId').equals('ec-o-101').delete();
+    await db.orders.delete('ec-o-101');
+    const first = (await db.orders.get('ec-o-100'))!;
+    await db.orders.update('ec-o-100', { imported: { ...first.imported!, twins: [{ jobId: '101', jobNo: '2' }] } });
+    const again = await importEaglecart(sample(), opts);
+    expect(again).toMatchObject({ jobs: 0, alreadyImported: 5 });
+    expect(await db.orders.get('ec-o-101')).toBeUndefined();
+    expect(await db.items.where('orderId').equals('ec-o-101').count()).toBe(0);
+  });
+
   it('connects to customers and cars already in MyGarage instead of duplicating them', async () => {
     const c = await createCustomer({ name: 'John', phone: '050 111 2233', preferredChannel: 'whatsapp', docLanguage: 'ru', type: 'individual' });
     const v = await createVehicle(c.id, { plate: { emirate: 'DXB', code: 'CC', number: '78728' }, make: 'Toyota', model: 'Corolla' });
