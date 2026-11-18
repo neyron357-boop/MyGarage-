@@ -131,14 +131,17 @@ export async function applyChanges(changes: Change[]): Promise<void> {
         if (local) await table.delete(c.k);
         continue;
       }
+      // Put under the change's own key (v0.45): a record the server wrote without its id inside (its renumbering of
+      // v0.42.3 did) went nowhere — and stopped every change after it on this device.
+      const key = table.schema.primKey.keyPath as string;
       if (c.t === 'counters') {
         // Numbers only go up — unless the main device's own are given (`reset`): taken as they are.
         const { reset, ...counter } = c.d;
         if (local && Number(local.value) > Number(counter.value) && !reset) continue;
-        await table.put({ ...counter, [STAMP]: 0 });
+        await table.put({ ...counter, [key]: c.k, [STAMP]: 0 });
         continue;
       }
-      await table.put({ ...c.d, [STAMP]: 0 });
+      await table.put({ ...c.d, [key]: c.k, [STAMP]: 0 });
     }
   });
 }

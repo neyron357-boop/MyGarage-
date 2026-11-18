@@ -95,6 +95,9 @@ describe('job and invoice numbers (v0.42.3)', () => {
     assert.equal(new Set(nums).size, 4);
     assert.ok(nums.every((n) => n >= 350));
     assert.equal(store.record('orders', 'old').number, 350);
-    assert.ok(store.pull('phone', r.rev - r.orders.length - r.invoices.length - 1).changes.some((c) => c.k === 'old'));
+    const back = store.pull('phone', r.rev - r.orders.length - r.invoices.length - 1).changes;
+    assert.ok(back.some((c) => c.k === 'old'));
+    // A device takes a record by the id in it (v0.45: renumbered without it, no device could put it).
+    for (const c of back.filter((x) => x.d && (x.t === 'orders' || x.t === 'invoices'))) assert.equal(c.d.id, c.k);
   });
 });

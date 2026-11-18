@@ -1,7 +1,9 @@
 /*
- * A customer's invoices from before this app (v0.45), checked in a terminal — nothing is written anywhere:
+ * A customer's invoices from before this app (v0.45), checked in a terminal — written nowhere unless --apply:
  *
  *   npm run history:check -- <folder of the PDFs> [--expect <expected.json>] [--rate 500]
+ *   … --db <garage.db> --customer <id>  — against the garage's records (read only): jobs, cars, flags
+ *   … --apply http://127.0.0.1:8788      — and written there (the server's page; see below), --backup <file> for the copy
  *
  * Every PDF is read as the app reads it (domain/historyInvoices.ts): its pages (summary · invoice A or B · terms · empty),
  * every invoice's sums checked, the summary's rows matched with the invoices. Printed: the month table (invoices, lines,
@@ -104,7 +106,8 @@ console.log(`Plates as printed: ${plates}${expected?.plates !== undefined ? ` (e
 if (opt('--db') && opt('--customer')) {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(opt('--db')!, { readOnly: true });
-  const all = <T>(tbl: string): T[] => (db.prepare('SELECT data FROM records WHERE tbl = ? AND deleted = 0').all(tbl) as { data: string }[]).map((r) => JSON.parse(r.data) as T);
+  // A record with its id (the server keeps it beside the data; some records were written without it inside).
+  const all = <T>(tbl: string): T[] => (db.prepare('SELECT id, data FROM records WHERE tbl = ? AND deleted = 0').all(tbl) as { id: string; data: string }[]).map((r) => ({ ...JSON.parse(r.data), id: r.id }) as T);
   const customerId = opt('--customer')!;
   const { planHistory } = await import('../src/domain/historyPlan');
   const { serviceLookup } = await import('../src/domain/serviceCatalog');
@@ -130,9 +133,64 @@ if (opt('--db') && opt('--customer')) {
   const flagged = plan.invoices.filter((i) => i.flags?.length);
   for (const i of flagged) console.log(`  ⚑ ${i.numberKind === 'job' ? 'Job' : 'Inv'} ${i.number} ${i.date} ${i.plate}: ${i.flags!.map((f) => f.text).join('; ')}`);
   for (const v of plan.vehicles.filter((v) => v.id.startsWith('hv-'))) console.log(`  + car ${carKeyOf(v)} ${v.make} ${v.model}${v.type ? ` (${v.type})` : ''}`);
-  console.log(`  bodies set for ${plan.vehicles.filter((v) => !v.id.startsWith('hv-')).length} cars of the customer`);
   for (const p of plan.problems) console.log(`  ✗ ${p}`);
   problems += plan.problems.length;
+
+  // --apply <the server's page, http://127.0.0.1:8788>: written into the garage's records — only when every sum adds up
+  // and the table is the expected one; a copy of the database first; written in one go by the server (every device takes
+  // it); counted again from what the server has; not the same — what was there before put back.
+  if (opt('--apply')) {
+    const page = opt('--apply')!.replace(/\/$/, '');
+    const fail = (why: string) => {
+      console.log(`\nNOT written: ${why}`);
+      process.exit(1);
+    };
+    if (plan.problems.length || problems) fail('a sum does not add up or a page was not read');
+    if (!want) fail('--expect <expected.json> is needed to write');
+    if (tableDiff(plan.table, want!).length) fail('the table is not the expected one');
+    const has = (tbl: string, id: string) => db.prepare('SELECT data, deleted FROM records WHERE tbl = ? AND id = ?').get(tbl, id) as { data: string | null; deleted: number } | undefined;
+    const newCars = plan.vehicles.filter((v) => v.id.startsWith('hv-') && !has('vehicles', v.id));
+    const changes = [
+      ...newCars.map((v) => ({ t: 'vehicles', k: v.id, d: v })),
+      ...plan.ownerships.filter((o) => newCars.some((v) => v.id === o.vehicleId)).map((o) => ({ t: 'ownerships', k: o.id, d: o })),
+      ...plan.write.invoices.map((i) => ({ t: 'historyInvoices', k: i.id, d: i })),
+      ...plan.write.rows.map((r) => ({ t: 'historySummaryRows', k: r.id, d: r })),
+    ];
+    if (!changes.length) {
+      console.log('\nNothing to write: all of it is in the garage’s records already.');
+    } else {
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const copy = opt('--backup') ?? path.join(path.dirname(opt('--db')!), '..', 'Резервные копии', `garage-до-истории-инвойсов-${stamp}.db`);
+      db.exec(`VACUUM INTO '${copy.replace(/'/g, "''")}'`);
+      console.log(`\nA copy of the database: ${copy}`);
+      // What each record was before (none — it was not there): to be put back if the figures are not the same after.
+      const before = changes.map((c) => {
+        const r = has(c.t, c.k);
+        return { t: c.t, k: c.k, d: r && !r.deleted && r.data ? JSON.parse(r.data) : null };
+      });
+      const send = async (list: { t: string; k: string; d: unknown }[]) => {
+        const res = await fetch(`${page}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ changes: list }) });
+        if (!res.ok) throw new Error(`the server said ${res.status}: ${(await res.text()).slice(0, 200)}`);
+        return (await res.json()) as { rev: number; n: number };
+      };
+      const sent = await send(changes);
+      console.log(`Written by the server: ${sent.n} records (up to rev ${sent.rev}).`);
+      // Counted again from the server's records.
+      const now = new DatabaseSync(opt('--db')!, { readOnly: true });
+      const back = plan.invoices
+        .map((i) => now.prepare('SELECT data FROM records WHERE tbl = ? AND id = ? AND deleted = 0').get('historyInvoices', i.id) as { data: string } | undefined)
+        .filter((r): r is { data: string } => !!r)
+        .map((r) => JSON.parse(r.data) as { date: string; lines: { netFils: number; vatFils: number; grossFils: number }[] });
+      const counted = monthTable(back);
+      const off = [...tableDiff(counted, plan.table), ...tableDiff(counted, want!)];
+      if (back.length !== plan.invoices.length || off.length) {
+        await send(before);
+        fail(`counted again from the server: ${back.length} of ${plan.invoices.length} invoices; ${off.join('; ')} — what was there before is put back`);
+      }
+      console.log('Counted again from the garage’s records:');
+      for (const r of counted) console.log(`  ${pad(r.month === 'all' ? 'All' : r.month, 9, true)} ${pad(r.invoices, 4)} ${pad(r.lines, 5)} ${pad(fmt(r.netFils), 12)} ${pad(fmt(r.vatFils), 10)} ${pad(fmt(r.totalFils), 12)}  ✓`);
+    }
+  }
 }
 function carKeyOf(v: { plate: { code: string; number: string } }) {
   return [v.plate.code, v.plate.number].filter(Boolean).join('-');

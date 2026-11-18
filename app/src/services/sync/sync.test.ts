@@ -294,6 +294,17 @@ describe('syncing with the garage’s server (v0.40)', () => {
     await applyChanges([{ t: 'drivers', k: driverId, d: { id: driverId, name: 'Muhammad', phone: '+971501112233', createdAt: '2026-11-18T10:00:00.000Z' } }]);
   });
 
+  it('a record that comes without its id inside (the server’s renumbering wrote them so, v0.42.3) is put under its key, and the changes after it come too', async () => {
+    as('phone');
+    const { id: _id, ...bare } = (await db.orders.get(orderId))!;
+    await applyChanges([
+      { t: 'orders', k: orderId, d: { ...bare, number: 361 } },
+      { t: 'notes', k: 'n-after', d: { id: 'n-after', orderId: '', text: 'after it', createdAt: '2026-11-18T12:00:00.000Z' } },
+    ]);
+    expect((await db.orders.get(orderId))?.number).toBe(361);
+    expect((await db.notes.get('n-after'))?.text).toBe('after it');
+  });
+
   it('a record changed here and not sent yet is not overwritten — it goes up and wins', async () => {
     as('phone');
     await db.orders.update(orderId, { complaint: 'phone says' });

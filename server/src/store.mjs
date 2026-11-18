@@ -270,10 +270,10 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
       const byId = (list) => new Map(list.map((x) => [x.id, x]));
       const o = byId(orders);
       const inv = byId(invoices);
-      const strip = ({ id, ...rest }) => rest;
+      // The record whole, its id in it (v0.45: without it a device cannot put it — it takes a record by its own id).
       const changes = [
-        ...plan.orders.map((c) => ({ t: 'orders', k: c.id, d: { ...strip(o.get(c.id)), number: c.to, ...(c.eaglecart ? { eaglecartNo: c.to } : {}) } })),
-        ...plan.invoices.map((c) => ({ t: 'invoices', k: c.id, d: { ...strip(inv.get(c.id)), number: c.to } })),
+        ...plan.orders.map((c) => ({ t: 'orders', k: c.id, d: { ...o.get(c.id), id: c.id, number: c.to, ...(c.eaglecart ? { eaglecartNo: c.to } : {}) } })),
+        ...plan.invoices.map((c) => ({ t: 'invoices', k: c.id, d: { ...inv.get(c.id), id: c.id, number: c.to } })),
       ];
       last = push(null, changes, { server: true });
       // The job counter: the highest number now (it only goes up).

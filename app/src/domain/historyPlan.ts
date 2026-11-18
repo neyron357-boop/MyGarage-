@@ -41,7 +41,7 @@ export interface HistoryPlan {
   /** Every invoice read, as it would stand. */
   invoices: HistoryInvoice[];
   rows: HistorySummaryRow[];
-  /** Cars to bring in (a plate not the customer's) or to give their body (none set before). */
+  /** Cars to bring in (a plate not the customer's); the customer's own cars are not changed. */
   vehicles: Vehicle[];
   ownerships: Ownership[];
   /** Only what is new or other than what is here. */
@@ -276,8 +276,6 @@ export function planHistory(input: PlanInput): HistoryPlan {
       put({ id: `hs-${customerId}-${month}-0`, customerId, month, kind: 'total', no: 0, amountFils: s.totalFils, status: 'total', source: { file: doc.file, sha256: doc.sha256, page: s.page }, importedAt: now });
   }
 
-  // Cars without a body: the one their make and model say.
-  const typed = mine.filter((v) => !v.type && invoices.some((i) => i.vehicleId === v.id) && vehicleTypeOf(v.make, v.model)).map((v) => ({ ...v, type: vehicleTypeOf(v.make, v.model) }));
   const write = {
     invoices: invoices.filter((i) => existing.get(i.id) !== i),
     rows: rows.filter((r) => existingRows.get(r.id) !== r),
@@ -285,7 +283,7 @@ export function planHistory(input: PlanInput): HistoryPlan {
   return {
     invoices,
     rows,
-    vehicles: [...added.values(), ...typed],
+    vehicles: [...added.values()],
     ownerships,
     write,
     table: monthTable(invoices),
