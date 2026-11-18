@@ -35,6 +35,7 @@ const page = `<!doctype html>
     <button class="ghost" onclick="copyLink()">Скопировать ссылку для телефона</button>
   </div>
   <p class="mono dim" id="link" style="margin:10px 0 0"></p>
+  <p class="dim" id="copied" style="margin:6px 0 0"></p>
 </div>
 <h2>Доступ из интернета</h2>
 <div class="card" id="tunnel">…</div>
@@ -44,7 +45,9 @@ const page = `<!doctype html>
 <div class="card"><div class="mono" id="folder">…</div><p class="dim" style="margin:8px 0 0">Фото и видео, документы (инвойсы, сметы, акты), база и её ежедневные копии — всё в этой папке.</p></div>
 </main>
 <script>
-let code = null, addr = '';
+// Questions are asked on the page itself, not by confirm()/alert(): a browser built into an app answers them «no» at
+// once without showing anything — and the button did nothing.
+let code = null, addr = '', asking = false, revoking = '';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const when = (s) => s ? new Date(s).toLocaleString('ru-RU', { timeZone: 'Asia/Dubai' }) : '—';
 const mb = (b) => (b / 1024 / 1024).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' МБ';
@@ -64,7 +67,10 @@ async function load() {
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel);
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
     '<div class="row"><span>' + esc(d.name) + '<br><span class="dim">был на связи: ' + when(d.last_seen) + '</span></span>' +
-    (d.revoked ? '<span class="bad">отключено</span>' : '<button class="red" onclick="revoke(\\'' + d.id + '\\')">Отключить</button>') + '</div>').join('')
+    (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
+      ? '<span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end"><span class="dim">перестанет получать данные</span>' +
+        '<button class="red" onclick="revoke(\\'' + d.id + '\\')">Отключить</button><button class="ghost" onclick="askRevoke(\\'\\')">Отмена</button></span>'
+      : '<button class="red" onclick="askRevoke(\\'' + d.id + '\\')">Отключить</button>') + '</div>').join('')
     : '<span class="dim">Пока ни одного</span>';
 }
 function tunnelHtml(t) {
@@ -74,16 +80,32 @@ function tunnelHtml(t) {
     (t.url ? '<div class="row"><span>Адрес</span><span class="mono">' + esc(t.url) + '</span></div>' : '') +
     '<p class="dim" style="margin:8px 0 12px">Телефон видит сервер из любой сети. Подключиться можно только по коду с этого компьютера. ' +
     'После перезагрузки ПК адрес меняется — новый будет здесь, его нужно один раз ввести в приложении (Сервер → адрес). Постоянный адрес — Tailscale.</p>' +
-    (t.on ? '<button class="ghost" onclick="setTunnel(0)">Выключить</button>' : '<button onclick="setTunnel(1)">Включить доступ из интернета</button>');
+    (t.on ? '<button class="ghost" onclick="setTunnel(0)">Выключить</button>'
+      : asking ? '<p style="margin:0 0 12px">Сервер станет доступен из интернета через Cloudflare. Данные можно получить только с устройства, подключённого по коду с этого компьютера. Включить?</p>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="setTunnel(1)">Включить</button><button class="ghost" onclick="askTunnel(false)">Отмена</button></div>'
+      : '<button onclick="askTunnel(true)">Включить доступ из интернета</button>');
 }
+function askTunnel(v) { asking = v; load(); }
+function askRevoke(id) { revoking = id; load(); }
 async function setTunnel(on) {
-  if (on && !confirm('Сервер станет доступен из интернета через Cloudflare. Данные можно получить только с устройства, подключённого по коду с этого компьютера. Включить?')) return;
+  asking = false;
   await fetch('tunnel?on=' + on, { method: 'POST' });
   load();
 }
 async function newCode() { await fetch('code', { method: 'POST' }); load(); }
-async function revoke(id) { if (confirm('Отключить это устройство? Оно перестанет получать данные.')) { await fetch('revoke?id=' + encodeURIComponent(id), { method: 'POST' }); load(); } }
-async function copyLink() { const t = document.getElementById('link').textContent; if (t) { await navigator.clipboard.writeText(t).catch(() => {}); alert('Скопировано. Отправьте себе на телефон и вставьте в поле «Адрес сервера».'); } else alert('Сначала нужен адрес (туннель) и код.'); }
+async function revoke(id) { revoking = ''; await fetch('revoke?id=' + encodeURIComponent(id), { method: 'POST' }); load(); }
+async function copyLink() {
+  const t = document.getElementById('link').textContent, note = document.getElementById('copied');
+  if (!t) { note.textContent = 'Сначала нужен адрес (доступ из интернета) и код.'; return; }
+  let ok = navigator.clipboard ? await navigator.clipboard.writeText(t).then(() => true, () => false) : false;
+  if (!ok) {
+    const area = document.createElement('textarea');
+    area.value = t; document.body.appendChild(area); area.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+  }
+  note.textContent = ok ? 'Скопировано. Отправьте себе на телефон и вставьте в поле «Адрес сервера».' : 'Скопируйте ссылку выше вручную.';
+}
 load(); setInterval(load, 5000);
 </script></body></html>`;
 
