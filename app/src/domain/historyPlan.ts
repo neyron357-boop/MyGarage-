@@ -32,8 +32,6 @@ export interface PlanInput {
   /** The customer's history invoices and summary rows already here (an import again changes only what differs). */
   existing: HistoryInvoice[];
   existingRows: HistorySummaryRow[];
-  /** The standard service of a description (the catalogue), none — to be looked at. */
-  serviceOf: (description: string) => string | undefined;
   now: string;
 }
 
@@ -204,12 +202,8 @@ export function planHistory(input: PlanInput): HistoryPlan {
         }
       } else if (inv.template === 'B') flags.push({ code: 'no-job', text: `no job ${inv.number} here` });
       const before = existing.get(id);
-      const lines = inv.lines.map((l, i) => {
-        // A service set by hand stays; else the catalogue's.
-        const kept = before?.lines[i]?.description === l.description ? before.lines[i].serviceId : undefined;
-        const serviceId = kept ?? input.serviceOf(l.description);
-        return { ...l, ...(serviceId ? { serviceId } : {}) };
-      });
+      // A line's service is not written here: the catalogue gives it when the line is read (services/catalog.ts).
+      const lines = inv.lines;
       const record: HistoryInvoice = {
         id,
         customerId,

@@ -350,8 +350,8 @@ erDiagram
 — та же запись). `customer_id`, `vehicle_id` (машина напечатанного номера; номер с опечаткой — его машина, с отметкой),
 `order_id` (работа Eaglecart в приложении, если есть), `template` (`A` — старый шаблон, `B` — Tax Invoice), `number_kind`
 (`invoice` · `job`), `number`, `date`, `time`, `plate_raw` (как напечатан), `plate` (КОД-НОМЕР), `vehicle_text`, `vin`,
-`lines` — описание как на документе, `qty`, `unit_net`, `discount`, `net`, `vat` (= ROUND(net × ставка)), `gross`,
-`service_id`; `net`, `vat`, `total` (сумма строк = напечатанному Total — проверено при чтении), `payment_method`,
+`lines` — описание как на документе, `qty`, `unit_net`, `discount`, `net`, `vat` (= ROUND(net × ставка)), `gross`
+(v0.46: услугу и категорию строки даёт справочник при чтении — не хранятся); `net`, `vat`, `total` (сумма строк = напечатанному Total — проверено при чтении), `payment_method`,
 `source` (файл, SHA-256, страница), `flags` (`job-sum` · `job-car` · `job-twin` · `no-job` · `plate` · `new-car` с текстом),
 `imported_at`.
 
@@ -360,10 +360,12 @@ erDiagram
 `plate_raw`, `plate`, `invoice_no`, `amount`, `invoice_id` (какой инвойс это), `status` (`ok` · `amount` · `plate` ·
 `plate-amount` · `missing` — документа нет), `source`.
 
-**`service_categories`**, **`services`**, **`service_map`** (v0.45) — справочник стандартных услуг: категория (`name`,
-`position`); услуга (`name`, `category_id`, `keywords` — правила: описание с одним из слов — эта услуга, побеждает
-самое длинное; `kind: 'oil'` — замена масла), описание → услуга (`id` — описание в верхнем регистре без знаков,
-`by`: `seed` · `rule` · `hand`).
+**`service_categories`**, **`services`**, **`service_map`** (v0.45, заполнены в v0.46) — справочник стандартных услуг:
+категория (`name`, `position`, `archived_at`); услуга (`name`, `category_id`, `keywords` — правила: описание с одним из
+слов — эта услуга, побеждает самое длинное слово; `kind`: `oil` — замена масла, `labour` — строка, начатая её словом, — она,
+`archived_at`), описание → услуга, данная вручную (`id` — описание в верхнем регистре без знаков, `by: 'hand'`).
+v0.46: сам справочник (16 категорий, 71 услуга) приходит с приложением (`domain/serviceCatalogSeed.ts`); в таблицах —
+только правки мастерской: изменённая или убранная услуга/категория — запись с тем же id, своя — новая запись.
 
 **`invoices`** — инвойсы и кредит-ноты.
 

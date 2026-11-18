@@ -2897,6 +2897,50 @@ async function launchBrowser() {
     if (size < 20_000) throw new Error(`the report is ${size} bytes`);
     await shot('47b-history-card');
   });
+  await step('v0.46: the customer’s Excel and the garage’s check beside the report’s PDF; a line no service fits — «Проверить услуги» → Settings → Services, given its service by hand', async () => {
+    const id = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const c = (await db.customers.toArray()).find((x) => x.name === 'ACME TEST CONTRACTING LLC');
+      // A second invoice of May, with a line no service of the catalogue fits.
+      const [first] = await db.historyInvoices.where('customerId').equals(c.id).toArray();
+      await db.historyInvoices.put({ ...first, id: 'hi-A-invoice-302-2026-05-09', number: '302', date: '2026-05-09', lines: [{ description: 'MAGIC SMOKE REMOVAL', qty: 1, unitNetFils: 10000, netFils: 10000, vatFils: 500, grossFils: 10500 }], netFils: 10000, vatFils: 500, totalFils: 10500 });
+      return c.id;
+    });
+    await page.goto(BASE + '#/customers/' + id);
+    await page.getByText('Отчёт').first().click();
+    await page.evaluate(() => {
+      navigator.canShare = () => false;
+    });
+    const dlg = page.getByRole('dialog');
+    await dlg.getByRole('button', { name: /^PDF для клиента · 2/ }).waitFor({ timeout: 60000 });
+    const [xlsx] = await Promise.all([page.waitForEvent('download'), dlg.getByRole('button', { name: 'Excel для клиента' }).click()]);
+    if (!/Service report May 2026\.xlsx$/.test(xlsx.suggestedFilename())) throw new Error(`the workbook is ${xlsx.suggestedFilename()}`);
+    // A stored ZIP: its parts are readable as they are.
+    const book = fs.readFileSync(await xlsx.path()).toString('utf8');
+    for (const s of ['<sheet name="Overview"', '<sheet name="Invoices"', '<sheet name="Work Details"', '<sheet name="Services"', '<sheet name="Vehicles"', 'SUBTOTAL(109,I2:I3)', 'Oil change (engine oil + filter)', 'MAGIC SMOKE REMOVAL', '<c:barChart>'])
+      if (!book.includes(s)) throw new Error(`the workbook has no ${s}`);
+    await page.waitForTimeout(400);
+    const [check] = await Promise.all([page.waitForEvent('download'), dlg.getByRole('button', { name: 'Сверка со сводками' }).click()]);
+    if (!/INTERNAL check May 2026\.xlsx$/.test(check.suggestedFilename())) throw new Error(`the check is ${check.suggestedFilename()}`);
+    await shot('48a-report-excel');
+    await page.waitForTimeout(400);
+    await dlg.getByRole('button', { name: 'Проверить услуги: 1' }).click();
+    await page.getByText('MAGIC SMOKE REMOVAL').first().waitFor();
+    await page.getByText('Oil change (engine oil + filter)').first().waitFor();
+    await shot('48b-services');
+    await page.waitForTimeout(400);
+    await page.getByText('MAGIC SMOKE REMOVAL').first().click();
+    const pick = page.getByRole('dialog');
+    await pick.getByPlaceholder('Найти услугу').fill('labour');
+    await shot('48c-services-pick');
+    await pick.getByText('Labour charges', { exact: true }).click();
+    await pick.waitFor({ state: 'detached' });
+    const mapped = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      return (await db.serviceMap.toArray()).map((e) => [e.id, e.serviceId, e.by]);
+    });
+    if (JSON.stringify(mapped) !== JSON.stringify([['MAGIC SMOKE REMOVAL', 'svc-labour', 'hand']])) throw new Error(`mapped: ${JSON.stringify(mapped)}`);
+  });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
     await page.goto(BASE + '#/');

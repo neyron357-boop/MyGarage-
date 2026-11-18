@@ -2,7 +2,6 @@ import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { monthTable, readDocument, tableDiff, type MonthRow } from '../domain/historyInvoices';
 import { planHistory, type HistoryPlan, type PlanDoc } from '../domain/historyPlan';
-import { serviceLookup } from '../domain/serviceCatalog';
 import type { HistoryInvoice } from '../domain/types';
 import { AppError } from './errors';
 import { sha256Hex } from './media';
@@ -25,15 +24,13 @@ export async function readHistoryPdf(file: Blob, name: string): Promise<PlanDoc>
 
 /** What an import of these PDFs would write into the customer's card — nothing is written. */
 export async function planHistoryImport(customerId: string, docs: PlanDoc[]): Promise<HistoryPlan> {
-  const [vehicles, orders, existing, existingRows, services, map] = await Promise.all([
+  const [vehicles, orders, existing, existingRows] = await Promise.all([
     db.vehicles.toArray(),
     db.orders.where('customerId').equals(customerId).toArray(),
     db.historyInvoices.where('customerId').equals(customerId).toArray(),
     db.historySummaryRows.where('customerId').equals(customerId).toArray(),
-    db.services.toArray(),
-    db.serviceMap.toArray(),
   ]);
-  return planHistory({ customerId, docs, vehicles, orders, existing, existingRows, serviceOf: serviceLookup({ services, map }), now: nowIso() });
+  return planHistory({ customerId, docs, vehicles, orders, existing, existingRows, now: nowIso() });
 }
 
 export interface HistoryImportResult {

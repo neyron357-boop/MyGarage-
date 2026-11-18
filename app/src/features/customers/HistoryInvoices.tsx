@@ -1,13 +1,15 @@
 import { Alert, Box, Button, Group, Modal, SegmentedControl, Stack, Table, Text } from '@mantine/core';
-import { IconAlertTriangle, IconCheck, IconFileImport, IconFileText, IconReportAnalytics } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconFileImport, IconFileSpreadsheet, IconFileText, IconListCheck, IconReportAnalytics } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { tableDiff, type MonthRow } from '../../domain/historyInvoices';
 import type { HistoryPlan, PlanDoc } from '../../domain/historyPlan';
 import type { Customer } from '../../domain/types';
+import type { ReportExcels } from '../../services/customerExcel';
 import { applyHistoryImport, expectedTable, planHistoryImport, readHistoryPdf, type HistoryImportResult } from '../../services/historyImport';
 import { MonthField, DayPill } from '../../ui/DateFields';
 import { shareOrDownload } from '../../ui/share';
@@ -80,30 +82,43 @@ const monthEnd = (m: string) => `${m}-${String(new Date(Date.UTC(+m.slice(0, 4),
 
 /**
  * The customer's report of a month (the one its last invoice is of, at first) or of any period: one PDF — the summary,
- * then each invoice (pdf/customerReport.tsx).
+ * then each invoice (pdf/customerReport.tsx) — and the Excel for the customer (services/customerExcel.ts; lines no
+ * service is known for — «Проверить», Settings → Services), with the garage's own check of the summaries beside it.
  */
 function ReportSheet({ customer, opened, onClose, lastDay }: { customer: Customer; opened: boolean; onClose: () => void; lastDay?: string }) {
   const { t } = useTranslation();
   const errorText = useErrorText();
+  const navigate = useNavigate();
   const [mode, setMode] = useState<'month' | 'period'>('month');
   const [month, setMonth] = useState((lastDay ?? dubaiDate()).slice(0, 7));
   const [from, setFrom] = useState(`${(lastDay ?? dubaiDate()).slice(0, 7)}-01`);
   const [to, setTo] = useState(lastDay ?? dubaiDate());
   const period = mode === 'month' ? { from: `${month}-01`, to: monthEnd(month) } : { from: from <= to ? from : to, to: from <= to ? to : from };
   const key = `${period.from}|${period.to}`;
-  // The PDF of the period chosen is made as soon as it is chosen: a phone shares a file only in the tap itself (iOS
-  // refuses it after a wait), so the button hands over one made already.
+  // The files of the period chosen are made as soon as it is chosen: a phone shares a file only in the tap itself (iOS
+  // refuses it after a wait), so each button hands over one made already — the workbooks soon, the PDF (a page an
+  // invoice) when it is drawn.
   const [made, setMade] = useState<{ key: string; file?: File; count: number; error?: string } | null>(null);
+  const [books, setBooks] = useState<({ key: string; error?: string } & Partial<ReportExcels>) | null>(null);
   useEffect(() => {
     if (!opened) return;
     let alive = true;
     const wait = window.setTimeout(() => {
       void (async () => {
         try {
-          const { renderCustomerReport } = await import('../../pdf/customerReport');
-          const r = await renderCustomerReport(customer.id, period.from, period.to);
+          const report = await import('../../pdf/customerReport');
+          const items = await report.reportItems(customer.id, period.from, period.to);
+          void import('../../services/customerExcel')
+            .then((x) => x.reportExcels(customer, period.from, period.to, items))
+            .then((x) => alive && setBooks({ key, ...x }))
+            .catch((e) => alive && setBooks({ key, error: errorText(e) }));
+          if (!items.length) {
+            if (alive) setMade({ key, count: 0 });
+            return;
+          }
+          const r = await report.renderCustomerReport(customer.id, period.from, period.to, items);
           const name = `${customer.companyName || customer.name} — ${r.title}.pdf`.replace(/[\\/:*?"<>|]/g, ' ');
-          if (alive) setMade({ key, count: r.items.length, ...(r.items.length ? { file: new File([r.blob], name, { type: 'application/pdf' }) } : {}) });
+          if (alive) setMade({ key, count: r.items.length, file: new File([r.blob], name, { type: 'application/pdf' }) });
         } catch (e) {
           if (alive) setMade({ key, count: 0, error: errorText(e) });
         }
@@ -117,7 +132,9 @@ function ReportSheet({ customer, opened, onClose, lastDay }: { customer: Custome
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, key, customer.id]);
   const ready = made?.key === key ? made : null;
+  const book = books?.key === key ? books : null;
   const pdf = () => ready?.file && shareOrDownload(ready.file);
+  const error = ready?.error ?? book?.error;
   return (
     <Modal opened={opened} onClose={onClose} title={t('history.report')}>
       <Stack gap="md">
@@ -138,14 +155,38 @@ function ReportSheet({ customer, opened, onClose, lastDay }: { customer: Custome
             <DayPill value={to} onChange={setTo} label={t('history.to')} />
           </Group>
         )}
-        {ready?.error ? (
+        {error ? (
           <Text size="sm" c="red.7">
-            {ready.error}
+            {error}
           </Text>
         ) : null}
         <Button size="md" leftSection={<IconFileText size={18} />} loading={!ready} disabled={!!ready && !ready.file} onClick={pdf}>
           {ready && !ready.file && !ready.error ? t('history.nothingInPeriod') : ready?.file ? t('history.pdfCount', { n: ready.count }) : t('history.pdf')}
         </Button>
+        {(!book || book.client) && (
+          <Button size="md" variant="light" leftSection={<IconFileSpreadsheet size={18} />} loading={!book} onClick={() => book?.client && shareOrDownload(book.client)}>
+            {t('history.excel')}
+          </Button>
+        )}
+        {!!book?.unmapped && (
+          <Button
+            size="md"
+            variant="light"
+            color="orange"
+            leftSection={<IconAlertTriangle size={18} />}
+            onClick={() => {
+              onClose();
+              navigate('/settings?tab=services');
+            }}
+          >
+            {t('history.unmapped', { n: book.unmapped })}
+          </Button>
+        )}
+        {book?.check && (
+          <Button size="md" variant="subtle" color="gray" leftSection={<IconListCheck size={18} />} onClick={() => book.check && shareOrDownload(book.check)}>
+            {t('history.check')}
+          </Button>
+        )}
       </Stack>
     </Modal>
   );

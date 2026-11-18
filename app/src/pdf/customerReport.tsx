@@ -3,7 +3,8 @@ import { db } from '../db/db';
 import { dubaiDate, formatDocDate } from '../domain/dates';
 import { carPlate } from '../domain/historyPlan';
 import { buyerName } from '../domain/invoice';
-import type { Customer, HistoryInvoice, Settings } from '../domain/types';
+import type { Customer, HistoryInvoice, Settings, Vehicle, VehicleType } from '../domain/types';
+import { vehicleTypeOf } from '../domain/vehicleType';
 import { getSettings } from '../services/settings';
 import { invoicePageView, InvoicePage, renderDoc, type InvoicePageView } from './documents';
 import { aed, AR_LABEL, COLOR, GarageFooter, GarageHeader, TitleBar, type DocRow } from './garage';
@@ -24,9 +25,16 @@ export interface ReportItem {
   date: string;
   vehicle: string;
   plate: string;
+  /** The car's body (Pickup, Van…) — as set on the car, else as its make and model tell. */
+  vehicleType?: VehicleType;
   totalFils: number;
   page: InvoicePageView;
 }
+
+const typeOf = (car?: Vehicle): { vehicleType?: VehicleType } => {
+  const t = car && (car.type ?? vehicleTypeOf(car.make, car.model));
+  return t ? { vehicleType: t } : {};
+};
 
 /** "2 May 2026" — a day of a document without its time. */
 const dayText = (date: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
@@ -76,7 +84,7 @@ export async function reportItems(customerId: string, from: string, to: string):
   for (const h of history) {
     if (h.date < from || h.date > to) continue;
     const car = cars.get(h.vehicleId);
-    items.push({ key: h.id, number: h.number, date: h.date, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : h.vehicleText, plate: h.plate, totalFils: h.totalFils, page: historyPageView(h, settings, customer) });
+    items.push({ key: h.id, number: h.number, date: h.date, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : h.vehicleText, plate: h.plate, ...typeOf(car), totalFils: h.totalFils, page: historyPageView(h, settings, customer) });
   }
   const invoices = orders.length ? await db.invoices.where('orderId').anyOf(orders.map((o) => o.id)).toArray() : [];
   for (const inv of invoices) {
@@ -84,7 +92,7 @@ export async function reportItems(customerId: string, from: string, to: string):
     if (inv.type === 'credit_note' || inv.status !== 'issued' || day < from || day > to) continue;
     const order = orders.find((o) => o.id === inv.orderId);
     const car = order && (cars.get(order.vehicleId) ?? (await db.vehicles.get(order.vehicleId)));
-    items.push({ key: inv.id, number: inv.number, date: day, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : '', plate: car ? carPlate(car.plate) : '', totalFils: inv.totalFils, page: await invoicePageView(inv.id) });
+    items.push({ key: inv.id, number: inv.number, date: day, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : '', plate: car ? carPlate(car.plate) : '', ...typeOf(car), totalFils: inv.totalFils, page: await invoicePageView(inv.id) });
   }
   return items.sort((a, b) => a.date.localeCompare(b.date) || a.number.localeCompare(b.number, 'en', { numeric: true }));
 }
@@ -154,9 +162,9 @@ function SummaryPage({ fam, settings, customer, title, rows, from, last, total, 
   );
 }
 
-/** The report of a customer's period as a PDF: its summary, then each invoice. */
-export async function renderCustomerReport(customerId: string, from: string, to: string): Promise<{ blob: Blob; items: ReportItem[]; title: string }> {
-  const [customer, settings, items] = await Promise.all([db.customers.get(customerId), getSettings(), reportItems(customerId, from, to)]);
+/** The report of a customer's period as a PDF: its summary, then each invoice (`items` — read already, for the Excel too). */
+export async function renderCustomerReport(customerId: string, from: string, to: string, read?: ReportItem[]): Promise<{ blob: Blob; items: ReportItem[]; title: string }> {
+  const [customer, settings, items] = await Promise.all([db.customers.get(customerId), getSettings(), read ?? reportItems(customerId, from, to)]);
   if (!customer) throw new Error('not found');
   const { title: period, monthly } = periodTitle(from, to);
   const title = `${monthly ? 'MONTHLY INVOICE SUMMARY' : 'INVOICE SUMMARY'} – ${period}`;

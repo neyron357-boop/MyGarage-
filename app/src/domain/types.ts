@@ -157,8 +157,6 @@ export interface HistoryLine {
   /** ROUND(net × rate) — the line's VAT. */
   vatFils: number;
   grossFils: number;
-  /** The standard service (services table): by the catalogue's rules or by hand; none — waits in «Проверить». */
-  serviceId?: string;
 }
 
 export interface HistoryFlag {
@@ -215,7 +213,8 @@ export interface Service {
   name: string;
   categoryId: string;
   keywords: string[];
-  kind?: 'oil';
+  /** oil — an oil change (counted on each car); labour — a line that starts with its words is labour, whatever it names after. */
+  kind?: 'oil' | 'labour';
   position: number;
   archivedAt?: string;
 }

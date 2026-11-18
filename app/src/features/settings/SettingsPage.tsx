@@ -36,6 +36,7 @@ import {
   IconPlus,
   IconSettings,
   IconTemplate,
+  IconTool,
   IconTrash,
   IconUpload,
   IconUsers,
@@ -64,6 +65,7 @@ import { useInstall } from '../../ui/pwa';
 import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
 import { LazySheet } from '../../ui/lazy';
 import { ListsTab } from './ListsTab';
+import { ServicesTab } from './ServicesTab';
 import { EaglecartImportCard, EaglecartUndoRow } from './EaglecartImport';
 
 function Card({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
@@ -661,6 +663,7 @@ const TABS: { key: string; icon: Icon }[] = [
   { key: 'staff', icon: IconUsers },
   { key: 'prices', icon: IconList },
   { key: 'lists', icon: IconListCheck },
+  { key: 'services', icon: IconTool },
   { key: 'categories', icon: IconCategory },
   { key: 'data', icon: IconDatabase },
 ];
@@ -689,6 +692,7 @@ export function SettingsPage() {
       {tab === 'staff' && <StaffTab />}
       {tab === 'prices' && <PricesTab />}
       {tab === 'lists' && <ListsTab s={s} onOpenPrices={() => openTab('prices')} />}
+      {tab === 'services' && <ServicesTab />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'data' && <DataTab />}
       <ConfirmModal

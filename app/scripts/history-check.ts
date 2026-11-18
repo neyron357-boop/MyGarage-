@@ -110,7 +110,6 @@ if (opt('--db') && opt('--customer')) {
   const all = <T>(tbl: string): T[] => (db.prepare('SELECT id, data FROM records WHERE tbl = ? AND deleted = 0').all(tbl) as { id: string; data: string }[]).map((r) => ({ ...JSON.parse(r.data), id: r.id }) as T);
   const customerId = opt('--customer')!;
   const { planHistory } = await import('../src/domain/historyPlan');
-  const { serviceLookup } = await import('../src/domain/serviceCatalog');
   type Rec = { customerId: string };
   const docs = [];
   for (const f of files) {
@@ -125,7 +124,6 @@ if (opt('--db') && opt('--customer')) {
     orders: all<Rec & import('../src/domain/types').Order>('orders').filter((o) => o.customerId === customerId),
     existing: all<Rec & import('../src/domain/types').HistoryInvoice>('historyInvoices').filter((i) => i.customerId === customerId),
     existingRows: all<Rec & import('../src/domain/types').HistorySummaryRow>('historySummaryRows').filter((i) => i.customerId === customerId),
-    serviceOf: serviceLookup({ services: all('services'), map: all('serviceMap') }),
     now: new Date().toISOString(),
   });
   const withJob = plan.invoices.filter((i) => i.orderId).length;
