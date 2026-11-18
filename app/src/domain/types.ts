@@ -172,6 +172,11 @@ export interface ImportedFrom {
 export interface Order {
   id: string;
   number: number;
+  /**
+   * A job made here that is an Eaglecart job (v0.42.3): its number is Eaglecart's (below 350, where the garage's own
+   * start); the garage's server keeps it so (server/src/numbers.mjs).
+   */
+  eaglecartNo?: number;
   customerId: string;
   vehicleId: string;
   stage: Stage;

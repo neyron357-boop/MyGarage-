@@ -137,6 +137,16 @@ describe('Eaglecart import', () => {
     expect(await counts()).toEqual(before);
   });
 
+  it('a job already here under its Eaglecart number (made here, v0.42.3) is not brought in a second time', async () => {
+    const c = await createCustomer({ name: 'JOHN TEST', phone: '+971501112233', preferredChannel: 'whatsapp', docLanguage: 'en', type: 'individual' });
+    const v = await createVehicle(c.id, { plate: { emirate: 'DXB', code: 'CC', number: '78728' }, make: 'Toyota', model: 'Corolla' });
+    await db.orders.add({ id: uid(), number: 2, eaglecartNo: 2, customerId: c.id, vehicleId: v.id, stage: 'ready', outcome: 'in_progress', complaint: '', docLanguage: 'en', createdAt: '2026-08-02T06:00:00.000Z', updatedAt: '2026-08-02T06:00:00.000Z', stageChangedAt: '2026-08-02T06:00:00.000Z' });
+    const stats = await importEaglecart(sample(), opts);
+    expect(await db.orders.get('ec-o-101')).toBeUndefined();
+    expect(stats.alreadyImported).toBe(1);
+    expect((await db.orders.where('number').equals(2).toArray()).length).toBe(1);
+  });
+
   it('connects to customers and cars already in MyGarage instead of duplicating them', async () => {
     const c = await createCustomer({ name: 'John', phone: '050 111 2233', preferredChannel: 'whatsapp', docLanguage: 'ru', type: 'individual' });
     const v = await createVehicle(c.id, { plate: { emirate: 'DXB', code: 'CC', number: '78728' }, make: 'Toyota', model: 'Corolla' });

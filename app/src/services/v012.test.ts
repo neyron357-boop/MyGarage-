@@ -102,7 +102,9 @@ describe('changing the lines after the invoice', () => {
     await updateItem(oil.id, { titleEn: 'Engine oil change' });
     await approveAll(o.id);
     const second = await quickInvoice(o.id);
-    expect(second.number).not.toBe(first.number);
+    // v0.42.3: the invoice in force has the job's own number; the cancelled one gave it up («-1»).
+    expect(second.number).toBe(first.number);
+    expect((await db.invoices.get(first.id))!.number).toBe(`${first.number}-1`);
     expect(second.lines.map((l) => l.description)).toEqual(['ENGINE OIL CHANGE', 'OIL FILTER']);
     b = (await loadOrderBundle(o.id))!;
     expect(b.order.stage).toBe('ready');

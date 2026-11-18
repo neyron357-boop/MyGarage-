@@ -2,7 +2,7 @@ import { db, nextNumber, uid } from '../db/db';
 import { cashTotals } from '../domain/cash';
 import { dubaiDate, monthKey, nowIso, onDubaiDay } from '../domain/dates';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
-import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, paidNet } from '../domain/invoice';
+import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, jobDocNumber, paidNet } from '../domain/invoice';
 import { formatAed } from '../domain/money';
 import type { CashClosing, CashMovement, CashReason, Debt, Expense, ExpenseMethod, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
 import { placeInDay, recountClosing } from './cashDays';
@@ -115,10 +115,11 @@ export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 
   const c = b.customer;
   const invType = type ?? chooseInvoiceType(c);
   return db.transaction('rw', [db.invoices, db.counters, db.events], async () => {
-    const n = await nextNumber(`invoice-${year()}`);
+    // The job's own number (v0.42.3): the invoice in force has it; the one a credit note cancelled before becomes «-1»
+    // (the garage's server renames it — invoices never change here).
     const inv: Invoice = {
       id: uid(),
-      number: formatDocNumber('INV', year(), n),
+      number: jobDocNumber('INV', year(), b.order.number),
       type: invType,
       orderId,
       issuedAt: nowIso(),
@@ -147,12 +148,14 @@ export async function issueCreditNote(invoiceId: string, reason: string): Promis
   if (!orig || orig.type === 'credit_note') throw new AppError('err.notFound');
   if (orig.status !== 'issued') throw new AppError('err.alreadyCredited');
   if (!reason.trim()) throw new AppError('err.reasonRequired');
+  const order = await db.orders.get(orig.orderId);
   return db.transaction('rw', [db.invoices, db.counters, db.events], async () => {
-    const n = await nextNumber(`credit-${year()}`);
+    // The job's own number too (v0.42.3): «CN-2026-319», a second one — «-2».
+    const before = await db.invoices.where('orderId').equals(orig.orderId).filter((i) => i.type === 'credit_note').count();
     const cn: Invoice = {
       ...orig,
       id: uid(),
-      number: formatDocNumber('CN', year(), n),
+      number: jobDocNumber('CN', year(), order?.number ?? 0, before + 1),
       type: 'credit_note',
       originalInvoiceId: orig.id,
       issuedAt: nowIso(),
@@ -160,7 +163,11 @@ export async function issueCreditNote(invoiceId: string, reason: string): Promis
       status: 'issued',
     };
     await db.invoices.add(cn);
-    await db.invoices.update(orig.id, { status: 'credited' });
+    // Cancelled, it gives the job's own number to the invoice issued next (v0.42.3): «INV-2026-319» → «-1», «-2» in the
+    // order they were cancelled — as the garage's server numbers them (server/src/numbers.mjs).
+    const cancelled = await db.invoices.where('orderId').equals(orig.orderId).filter((i) => i.type !== 'credit_note' && i.status === 'credited' && i.id !== orig.id).count();
+    const base = jobDocNumber('INV', Number(dubaiDate(orig.issuedAt).slice(0, 4)), order?.number ?? 0);
+    await db.invoices.update(orig.id, { status: 'credited', number: `${base}-${cancelled + 1}` });
     await logEvent(orig.orderId, 'credit_note', { number: cn.number, original: orig.number, reason });
     return cn;
   });

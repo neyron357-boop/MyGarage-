@@ -402,7 +402,7 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
 }
 
 /**
- * Tax invoice (and credit note) as the garage's own: seller with TRN, invoice and job numbers,
+ * Tax invoice (and credit note) as the garage's own: seller with TRN, the invoice number (it is the job's, v0.42.3),
  * the customer with the car, lines with price excl. VAT, their part of the discount and VAT, totals incl.
  * VAT (Subtotal − Discount = Total), barcodes and a QR code with the invoice summary. Always in English
  * with Arabic labels (UAE tax invoice).
@@ -445,7 +445,6 @@ export async function renderInvoice(invoiceId: string, paidAt?: string): Promise
               <>
                 <BiLine en={credit ? 'Credit Note Number' : 'Invoice Number'} ar={credit ? AR_LABEL.creditNumber : AR_LABEL.invoiceNumber} value={inv.number} />
                 {original ? <BiLine en="Reference" ar={AR_LABEL.reference} value={`${original.number}${inv.reason ? ` — ${inv.reason}` : ''}`} /> : null}
-                <BiLine en="Order#" ar={AR_LABEL.order} value={String(b.order.number)} />
                 <BiLine en="Date" ar={AR_LABEL.date} value={formatDocDate(inv.issuedAt)} />
               </>
             }
@@ -469,7 +468,8 @@ export async function renderInvoice(invoiceId: string, paidAt?: string): Promise
             </>
           }
         />
-        <Codes jobNo={String(b.order.number)} invoiceNo={inv.number} qrText={qrText} />
+        {/* Only the invoice's own number (v0.42.3, the user: «только инвойс номер в инвойсе, убери job номер»). */}
+        <Codes invoiceNo={inv.number} qrText={qrText} />
         <GarageFooter s={head} />
       </Page>
     </Document>

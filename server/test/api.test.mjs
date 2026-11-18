@@ -220,18 +220,20 @@ describe('MyGarage server', () => {
     const pc = await pair('PC demo');
     await call('/api/sync/push', { token: pc, method: 'POST', body: { changes: [{ t: 'orders', k: 'demo-1', d: { id: 'demo-1', number: 1001 } }, { t: 'counters', k: 'order', d: { name: 'order', value: 1008 } }] } });
     const phone = await pair('iPhone 2');
-    await call('/api/sync/push', { token: phone, method: 'POST', body: { changes: [{ t: 'orders', k: 'real-1', d: { id: 'real-1', number: 307 } }] } });
-    const keys = { orders: ['real-1'] };
-    const r = await call('/api/sync/replace', { token: phone, method: 'POST', body: { keys, counters: [{ name: 'order', value: 307 }] } });
+    // Its jobs: its own (from 350, v0.42.3) and one that is an Eaglecart job, with Eaglecart's number.
+    await call('/api/sync/push', { token: phone, method: 'POST', body: { changes: [{ t: 'orders', k: 'real-1', d: { id: 'real-1', number: 357 } }, { t: 'orders', k: 'real-2', d: { id: 'real-2', number: 302, eaglecartNo: 302 } }] } });
+    const keys = { orders: ['real-1', 'real-2'] };
+    const r = await call('/api/sync/replace', { token: phone, method: 'POST', body: { keys, counters: [{ name: 'order', value: 357 }] } });
     assert.equal(r.status, 200);
     assert.equal(store.record('orders', 'demo-1'), undefined);
-    assert.equal(store.record('orders', 'real-1').number, 307);
-    assert.equal(store.record('counters', 'order').value, 307);
+    assert.equal(store.record('orders', 'real-1').number, 357);
+    assert.equal(store.record('orders', 'real-2').number, 302);
+    assert.equal(store.record('counters', 'order').value, 357);
     assert.equal(store.mainDevice().name, 'iPhone 2');
     // The other device is told: the demo order goes, the lower number comes (marked to be taken).
     const got = await (await call('/api/sync/pull?since=0', { token: pc })).json();
     assert.deepEqual(got.changes.find((c) => c.k === 'demo-1').d, null);
-    assert.deepEqual(got.changes.find((c) => c.t === 'counters' && c.k === 'order').d, { name: 'order', value: 307, reset: true });
+    assert.deepEqual(got.changes.find((c) => c.t === 'counters' && c.k === 'order').d, { name: 'order', value: 357, reset: true });
     assert.equal(got.main.name, 'iPhone 2');
     // Only the main device may do it again.
     assert.equal((await call('/api/sync/replace', { token: pc, method: 'POST', body: { keys: {} } })).status, 409);

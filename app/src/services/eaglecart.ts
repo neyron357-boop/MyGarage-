@@ -169,6 +169,8 @@ export interface Existing {
   ids: Set<string>;
   customerByPhone: Map<string, string>;
   vehicleByPlate: Map<string, string>;
+  /** Job numbers in use: a job already here under its number is not brought in again (v0.42.3). */
+  numbers?: Set<number>;
 }
 
 const plateKey = (p: Plate) => `${p.emirate}:${plateSearchKey(p)}`;
@@ -302,7 +304,7 @@ export function planEaglecartImport(data: EaglecartExport, existing: Existing, o
   const items: OrderItem[] = [];
   for (const j of used) {
     const id = `ec-o-${j.id}`;
-    if (existing.ids.has(id)) {
+    if (existing.ids.has(id) || existing.numbers?.has(Number(j.no))) {
       stats.alreadyImported++;
       continue;
     }
@@ -398,7 +400,10 @@ async function loadExisting(): Promise<Existing> {
   for (const c of customers) if (c.phone && !c.archivedAt && !customerByPhone.has(c.phone)) customerByPhone.set(c.phone, c.id);
   const vehicleByPlate = new Map<string, string>();
   for (const v of vehicles) if (v.plate.number && !v.archivedAt) vehicleByPlate.set(plateKey(v.plate), v.id);
-  return { ids, customerByPhone, vehicleByPlate };
+  // The numbers in use (v0.42.3): an Eaglecart job the garage already has under its number (made here and given
+  // Eaglecart's number) is not brought in a second time.
+  const numbers = new Set(orders.map((o) => o.number));
+  return { ids, customerByPhone, vehicleByPlate, numbers };
 }
 
 /** What the import would add, without changing anything. */

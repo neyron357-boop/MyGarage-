@@ -11,15 +11,19 @@ export interface PdfFile {
   filename: string;
 }
 
-async function stored(ownerId: string): Promise<Media | undefined> {
-  return db.media.where('ownerId').equals(ownerId).filter((m) => m.kind === 'pdf' && m.slot === 'document_pdf').first();
+async function stored(ownerId: string, ok?: (m: Media) => boolean): Promise<Media | undefined> {
+  return db.media
+    .where('ownerId')
+    .equals(ownerId)
+    .filter((m) => m.kind === 'pdf' && m.slot === 'document_pdf' && (!ok || ok(m)))
+    .first();
 }
 
 const inFlight = new Map<string, Promise<PdfFile>>();
 
 /** Generate once and keep: the stored PDF is what the customer received. */
-async function keep(ownerType: MediaOwner, ownerId: string, filename: string, make: () => Promise<Blob>): Promise<PdfFile> {
-  const existing = await stored(ownerId);
+async function keep(ownerType: MediaOwner, ownerId: string, filename: string, make: () => Promise<Blob>, ok?: (m: Media) => boolean): Promise<PdfFile> {
+  const existing = await stored(ownerId, ok);
   if (existing) {
     const blob = await mediaBlob(existing.id);
     if (blob) return { blob, filename };
@@ -106,7 +110,8 @@ export async function invoicePdf(invoiceId: string): Promise<PdfFile> {
     }
   }
   if (invoiceBuyer(inv.buyer, customer) !== inv.buyer) return { blob: await make(), filename };
-  return keep('invoice', invoiceId, filename, make);
+  // Kept under its number: an invoice numbered again (v0.42.3 — as its job, as in Eaglecart) is drawn and kept anew.
+  return keep('invoice', invoiceId, filename, make, (m) => !m.name || m.name.startsWith(`${inv.number} `) || m.name === `${inv.number}.pdf`);
 }
 
 export async function receiptPdf(paymentId: string): Promise<PdfFile> {

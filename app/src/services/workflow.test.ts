@@ -214,7 +214,8 @@ describe('estimate and approvals', () => {
     await addPayment(o.id, { kind: 'prepayment', method: 'cash', amountFils: 10000 });
     const inv = await issueInvoice(o.id);
     expect(inv.type).toBe('simplified_tax_invoice');
-    expect(inv.number).toMatch(/^INV-\d{4}-00001$/);
+    // v0.42.3: the job's own number, as in Eaglecart — «INV-2026-350».
+    expect(inv.number).toBe(`INV-${new Date().getFullYear()}-${(await db.orders.get(o.id))!.number}`);
     // pads 180 + labor 120 + discs 450 + boot 80 = 830 net, VAT 41.50
     expect(inv.subtotalFils).toBe(83000);
     expect(inv.vatFils).toBe(4150);
@@ -228,12 +229,13 @@ describe('estimate and approvals', () => {
     await signInspection(h.id, 'Ahmed', png());
     expect((await db.orders.get(o.id))!.stage).toBe('closed');
 
-    // Correcting an invoice: credit note + new number.
+    // Correcting an invoice (v0.42.3): a credit note with the job's number; the cancelled invoice gives the job's own
+    // number to the new one.
     const cn = await issueCreditNote(inv.id, 'Ошибка в имени');
-    expect(cn.number).toMatch(/^CN-\d{4}-00001$/);
-    expect((await db.invoices.get(inv.id))!.status).toBe('credited');
+    expect(cn.number).toBe(inv.number.replace('INV-', 'CN-'));
+    expect(await db.invoices.get(inv.id)).toMatchObject({ status: 'credited', number: `${inv.number}-1` });
     const inv2 = await issueInvoice(o.id);
-    expect(inv2.number).toMatch(/00002$/);
+    expect(inv2.number).toBe(inv.number);
   });
 
   it('declined repair cancels open items (no diagnostics fee since the fast check-in)', async () => {

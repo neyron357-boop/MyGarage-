@@ -252,7 +252,9 @@ function installGuards(db: GarageDB) {
   guard(db.media, [], (m) => m.locked);
   guard(db.versions, ['status', 'answeredAt']);
   guard(db.decisions, []);
-  guard(db.invoices, ['status']);
+  // An invoice's number changes once (v0.42.3): cancelled by a credit note, it gives the job's own number to the next
+  // one — «INV-2026-319» becomes «INV-2026-319-1» (services/money.ts issueCreditNote, as the server does).
+  guard(db.invoices, ['status', 'number']);
   guard(db.debts, ['status']);
   guard(db.events, [], (e) => !purgeable.has(e.id));
   guard(db.addenda, []);

@@ -22,7 +22,10 @@ function usePhotoFile(item?: ViewerItem) {
     let alive = true;
     setFile(undefined);
     if (!item) return;
-    const load = item.src ? fetch(item.src).then((r) => r.blob()) : mediaBlob(item.id);
+    // After the photo itself (v0.42.3): the copy to share does not take its bandwidth — and by then it is mostly in the
+    // browser's cache already.
+    const wait = new Promise((r) => window.setTimeout(r, 1200));
+    const load = wait.then(() => (alive ? (item.src ? fetch(item.src).then((r) => r.blob()) : mediaBlob(item.id)) : undefined));
     void load
       .then((blob) => {
         if (!alive || !blob) return;

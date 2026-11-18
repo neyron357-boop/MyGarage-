@@ -148,6 +148,16 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
       else tunnel.stop();
       return json({ ok: true, on });
     }
+    // Every job numbered once more (v0.42.3, store.renumber): this computer only, asked by hand — `apply` false says
+    // what would change.
+    if (req.method === 'POST' && url.pathname === '/renumber') {
+      let body = '';
+      for await (const c of req) body += c;
+      const opts = JSON.parse(body || '{}');
+      const r = store.renumber({ fixed: opts.fixed ?? {}, floor: opts.floor, apply: opts.apply === true });
+      if (opts.apply === true) events?.changed(r.rev, null);
+      return json(r);
+    }
     if (req.method === 'POST' && url.pathname === '/revoke') {
       store.revoke(url.searchParams.get('id') || '');
       events?.drop(url.searchParams.get('id') || '');

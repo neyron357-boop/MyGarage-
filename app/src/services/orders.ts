@@ -1,4 +1,4 @@
-import { db, nextNumber, purge, purgeJournal, uid } from '../db/db';
+import { db, purge, purgeJournal, uid } from '../db/db';
 import { mechanicsOf, toggled } from '../domain/crew';
 import { hoursBetween, nowIso } from '../domain/dates';
 import { whatJobHolds, whyJobStays, type DeleteBlock } from '../domain/deletion';
@@ -55,6 +55,19 @@ export interface NewOrderInput {
  * optional (check-in, a warranty return). It is the job's creation that puts it there, not the first look at it:
  * opening a job never changes it (the board would put it on top).
  */
+/**
+ * The garage's own job numbers (v0.42.3, the user): Eaglecart's are its jobs' (up to 319 there) — the garage's own go on
+ * from 350, never below it, one after another. The garage's server keeps them unique between devices (server/src/numbers.mjs).
+ */
+export const FIRST_OWN_NUMBER = 350;
+
+async function nextOrderNumber(): Promise<number> {
+  const c = await db.counters.get('order');
+  const value = Math.max(FIRST_OWN_NUMBER, (c?.value ?? 0) + 1);
+  await db.counters.put({ name: 'order', value });
+  return value;
+}
+
 export async function createOrder(input: NewOrderInput): Promise<Order> {
   const customer = await db.customers.get(input.customerId);
   if (!customer) throw new AppError('err.notFound');
@@ -62,7 +75,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     const now = nowIso();
     const order: Order = {
       id: uid(),
-      number: await nextNumber('order', 1001),
+      number: await nextOrderNumber(),
       customerId: input.customerId,
       vehicleId: input.vehicleId,
       stage: input.arrivedNow ? 'diagnostics' : 'booked',

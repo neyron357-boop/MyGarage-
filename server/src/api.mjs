@@ -130,7 +130,9 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         }
       : {};
     if (req.method === 'OPTIONS') {
-      res.writeHead(allowed ? 204 : 403, cors);
+      // The app on this same computer asks it straight (v0.42.3, Chrome's Private / Local Network Access).
+      const near = allowed && req.headers['access-control-request-private-network'] ? { 'Access-Control-Allow-Private-Network': 'true' } : {};
+      res.writeHead(allowed ? 204 : 403, { ...cors, ...near });
       return res.end();
     }
     for (const [k, v] of Object.entries(cors)) res.setHeader(k, v);
@@ -149,6 +151,10 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         if (!store.mediaDevice(url.searchParams.get('d'), url.searchParams.get('k'))) throw httpError(401, 'not paired');
         const f = store.file(id, variant);
         if (!f) throw httpError(404, 'no such file');
+        // The key is the permission (v0.42.3): any page may read it — the same answer, kept once by the browser, serves a
+        // picture element and the app's own fetch alike.
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.removeHeader('Vary');
         return sendFile(req, res, f);
       }
 

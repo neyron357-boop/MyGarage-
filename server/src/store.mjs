@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { eaglecartNumbered, FIRST_OWN, fromEaglecart, invoiceNumbers, planRenumber } from './numbers.mjs';
 
 /*
  * Everything the garage has, in one folder on this computer:
@@ -103,17 +104,46 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
        device = excluded.device, at = excluded.at`,
   );
   const pullRows = db.prepare('SELECT rev, tbl, id, data, deleted FROM records WHERE rev > ? AND (device IS NULL OR device <> ?) ORDER BY rev LIMIT ?');
+  // Job numbers (v0.42.3, numbers.mjs): which job has a number, the highest one, a job's invoices.
+  const orderByNumber = db.prepare("SELECT id FROM records WHERE tbl = 'orders' AND deleted = 0 AND id <> ? AND json_extract(data, '$.number') = ? LIMIT 1");
+  const topNumber = db.prepare("SELECT MAX(json_extract(data, '$.number')) AS n FROM records WHERE tbl = 'orders' AND deleted = 0");
+  const invoicesOf = db.prepare("SELECT id, data FROM records WHERE tbl = 'invoices' AND deleted = 0 AND json_extract(data, '$.orderId') = ?");
+  const liveRows = db.prepare('SELECT id, data FROM records WHERE tbl = ? AND deleted = 0');
 
   function record(tbl, id) {
     const row = getRecord.get(tbl, id);
     return row && !row.deleted ? JSON.parse(row.data) : undefined;
   }
 
-  /** A device's changes: `{t, k, d}` (`d` null — deleted). Returns the number of the last one kept. */
-  function push(deviceId, changes) {
+  /** The next free job number (≥ 350): the counter moves to it, and every device is told. */
+  function nextJobNumber(at) {
+    const n = Math.max(FIRST_OWN - 1, Number(record('counters', 'order')?.value) || 0, Number(topNumber.get().n) || 0) + 1;
+    putRecord.run('counters', 'order', JSON.stringify({ name: 'order', value: n }), 0, ++rev, null, at);
+    return n;
+  }
+
+  /** A job's invoices numbered as its own (v0.42.3): those that differ are written so, and every device is told. */
+  function numberInvoices(orderId, at) {
+    const order = record('orders', orderId);
+    if (!order || !Number.isFinite(Number(order.number))) return;
+    const list = invoicesOf.all(orderId).map((r) => ({ id: r.id, ...JSON.parse(r.data) }));
+    const want = invoiceNumbers(Number(order.number), list);
+    for (const i of list) {
+      if (want.get(i.id) === i.number) continue;
+      const { id, ...data } = i;
+      putRecord.run('invoices', id, JSON.stringify({ ...data, number: want.get(id) }), 0, ++rev, null, at);
+    }
+  }
+
+  /**
+   * A device's changes: `{t, k, d}` (`d` null — deleted). Returns the number of the last one kept. `server`: the
+   * server's own (a job numbered once more): every device takes them, as they are.
+   */
+  function push(deviceId, changes, { server = false } = {}) {
     if (!Array.isArray(changes)) throw httpError(400, 'changes');
     const at = now();
     const touchedMedia = [];
+    const jobs = new Set();
     db.exec('BEGIN IMMEDIATE');
     try {
       for (const c of changes) {
@@ -129,7 +159,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
         }
         if (typeof c.d !== 'object') throw httpError(400, `bad record ${tbl}/${id}`);
         let data = c.d;
-        let by = deviceId;
+        let by = server ? null : deviceId;
         // A job's numbers only go up: a device behind gets the higher one back (it is sent to it too).
         if (tbl === 'counters') {
           const have = record(tbl, id);
@@ -138,11 +168,30 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
             by = null;
           }
         }
+        // Job numbers (v0.42.3): a job's stays what the server has; a new one taken already — or made here and below
+        // 350 — gets the next free one. The device gets it back (`by` none: every device takes it).
+        if (tbl === 'orders' && !server) {
+          const have = record(tbl, id);
+          const n = Number(data.number);
+          if (have) {
+            if (n !== Number(have.number)) {
+              data = { ...data, number: have.number };
+              by = null;
+            }
+          } else if (!Number.isFinite(n) || orderByNumber.get(id, n) || (!fromEaglecart(data) && !eaglecartNumbered(data) && n < FIRST_OWN)) {
+            data = { ...data, number: nextJobNumber(at) };
+            by = null;
+          }
+          jobs.add(id);
+        }
+        if (tbl === 'invoices' && !server && data.orderId) jobs.add(String(data.orderId));
         const json = JSON.stringify(data);
         if (json.length > MAX_RECORD) throw httpError(413, `record too large ${tbl}/${id}`);
         putRecord.run(tbl, id, json, 0, ++rev, by, at);
         if (tbl === 'media') touchedMedia.push(id);
       }
+      // An invoice's number is its job's (v0.42.3).
+      for (const orderId of jobs) numberInvoices(orderId, at);
       db.exec('COMMIT');
     } catch (e) {
       db.exec('ROLLBACK');
@@ -206,6 +255,32 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     const more = rows.length === Math.min(Math.max(Number(limit) || 500, 1), 2000);
     // Nothing more: the device is up to date with everything, its own changes included.
     return { changes, cursor: more ? changes[changes.length - 1].r : rev, more };
+  }
+
+  /**
+   * Every job numbered once more (v0.42.3, numbers.mjs `planRenumber`): `fixed` — jobs made here that are Eaglecart
+   * jobs (id → Eaglecart's number). Without `apply` only says what would change.
+   */
+  function renumber({ fixed = {}, floor = FIRST_OWN, apply = false } = {}) {
+    const orders = liveRows.all('orders').map((r) => ({ id: r.id, ...JSON.parse(r.data) }));
+    const invoices = liveRows.all('invoices').map((r) => ({ id: r.id, ...JSON.parse(r.data) }));
+    const plan = planRenumber(orders, invoices, { floor, fixed });
+    let last = rev;
+    if (apply) {
+      const byId = (list) => new Map(list.map((x) => [x.id, x]));
+      const o = byId(orders);
+      const inv = byId(invoices);
+      const strip = ({ id, ...rest }) => rest;
+      const changes = [
+        ...plan.orders.map((c) => ({ t: 'orders', k: c.id, d: { ...strip(o.get(c.id)), number: c.to, ...(c.eaglecart ? { eaglecartNo: c.to } : {}) } })),
+        ...plan.invoices.map((c) => ({ t: 'invoices', k: c.id, d: { ...strip(inv.get(c.id)), number: c.to } })),
+      ];
+      last = push(null, changes, { server: true });
+      // The job counter: the highest number now (it only goes up).
+      if (plan.counter > (Number(record('counters', 'order')?.value) || 0)) putRecord.run('counters', 'order', JSON.stringify({ name: 'order', value: plan.counter }), 0, ++rev, null, now());
+      last = rev;
+    }
+    return { orders: plan.orders, invoices: plan.invoices, counter: plan.counter, rev: last };
   }
 
   function counts() {
@@ -362,7 +437,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  return { dataDir, push, pull, replace, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
+  return { dataDir, push, pull, replace, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
 }
 
 export function httpError(status, message) {

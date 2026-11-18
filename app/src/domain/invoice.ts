@@ -109,3 +109,13 @@ export function amountDue(approvedGross: number, invoices: Invoice[], payments: 
 export function formatDocNumber(prefix: string, year: number, value: number): string {
   return `${prefix}-${year}-${String(value).padStart(5, '0')}`;
 }
+
+/**
+ * A job's invoice number (v0.42.3, the user: «job номер и инвойс номер одинаковые … формат простой: INV-2026-319»,
+ * as in Eaglecart): the job's own number after the year it is issued in — the invoice in force always has it; one
+ * a credit note cancelled becomes «INV-2026-319-1», «-2» (the garage's server renames it, server/src/numbers.mjs); a credit
+ * note — «CN-2026-319», «-2».
+ */
+export function jobDocNumber(prefix: 'INV' | 'CN', year: number, jobNo: number, nth = 1): string {
+  return `${prefix}-${year}-${jobNo}${nth > 1 ? `-${nth}` : ''}`;
+}

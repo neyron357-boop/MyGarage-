@@ -119,14 +119,24 @@ export function VideoPlayer({ video, file, title, onClose }: { video: HTMLVideoE
     return () => window.clearTimeout(hide.current);
   }, [playing, wake]);
 
-  // The file to share, read once.
+  // The file to share, read once — after the video has enough to play (v0.42.3): it does not take the video's own
+  // bandwidth (through the garage's tunnel the two went at once, and the video waited).
   useEffect(() => {
     let alive = true;
-    void file?.().then((f) => alive && setShared(f));
+    let asked = false;
+    const read = () => {
+      if (asked) return;
+      asked = true;
+      void file?.().then((f) => alive && setShared(f));
+    };
+    video.addEventListener('canplaythrough', read, { once: true });
+    const late = window.setTimeout(read, 8000);
     return () => {
       alive = false;
+      window.clearTimeout(late);
+      video.removeEventListener('canplaythrough', read);
     };
-  }, [file]);
+  }, [file, video]);
 
   const toggle = () => {
     if (video.paused) {

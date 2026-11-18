@@ -365,10 +365,11 @@ function QrCode({ text, size = 56.3 }: { text: string; size?: number }) {
 }
 
 /** Invoice: job barcode, QR with the invoice summary, invoice barcode. */
-export function Codes({ jobNo, invoiceNo, qrText }: { jobNo: string; invoiceNo: string; qrText: string }) {
+export function Codes({ jobNo, invoiceNo, qrText }: { jobNo?: string; invoiceNo: string; qrText: string }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, paddingHorizontal: 0 }} wrap={false}>
-      <Barcode value={jobNo} en="JOB ID" ar={AR_LABEL.jobId} />
+      {/* No job barcode on an invoice (v0.42.3): its place stays, so the QR code stays in the middle. */}
+      {jobNo ? <Barcode value={jobNo} en="JOB ID" ar={AR_LABEL.jobId} /> : <View style={{ width: 170 }} />}
       <QrCode text={qrText} />
       <Barcode value={invoiceNo} en="INVOICE#" ar={AR_LABEL.invoiceNo} />
     </View>

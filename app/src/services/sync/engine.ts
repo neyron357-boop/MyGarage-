@@ -203,7 +203,9 @@ export function onMediaArrived(fn: Arrived) {
 }
 
 /** Sends the photos' files; true when a photo whose record was held can go now (its record is sent at once). */
-async function pushMedia(cfg: SyncConfig): Promise<boolean> {
+async function pushMedia(server: SyncConfig): Promise<boolean> {
+  // Files to this computer's own server when it is the one (v0.42.3).
+  const cfg = { ...server, url: filesBase(server) };
   if (!syncState().mediaScanned) {
     // Photos from before syncing: each one waits to be sent.
     await db.mediaBlobs.filter((r) => r.up === undefined).modify({ up: 0 });
@@ -279,12 +281,66 @@ export function remoteMedia(id: string, variant: 'blob' | 'thumb' | 'card'): Pro
   const key = `${id}:${variant}`;
   let p = inflight.get(key);
   if (!p) {
-    p = getFile(cfg, id, variant)
+    // By the file's own address (v0.42.3), kept by the browser: what a picture or the viewer has loaded already is
+    // not downloaded a second time (to share, to save).
+    const src = remoteMediaSrc(id, variant);
+    p = (src ? cachedFile(src) : getFile({ ...cfg, url: filesBase(cfg) }, id, variant))
       .catch(() => undefined)
       .finally(() => inflight.delete(key));
     inflight.set(key, p);
   }
   return p;
+}
+
+/** A file by its own address, from the browser's cache when it is there (the server marks files as never changing). */
+async function cachedFile(src: string): Promise<Blob | undefined> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 120_000);
+  try {
+    const res = await fetch(src, { signal: ctl.signal, cache: 'force-cache' });
+    if (res.status === 404) return undefined;
+    if (!res.ok) throw new SyncError(res.status, res.statusText);
+    return await res.blob();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------- This computer's own server (v0.42.3) ---------- */
+
+const NEAR = 'http://127.0.0.1:8787';
+let near: { token: string; ok: boolean; at: number } | undefined;
+const phoneLike = () => typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+/**
+ * On the computer the garage's server runs on (v0.42.3, the user: «на десктопной версии фотографии и видео открываются
+ * очень [медленно]»): photos and videos come straight from it — not out through the tunnel and back (≈1 s a file and the
+ * garage's upload speed: a 12 MB video 8.6 s, straight 0.2 s). Checked once: this device's own key must work there (the
+ * same server). Anywhere else — or if the browser does not allow it — through the tunnel, as before.
+ */
+export async function findNearServer(): Promise<boolean> {
+  const cfg = syncConfig();
+  if (!cfg || phoneLike() || typeof fetch === 'undefined' || cfg.url === NEAR) return false;
+  if (near?.token === cfg.token && (near.ok || Date.now() - near.at < 10 * 60_000)) return near.ok;
+  near = { token: cfg.token, ok: false, at: Date.now() };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 2000);
+  try {
+    // `targetAddressSpace`: Chrome's own words for a page asking this computer (Local Network Access).
+    const init = { headers: { Authorization: `Bearer ${cfg.token}`, 'X-Sync': '2' }, signal: ctl.signal, cache: 'no-store', targetAddressSpace: 'loopback' } as RequestInit;
+    const res = await fetch(`${NEAR}/api/status`, init);
+    if (res.ok && syncConfig()?.token === cfg.token) near = { token: cfg.token, ok: true, at: Date.now() };
+  } catch {
+    // not this computer, or not allowed: the tunnel
+  } finally {
+    clearTimeout(timer);
+  }
+  return near.ok;
+}
+
+/** Where this device's files come from and go to: this computer's own server when it is here, else its address. */
+export function filesBase(cfg: SyncConfig): string {
+  return near?.ok && near.token === cfg.token ? NEAR : cfg.url;
 }
 
 /**
@@ -294,13 +350,13 @@ export function remoteMedia(id: string, variant: 'blob' | 'thumb' | 'card'): Pro
 export function remoteMediaSrc(id: string, variant: 'blob' | 'thumb' | 'card' = 'blob'): string | undefined {
   const cfg = syncConfig();
   if (!cfg?.mediaKey) return undefined;
-  return `${cfg.url}/api/media/${encodeURIComponent(id)}/${variant}?d=${encodeURIComponent(cfg.deviceId)}&k=${encodeURIComponent(cfg.mediaKey)}`;
+  return `${filesBase(cfg)}/api/media/${encodeURIComponent(id)}/${variant}?d=${encodeURIComponent(cfg.deviceId)}&k=${encodeURIComponent(cfg.mediaKey)}`;
 }
 
 /** A card made here from the server's original: the server keeps it too (best effort). */
 export function sendCard(id: string, card: Blob) {
   const cfg = syncConfig();
-  if (cfg) void putFile(cfg, id, 'card', card).catch(() => undefined);
+  if (cfg) void putFile({ ...cfg, url: filesBase(cfg) }, id, 'card', card).catch(() => undefined);
 }
 
 /* ---------- Running ---------- */
@@ -542,6 +598,7 @@ function listen() {
 
 /** The stream opened anew (back in the app, online again, a new address or connection), or closed when disconnected. */
 function relisten() {
+  void findNearServer();
   stream?.abort();
   stream = null;
   streamTries = 0;
@@ -555,6 +612,8 @@ let started = false;
 export function startSync() {
   if (started || typeof document === 'undefined') return;
   started = true;
+  // The computer with the server: its files straight from it (v0.42.3).
+  void findNearServer();
   // A change here: sent an eighth of a second later (one action's several writes go together).
   onLocalChange(() => scheduleSync(120));
   document.addEventListener('visibilitychange', () => {

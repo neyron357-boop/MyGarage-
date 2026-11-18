@@ -245,11 +245,15 @@ export interface JobMatch<T = unknown> {
   byNumber: boolean;
 }
 
-/** "INV-2026-00012" is found by "inv-2026-00012", "2026-00012" and "12"; "1024" by "1024". */
+/**
+ * "INV-2026-00012" is found by "inv-2026-00012", "2026-00012" and "12"; "1024" by "1024"; "INV-2026-319-2" (a job's
+ * invoice issued again, v0.42.3) — by "319" too.
+ */
 function numberKeys(n: string): string[] {
   const all = n.replace(/\D/g, '').replace(/^0+/, '');
   const last = (n.match(/(\d+)\D*$/)?.[1] ?? '').replace(/^0+/, '');
-  return [all, last].filter(Boolean);
+  const job = (/^[A-Z]{2,4}-\d{4}-(\d+)(?:-\d+)?$/i.exec(n.trim())?.[1] ?? '').replace(/^0+/, '');
+  return [all, last, job].filter(Boolean);
 }
 
 /**
