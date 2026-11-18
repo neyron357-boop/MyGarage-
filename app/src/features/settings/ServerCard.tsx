@@ -43,6 +43,7 @@ function useErrorText() {
     if (s?.message === 'code') return t('sync.err.code');
     if (s?.status === 403) return t('sync.err.wrongCode');
     if (s?.status === 429) return t('sync.err.tooMany');
+    if (s?.status === 426) return t('sync.err.update');
     if (s?.status === 0) return t('sync.err.offline');
     return t('sync.err.other', { message: (e as Error)?.message ?? String(e) });
   };
@@ -77,6 +78,8 @@ function PairSheet({ opened, onClose }: { opened: boolean; onClose: () => void }
       // An empty server: this device's data goes there (a phone's becomes the garage's — the main one).
       if (!r.server) finish(mobile(name) && r.local ? 'main' : 'send');
       else if (!r.local) finish('take');
+      // The same app connected again: it stays what it was; its data and the garage's are put together.
+      else if (r.rejoined) finish('send');
       else setAsk({ canMain: mobile(name) && !r.main });
     } catch (e) {
       haptic('error');
@@ -214,7 +217,8 @@ export function ServerCard() {
   const host = config.url.replace(/^https?:\/\//, '');
   const last = state.lastAt ? dayShort(state.lastAt) : undefined;
   const when = state.lastAt ? (last?.word ? `${t(`common.${last.word}`)} ${formatDateTime(state.lastAt).slice(11)}` : formatDateTime(state.lastAt)) : t('sync.never');
-  const status = state.busy ? t('sync.syncing') : state.lastError ? (errors[state.lastError] ?? t('sync.err.other', { message: state.lastError })) : when;
+  // The stream open (v0.41.2): other devices' changes come the moment they are made — «На связи».
+  const status = state.lastError ? (errors[state.lastError] ?? t('sync.err.other', { message: state.lastError })) : state.live ? t('sync.live') : state.busy ? t('sync.syncing') : when;
   const isMain = !!state.main && state.main.id === config.deviceId;
   // A phone may make its data the garage's while there is no main device (or it is the main one: sent again).
   const mayMain = mobile(config.deviceName) && (!state.main || isMain);
@@ -231,7 +235,7 @@ export function ServerCard() {
         </FormRow>
         <FormRow label={t('sync.status')}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <Text size="sm" c={state.lastError ? 'orange' : 'dimmed'} data-sync-status>
+            <Text size="sm" c={state.lastError ? 'orange' : state.live ? 'green' : 'dimmed'} data-sync-status>
               {status}
             </Text>
             <Button size="compact-sm" variant="light" leftSection={state.busy ? <Loader size={14} /> : <IconRefresh size={15} />} disabled={state.busy} onClick={() => void syncNow()}>

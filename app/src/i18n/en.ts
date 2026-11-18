@@ -1597,6 +1597,7 @@ export const en: typeof ru = {
     status: 'Sync',
     now: 'Now',
     syncing: 'Syncing…',
+    live: 'Live',
     never: 'Not yet',
     pending_one: 'Waiting to send: {{count}}',
     pending_few: 'Waiting to send: {{count}}',
@@ -1626,6 +1627,7 @@ export const en: typeof ru = {
       tooMany: 'Too many tries — wait 10 minutes',
       other: 'Error: {{message}}',
       main: 'Another device is the main one',
+      update: 'Update the app: close it and open it again',
     },
   },
   suppliers: {

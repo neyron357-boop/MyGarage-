@@ -3,7 +3,7 @@ import { db } from '../../db/db';
 import { LOCAL_TABLES, markRemote, nextStamp, onLocalChange, STAMP } from '../../db/syncHooks';
 import { nowIso } from '../../domain/dates';
 import { addressAllowed, callJson, getFile, parseAddress, putFile, SyncError } from './api';
-import { offloadOn, resetSyncState, setSyncConfig, setSyncState, syncConfig, syncState, type SyncConfig } from './config';
+import { installId, offloadOn, resetSyncState, setSyncConfig, setSyncState, syncConfig, syncState, type SyncConfig } from './config';
 
 /*
  * Syncing with the garage's server (v0.40): the app keeps working on its own data; in the background it sends what
@@ -27,6 +27,8 @@ export interface Change {
   k: string;
   d: Row | null;
   r?: number;
+  /** A copy (v0.41.2): taken from the server and never changed here — kept there only if the server has nothing for it. */
+  c?: 1;
 }
 
 /** A file this size and up leaves the phone once the server has it (a signature, a logo stay). */
@@ -42,6 +44,12 @@ function strip(row: Row): Row {
 
 /* ---------- Records ---------- */
 
+/** Photos whose own files are not on the server yet (sent first, then the photo's record — `held`). */
+async function filesWaiting(ids: string[]): Promise<Set<string>> {
+  const rows = await db.mediaBlobs.bulkGet(ids);
+  return new Set(ids.filter((_, i) => rows[i] && rows[i]!.up !== 1));
+}
+
 /** What changed here since the last push (everything, the first time), sent in parts. */
 async function pushRecords(cfg: SyncConfig): Promise<number> {
   const st = syncState();
@@ -55,9 +63,33 @@ async function pushRecords(cfg: SyncConfig): Promise<number> {
     if (!table || (await table.get(tomb.k))) continue;
     changes.push({ t: tomb.t, k: tomb.k, d: null });
   }
+  // A photo's record goes once its files are there (v0.41.2): another device shows it at once, never an empty frame.
+  const held = new Set(st.held ?? []);
+  const sent = new Set<string>();
   for (const table of synced()) {
     const rows = (st.initialDone ? await table.where(STAMP).above(st.pushedT).toArray() : await table.toArray()) as Row[];
-    for (const row of rows) changes.push({ t: table.name, k: keyOf(table, row), d: strip(row) });
+    const waiting = table.name === 'media' ? await filesWaiting(rows.map((r) => keyOf(table, r))) : undefined;
+    for (const row of rows) {
+      const k = keyOf(table, row);
+      if (waiting?.has(k)) {
+        held.add(k);
+        continue;
+      }
+      if (table.name === 'media') sent.add(k);
+      // Everything at a first connection: what came from the server and was not changed here goes as a copy — it
+      // never brings back what was deleted there since, or overrides a newer version.
+      if (!st.initialDone && row[STAMP] === 0) changes.push({ t: table.name, k, d: strip(row), c: 1 });
+      else changes.push({ t: table.name, k, d: strip(row) });
+    }
+  }
+  if (held.size) {
+    const still = await filesWaiting([...held]);
+    for (const k of [...held]) {
+      if (still.has(k)) continue;
+      held.delete(k);
+      const row = (await db.media.get(k)) as Row | undefined;
+      if (row && !sent.has(k)) changes.push({ t: 'media', k, d: strip(row) });
+    }
   }
   let batch: Change[] = [];
   let size = 0;
@@ -75,7 +107,7 @@ async function pushRecords(cfg: SyncConfig): Promise<number> {
   }
   await flush();
   if (tombs.length) await db.syncTombs.bulkDelete(tombs.map((t) => t.n!));
-  setSyncState({ pushedT: Math.max(st.pushedT, mark), initialDone: true });
+  setSyncState({ pushedT: Math.max(st.pushedT, mark), initialDone: true, held: [...held] });
   return changes.length;
 }
 
@@ -134,8 +166,10 @@ async function replaceServer(cfg: SyncConfig): Promise<void> {
   const keys: Record<string, string[]> = {};
   let counters: { name: string; value: number }[] = [];
   for (const table of synced()) {
-    if (table.name === 'counters') counters = ((await table.toArray()) as { name: string; value: number }[]).map((c) => ({ name: c.name, value: c.value }));
-    else keys[table.name] = (await table.toCollection().primaryKeys()).map(String);
+    keys[table.name] = (await table.toCollection().primaryKeys()).map(String);
+    // Its own numbers are taken as they are; one it only had from the server stays the server's.
+    if (table.name === 'counters')
+      counters = ((await table.toArray()) as { name: string; value: number; _t?: number }[]).filter((c) => c._t !== 0).map((c) => ({ name: c.name, value: c.value }));
   }
   await callJson(cfg, '/api/sync/replace', { method: 'POST', body: { keys, counters }, timeout: 90_000 });
   setSyncState({ replacing: false, main: { id: cfg.deviceId, name: cfg.deviceName } });
@@ -143,14 +177,15 @@ async function replaceServer(cfg: SyncConfig): Promise<void> {
 
 /* ---------- Photos and files ---------- */
 
-async function pushMedia(cfg: SyncConfig): Promise<number> {
+/** Sends the photos' files; true when a photo whose record was held can go now (its record is sent at once). */
+async function pushMedia(cfg: SyncConfig): Promise<boolean> {
   if (!syncState().mediaScanned) {
     // Photos from before syncing: each one waits to be sent.
     await db.mediaBlobs.filter((r) => r.up === undefined).modify({ up: 0 });
     setSyncState({ mediaScanned: true });
   }
   const ids = await db.mediaBlobs.where('up').equals(0).primaryKeys();
-  let sent = 0;
+  let released = false;
   for (const id of ids) {
     const row = await db.mediaBlobs.get(id);
     if (!row || row.up) continue;
@@ -169,11 +204,15 @@ async function pushMedia(cfg: SyncConfig): Promise<number> {
         if (off) delete r.blob;
       });
     if (!media) continue;
-    sent++;
     const s = syncState();
     setSyncState({ uploaded: (s.uploaded ?? 0) + 1, freedBytes: (s.freedBytes ?? 0) + (off ? row.blob!.size : 0) });
+    // Its record waited for it: it goes now, while the next photos are still being sent.
+    if (s.held?.includes(id)) {
+      released = true;
+      void syncRecords();
+    }
   }
-  return sent;
+  return released;
 }
 
 /** Turned on later: files the server already has leave the phone now. */
@@ -211,8 +250,16 @@ export function remoteMedia(id: string, variant: 'blob' | 'thumb'): Promise<Blob
 
 /* ---------- Running ---------- */
 
-let running: Promise<void> | null = null;
-let again = false;
+/*
+ * Two lanes (v0.41.2, the user: «данные передавались моментально»): records — sent an eighth of a second after a
+ * change, taken the moment the server says another device changed something (`listen`); files — the photos' and
+ * PDFs' files, sent on their own, so a photo being sent never holds up a job, a payment, a note.
+ */
+
+let recRun: Promise<void> | null = null;
+let recAgain = false;
+let fileRun: Promise<void> | null = null;
+let fileAgain = false;
 let failures = 0;
 
 async function pendingCount(): Promise<number> {
@@ -222,41 +269,78 @@ async function pendingCount(): Promise<number> {
   return n;
 }
 
-/** Send, take, send the photos — once at a time (asked again meanwhile: once more after). */
-export function syncNow(): Promise<void> {
-  if (running) {
-    again = true;
-    return running;
+function failed(e: unknown) {
+  failures++;
+  const err = e instanceof SyncError ? (e.status === 401 ? 'revoked' : e.status === 0 ? 'offline' : e.message) : String((e as Error)?.message ?? e);
+  setSyncState({ lastError: err, busy: false });
+  void pendingCount().then((pending) => setSyncState({ pending }, false), () => undefined);
+  // Tried again later, less often each time it fails (at most every 10 minutes).
+  if (err !== 'revoked') scheduleSync(Math.min(10 * 60_000, 15_000 * 2 ** Math.min(failures, 6)));
+}
+
+/** Records: send, take — once at a time (asked again meanwhile: once more after). */
+function syncRecords(): Promise<void> {
+  if (recRun) {
+    recAgain = true;
+    return recRun;
   }
   const cfg = syncConfig();
-  // Not connected: nothing to do (checked before `running` is set — a run that ended at once would leave it set).
+  // Not connected: nothing to do (checked before the run is set — a run that ended at once would leave it set).
   if (!cfg) return Promise.resolve();
-  running = (async () => {
+  recRun = (async () => {
     setSyncState({ busy: true }, false);
     try {
       do {
-        again = false;
+        recAgain = false;
         const replacing = syncState().replacing;
         if (replacing) await mayBeMain(cfg);
         await pushRecords(cfg);
         if (replacing) await replaceServer(cfg);
         await pullRecords(cfg);
-        await pushMedia(cfg);
-        await offloadSent();
-      } while (again);
+      } while (recAgain);
       failures = 0;
-      setSyncState({ lastAt: nowIso(), lastError: undefined, busy: false, pending: await pendingCount() });
+      setSyncState({ lastAt: nowIso(), lastError: undefined, busy: false });
     } catch (e) {
-      failures++;
-      const err = e instanceof SyncError ? (e.status === 401 ? 'revoked' : e.status === 0 ? 'offline' : e.message) : String((e as Error)?.message ?? e);
-      setSyncState({ lastError: err, busy: false, pending: await pendingCount().catch(() => undefined) });
-      // Tried again later, less often each time it fails (at most every 10 minutes).
-      if (err !== 'revoked') scheduleSync(Math.min(10 * 60_000, 15_000 * 2 ** Math.min(failures, 6)));
+      failed(e);
     } finally {
-      running = null;
+      recRun = null;
     }
   })();
-  return running;
+  return recRun;
+}
+
+/** Files: the photos' (PDFs'…) files sent, and those the server has leave this device. */
+function syncFiles(): Promise<void> {
+  if (fileRun) {
+    fileAgain = true;
+    return fileRun;
+  }
+  const cfg = syncConfig();
+  if (!cfg) return Promise.resolve();
+  fileRun = (async () => {
+    try {
+      let released = false;
+      do {
+        fileAgain = false;
+        if (await pushMedia(cfg)) released = true;
+        await offloadSent();
+      } while (fileAgain);
+      // The photos' records that waited for their files: sent (the last of them is in by the time this ends).
+      if (released) await syncRecords();
+      setSyncState({ pending: await pendingCount() }, false);
+    } catch (e) {
+      failed(e);
+    } finally {
+      fileRun = null;
+    }
+  })();
+  return fileRun;
+}
+
+/** Everything: the records, then the files. */
+export async function syncNow(): Promise<void> {
+  await syncRecords();
+  await syncFiles();
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -266,20 +350,125 @@ export function scheduleSync(ms = 3000) {
   timer = setTimeout(() => void syncNow(), ms);
 }
 
+/* ---------- Told at once (v0.41.2) ---------- */
+
+let stream: AbortController | null = null;
+let streamTries = 0;
+let heard = 0;
+let reopen: ReturnType<typeof setTimeout> | undefined;
+
+/** The number of the server's change in an event (`data: {"rev": N}`); a comment (`: ping`) — none. */
+export function eventRev(block: string): number | undefined {
+  const data = block
+    .split('\n')
+    .filter((l) => l.startsWith('data:'))
+    .map((l) => l.slice(5).trim())
+    .join('');
+  if (!data) return undefined;
+  try {
+    const rev = Number((JSON.parse(data) as { rev?: unknown }).rev);
+    return Number.isFinite(rev) ? rev : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One stream open to the server: each time another device's changes are kept there, this device takes them at once.
+ * Gone (no network, the app in the background, the server restarted): opened again; the minute's check stays as the net.
+ */
+function listen() {
+  const cfg = syncConfig();
+  if (!started || !cfg || stream) return;
+  clearTimeout(reopen);
+  const ctl = new AbortController();
+  stream = ctl;
+  let reconnect = true;
+  void (async () => {
+    try {
+      const res = await fetch(`${cfg.url}/api/sync/events`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: ctl.signal, cache: 'no-store' });
+      if (res.status === 401) {
+        reconnect = false;
+        setSyncState({ lastError: 'revoked' });
+        return;
+      }
+      if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
+      heard = Date.now();
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      // «На связи» once the server's first event has come through: a tunnel that held the stream back is not live (the
+      // 20-second check stays on).
+      let through = false;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        heard = Date.now();
+        buf += dec.decode(value, { stream: true }).replace(/\r/g, '');
+        let i: number;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const rev = eventRev(buf.slice(0, i));
+          buf = buf.slice(i + 2);
+          if (!through) {
+            through = true;
+            streamTries = 0;
+            setSyncState({ live: true }, false);
+          }
+          // Another device's changes (or ones missed while the stream was closed): taken now.
+          if (rev !== undefined && rev > syncState().cursor) void syncRecords();
+        }
+      }
+    } catch {
+      // closed, or no network
+    } finally {
+      if (stream === ctl) stream = null;
+      setSyncState({ live: false }, false);
+      if (reconnect && !ctl.signal.aborted && syncConfig()?.token === cfg.token) {
+        streamTries++;
+        reopen = setTimeout(listen, Math.min(30_000, 1000 * 2 ** Math.min(streamTries, 5)));
+      }
+    }
+  })();
+}
+
+/** The stream opened anew (back in the app, online again, a new address or connection), or closed when disconnected. */
+function relisten() {
+  stream?.abort();
+  stream = null;
+  streamTries = 0;
+  clearTimeout(reopen);
+  if (started) setSyncState({ live: false }, false);
+  listen();
+}
+
 let started = false;
-/** Once, at the app's start: syncing runs by itself — after changes, on coming back to the app, online, every minute. */
+/** Once, at the app's start: syncing runs by itself — at once after a change, at once when told, on coming back. */
 export function startSync() {
   if (started || typeof document === 'undefined') return;
   started = true;
-  onLocalChange(() => scheduleSync(4000));
+  // A change here: sent an eighth of a second later (one action's several writes go together).
+  onLocalChange(() => scheduleSync(120));
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') scheduleSync(400);
+    if (document.visibilityState !== 'visible') return;
+    // Back in the app: the stream iOS cut in the background opened anew, and what changed meanwhile taken.
+    relisten();
+    scheduleSync(0);
   });
-  window.addEventListener('online', () => scheduleSync(400));
+  window.addEventListener('online', () => {
+    relisten();
+    scheduleSync(0);
+  });
+  let ticks = 0;
   setInterval(() => {
-    if (document.visibilityState === 'visible') scheduleSync(0);
-  }, 60_000);
-  scheduleSync(1500);
+    // A stream silent for long (its pings stopped) is a dead one.
+    if (stream && Date.now() - heard > 45_000) relisten();
+    if (document.visibilityState !== 'visible') return;
+    // The net under the stream: every 20 s without it, every minute with it.
+    ticks++;
+    if (!syncState().live || ticks % 3 === 0) scheduleSync(0);
+  }, 20_000);
+  listen();
+  scheduleSync(800);
 }
 
 /* ---------- Pairing ---------- */
@@ -297,6 +486,8 @@ export interface Pairing {
   local: number;
   /** The device whose data is the garage's, if there is one. */
   main: MainDevice | null;
+  /** The same app connected again (its install): it stays what it was — its data and the server's are put together. */
+  rejoined: boolean;
 }
 
 /** This device paired with the server (the code shown on the computer): how much each side has; nothing synced yet. */
@@ -305,12 +496,17 @@ export async function pairDevice(address: string, code: string, name: string): P
   const pin = (code || parsed.code || '').replace(/\D/g, '');
   if (!parsed.url || !addressAllowed(parsed.url)) throw new SyncError(0, 'address');
   if (pin.length !== 6) throw new SyncError(0, 'code');
-  const res = await callJson<{ token: string; deviceId: string; records: number; byTable?: Record<string, number>; main?: MainDevice | null }>({ url: parsed.url, token: '' }, '/api/pair', { method: 'POST', body: { code: pin, name } });
+  const res = await callJson<{ token: string; deviceId: string; records: number; byTable?: Record<string, number>; main?: MainDevice | null; rejoined?: boolean }>(
+    { url: parsed.url, token: '' },
+    '/api/pair',
+    { method: 'POST', body: { code: pin, name, install: installId() } },
+  );
   return {
     config: { url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso() },
     server: res.byTable?.orders ?? (res.records ? 1 : 0),
     local: await db.orders.count(),
     main: res.main ?? null,
+    rejoined: !!res.rejoined,
   };
 }
 
@@ -320,6 +516,7 @@ export async function pairDevice(address: string, code: string, name: string): P
  */
 export async function finishPairing(p: Pairing, how: 'send' | 'main' | 'take'): Promise<void> {
   setSyncConfig(p.config);
+  relisten();
   if (how === 'take') return takeServerData();
   if (how === 'main') return makeMain();
   return sendLocalData();
@@ -364,6 +561,7 @@ export async function changeServerAddress(address: string): Promise<void> {
   if (!parsed.url || !addressAllowed(parsed.url)) throw new SyncError(0, 'address');
   await callJson({ url: parsed.url, token: cfg.token }, '/api/status', { timeout: 15_000 });
   setSyncConfig({ ...cfg, url: parsed.url });
+  relisten();
   scheduleSync(0);
 }
 
@@ -373,4 +571,5 @@ export function forgetSync() {
   if (cfg) void callJson(cfg, '/api/forget', { method: 'POST', timeout: 10_000 }).catch(() => undefined);
   setSyncConfig(null);
   resetSyncState();
+  relisten();
 }

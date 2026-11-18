@@ -66,7 +66,7 @@ async function load() {
   document.getElementById('folder').textContent = s.dataDir;
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel);
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
-    '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br><span class="dim">был на связи: ' + when(d.last_seen) + '</span></span>' +
+    '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br>' + (d.live ? '<span class="ok">● на связи сейчас</span>' : '<span class="dim">был на связи: ' + when(d.last_seen) + '</span>') + '</span>' +
     (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
       ? '<span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end"><span class="dim">перестанет получать данные</span>' +
         '<button class="red" onclick="revoke(\\'' + d.id + '\\')">Отключить</button><button class="ghost" onclick="askRevoke(\\'\\')">Отмена</button></span>'
@@ -109,7 +109,7 @@ async function copyLink() {
 load(); setInterval(load, 5000);
 </script></body></html>`;
 
-export function createAdmin({ store, config, pairing, publicUrl, tunnel }) {
+export function createAdmin({ store, config, pairing, publicUrl, tunnel, events }) {
   return async function admin(req, res) {
     const url = new URL(req.url, 'http://local');
     const json = (body) => {
@@ -126,7 +126,10 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel }) {
         dataDir: config.dataDir,
         publicUrl: publicUrl(),
         code: pairing.current(),
-        devices: store.devices(),
+        devices: (() => {
+          const live = events?.live() ?? new Set();
+          return store.devices().map((d) => ({ ...d, live: live.has(d.id) }));
+        })(),
         main: store.mainDevice(),
         lastBackup: store.metaGet('lastBackup'),
         tunnel: { available: !!tunnel && !!config.tunnelExe && tunnel.available(), on: !!tunnel?.on(), url: tunnel?.url() ?? '' },
@@ -144,6 +147,7 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel }) {
     }
     if (req.method === 'POST' && url.pathname === '/revoke') {
       store.revoke(url.searchParams.get('id') || '');
+      events?.drop(url.searchParams.get('id') || '');
       return json({ ok: true });
     }
     res.writeHead(404);

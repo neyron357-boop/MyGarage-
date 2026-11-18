@@ -38,9 +38,14 @@ export interface SyncState {
   replacing?: boolean;
   /** The device whose data is the garage's, as the server last said. */
   main?: { id: string; name: string } | null;
+  /** Photos whose records wait for their own files to be on the server (v0.41.2). */
+  held?: string[];
+  /** The stream is open: other devices' changes come the moment they are made (not kept between visits). */
+  live?: boolean;
 }
 
 const CONFIG_KEY = 'mygarage.sync';
+const INSTALL_KEY = 'mygarage.install';
 const STATE_KEY = 'mygarage.sync.state';
 const OFFLOAD_KEY = 'mygarage.sync.offload';
 const INITIAL: SyncState = { cursor: 0, pushedT: 0, initialDone: false };
@@ -109,7 +114,7 @@ export function setSyncState(patch: Partial<SyncState>, keep = true) {
   stateCache = { ...syncState(), ...patch };
   // The moment-to-moment (busy, pending) is not worth a write each time.
   if (keep) {
-    const { busy: _b, pending: _p, ...lasting } = stateCache;
+    const { busy: _b, pending: _p, live: _l, ...lasting } = stateCache;
     kv.set(STATE_KEY, JSON.stringify(lasting));
   }
   notify();
@@ -138,6 +143,26 @@ export function useSync(): { config: SyncConfig | null; state: SyncState; offloa
     () => version,
   );
   return { config: syncConfig(), state: syncState(), offload: offloadOn() };
+}
+
+/**
+ * This app's own number on this device (v0.41.2): kept when it is disconnected, so the same app connected again is
+ * the same device to the server (the main one stays the main one).
+ */
+export function installId(): string {
+  let id = kv.get(INSTALL_KEY);
+  if (!id) {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    kv.set(INSTALL_KEY, id);
+  }
+  return id;
+}
+
+/** Testing: a test device's own install number put back (each keeps its own). */
+export function restoreInstallId(id: string | undefined) {
+  if (id) kv.set(INSTALL_KEY, id);
 }
 
 /** Testing: the storage forgotten (each test device starts clean). */

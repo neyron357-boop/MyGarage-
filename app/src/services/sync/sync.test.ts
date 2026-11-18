@@ -11,8 +11,8 @@ import { addItem } from '../estimate';
 import { addMedia, mediaBlob } from '../media';
 import { checkIn } from '../orders';
 import { ensureSeed } from '../seed';
-import { forgetSyncMemory, resetSyncState, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
-import { applyChanges, changeServerAddress, finishPairing, makeMain, pairDevice, syncNow } from './engine';
+import { forgetSyncMemory, installId, resetSyncState, restoreInstallId, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
+import { applyChanges, changeServerAddress, eventRev, finishPairing, makeMain, pairDevice, syncNow } from './engine';
 
 /*
  * Two devices and the garage's own server (server/src/main.mjs, started here as it runs on the computer): what one
@@ -63,6 +63,7 @@ interface Device {
   db: GarageDB;
   config: SyncConfig | null;
   state: SyncState;
+  install?: string;
 }
 const devices: Record<string, Device> = {};
 let current: Device | undefined;
@@ -72,10 +73,12 @@ function as(name: string): Device {
   if (current) {
     current.config = syncConfig();
     current.state = syncState();
+    current.install = installId();
   }
   let d = devices[name];
   if (!d) d = devices[name] = { name, db: new GarageDB(`sync-${name}-${uid()}`), config: null, state: { cursor: 0, pushedT: 0, initialDone: false } };
   forgetSyncMemory();
+  restoreInstallId(d.install);
   setDb(d.db);
   setSyncConfig(d.config);
   resetSyncState(d.state);
@@ -222,6 +225,65 @@ describe('syncing with the garage’s server (v0.40)', () => {
     as('pc');
     await syncNow();
     expect((await db.orders.get(orderId))?.complaint).toBe('phone says');
+  });
+
+  it('a photo’s record goes only once its file is on the server — the rest does not wait for it', async () => {
+    as('phone');
+    const photo = await addMedia({ ownerType: 'order', ownerId: orderId, slot: 'car', file: new Blob([bytes(90_000, 3)], { type: 'image/jpeg' }), compress: false });
+    await db.orders.update(orderId, { complaint: 'with a new photo' });
+    // The files cannot be sent (no network for them): the job's change goes; the photo's record waits.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => (String(input).includes('/api/media/') ? Promise.reject(new TypeError('offline')) : realFetch(input, init))) as typeof fetch;
+    try {
+      await syncNow();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(store.record('orders', orderId)?.complaint).toBe('with a new photo');
+    expect(store.record('media', photo.id)).toBeUndefined();
+    expect(syncState().held).toContain(photo.id);
+    // The network back: the file goes, then its record at once.
+    await syncNow();
+    expect(store.file(photo.id, 'blob')?.size).toBe(90_000);
+    expect(store.record('media', photo.id)?.id).toBe(photo.id);
+    expect(syncState().held).toEqual([]);
+  });
+
+  it('reads the server’s events: a change number, a ping', () => {
+    expect(eventRev('retry: 2000\ndata: {"rev":42}')).toBe(42);
+    expect(eventRev(': ping')).toBeUndefined();
+    expect(eventRev('data: nonsense')).toBeUndefined();
+  });
+
+  it('the same app connected again stays the main one; what it only had from the server, deleted there since, does not come back', async () => {
+    as('phone');
+    const pc = devices.pc.config!;
+    const push = (changes: unknown[]) => fetch(`${url}/api/sync/push`, { method: 'POST', headers: { Authorization: `Bearer ${pc.token}`, 'Content-Type': 'application/json', 'X-Sync': '2' }, body: JSON.stringify({ changes }) });
+    // A job made on the computer, taken by the phone: a copy there (never changed on the phone).
+    const made = { id: 'pc-made', number: 9001, complaint: 'made on the PC', customerId: 'c', vehicleId: 'v', stage: 'diagnostics', outcome: 'in_progress', createdAt: '2026-11-18T05:00:00.000Z' };
+    await push([{ t: 'orders', k: 'pc-made', d: made }]);
+    await syncNow();
+    expect(((await db.orders.get('pc-made')) as { _t?: number } | undefined)?._t).toBe(0);
+    const mainBefore = syncState().main?.id;
+    expect(mainBefore).toBe(syncConfig()!.deviceId);
+    // Disconnected here while the server could not be reached (its address had changed): the key just forgotten.
+    setSyncConfig(null);
+    resetSyncState();
+    // Meanwhile the computer deletes that job, and makes another.
+    await push([{ t: 'orders', k: 'pc-made', d: null }, { t: 'orders', k: 'pc-new', d: { ...made, id: 'pc-new', number: 9002, complaint: 'new on the PC' } }]);
+    // The same app connected again: it is the main one still; its data and the garage's put together.
+    const again = await pairDevice(url, await newCode(), 'iPhone');
+    expect(again.rejoined).toBe(true);
+    expect(again.main?.id).toBe(again.config.deviceId);
+    await finishPairing(again, 'send');
+    expect(syncState().lastError).toBeUndefined();
+    expect(store.record('orders', 'pc-made')).toBeUndefined();
+    expect(await db.orders.get('pc-made')).toBeUndefined();
+    expect((await db.orders.get('pc-new'))?.complaint).toBe('new on the PC');
+    expect(store.record('orders', orderId)).toBeDefined();
+    // The old key works no more.
+    const old = await fetch(`${url}/api/status`, { headers: { Authorization: `Bearer ${devices.phone.config?.token ?? ''}` } });
+    expect(old.status === 401 || devices.phone.config === null).toBe(true);
   });
 
   it('a job’s number never goes back', async () => {

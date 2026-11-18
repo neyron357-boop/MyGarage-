@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { createAdmin } from './admin.mjs';
 import { createApi, createPairing } from './api.mjs';
+import { createEvents } from './events.mjs';
 import { loadConfig, VERSION } from './config.mjs';
 import { DIRS, openStore } from './store.mjs';
 import { createTunnel } from './tunnel.mjs';
@@ -30,6 +31,7 @@ function log(msg) {
 
 const store = openStore(config.dataDir, { keepBackups: config.keepBackups, log });
 const pairing = createPairing();
+const events = createEvents();
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
@@ -73,14 +75,16 @@ function backupNow() {
   }
 }
 
-const api = createServer(createApi({ store, config, pairing, log, onSeen }));
+const api = createServer(createApi({ store, config, pairing, log, onSeen, events }));
+// Streams stay open (events): no idle cut-off on this side.
+api.keepAliveTimeout = 65_000;
 api.requestTimeout = 0;
 api.listen(config.port, config.host, () => {
   log(`MyGarage server ${VERSION}: API http://${config.host}:${config.port}, data ${config.dataDir}`);
   // Turned on by the owner on this computer's page: on again with the server (the one still running is kept).
   if (store.metaGet('tunnel') === 'on' && config.tunnelExe) tunnel.start();
 });
-const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel }));
+const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();
@@ -92,6 +96,7 @@ function stop() {
   log('stopping');
   // The tunnel goes on: the server started next keeps it, and its address.
   tunnel.detach();
+  events.closeAll();
   api.close();
   admin.close();
   store.close();

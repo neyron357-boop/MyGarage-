@@ -62,7 +62,8 @@ export async function callJson<T>(cfg: Pick<SyncConfig, 'url' | 'token'>, path: 
     cfg.url + path,
     {
       method: init.method ?? 'GET',
-      headers: { ...(cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {}), ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      // The sync rules this app follows (v0.41.2): the server lets only such an app connect and send.
+      headers: { 'X-Sync': '2', ...(cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {}), ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     },
     init.timeout ?? 30_000,

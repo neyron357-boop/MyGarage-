@@ -6,21 +6,24 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { createApi, createPairing } from '../src/api.mjs';
 import { loadConfig } from '../src/config.mjs';
+import { createEvents } from '../src/events.mjs';
 import { openStore } from '../src/store.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-server-'));
 const config = loadConfig({ DATA_DIR: dir, ALLOWED_ORIGINS: 'https://app.example' });
 const store = openStore(dir, { keepBackups: 2 });
 const pairing = createPairing();
+const events = createEvents({ pingMs: 200 });
 let base = '';
 let server;
 
 before(async () => {
-  server = createServer(createApi({ store, config, pairing, log: () => {}, onSeen: () => {} }));
+  server = createServer(createApi({ store, config, pairing, log: () => {}, onSeen: () => {}, events }));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => {
+  events.closeAll();
   server.close();
   store.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -29,13 +32,13 @@ after(() => {
 const call = (p, { token, method = 'GET', body, headers = {} } = {}) =>
   fetch(base + p, {
     method,
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body && !(body instanceof Uint8Array) ? { 'Content-Type': 'application/json' } : {}), ...headers },
+    headers: { 'X-Sync': '2', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body && !(body instanceof Uint8Array) ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: body instanceof Uint8Array ? body : body ? JSON.stringify(body) : undefined,
   });
 
 async function pair(name) {
   const { code } = pairing.issue();
-  const r = await call('/api/pair', { method: 'POST', body: { code, name } });
+  const r = await call('/api/pair', { method: 'POST', body: { code, name, install: `install-${name.replace(/W/g, '')}-${Math.random().toString(36).slice(2, 10)}` } });
   assert.equal(r.status, 200);
   return (await r.json()).token;
 }
@@ -156,6 +159,59 @@ describe('MyGarage server', () => {
     assert.equal(fs.readdirSync(path.join(dir, 'Резервные копии')).length, 1);
   });
 
+  it('a device listening is told at once when another device’s changes are kept — not of its own', async () => {
+    const listen = async (token) => {
+      const ctl = new AbortController();
+      const res = await fetch(base + '/api/sync/events', { headers: { Authorization: `Bearer ${token}` }, signal: ctl.signal });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type'), /^text\/event-stream/);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      const got = [];
+      const pump = (async () => {
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) return;
+            buf += dec.decode(value, { stream: true });
+            let i;
+            while ((i = buf.indexOf('\n\n')) >= 0) {
+              const block = buf.slice(0, i);
+              buf = buf.slice(i + 2);
+              const data = block.split('\n').find((l) => l.startsWith('data:'));
+              got.push(data ? JSON.parse(data.slice(5)) : { ping: true });
+            }
+          }
+        } catch {
+          // closed
+        }
+      })();
+      return { got, stop: () => (ctl.abort(), pump) };
+    };
+    const one = await pair('Listener A');
+    const two = await pair('Listener B');
+    const a1 = await listen(one);
+    const b1 = await listen(two);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(typeof a1.got[0].rev, 'number');
+    const t0 = Date.now();
+    const pushed = await (await call('/api/sync/push', { token: two, method: 'POST', body: { changes: [{ t: 'orders', k: 'live-1', d: { id: 'live-1' } }] } })).json();
+    while (!a1.got.some((e) => e.rev === pushed.rev) && Date.now() - t0 < 2000) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(a1.got.some((e) => e.rev === pushed.rev), 'the other device was told');
+    assert.ok(Date.now() - t0 < 500, `told in ${Date.now() - t0} ms`);
+    assert.ok(!b1.got.some((e) => e.rev === pushed.rev), 'not told of its own');
+    // An idle stream is kept alive (comments).
+    await new Promise((r) => setTimeout(r, 450));
+    assert.ok(a1.got.some((e) => e.ping));
+    // A device cut off: its stream ends.
+    store.revoke(store.devices().find((d) => d.name === 'Listener A').id);
+    events.drop(store.devices().find((d) => d.name === 'Listener A').id);
+    assert.equal(events.live().size, 1);
+    await a1.stop();
+    await b1.stop();
+  });
+
   it('the main device’s data becomes the garage’s: what it lacks is deleted for everyone, its numbers taken as they are', async () => {
     const pc = await pair('PC demo');
     await call('/api/sync/push', { token: pc, method: 'POST', body: { changes: [{ t: 'orders', k: 'demo-1', d: { id: 'demo-1', number: 1001 } }, { t: 'counters', k: 'order', d: { name: 'order', value: 1008 } }] } });
@@ -180,6 +236,51 @@ describe('MyGarage server', () => {
     assert.equal((await call('/api/forget', { token: phone, method: 'POST' })).status, 200);
     assert.equal((await call('/api/status', { token: phone })).status, 401);
     assert.equal(store.mainDevice(), null);
+  });
+
+  it('a copy (taken from the server, never changed) never brings back a deletion or overrides; a new one is kept', async () => {
+    const x = await pair('Copy A');
+    const y = await pair('Copy B');
+    await call('/api/sync/push', { token: x, method: 'POST', body: { changes: [{ t: 'orders', k: 'cp-1', d: { id: 'cp-1', v: 1 } }] } });
+    await call('/api/sync/push', { token: x, method: 'POST', body: { changes: [{ t: 'orders', k: 'cp-1', d: null }, { t: 'orders', k: 'cp-2', d: { id: 'cp-2', v: 2 } }] } });
+    await call('/api/sync/push', {
+      token: y,
+      method: 'POST',
+      body: { changes: [{ t: 'orders', k: 'cp-1', d: { id: 'cp-1', v: 1 }, c: 1 }, { t: 'orders', k: 'cp-2', d: { id: 'cp-2', v: 1 }, c: 1 }, { t: 'orders', k: 'cp-3', d: { id: 'cp-3', v: 1 }, c: 1 }] },
+    });
+    assert.equal(store.record('orders', 'cp-1'), undefined);
+    assert.equal(store.record('orders', 'cp-2').v, 2);
+    assert.equal(store.record('orders', 'cp-3').v, 1);
+  });
+
+  it('the same app paired again is the same device: its old key stops, the main one stays the main one', async () => {
+    const { code } = pairing.issue();
+    const first = await (await call('/api/pair', { method: 'POST', body: { code, name: 'iPhone R', install: 'install-0123456789ab' } })).json();
+    assert.equal(first.rejoined, false);
+    await call('/api/sync/replace', { token: first.token, method: 'POST', body: { keys: {} } });
+    assert.equal(store.mainDevice().id, first.deviceId);
+    const again = pairing.issue();
+    const second = await (await call('/api/pair', { method: 'POST', body: { code: again.code, name: 'iPhone R', install: 'install-0123456789ab' } })).json();
+    assert.equal(second.rejoined, true);
+    assert.equal(second.main.id, second.deviceId);
+    assert.equal((await call('/api/status', { token: first.token })).status, 401);
+    assert.equal((await call('/api/status', { token: second.token })).status, 200);
+    // Another app is not taken for it.
+    const other = pairing.issue();
+    const third = await (await call('/api/pair', { method: 'POST', body: { code: other.code, name: 'iPhone R', install: 'install-ffffffffffff' } })).json();
+    assert.equal(third.rejoined, false);
+    assert.equal(store.mainDevice().id, second.deviceId);
+  });
+
+  it('an older app is told to update: it may not connect or send', async () => {
+    const { code } = pairing.issue();
+    const pairOld = await call('/api/pair', { method: 'POST', body: { code, name: 'old' }, headers: { 'X-Sync': '' } });
+    assert.equal(pairOld.status, 426);
+    assert.match((await pairOld.json()).error, /Обновите приложение/);
+    const t = await pair('New app');
+    const pushOld = await call('/api/sync/push', { token: t, method: 'POST', body: { changes: [] }, headers: { 'X-Sync': '' } });
+    assert.equal(pushOld.status, 426);
+    assert.equal((await call('/api/sync/push', { token: t, method: 'POST', body: { changes: [] } })).status, 200);
   });
 
   it('a device cut off on the computer is refused', async () => {

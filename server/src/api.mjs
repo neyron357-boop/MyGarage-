@@ -13,6 +13,7 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/status                     — how much is kept here
  *   POST /api/sync/push {changes}        — the device's changes
  *   GET  /api/sync/pull?since=N          — other devices' changes after N
+ *   GET  /api/sync/events                — a stream: told at once when other devices' changes are kept (v0.41.2)
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/forget                     — this device leaves (its key no longer works)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb
@@ -23,6 +24,12 @@ import { DIRS, httpError } from './store.mjs';
  */
 
 const VARIANTS = new Set(['blob', 'thumb']);
+/**
+ * The app's sync rules this server needs (v0.41.2): an older app (no `X-Sync: 2`) sends everything it has at
+ * connecting, before the choice, and over newer records — it may not send or connect; it is told to update.
+ */
+const SYNC = 2;
+const UPDATE = 'Обновите приложение: закройте его и откройте снова';
 const ID = /^[A-Za-z0-9._-]{1,120}$/;
 
 function send(res, status, body, headers = {}) {
@@ -70,14 +77,14 @@ export function createPairing() {
   };
 }
 
-export function createApi({ store, config, pairing, log, onSeen }) {
+export function createApi({ store, config, pairing, log, onSeen, events }) {
   return async function api(req, res) {
     const origin = req.headers.origin;
     const allowed = origin && config.origins.includes(origin);
     const cors = allowed
       ? {
           'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Size',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Size, X-Sync',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
           'Access-Control-Max-Age': '600',
           Vary: 'Origin',
@@ -97,12 +104,15 @@ export function createApi({ store, config, pairing, log, onSeen }) {
 
       if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true, app: 'mygarage-server', version: VERSION });
 
+      const modern = Number(req.headers['x-sync']) >= SYNC;
       if (req.method === 'POST' && url.pathname === '/api/pair') {
+        if (!modern) throw httpError(426, UPDATE);
         const body = await readJson(req, 4096);
         pairing.take(String(body.code ?? ''));
-        const d = store.addDevice(body.name);
-        log(`paired: ${body.name ?? 'device'} (${d.id})`);
-        return send(res, 200, { token: d.token, deviceId: d.id, main: store.mainDevice(), ...store.counts() });
+        const d = store.addDevice(body.name, body.install);
+        for (const old of d.was) events?.drop(old);
+        log(`paired: ${body.name ?? 'device'} (${d.id})${d.rejoined ? ` — the same app again (was ${d.was.join(', ')})` : ''}`);
+        return send(res, 200, { token: d.token, deviceId: d.id, rejoined: d.rejoined, main: store.mainDevice(), ...store.counts() });
       }
 
       const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -113,24 +123,35 @@ export function createApi({ store, config, pairing, log, onSeen }) {
 
       // The main device's data becomes the garage's: only it may do this (or any device, while there is none).
       if (req.method === 'POST' && url.pathname === '/api/sync/replace') {
+        if (!modern) throw httpError(426, UPDATE);
         const main = store.mainDevice();
         if (main && main.id !== device.id) throw httpError(409, `the main device is ${main.name}`);
         const body = await readJson(req);
         const r = store.replace(device.id, body.keys, body.counters);
+        events?.changed(r.rev, device.id);
         log(`main device: ${device.name} (${device.id}); ${r.removed} records it did not have deleted`);
         return send(res, 200, { ok: true, ...r });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/forget') {
         store.revoke(device.id);
+        events?.drop(device.id);
         log(`left: ${device.name} (${device.id})`);
         return send(res, 200, { ok: true });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/sync/push') {
+        if (!modern) throw httpError(426, UPDATE);
         const body = await readJson(req);
         const rev = store.push(device.id, body.changes);
+        // The other devices are told at once: they take it now, not at the minute's check.
+        if (body.changes.length) events?.changed(rev, device.id);
         return send(res, 200, { ok: true, rev, n: body.changes.length });
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/sync/events' && events) {
+        events.open(req, res, device.id, store.lastRev());
+        return;
       }
 
       if (req.method === 'GET' && url.pathname === '/api/sync/pull') {

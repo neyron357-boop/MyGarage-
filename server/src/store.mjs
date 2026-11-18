@@ -91,6 +91,8 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     );
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
   `);
+  // v0.41.2: the app's own install number on each device (the same app connected again is the same device).
+  if (!db.prepare('PRAGMA table_info(devices)').all().some((c) => c.name === 'install')) db.exec('ALTER TABLE devices ADD COLUMN install TEXT');
   let rev = Number(db.prepare('SELECT COALESCE(MAX(rev), 0) AS r FROM records').get().r);
   const now = () => new Date().toISOString();
 
@@ -118,6 +120,9 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
         const tbl = String(c?.t ?? '');
         const id = String(c?.k ?? '');
         if (!TABLE.test(tbl) || !id || id.length > 300) throw httpError(400, `bad change ${tbl}/${id.slice(0, 40)}`);
+        // A copy (v0.41.2): a record the device had from the server and never changed since. Sent at a first
+        // connection — kept only if the server has nothing for it; never over a newer one or over its deletion.
+        if (c.c && getRecord.get(tbl, id)) continue;
         if (c.d === null || c.d === undefined) {
           putRecord.run(tbl, id, null, 1, ++rev, deviceId, at);
           continue;
@@ -172,7 +177,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     db.exec('BEGIN IMMEDIATE');
     try {
       for (const r of db.prepare('SELECT tbl, id FROM records WHERE deleted = 0').all()) {
-        if (r.tbl === 'counters' ? given.has(r.id) : have.get(r.tbl)?.has(r.id)) continue;
+        if (have.get(r.tbl)?.has(r.id) || (r.tbl === 'counters' && given.has(r.id))) continue;
         putRecord.run(r.tbl, r.id, null, 1, ++rev, deviceId, at);
         removed++;
       }
@@ -213,11 +218,22 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   /* ---------- Devices ---------- */
 
   const hash = (token) => crypto.createHash('sha256').update(token).digest('hex');
-  function addDevice(name) {
+  /**
+   * A new device — or the same app paired again (its `install`, v0.41.2): then its old key stops working and it stays
+   * what it was (the main device stays the main one). Returns whether it came back.
+   */
+  function addDevice(name, install) {
     const token = crypto.randomBytes(32).toString('base64url');
     const id = crypto.randomUUID();
-    db.prepare('INSERT INTO devices (id, name, token_hash, created_at, last_seen) VALUES (?, ?, ?, ?, ?)').run(id, String(name || 'device').slice(0, 80), hash(token), now(), now());
-    return { id, token };
+    const inst = typeof install === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(install) ? install : null;
+    const before = inst ? db.prepare('SELECT id FROM devices WHERE install = ? AND revoked = 0').all(inst) : [];
+    const main = db.prepare("SELECT value FROM meta WHERE key = 'mainDevice'").get()?.value;
+    db.prepare('INSERT INTO devices (id, name, token_hash, created_at, last_seen, install) VALUES (?, ?, ?, ?, ?, ?)').run(id, String(name || 'device').slice(0, 80), hash(token), now(), now(), inst);
+    for (const d of before) {
+      db.prepare('UPDATE devices SET revoked = 1 WHERE id = ?').run(d.id);
+      if (d.id === main) db.prepare("UPDATE meta SET value = ? WHERE key = 'mainDevice'").run(id);
+    }
+    return { id, token, rejoined: before.length > 0, was: before.map((d) => d.id) };
   }
   const deviceByHash = db.prepare('SELECT id, name, revoked FROM devices WHERE token_hash = ?');
   const seen = db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?');
@@ -311,7 +327,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  return { dataDir, push, pull, replace, mainDevice, counts, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
+  return { dataDir, push, pull, replace, mainDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
 }
 
 export function httpError(status, message) {
