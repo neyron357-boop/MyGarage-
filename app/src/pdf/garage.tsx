@@ -63,6 +63,7 @@ export const AR_LABEL = {
   paymentMethod: 'طريقة الدفع',
   subtotal: 'المجموع الفرعي',
   vatIncl: 'شامل',
+  vat: 'ضريبة القيمة المضافة',
   jobId: 'معرف المهمة',
   invoiceNo: 'رقم الفاتورة',
   authorizedBy: 'مفوض من قبل',
@@ -286,10 +287,13 @@ export function ItemsTable({ rows }: { rows: DocRow[] }) {
 }
 
 /**
- * Left: total quantity and other notes; right: the rounded totals box. With a discount, as on the
- * garage's own invoices: Subtotal (before it) − Discount = Total, VAT included.
+ * Left: total quantity and other notes; right: the rounded totals box — Subtotal without VAT (before the discount),
+ * the discount without VAT if there is one, the VAT at its rate, Total: Subtotal + Discount + VAT = Total, to the fils.
+ * (Before v0.45 the Subtotal was printed with VAT, then "VAT (Incl.)" — Eaglecart's layout.) `discount` — net,
+ * negative; `vatRateBp` — the lines' one rate ("VAT 5%"), none when they differ ("VAT").
  */
-export function Totals({ qty, notes, subtotal, discount, discountLabel, vat, total, totalText }: { qty: number; notes?: ReactNode; subtotal: number; discount?: number; discountLabel?: string; vat: number; total: number; totalText?: string }) {
+export function Totals({ qty, notes, discount, discountLabel, vat, vatRateBp, total, totalText }: { qty: number; notes?: ReactNode; discount?: number; discountLabel?: string; vat: number; vatRateBp?: number; total: number; totalText?: string }) {
+  const subtotal = total - vat - (discount ?? 0);
   const row = (en: string, ar: string, value: string, big?: boolean, after?: string) => (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: big ? 0 : 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -312,7 +316,7 @@ export function Totals({ qty, notes, subtotal, discount, discountLabel, vat, tot
       <View style={{ width: 256, borderWidth: 0.75, borderColor: COLOR.boxBorder, borderRadius: 10, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 13 }}>
         {row('Subtotal', AR_LABEL.subtotal, aed(subtotal))}
         {discount ? row(discountLabel ? `Discount ${discountLabel}` : 'Discount', AR_LABEL.discount, aed(discount)) : null}
-        {row('VAT (Incl.', AR_LABEL.vatIncl, aed(vat), false, ')')}
+        {row(vatRateBp !== undefined ? `VAT ${vatRateBp / 100}%` : 'VAT', AR_LABEL.vat, aed(vat))}
         <View style={{ borderTopWidth: 0.7, borderColor: COLOR.boxRule, marginTop: 4, marginBottom: 10 }} />
         {row('Total', AR_LABEL.total, totalText ?? aed(total), true)}
       </View>

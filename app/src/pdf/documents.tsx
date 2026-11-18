@@ -284,6 +284,15 @@ function CustomerBlock({ en, ar, party, vehicle }: { en: string; ar: string; par
 /** Customer of a quotation (the invoice keeps its own snapshot of the buyer — `invoiceBuyer`). */
 const partyOf = (c: Customer) => ({ name: buyerName(c), phone: c.phone, email: c.email, trn: c.trn, address: c.address });
 
+/** A document's discount without VAT (its discount lines' net, negative); none — 0. */
+const netDiscount = (lines: { kind: string; net: number }[]) => lines.filter((l) => l.kind === 'discount').reduce((a, l) => a + l.net, 0);
+
+/** The one VAT rate of a document's lines (not its discounts) — "VAT 5%"; rates that differ — none ("VAT"). */
+function oneRate(lines: { kind: string; vatRateBp?: number }[]): number | undefined {
+  const rates = new Set(lines.filter((l) => l.kind !== 'discount').map((l) => l.vatRateBp));
+  return rates.size === 1 ? [...rates][0] : undefined;
+}
+
 function QuotationDocument({ fam, settings, customer, vehicle, number, date, validUntil, rows, totals, note }: {
   fam: string;
   settings: Settings;
@@ -293,8 +302,8 @@ function QuotationDocument({ fam, settings, customer, vehicle, number, date, val
   date: string;
   validUntil?: string;
   rows: DocRow[];
-  /** gross: the total; subtotal and discount: before the discount and the discount (negative), if any. */
-  totals: { gross: number; vat: number; text?: string; subtotal?: number; discount?: number; discountLabel?: string };
+  /** gross: the total; discount: without VAT, negative, if any; vatRateBp: the lines' one rate. */
+  totals: { gross: number; vat: number; text?: string; discount?: number; discountLabel?: string; vatRateBp?: number };
   note?: string;
 }) {
   const party = partyOf(customer);
@@ -318,10 +327,10 @@ function QuotationDocument({ fam, settings, customer, vehicle, number, date, val
       <ItemsTable rows={rows} />
       <Totals
         qty={rows.reduce((a, r) => a + (r.total < 0 ? 0 : r.qty), 0)}
-        subtotal={totals.subtotal ?? totals.gross}
         discount={totals.discount}
         discountLabel={totals.discountLabel}
         vat={totals.vat}
+        vatRateBp={totals.vatRateBp}
         total={totals.gross}
         totalText={totals.text}
         notes={note ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 2 }}>{note}</Text> : undefined}
@@ -364,7 +373,7 @@ export async function renderVersion(versionId: string): Promise<Blob> {
         date={v.sentAt}
         validUntil={v.validUntil}
         rows={rows}
-        totals={{ gross: v.fixedGross, vat, subtotal: v.fixedGross - spread.discount, discount: spread.discount, discountLabel, text: upTo ? `${aed(v.fixedGross)} – ${formatAed(v.maxGross, 'en', false)}` : undefined }}
+        totals={{ gross: v.fixedGross, vat, discount: netDiscount(v.items), discountLabel, vatRateBp: oneRate(v.items), text: upTo ? `${aed(v.fixedGross)} – ${formatAed(v.maxGross, 'en', false)}` : undefined }}
         note={note || undefined}
       />
     </Document>
@@ -375,7 +384,8 @@ export async function renderVersion(versionId: string): Promise<Blob> {
 export async function renderQuotation(orderId: string): Promise<Blob> {
   const b = (await loadOrderBundle(orderId))!;
   const items = b.items.filter((i) => ['draft', 'pending', 'approved'].includes(i.approvalState));
-  const spread = spreadDiscount(items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i })));
+  const priced = items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i }));
+  const spread = spreadDiscount(priced);
   const rows: DocRow[] = [
     ...spread.lines.map(({ line: { item: i }, discount, vat, gross }) => ({ description: itemTitle(i, 'en') + (i.customerSupplied ? ' (customer supplied part)' : ''), price: i.customerSupplied ? 0 : i.unitPriceFils, discount, vat, qty: i.qty, total: gross })),
     ...spread.rest.map(({ item: i, vat, gross }) => ({ description: itemTitle(i, 'en'), price: -Math.abs(i.unitPriceFils), vat, qty: i.qty, total: gross })),
@@ -395,7 +405,7 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
         date={now}
         validUntil={addDays(now, b.settings.estimateValidityDays)}
         rows={rows}
-        totals={{ gross, vat, subtotal: spread.subtotal, discount: spread.discount, discountLabel }}
+        totals={{ gross, vat, discount: netDiscount(priced), discountLabel, vatRateBp: oneRate(priced) }}
       />
     </Document>
   ));
@@ -455,10 +465,10 @@ export async function renderInvoice(invoiceId: string, paidAt?: string): Promise
         <ItemsTable rows={rows} />
         <Totals
           qty={qty}
-          subtotal={spread.subtotal}
-          discount={spread.discount}
+          discount={netDiscount(inv.lines)}
           discountLabel={discountLabel}
           vat={inv.vatFils}
+          vatRateBp={oneRate(inv.lines)}
           total={inv.totalFils}
           notes={
             <>
