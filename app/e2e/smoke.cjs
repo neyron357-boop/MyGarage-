@@ -2661,7 +2661,18 @@ async function launchBrowser() {
     }, paid.paid.order);
     if (gone[0] || gone[1] || gone[2]) throw new Error('not deleted whole: ' + JSON.stringify(gone.slice(1)));
     await page.getByRole('button', { name: 'Отменить' }).first().click();
-    await page.waitForFunction(async (id) => !!(await (await import('/src/db/db.ts')).db.orders.get(id)), paid.paid.order);
+    // The job and its documents come back in one go, its money right after them (restoreJob, then restoreEntry): wait
+    // for the money too — read the moment the job is back, the payments may not be there yet.
+    await page
+      .waitForFunction(
+        async (id) => {
+          const { db } = await import('/src/db/db.ts');
+          return !!(await db.orders.get(id)) && (await db.payments.where('orderId').equals(id).count()) > 0;
+        },
+        paid.paid.order,
+        { timeout: 15000 },
+      )
+      .catch(() => undefined);
     const back = await page.evaluate(async (id) => {
       const { db } = await import('/src/db/db.ts');
       return [await db.invoices.where('orderId').equals(id).count(), await db.payments.where('orderId').equals(id).count()];
