@@ -101,6 +101,11 @@ describe('the catalogue that comes with the app (v0.46)', () => {
     expect(id('DEFERENTIAL USED ORIGINAL')).toBe('svc-differential');
     expect(id('REAR STOP LIGHT LEFT & RIGHT')).toBe('svc-lamps');
     expect(id('A/C CHECK AND RECHARGE')).toBe('svc-ac-service');
+    expect(id('AC B LOWER')).toBe('svc-ac-blower');
+    expect(id('RIM REPAIR')).toBe('svc-rim-repair');
+    expect(id('PRIMER')).toBeUndefined();
+    expect(id('LABOUR CHARGE FOR 2 LIGHTS FIXING WITH CONSUMABLES ( WIRE & TAPE)')).toBe('svc-labour');
+    expect(id('REAR LEFT SIDE TIRE PUNCTURE REPAIRED')).toBe('svc-puncture');
     expect(id('MAGIC SMOKE REMOVAL')).toBeUndefined();
   });
 

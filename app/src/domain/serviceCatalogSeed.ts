@@ -56,6 +56,7 @@ export const SEED_SERVICES: Service[] = [
   s('puncture', 'Puncture repair', 'tyres', ['TIRE PUNCTURE', 'TYRE PUNCTURE', 'PUNCTURE']),
   s('alignment', 'Wheel alignment & balancing', 'tyres', ['ALIGNMENT', 'ALINMENT', 'BALANCING', 'WHEEL BALANCING']),
   s('wheel-bearing', 'Wheel bearing', 'tyres', ['WHEEL BEARING', 'HUB BEARING']),
+  s('rim-repair', 'Rim repair', 'tyres', ['RIM REPAIR', 'RIM STRAIGHTENING', 'ALLOY RIM']),
   // Battery & electrical
   s('battery', 'Battery', 'electrical', ['BATTERY', 'AMARON']),
   s('battery-terminal', 'Battery terminal & clamp', 'electrical', ['BATTERY CLAMP', 'BATTERY TERMINAL', 'FUSE LINK']),
@@ -72,7 +73,7 @@ export const SEED_SERVICES: Service[] = [
   s('ac-compressor', 'AC compressor', 'ac', ['AC COMPRESSOR', 'COMPRESSOR']),
   s('ac-condenser', 'AC condenser', 'ac', ['AC CONDENSER', 'CONDENSER']),
   s('ac-fan', 'AC / condenser fan motor', 'ac', ['FAN MOTOR', 'CONDENSER FAN', 'AC FAN']),
-  s('ac-blower', 'AC blower', 'ac', ['AC BLOWER', 'BLOWER']),
+  s('ac-blower', 'AC blower', 'ac', ['AC BLOWER', 'AC B LOWER', 'BLOWER']),
   s('ac-filter', 'AC filter', 'ac', ['AC FILTER', 'CABIN FILTER']),
   s('ac-valves', 'AC drier & valves', 'ac', ['AC FILTER DRIER', 'FILTER DRIER', 'EXPANSION VALVE', 'AC VALVE']),
   s('ac-pipes', 'AC pipes & cleaning', 'ac', ['AC PIPE', 'PIPE ORING', 'VACUUM PIPE', 'PIPE VACUUM']),

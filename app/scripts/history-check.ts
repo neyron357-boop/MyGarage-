@@ -55,6 +55,7 @@ const files = fs
   .sort();
 const invoices: { date: string; plate: string; lines: { netFils: number; vatFils: number; grossFils: number }[] }[] = [];
 let problems = 0;
+const read: { f: string; doc: ReturnType<typeof readDocument> }[] = [];
 for (const f of files) {
   const bytes = new Uint8Array(fs.readFileSync(path.join(dir, f)));
   const sha = createHash('sha256').update(bytes).digest('hex').slice(0, 12);
@@ -64,22 +65,30 @@ for (const f of files) {
   for (const p of doc.problems) console.log(`  ✗ ${p}`);
   problems += doc.problems.length;
   invoices.push(...doc.invoices);
-  if (doc.summary) {
-    const { matches, unlisted } = matchSummary(doc.summary.rows, doc.invoices);
-    const sum = doc.invoices.reduce((a, i) => a + i.printed.total, 0);
-    const odd = matches.filter((m) => m.status !== 'ok');
-    console.log(`  summary: ${doc.summary.rows.length} rows, TOTAL ${doc.summary.totalFils !== undefined ? fmt(doc.summary.totalFils) : '—'}; the invoices: ${doc.invoices.length}, ${fmt(sum)}`);
-    for (const m of odd) {
-      const inv = m.invoice !== undefined ? doc.invoices[m.invoice] : undefined;
-      const r = m.row;
-      const what =
-        m.status === 'missing'
-          ? 'no document'
-          : `${m.status}: ${inv!.numberKind === 'job' ? 'Job' : 'Inv'} ${inv!.number} — ${m.status !== 'amount' ? `plate ${inv!.plate}` : ''}${m.status === 'plate-amount' ? ', ' : ''}${m.status !== 'plate' ? `sum ${fmt(inv!.printed.total)}` : ''}`;
-      console.log(`    · row ${r.no} ${r.date} ${r.vehicleText} ${r.plate} ${fmt(r.amountFils)}${r.invoiceNo ? ` (#${r.invoiceNo})` : ''} → ${what}`);
-    }
-    for (const i of unlisted) console.log(`    · not in the summary: ${doc.invoices[i].number} ${doc.invoices[i].date} ${doc.invoices[i].plate} ${fmt(doc.invoices[i].printed.total)}`);
+  read.push({ f, doc });
+}
+// Each summary against its own PDF's invoices and that month's from the other PDFs (v0.46.3: a month's invoices may come
+// apart — a PDF of those its file left out), as the import matches them.
+for (const { f, doc } of read) {
+  if (!doc.summary) continue;
+  const months = doc.summary.rows.map((r) => r.date?.slice(0, 7)).filter((m): m is string => !!m);
+  const month = months.sort((a, b) => months.filter((x) => x === b).length - months.filter((x) => x === a).length)[0] ?? doc.invoices[0]?.date.slice(0, 7);
+  const pool = [...doc.invoices, ...read.filter((x) => x.doc !== doc).flatMap((x) => x.doc.invoices.filter((i) => i.date.slice(0, 7) === month))];
+  const { matches, unlisted } = matchSummary(doc.summary.rows, pool);
+  const sum = pool.reduce((a, i) => a + i.printed.total, 0);
+  const odd = matches.filter((m) => m.status !== 'ok');
+  const others = pool.length - doc.invoices.length;
+  console.log(`\n${f} — summary: ${doc.summary.rows.length} rows, TOTAL ${doc.summary.totalFils !== undefined ? fmt(doc.summary.totalFils) : '—'}; the invoices: ${pool.length}${others ? ` (${others} from other PDFs)` : ''}, ${fmt(sum)}`);
+  for (const m of odd) {
+    const inv = m.invoice !== undefined ? pool[m.invoice] : undefined;
+    const r = m.row;
+    const what =
+      m.status === 'missing'
+        ? 'no document'
+        : `${m.status}: ${inv!.numberKind === 'job' ? 'Job' : 'Inv'} ${inv!.number} — ${m.status !== 'amount' ? `plate ${inv!.plate}` : ''}${m.status === 'plate-amount' ? ', ' : ''}${m.status !== 'plate' ? `sum ${fmt(inv!.printed.total)}` : ''}`;
+    console.log(`    · row ${r.no} ${r.date} ${r.vehicleText} ${r.plate} ${fmt(r.amountFils)}${r.invoiceNo ? ` (#${r.invoiceNo})` : ''} → ${what}`);
   }
+  for (const i of unlisted) console.log(`    · not in the summary: ${pool[i].number} ${pool[i].date} ${pool[i].plate} ${fmt(pool[i].printed.total)}`);
 }
 
 // Every description as read, with how many lines have it (--descriptions): what the service catalogue must know.

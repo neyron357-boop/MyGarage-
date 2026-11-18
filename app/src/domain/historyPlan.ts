@@ -241,7 +241,10 @@ export function planHistory(input: PlanInput): HistoryPlan {
     const months = s.rows.map((r) => r.date?.slice(0, 7)).filter((m): m is string => !!m);
     const month = months.sort((a, b) => months.filter((x) => x === b).length - months.filter((x) => x === a).length)[0] ?? doc.read.invoices[0]?.date.slice(0, 7);
     if (!month) continue;
-    const { matches } = matchSummary(s.rows, doc.read.invoices);
+    // Its own PDF's invoices and that month's from the other PDFs given (v0.46.3: its invoices may come apart — a PDF of
+    // those its file left out).
+    const pool = [...doc.read.invoices, ...input.docs.filter((d) => d !== doc).flatMap((d) => d.read.invoices.filter((i) => i.date.slice(0, 7) === month))];
+    const { matches } = matchSummary(s.rows, pool);
     const put = (row: HistorySummaryRow) => {
       const before = existingRows.get(row.id);
       rows.push(before && sameRecord(row, before) ? before : row);
@@ -260,7 +263,7 @@ export function planHistory(input: PlanInput): HistoryPlan {
         plate: r.plate,
         ...(r.invoiceNo ? { invoiceNo: r.invoiceNo } : {}),
         amountFils: r.amountFils,
-        ...(m.invoice !== undefined ? { invoiceId: ids.get(doc.read.invoices[m.invoice]) } : {}),
+        ...(m.invoice !== undefined ? { invoiceId: ids.get(pool[m.invoice]) } : {}),
         status: m.status,
         source: { file: doc.file, sha256: doc.sha256, page: r.page },
         importedAt: now,

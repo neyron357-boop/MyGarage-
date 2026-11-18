@@ -138,6 +138,28 @@ async function company() {
 }
 
 describe('invoices from before the app brought in (v0.45)', () => {
+  it('a month’s summary takes its invoices from every PDF given with it: those its own file left out, in a PDF of their own (v0.46.3)', async () => {
+    const { c } = await company();
+    const july = doc('july.pdf', [...summary, ...taxInvoice(2, '107', 'H-10265', '410.00', '20.50', '430.50')], 2);
+    const more = doc('july-more.pdf', taxInvoice(1, '105', 'P-20202', '300.00', '15.00', '315.00'), 1);
+    // The July PDF alone: the Audi's row has no document.
+    await applyHistoryImport(c.id, await planHistoryImport(c.id, [july]));
+    expect((await db.historySummaryRows.toArray()).find((r) => r.plate === 'P-20202')).toMatchObject({ status: 'missing' });
+    // Then both: the invoice that came apart is written, and the row is its own now; nothing else changes.
+    const plan = await planHistoryImport(c.id, [july, more]);
+    expect(plan.problems).toEqual([]);
+    expect(plan.write.invoices.map((i) => i.id)).toEqual(['hi-B-job-105-2026-07-01']);
+    expect(plan.write.rows.map((r) => [r.plate, r.status, r.invoiceId])).toEqual([['P-20202', 'ok', 'hi-B-job-105-2026-07-01']]);
+    await applyHistoryImport(c.id, plan);
+    expect((await db.historySummaryRows.toArray()).map((r) => [r.plate, r.status]).sort()).toEqual([
+      [undefined, 'total'],
+      ['H-10257', 'plate'],
+      ['P-20202', 'ok'],
+    ]);
+    expect(plan.table.at(-1)).toMatchObject({ invoices: 2, totalFils: 74550 });
+    expect((await planHistoryImport(c.id, [july, more])).write).toEqual({ invoices: [], rows: [] });
+  });
+
   it('a dry run writes nothing; the import: each invoice with its job and car, a new car, the summary’s rows; again — nothing changes', async () => {
     const { c, pajero, order } = await company();
     const docs = [doc('july.pdf', [...summary, ...taxInvoice(2, '107', 'H-10265', '410.00', '20.50', '430.50')], 2), doc('may.pdf', oldInvoice(1, '204', 'EE 12345'), 1)];
