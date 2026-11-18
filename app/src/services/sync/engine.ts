@@ -4,6 +4,7 @@ import { LOCAL_TABLES, markRemote, nextStamp, onLocalChange, STAMP } from '../..
 import { nowIso } from '../../domain/dates';
 import { cardOf } from '../photoSize';
 import { addressAllowed, callJson, getFile, parseAddress, putFile, SyncError } from './api';
+import { readRelay, RELAY } from './relay';
 import { installId, offloadOn, resetSyncState, setSyncConfig, setSyncState, syncConfig, syncState, type SyncConfig } from './config';
 
 /*
@@ -146,12 +147,18 @@ async function pullRecords(cfg: SyncConfig): Promise<number> {
   let cursor = syncState().cursor;
   let n = 0;
   for (;;) {
-    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean; main?: MainDevice | null; mediaKey?: string }>(cfg, `/api/sync/pull?since=${cursor}&limit=1000`, { timeout: 90_000 });
+    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean; main?: MainDevice | null; mediaKey?: string; relay?: { url: string } }>(cfg, `/api/sync/pull?since=${cursor}&limit=1000`, { timeout: 90_000 });
     if (res.changes.length) await applyChanges(res.changes);
     if (res.main !== undefined) setSyncState({ main: res.main });
-    // This device's key for its pictures and videos (given since v0.41.3): kept with the connection.
+    // This device's key for its pictures and videos (given since v0.41.3) and where the server leaves its address
+    // (v0.42.2): kept with the connection.
     const now = syncConfig();
-    if (res.mediaKey && now && now.token === cfg.token && now.mediaKey !== res.mediaKey) setSyncConfig({ ...now, mediaKey: res.mediaKey });
+    if (now && now.token === cfg.token) {
+      const patch: Partial<SyncConfig> = {};
+      if (res.mediaKey && now.mediaKey !== res.mediaKey) patch.mediaKey = res.mediaKey;
+      if (res.relay?.url && now.relayUrl !== res.relay.url) patch.relayUrl = res.relay.url;
+      if (Object.keys(patch).length) setSyncConfig({ ...now, ...patch });
+    }
     const photos = res.changes.filter((c) => c.t === 'media' && c.d && c.d.kind === 'photo');
     if (photos.length) arrived?.(photos.map((c) => ({ id: c.k, card: isCover(String(c.d!.slot ?? '')) })));
     n += res.changes.length;
@@ -336,6 +343,46 @@ function failed(e: unknown) {
   // Tried again soon, a little less often each time (2, 4, 8 … at most every 30 s) — the server started again is
   // found in seconds.
   if (err !== 'revoked') scheduleSync(Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)));
+  // Not reached at all: its address may be new (the computer restarted) — looked up where the server leaves it.
+  if (!err) void findServer();
+}
+
+let finding: Promise<boolean> | null = null;
+let lookedAt = 0;
+
+/**
+ * The server not reached: its address may have changed — the computer started again, and its free tunnel with a new
+ * address (v0.42.2). The address the server left on the relay is read; if it is another one and this device's own key
+ * works there (the same server — another would not know it), syncing goes on there. At most every 30 s (`now`: at
+ * once); quiet either way.
+ */
+export function findServer(now = false): Promise<boolean> {
+  if (finding) return finding;
+  const cfg = syncConfig();
+  if (!cfg || (!now && Date.now() - lookedAt < 30_000)) return Promise.resolve(false);
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve(false);
+  lookedAt = Date.now();
+  finding = (async () => {
+    try {
+      const relay = cfg.relayUrl ?? RELAY;
+      if (!addressAllowed(relay)) return false;
+      const left = await readRelay(relay, cfg.token);
+      const url = left ? parseAddress(left.u).url : '';
+      if (!url || url === cfg.url || !addressAllowed(url)) return false;
+      await callJson({ url, token: cfg.token }, '/api/status', { timeout: 15_000 });
+      const here = syncConfig();
+      if (!here || here.token !== cfg.token) return false;
+      setSyncConfig({ ...here, url });
+      relisten();
+      scheduleSync(0);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      finding = null;
+    }
+  })();
+  return finding;
 }
 
 /** Records: send, take — once at a time (asked again meanwhile: once more after). */
@@ -558,13 +605,13 @@ export async function pairDevice(address: string, code: string, name: string): P
   const pin = (code || parsed.code || '').replace(/\D/g, '');
   if (!parsed.url || !addressAllowed(parsed.url)) throw new SyncError(0, 'address');
   if (pin.length !== 6) throw new SyncError(0, 'code');
-  const res = await callJson<{ token: string; deviceId: string; mediaKey?: string; records: number; byTable?: Record<string, number>; main?: MainDevice | null; rejoined?: boolean }>(
+  const res = await callJson<{ token: string; deviceId: string; mediaKey?: string; relay?: { url: string }; records: number; byTable?: Record<string, number>; main?: MainDevice | null; rejoined?: boolean }>(
     { url: parsed.url, token: '' },
     '/api/pair',
     { method: 'POST', body: { code: pin, name, install: installId() } },
   );
   return {
-    config: { url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso(), mediaKey: res.mediaKey },
+    config: { url: parsed.url, token: res.token, deviceId: res.deviceId, deviceName: name, pairedAt: nowIso(), mediaKey: res.mediaKey, relayUrl: res.relay?.url },
     server: res.byTable?.orders ?? (res.records ? 1 : 0),
     local: await db.orders.count(),
     main: res.main ?? null,

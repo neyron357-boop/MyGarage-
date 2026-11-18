@@ -64,7 +64,7 @@ async function load() {
   document.getElementById('code').textContent = code ? code.code.replace(/(\\d{3})(\\d{3})/, '$1 $2') : '— — —';
   document.getElementById('link').textContent = addr && code ? addr + '#pair=' + code.code : '';
   document.getElementById('folder').textContent = s.dataDir;
-  document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel);
+  document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel, s.relay);
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
     '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br>' + (d.live ? '<span class="ok">● на связи сейчас</span>' : '<span class="dim">был на связи: ' + when(d.last_seen) + '</span>') + '</span>' +
     (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
@@ -73,13 +73,15 @@ async function load() {
       : '<button class="red" onclick="askRevoke(\\'' + d.id + '\\')">Отключить</button>') + '</div>').join('')
     : '<span class="dim">Пока ни одного</span>';
 }
-function tunnelHtml(t) {
+function tunnelHtml(t, r) {
   if (!t.available) return '<span class="dim">Здесь — через Tailscale (см. инструкцию сервера).</span>';
   const state = t.url ? '<span class="ok">● включён</span>' : t.on ? '<span class="dim">подключается…</span>' : '<span class="dim">выключен</span>';
   return '<div class="row"><span>Cloudflare (бесплатно)</span>' + state + '</div>' +
     (t.url ? '<div class="row"><span>Адрес</span><span class="mono">' + esc(t.url) + '</span></div>' : '') +
+    (r && t.url ? '<div class="row"><span>Новый адрес — устройствам</span>' + (r.at && r.url === t.url ? '<span class="ok">● отправлен ' + esc(when(r.at)) + ' · устройств: ' + r.devices + '</span>'
+      : r.error ? '<span class="bad">не отправлен: ' + esc(r.error) + '</span>' : '<span class="dim">отправляется…</span>') + '</div>' : '') +
     '<p class="dim" style="margin:8px 0 12px">Телефон видит сервер из любой сети. Подключиться можно только по коду с этого компьютера. ' +
-    'После перезагрузки ПК адрес меняется — новый будет здесь, его нужно один раз ввести в приложении (Сервер → адрес). Постоянный адрес — Tailscale.</p>' +
+    'После перезагрузки ПК адрес меняется — подключённые устройства находят новый сами: сервер оставляет его на ntfy.sh зашифрованным. Постоянный адрес — Tailscale.</p>' +
     (t.on ? '<button class="ghost" onclick="setTunnel(0)">Выключить</button>'
       : asking ? '<p style="margin:0 0 12px">Сервер станет доступен из интернета через Cloudflare. Данные можно получить только с устройства, подключённого по коду с этого компьютера. Включить?</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="setTunnel(1)">Включить</button><button class="ghost" onclick="askTunnel(false)">Отмена</button></div>'
@@ -109,7 +111,7 @@ async function copyLink() {
 load(); setInterval(load, 5000);
 </script></body></html>`;
 
-export function createAdmin({ store, config, pairing, publicUrl, tunnel, events }) {
+export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay }) {
   return async function admin(req, res) {
     const url = new URL(req.url, 'http://local');
     const json = (body) => {
@@ -133,6 +135,7 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events 
         main: store.mainDevice(),
         lastBackup: store.metaGet('lastBackup'),
         tunnel: { available: !!tunnel && !!config.tunnelExe && tunnel.available(), on: !!tunnel?.on(), url: tunnel?.url() ?? '' },
+        relay: relay?.status() ?? null,
         ...store.counts(),
       });
     }

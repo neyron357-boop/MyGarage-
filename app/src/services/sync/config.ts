@@ -15,6 +15,8 @@ export interface SyncConfig {
   pairedAt: string;
   /** This device's key for its pictures and videos only (v0.41.3): an element loads them by their address with it. */
   mediaKey?: string;
+  /** Where the server leaves its address, sealed, when it changes (v0.42.2; none said — ntfy.sh): found there by itself. */
+  relayUrl?: string;
 }
 
 export interface SyncState {

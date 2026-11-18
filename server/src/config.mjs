@@ -33,6 +33,11 @@ export function loadConfig(env = process.env) {
      * comes from Tailscale). Empty: not offered.
      */
     tunnelExe: env.TUNNEL_EXE ?? (win ? path.join(dataDir, 'Служебное', 'cloudflared', 'cloudflared.exe') : ''),
+    /**
+     * Where the server leaves its address, sealed, for the devices to find after it changes (v0.42.2, relay.mjs):
+     * ntfy.sh — free, no account. Empty: not left anywhere.
+     */
+    relayUrl: (env.RELAY_URL ?? 'https://ntfy.sh').replace(/\/+$/, ''),
     /** How many daily copies of the database to keep. */
     keepBackups: Number(env.KEEP_BACKUPS) || 30,
   };

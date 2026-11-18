@@ -6,6 +6,7 @@ import { createAdmin } from './admin.mjs';
 import { createApi, createPairing } from './api.mjs';
 import { createCards } from './cards.mjs';
 import { createEvents } from './events.mjs';
+import { createRelay } from './relay.mjs';
 import { loadConfig, VERSION } from './config.mjs';
 import { DIRS, openStore } from './store.mjs';
 import { createTunnel } from './tunnel.mjs';
@@ -34,6 +35,8 @@ const store = openStore(config.dataDir, { keepBackups: config.keepBackups, log }
 const pairing = createPairing();
 const events = createEvents();
 const cards = createCards({ store, dataDir: config.dataDir, log });
+// The address, sealed, where the devices find it after it changes (a reboot gives the tunnel a new one).
+const relay = createRelay({ store, base: config.relayUrl, log });
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
@@ -46,6 +49,7 @@ const tunnel = createTunnel({
   log,
   onUrl: (u) => {
     tunnelUrl = u;
+    if (u) relay?.publish(config.publicUrl || u);
   },
 });
 function onSeen(host) {
@@ -53,6 +57,7 @@ function onSeen(host) {
   learnt = host;
   store.metaSet('publicHost', host);
   log(`address: https://${host}`);
+  relay?.publish(publicUrl());
 }
 function askTailscale() {
   if (config.publicUrl) return;
@@ -77,7 +82,7 @@ function backupNow() {
   }
 }
 
-const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards }));
+const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay }));
 // Streams stay open (events): no idle cut-off on this side.
 api.keepAliveTimeout = 65_000;
 api.requestTimeout = 0;
@@ -85,8 +90,10 @@ api.listen(config.port, config.host, () => {
   log(`MyGarage server ${VERSION}: API http://${config.host}:${config.port}, data ${config.dataDir}`);
   // Turned on by the owner on this computer's page: on again with the server (the one still running is kept).
   if (store.metaGet('tunnel') === 'on' && config.tunnelExe) tunnel.start();
+  // A permanent address (Docker and Tailscale, or given): the devices have it from the start.
+  if (config.publicUrl) relay?.publish(config.publicUrl);
 });
-const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events }));
+const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();
@@ -101,6 +108,7 @@ function stop() {
   log('stopping');
   // The tunnel goes on: the server started next keeps it, and its address.
   tunnel.detach();
+  relay?.stop();
   events.closeAll();
   api.close();
   admin.close();

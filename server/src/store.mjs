@@ -250,6 +250,8 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     return { id: d.id, name: d.name };
   }
   const devices = () => db.prepare('SELECT id, name, created_at, last_seen, revoked FROM devices ORDER BY created_at').all();
+  /** The hashes of the paired devices' keys: their channels on the relay (relay.mjs, v0.42.2). */
+  const relayDevices = () => db.prepare('SELECT token_hash FROM devices WHERE revoked = 0').all().map((d) => d.token_hash);
   const revoke = (id) => db.prepare('UPDATE devices SET revoked = 1 WHERE id = ?').run(id);
 
   /* ---------- Files ---------- */
@@ -360,7 +362,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  return { dataDir, push, pull, replace, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
+  return { dataDir, push, pull, replace, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
 }
 
 export function httpError(status, message) {

@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import { createApi, createPairing } from '../src/api.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { createEvents } from '../src/events.mjs';
+import { createRelay } from '../src/relay.mjs';
 import { openStore } from '../src/store.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-server-'));
@@ -14,15 +15,18 @@ const config = loadConfig({ DATA_DIR: dir, ALLOWED_ORIGINS: 'https://app.example
 const store = openStore(dir, { keepBackups: 2 });
 const pairing = createPairing();
 const events = createEvents({ pingMs: 200 });
+// Where the address is left (v0.42.2): nothing goes out of this test.
+const relay = createRelay({ store, base: 'http://127.0.0.1:9/relay', fetchImpl: async () => new Response('{}') });
 let base = '';
 let server;
 
 before(async () => {
-  server = createServer(createApi({ store, config, pairing, log: () => {}, onSeen: () => {}, events }));
+  server = createServer(createApi({ store, config, pairing, log: () => {}, onSeen: () => {}, events, relay }));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => {
+  relay.stop();
   events.closeAll();
   server.close();
   store.close();
@@ -336,6 +340,14 @@ describe('MyGarage server', () => {
     assert.equal((await call('/api/health')).status, 200);
     const again = await call('/api/media/vid-1/blob', { token: t, headers: { Range: 'bytes=0-9' } });
     assert.equal(again.status, 206);
+  });
+
+  it('pairing, the status and each sync tell the device where the server leaves its address (v0.42.2)', async () => {
+    const { code } = pairing.issue();
+    const paired = await (await call('/api/pair', { method: 'POST', body: { code, name: 'Finder', install: 'install-finder-123456' } })).json();
+    assert.deepEqual(paired.relay, { url: 'http://127.0.0.1:9/relay' });
+    assert.deepEqual((await (await call('/api/status', { token: paired.token })).json()).relay, relay.info());
+    assert.deepEqual((await (await call('/api/sync/pull?since=0', { token: paired.token })).json()).relay, relay.info());
   });
 
   it('an older app is told to update: it may not connect or send', async () => {

@@ -104,22 +104,31 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
     try {
       // Left running by this server before it was started again: kept, with its address.
       const saved = readState();
-      if (saved?.pid && saved.url && isTunnel(saved.pid)) {
-        if (await answers(saved.url)) {
-          pid = saved.pid;
-          tries = 0;
-          setUrl(saved.url);
-          log(`tunnel kept: ${saved.url}`);
-          watching();
-          return;
-        }
-        try {
-          process.kill(saved.pid);
-        } catch {
-          // gone already
-        }
+      if (saved?.pid && saved.url) {
+        if (isTunnel(saved.pid)) {
+          if (await answers(saved.url)) {
+            pid = saved.pid;
+            tries = 0;
+            setUrl(saved.url);
+            log(`tunnel kept: ${saved.url}`);
+            watching();
+            return;
+          }
+          log(`tunnel ${saved.url} does not answer: a new one`);
+          try {
+            process.kill(saved.pid);
+          } catch {
+            // gone already
+          }
+        } else log(`tunnel ${saved.url} is not running any more: a new one`);
       }
       if (!wanted) return;
+      // The last tunnel's own output kept beside (v0.42.2): why it stopped, if it did.
+      try {
+        if (fs.existsSync(outFile)) fs.renameSync(outFile, `${outFile}.1`);
+      } catch {
+        // still held: written over
+      }
       const out = fs.openSync(outFile, 'w');
       const child = spawn(exe, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`], { detached: true, windowsHide: true, stdio: ['ignore', out, out] });
       fs.closeSync(out);

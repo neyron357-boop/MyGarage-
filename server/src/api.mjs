@@ -16,6 +16,7 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/sync/events                — a stream: told at once when other devices' changes are kept (v0.41.2)
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/forget                     — this device leaves (its key no longer works)
+ *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
  *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
  *                                          by the device's key, or by `?d=<device>&k=<media key>` — a picture or a
@@ -115,7 +116,7 @@ export function createPairing() {
   };
 }
 
-export function createApi({ store, config, pairing, log, onSeen, events, cards }) {
+export function createApi({ store, config, pairing, log, onSeen, events, cards, relay }) {
   return async function api(req, res) {
     const origin = req.headers.origin;
     const allowed = origin && config.origins.includes(origin);
@@ -159,14 +160,15 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards }
         const d = store.addDevice(body.name, body.install);
         for (const old of d.was) events?.drop(old);
         log(`paired: ${body.name ?? 'device'} (${d.id})${d.rejoined ? ` — the same app again (was ${d.was.join(', ')})` : ''}`);
-        return send(res, 200, { token: d.token, deviceId: d.id, mediaKey: store.mediaKey(d.id), rejoined: d.rejoined, main: store.mainDevice(), ...store.counts() });
+        relay?.paired(d.token);
+        return send(res, 200, { token: d.token, deviceId: d.id, mediaKey: store.mediaKey(d.id), relay: relay?.info(), rejoined: d.rejoined, main: store.mainDevice(), ...store.counts() });
       }
 
       const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
       const device = store.deviceOf(token);
       if (!device) throw httpError(401, 'not paired');
 
-      if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ok: true, version: VERSION, device: device.name, mediaKey: store.mediaKey(device.id), main: store.mainDevice(), ...store.counts() });
+      if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ok: true, version: VERSION, device: device.name, mediaKey: store.mediaKey(device.id), relay: relay?.info(), main: store.mainDevice(), ...store.counts() });
 
       // The main device's data becomes the garage's: only it may do this (or any device, while there is none).
       if (req.method === 'POST' && url.pathname === '/api/sync/replace') {
@@ -202,7 +204,7 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards }
       }
 
       if (req.method === 'GET' && url.pathname === '/api/sync/pull') {
-        return send(res, 200, { ...store.pull(device.id, url.searchParams.get('since'), url.searchParams.get('limit')), main: store.mainDevice(), mediaKey: store.mediaKey(device.id) });
+        return send(res, 200, { ...store.pull(device.id, url.searchParams.get('since'), url.searchParams.get('limit')), main: store.mainDevice(), mediaKey: store.mediaKey(device.id), relay: relay?.info() });
       }
 
       if (parts[0] === 'api' && parts[1] === 'media' && parts.length === 4) {

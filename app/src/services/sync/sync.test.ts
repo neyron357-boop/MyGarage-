@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createServer as httpServer, type Server } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,7 +15,7 @@ import { checkIn } from '../orders';
 import { ensureSeed } from '../seed';
 import { forgetSyncMemory, installId, resetSyncState, restoreInstallId, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
 import { SyncError } from './api';
-import { applyChanges, changeServerAddress, eventRev, finishPairing, lastingError, makeMain, pairDevice, syncNow } from './engine';
+import { applyChanges, changeServerAddress, eventRev, findServer, finishPairing, lastingError, makeMain, pairDevice, syncNow } from './engine';
 
 /*
  * Two devices and the garage's own server (server/src/main.mjs, started here as it runs on the computer): what one
@@ -57,6 +59,56 @@ const store = {
   },
 };
 /** A pairing code, as this computer's page gives it. */
+/**
+ * The relay where the server leaves its address (v0.42.2) — here, not ntfy.sh: what is posted to a topic, and its
+ * messages read back the way ntfy gives them.
+ */
+let relayServer: Server | undefined;
+let relayBase = '';
+const relayTopics = new Map<string, string[]>();
+const startRelay = async () => {
+  relayServer = httpServer((req, res) => {
+    const parts = new URL(req.url ?? '/', 'http://relay').pathname.split('/').filter(Boolean);
+    const topic = parts[0] ?? '';
+    if (req.method === 'POST' && parts.length === 1) {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString('utf8')));
+      req.on('end', () => {
+        relayTopics.set(topic, [...(relayTopics.get(topic) ?? []), body]);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+      });
+      return;
+    }
+    if (req.method === 'GET' && parts[1] === 'json') {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      res.end((relayTopics.get(topic) ?? []).map((message, i) => `${JSON.stringify({ id: String(i), time: i, event: 'message', topic, message })}
+`).join(''));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((r) => relayServer!.listen(0, '127.0.0.1', () => r()));
+  relayBase = `http://127.0.0.1:${(relayServer.address() as { port: number }).port}`;
+};
+/** A device's channel on the relay, as the server makes it from the hash of the device's key (server/src/relay.mjs). */
+const channelOf = (token: string) => {
+  const h = Buffer.from(crypto.createHash('sha256').update(token).digest('hex'), 'utf8');
+  return {
+    topic: crypto.createHmac('sha256', h).update('mygarage relay topic').digest('base64url').slice(0, 24),
+    key: crypto.createHmac('sha256', h).update('mygarage relay key').digest('base64url'),
+  };
+};
+/** An address sealed as the server seals it (server/src/relay.mjs). */
+const seal = (key: string, topic: string, u: string, t: number) => {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', Buffer.from(key, 'base64url'), iv);
+  c.setAAD(Buffer.from(topic, 'utf8'));
+  const body = Buffer.concat([c.update(JSON.stringify({ u, t }), 'utf8'), c.final(), c.getAuthTag()]);
+  return `mg1.${iv.toString('base64url')}.${body.toString('base64url')}`;
+};
+
 const newCode = async () => ((await (await fetch(`${admin}/code`, { method: 'POST' })).json()) as { code: string }).code;
 
 interface Device {
@@ -94,8 +146,10 @@ beforeAll(async () => {
   const [port, adminPort] = [await freePort(), await freePort()];
   url = `http://127.0.0.1:${port}`;
   admin = `http://127.0.0.1:${adminPort}`;
+  await startRelay();
   proc = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', main], {
-    env: { ...process.env, DATA_DIR: dataDir, PORT: String(port), ADMIN_PORT: String(adminPort) },
+    // Its address given (as with Tailscale) and left on the relay here.
+    env: { ...process.env, DATA_DIR: dataDir, PORT: String(port), ADMIN_PORT: String(adminPort), PUBLIC_URL: url, RELAY_URL: relayBase },
     stdio: 'ignore',
   });
   for (let i = 0; i < 100; i++) {
@@ -110,6 +164,7 @@ beforeAll(async () => {
 }, 20_000);
 afterAll(() => {
   proc?.kill();
+  relayServer?.close();
   setTimeout(() => fs.rmSync(dataDir, { recursive: true, force: true }), 300);
 });
 
@@ -323,6 +378,36 @@ describe('syncing with the garage’s server (v0.40)', () => {
     setSyncConfig(here);
     await syncNow();
     expect(syncState().lastError).toBeUndefined();
+  });
+
+  it('the server at a new address (the computer started again): found where it left it, by itself (v0.42.2)', async () => {
+    as('pc');
+    await syncNow();
+    const here = syncConfig()!;
+    expect(here.relayUrl).toBe(relayBase);
+    // This device's own channel (made from its key): the server left its address there when it paired — sealed.
+    const relay = channelOf(here.token);
+    const left = [...(relayTopics.get(relay.topic) ?? [])];
+    expect(left.length).toBeGreaterThan(0);
+    expect(left.join('')).not.toContain('127.0.0.1');
+    // Someone else's text there (not this device's key) is never taken, however new.
+    relayTopics.get(relay.topic)!.push(seal(crypto.randomBytes(32).toString('base64url'), relay.topic, 'http://127.0.0.1:2', Date.now() + 60_000));
+    // The address this device has is gone (a new tunnel): nothing said; the new one found.
+    setSyncConfig({ ...here, url: 'http://127.0.0.1:1' });
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+    await findServer(true);
+    expect(syncConfig()!.url).toBe(here.url);
+    expect(syncConfig()!.token).toBe(here.token);
+    await syncNow();
+    expect(syncState().lastError).toBeUndefined();
+    // This device's key, but a server that does not know it: not taken either.
+    relayTopics.get(relay.topic)!.push(seal(relay.key, relay.topic, admin, Date.now() + 120_000));
+    setSyncConfig({ ...here, url: 'http://127.0.0.1:1' });
+    expect(await findServer(true)).toBe(false);
+    expect(syncConfig()!.url).toBe('http://127.0.0.1:1');
+    relayTopics.set(relay.topic, left);
+    setSyncConfig(here);
   });
 
   it('a device cut off on the server stops, and says why', async () => {
