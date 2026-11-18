@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Button, Group, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import {
   IconBrandWhatsapp,
   IconBuildingStore,
@@ -77,7 +77,7 @@ import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from '../../ui/hooks';
-import { useDeskHotkeys } from '../../ui/desk';
+import { useDesk, useDeskHotkeys } from '../../ui/desk';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { OwnerCheckSheet } from './OwnerCheck';
@@ -167,14 +167,21 @@ const ADD_KINDS: { kind: LineKind; icon: Icon; color: string; label: string }[] 
  */
 function AddBar({ onAdd, flush, children }: { onAdd: (kind: LineKind) => void; flush?: boolean; children?: ReactNode }) {
   const { t } = useTranslation();
+  // On a PC each says its key (1 · 2 · 3 — useDeskHotkeys below).
+  const desk = useDesk();
   return (
     <div className="add-row" data-flush={flush || undefined}>
-      {ADD_KINDS.map(({ kind, icon: I, color, label }) => (
+      {ADD_KINDS.map(({ kind, icon: I, color, label }, n) => (
         <button key={kind} type="button" className="action-tile add-btn" onClick={() => onAdd(kind)}>
           <span className="tile-icon" style={{ '--c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}>
             <I size={18} stroke={2.1} aria-hidden />
           </span>
           <span>{t(label)}</span>
+          {desk && (
+            <Kbd className="add-kbd" aria-hidden>
+              {n + 1}
+            </Kbd>
+          )}
         </button>
       ))}
       {children}

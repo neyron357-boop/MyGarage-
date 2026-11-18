@@ -38,6 +38,13 @@ export const ru = {
     keyLines: 'Работа · Запчасть · Услуга в заказе',
     keyClose: 'Закрыть окно',
     actions: 'Действия',
+    // Search from anywhere on a PC (v0.42): Ctrl+K.
+    palette: {
+      placeholder: 'Номер, имя, телефон, VIN',
+      found: 'Машины и клиенты',
+      actions: 'Действия',
+      everywhere: 'Искать «{{q}}» везде',
+    },
     col: {
       customer: 'Клиент',
       phone: 'Телефон',

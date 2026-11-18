@@ -133,7 +133,7 @@ export function DeskKeys() {
  * desk.css `.desk-split`. On a phone (`desk` false) the two one after the other, as they always were: no element of
  * its own, the page exactly as before.
  */
-export function DeskSplit({ desk, side, main }: { desk: boolean; side: ReactNode; main: ReactNode }) {
+export function DeskSplit({ desk, side, main, className }: { desk: boolean; side: ReactNode; main: ReactNode; className?: string }) {
   if (!desk)
     return (
       <>
@@ -142,7 +142,7 @@ export function DeskSplit({ desk, side, main }: { desk: boolean; side: ReactNode
       </>
     );
   return (
-    <div className="desk-split">
+    <div className={className ? `desk-split ${className}` : 'desk-split'}>
       <div className="desk-split-side">{side}</div>
       <div className="desk-split-main">{main}</div>
     </div>

@@ -366,12 +366,76 @@ export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
   );
 }
 
+type HeaderProps = { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode };
+
+/**
+ * A screen's head. Phone: the iOS navigation bar and the large title under it. PC (v0.42): the window's toolbar — one
+ * row at the top of the screen, back, the title with its small line under it, the screen's buttons at the end.
+ */
+export function PageHeader(props: HeaderProps) {
+  const desk = useDesk();
+  return desk ? <DeskBar {...props} /> : <PhoneHeader {...props} />;
+}
+
+/** The PC's toolbar (v0.42): sticky at the top of the window; a hairline under it once the screen scrolls under it. */
+function DeskBar({ title, back, right, subtitle, eyebrow }: HeaderProps) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    let shown = '';
+    const update = () => {
+      const now = String(window.scrollY > 2);
+      if (now !== shown && ref.current) ref.current.dataset.scrolled = shown = now;
+    };
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, []);
+  const sub = [eyebrow, subtitle].filter((x) => x !== undefined && x !== null && x !== false && x !== '');
+  return (
+    <header className="desk-bar" ref={ref}>
+      {back && <DeskBack to={typeof back === 'string' ? back : undefined} />}
+      <div className="desk-bar-head">
+        <h1 className="desk-title">{title}</h1>
+        {sub.length > 0 && (
+          <div className="desk-bar-sub">
+            {sub.map((s, i) => (
+              <span key={i}>{s}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      {right && <div className="desk-bar-right">{right}</div>}
+    </header>
+  );
+}
+
+/** Back on a PC: a round button with the name of where it goes in its tooltip. */
+function DeskBack({ to }: { to?: string }) {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const title = useScreenTitle();
+  const name = to ? title(to) : t('common.back');
+  const label = typeof name === 'string' && name ? name : t('common.back');
+  return (
+    <Tooltip label={label} position="bottom">
+      <button
+        type="button"
+        className="desk-back"
+        aria-label={label}
+        onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate(to ?? '/'))}
+      >
+        <IconChevronLeft size={20} stroke={2.2} aria-hidden />
+      </button>
+    </Tooltip>
+  );
+}
+
 /**
  * Screen header like iOS: a translucent navigation bar (back, actions, and the title once the large
  * one has scrolled under it) above a large title that fades as it goes. On a phone the bar lives
  * outside the screen's scroll view, so it never moves when the content bounces.
  */
-export function PageHeader({ title, back, right, subtitle, eyebrow }: { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode }) {
+function PhoneHeader({ title, back, right, subtitle, eyebrow }: HeaderProps) {
   const screen = useScreen();
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);

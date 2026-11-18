@@ -21,7 +21,8 @@ import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { CarThumb } from '../job/CarCover';
 import { DateTimeField } from '../../ui/DateFields';
-import { typedOnly, useAction, useLang, useSettings } from '../../ui/hooks';
+import { typedOnly, useAction, useLang, usePhone, useSettings } from '../../ui/hooks';
+import { DeskSplit } from '../../ui/desk';
 
 const LAST_EMIRATE = 'mygarage.lastEmirate';
 
@@ -249,6 +250,8 @@ export function NewOrderPage() {
   // One job per "Accept", however fast the second tap comes.
   const { run, busy } = useAction({ exclusive: true });
   const settings = useSettings();
+  // On a PC (v0.42) the form is two columns: the car | what is wrong and whose it is.
+  const onPhone = usePhone();
   const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
@@ -379,194 +382,205 @@ export function NewOrderPage() {
     <>
       <PageHeader back title={t('newOrder.title')} right={<DocImportButton />} />
       <Stack gap={0}>
-        <div className="group-title">{t('newOrder.vehicle')}</div>
-        {shot && <CarShot file={shot.file} state={read?.state ?? 'reading'} box={fromPhoto?.box} pick={shoot} onRemove={() => setShot(undefined)} />}
-        {picked ? (
-          <Box className="surface rise-enter" p="md">
-            <Group justify="space-between" wrap="nowrap" gap="sm">
-              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                <CarThumb vehicleId={picked.vehicle.id} />
-                <PlateText plate={picked.vehicle.plate} size="md" />
-                <Box style={{ minWidth: 0 }}>
-                  <Text fw={600} lineClamp={1}>
-                    {[picked.vehicle.make, picked.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
-                  </Text>
-                  <Text size="sm" c="dimmed" lineClamp={1}>
-                    {who(picked.owner, noName)}
-                  </Text>
-                </Box>
-              </Group>
-              <Button variant="subtle" size="compact-md" onClick={() => setPicked(undefined)}>
-                {t('newOrder.otherCar')}
-              </Button>
-            </Group>
-            {picked.activeOrder && (
-              <button type="button" className="suggest" style={{ marginTop: 12 }} onClick={() => navigate(`/orders/${picked.activeOrder!.id}`)}>
-                <Text size="sm" fw={600} style={{ flex: 1 }}>
-                  {t('newOrder.inWork', { n: picked.activeOrder.number })}
-                </Text>
-                <Text size="sm" c="cobalt.6" fw={600}>
-                  {t('newOrder.openOrder')}
-                </Text>
-              </button>
-            )}
-          </Box>
-        ) : (
-          <>
-            <PlateBlock
-              plate={plate}
-              onChange={typePlate}
-              unsure={unsure}
-              focus={!shot}
-              camera={
-                !shot && (
-                  <ActionIcon className="plate-cam" size={40} radius="xl" variant="light" aria-label={t('newOrder.photo')} {...shoot.handlers} onClick={() => !shoot.consumeClick() && shoot.camera()}>
-                    <IconCamera size={20} stroke={2} />
-                  </ActionIcon>
-                )
-              }
-            />
-            {shoot.inputs}
-            {auto && (
-              <Box className="surface rise-enter" p="sm" mt={10} aria-label={t('newOrder.inBase')}>
-                <Group gap="sm" wrap="nowrap">
-                  <CarThumb vehicleId={auto.vehicle.id} />
-                  <Box style={{ minWidth: 0, flex: 1 }}>
-                    <Text fw={600} lineClamp={1}>
-                      {[auto.vehicle.make, auto.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
-                    </Text>
-                    <Text size="sm" c="dimmed" lineClamp={1}>
-                      {t('newOrder.inBase')}
-                    </Text>
-                  </Box>
-                </Group>
-              </Box>
-            )}
-            {match?.activeOrder && (
-              <button
-                type="button"
-                className="suggest rise-enter"
-                style={{ marginTop: 10 }}
-                onClick={() => navigate(`/orders/${match.activeOrder!.id}`)}
-              >
-                <IconCar size={22} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
-                <Box style={{ flex: 1, minWidth: 0 }}>
-                  <Text size="sm" fw={600} lh={1.3}>
-                    {t('newOrder.inWork', { n: match.activeOrder.number })}
-                  </Text>
-                  <Text size="xs" c="dimmed" lineClamp={1}>
-                    {[[match.vehicle.make, match.vehicle.model].filter(Boolean).join(' '), who(match.owner, noName)].filter(Boolean).join(' · ')}
-                  </Text>
-                </Box>
-                <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
-                  {t('newOrder.openOrder')}
-                </Text>
-              </button>
-            )}
-            {byNumber.length > 0 && (
-              // The number is in the base with another code (or none): one tap — that car and its customer.
-              <Stack gap={8} mt={10}>
-                {byNumber.map((c) => (
-                  <button
-                    key={c.vehicle.id}
-                    type="button"
-                    className="suggest rise-enter"
-                    onClick={() => (c.activeOrder ? navigate(`/orders/${c.activeOrder.id}`) : setPicked(c))}
-                  >
-                    <CarThumb vehicleId={c.vehicle.id} size={44} />
-                    <Box style={{ flex: 1, minWidth: 0 }}>
-                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                        <PlateText plate={c.vehicle.plate} size="sm" />
-                        <Text size="sm" fw={600} lineClamp={1}>
-                          {[c.vehicle.make, c.vehicle.model].filter(Boolean).join(' ')}
+        <DeskSplit
+          desk={!onPhone}
+          className="desk-form"
+          side={
+            <>
+              <div className="group-title">{t('newOrder.vehicle')}</div>
+              {shot && <CarShot file={shot.file} state={read?.state ?? 'reading'} box={fromPhoto?.box} pick={shoot} onRemove={() => setShot(undefined)} />}
+              {picked ? (
+                <Box className="surface rise-enter" p="md">
+                  <Group justify="space-between" wrap="nowrap" gap="sm">
+                    <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                      <CarThumb vehicleId={picked.vehicle.id} />
+                      <PlateText plate={picked.vehicle.plate} size="md" />
+                      <Box style={{ minWidth: 0 }}>
+                        <Text fw={600} lineClamp={1}>
+                          {[picked.vehicle.make, picked.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
                         </Text>
-                      </Group>
-                      <Text size="xs" c="dimmed" lineClamp={1} mt={2}>
-                        {[who(c.owner, noName), c.activeOrder ? t('newOrder.inWork', { n: c.activeOrder.number }) : ''].filter(Boolean).join(' · ')}
+                        <Text size="sm" c="dimmed" lineClamp={1}>
+                          {who(picked.owner, noName)}
+                        </Text>
+                      </Box>
+                    </Group>
+                    <Button variant="subtle" size="compact-md" onClick={() => setPicked(undefined)}>
+                      {t('newOrder.otherCar')}
+                    </Button>
+                  </Group>
+                  {picked.activeOrder && (
+                    <button type="button" className="suggest" style={{ marginTop: 12 }} onClick={() => navigate(`/orders/${picked.activeOrder!.id}`)}>
+                      <Text size="sm" fw={600} style={{ flex: 1 }}>
+                        {t('newOrder.inWork', { n: picked.activeOrder.number })}
                       </Text>
+                      <Text size="sm" c="cobalt.6" fw={600}>
+                        {t('newOrder.openOrder')}
+                      </Text>
+                    </button>
+                  )}
+                </Box>
+              ) : (
+                <>
+                  <PlateBlock
+                    plate={plate}
+                    onChange={typePlate}
+                    unsure={unsure}
+                    focus={!shot}
+                    camera={
+                      !shot && (
+                        <ActionIcon className="plate-cam" size={40} radius="xl" variant="light" aria-label={t('newOrder.photo')} {...shoot.handlers} onClick={() => !shoot.consumeClick() && shoot.camera()}>
+                          <IconCamera size={20} stroke={2} />
+                        </ActionIcon>
+                      )
+                    }
+                  />
+                  {shoot.inputs}
+                  {auto && (
+                    <Box className="surface rise-enter" p="sm" mt={10} aria-label={t('newOrder.inBase')}>
+                      <Group gap="sm" wrap="nowrap">
+                        <CarThumb vehicleId={auto.vehicle.id} />
+                        <Box style={{ minWidth: 0, flex: 1 }}>
+                          <Text fw={600} lineClamp={1}>
+                            {[auto.vehicle.make, auto.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
+                          </Text>
+                          <Text size="sm" c="dimmed" lineClamp={1}>
+                            {t('newOrder.inBase')}
+                          </Text>
+                        </Box>
+                      </Group>
                     </Box>
-                    <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
-                      {c.activeOrder ? t('newOrder.openOrder') : t('newOrder.useThis')}
-                    </Text>
-                  </button>
-                ))}
-              </Stack>
-            )}
-            {!auto && (
-              <>
-                <div className="group-title" style={{ marginTop: 22 }}>
-                  {t('newOrder.makeModel')}
-                </div>
-                <MakeModelBlock make={make} model={model} onMake={setMake} onModel={setModel} />
-              </>
-            )}
-          </>
-        )}
-
-        <div className="group-title" style={{ marginTop: 22 }}>
-          {t('job.complaint')}
-        </div>
-        <ComplaintBlock complaint={complaint} complaints={complaints} onAdd={addQuick} onChange={setComplaint} />
-
-        <div className="group-title" style={{ marginTop: 22 }}>
-          {t('job.client')}
-        </div>
-        {owner && (owner.name || owner.phone) ? (
-          <Box className="surface rise-enter" p="md">
-            <Group justify="space-between" wrap="nowrap">
-              <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                <IconUser size={20} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
-                <Text fw={500} lineClamp={1}>
-                  {who(owner, noName)}
-                </Text>
-              </Group>
-              {!known && (
-                <Button variant="subtle" color="gray" size="compact-md" aria-label={t('common.change')} onClick={() => setPickedCustomer(undefined)}>
-                  <IconX size={18} />
-                </Button>
+                  )}
+                  {match?.activeOrder && (
+                    <button
+                      type="button"
+                      className="suggest rise-enter"
+                      style={{ marginTop: 10 }}
+                      onClick={() => navigate(`/orders/${match.activeOrder!.id}`)}
+                    >
+                      <IconCar size={22} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
+                      <Box style={{ flex: 1, minWidth: 0 }}>
+                        <Text size="sm" fw={600} lh={1.3}>
+                          {t('newOrder.inWork', { n: match.activeOrder.number })}
+                        </Text>
+                        <Text size="xs" c="dimmed" lineClamp={1}>
+                          {[[match.vehicle.make, match.vehicle.model].filter(Boolean).join(' '), who(match.owner, noName)].filter(Boolean).join(' · ')}
+                        </Text>
+                      </Box>
+                      <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                        {t('newOrder.openOrder')}
+                      </Text>
+                    </button>
+                  )}
+                  {byNumber.length > 0 && (
+                    // The number is in the base with another code (or none): one tap — that car and its customer.
+                    <Stack gap={8} mt={10}>
+                      {byNumber.map((c) => (
+                        <button
+                          key={c.vehicle.id}
+                          type="button"
+                          className="suggest rise-enter"
+                          onClick={() => (c.activeOrder ? navigate(`/orders/${c.activeOrder.id}`) : setPicked(c))}
+                        >
+                          <CarThumb vehicleId={c.vehicle.id} size={44} />
+                          <Box style={{ flex: 1, minWidth: 0 }}>
+                            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                              <PlateText plate={c.vehicle.plate} size="sm" />
+                              <Text size="sm" fw={600} lineClamp={1}>
+                                {[c.vehicle.make, c.vehicle.model].filter(Boolean).join(' ')}
+                              </Text>
+                            </Group>
+                            <Text size="xs" c="dimmed" lineClamp={1} mt={2}>
+                              {[who(c.owner, noName), c.activeOrder ? t('newOrder.inWork', { n: c.activeOrder.number }) : ''].filter(Boolean).join(' · ')}
+                            </Text>
+                          </Box>
+                          <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                            {c.activeOrder ? t('newOrder.openOrder') : t('newOrder.useThis')}
+                          </Text>
+                        </button>
+                      ))}
+                    </Stack>
+                  )}
+                  {!auto && (
+                    <>
+                      <div className="group-title" style={{ marginTop: 22 }}>
+                        {t('newOrder.makeModel')}
+                      </div>
+                      <MakeModelBlock make={make} model={model} onMake={setMake} onModel={setModel} />
+                    </>
+                  )}
+                </>
               )}
-            </Group>
-          </Box>
-        ) : (
-          <>
-            <RowGroup mt={0}>
-              <FormRow label={t('customer.phone')}>
-                <TextInput aria-label={t('customer.phone')} type="tel" inputMode="tel" placeholder="050 123 4567" value={phone} onChange={(e) => setPhone(e.currentTarget.value)} autoComplete="off" w="100%" />
-              </FormRow>
-              <FormRow label={t('customer.name')}>
-                <TextInput aria-label={t('customer.name')} placeholder={t('newOrder.namePlaceholder')} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="off" autoCapitalize="words" w="100%" />
-              </FormRow>
-            </RowGroup>
-            {suggestions.length > 0 && (
-              <Stack gap={8} mt={10}>
-                {suggestions.map((c) => (
-                  <button key={c.id} type="button" className="suggest rise-enter" onClick={() => setPickedCustomer(c)}>
-                    <IconUser size={20} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
-                    <Text size="sm" fw={500} style={{ flex: 1, minWidth: 0 }} lineClamp={1}>
-                      {who(c, noName)}
-                    </Text>
-                    <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
-                      {t('newOrder.useThis')}
-                    </Text>
-                  </button>
-                ))}
-              </Stack>
-            )}
+            </>
+          }
+          main={
+            <>
+              <div className="group-title" style={{ marginTop: 22 }}>
+                {t('job.complaint')}
+              </div>
+              <ComplaintBlock complaint={complaint} complaints={complaints} onAdd={addQuick} onChange={setComplaint} />
 
-          </>
-        )}
+              <div className="group-title" style={{ marginTop: 22 }}>
+                {t('job.client')}
+              </div>
+              {owner && (owner.name || owner.phone) ? (
+                <Box className="surface rise-enter" p="md">
+                  <Group justify="space-between" wrap="nowrap">
+                    <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                      <IconUser size={20} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+                      <Text fw={500} lineClamp={1}>
+                        {who(owner, noName)}
+                      </Text>
+                    </Group>
+                    {!known && (
+                      <Button variant="subtle" color="gray" size="compact-md" aria-label={t('common.change')} onClick={() => setPickedCustomer(undefined)}>
+                        <IconX size={18} />
+                      </Button>
+                    )}
+                  </Group>
+                </Box>
+              ) : (
+                <>
+                  <RowGroup mt={0}>
+                    <FormRow label={t('customer.phone')}>
+                      <TextInput aria-label={t('customer.phone')} type="tel" inputMode="tel" placeholder="050 123 4567" value={phone} onChange={(e) => setPhone(e.currentTarget.value)} autoComplete="off" w="100%" />
+                    </FormRow>
+                    <FormRow label={t('customer.name')}>
+                      <TextInput aria-label={t('customer.name')} placeholder={t('newOrder.namePlaceholder')} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="off" autoCapitalize="words" w="100%" />
+                    </FormRow>
+                  </RowGroup>
+                  {suggestions.length > 0 && (
+                    <Stack gap={8} mt={10}>
+                      {suggestions.map((c) => (
+                        <button key={c.id} type="button" className="suggest rise-enter" onClick={() => setPickedCustomer(c)}>
+                          <IconUser size={20} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
+                          <Text size="sm" fw={500} style={{ flex: 1, minWidth: 0 }} lineClamp={1}>
+                            {who(c, noName)}
+                          </Text>
+                          <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                            {t('newOrder.useThis')}
+                          </Text>
+                        </button>
+                      ))}
+                    </Stack>
+                  )}
+
+                </>
+              )}
 
 
-        <RowGroup>
-          <FormRow label={t('newOrder.bookLater')}>
-            <Switch checked={later} onChange={(e) => setLater(e.currentTarget.checked)} aria-label={t('newOrder.bookLater')} />
-          </FormRow>
-          {later && (
-            <Box px="md" pb="md" pt={4} className="rise-enter">
-              <DateTimeField label={t('newOrder.bookedFor')} value={bookedFor} onChange={setBookedFor} />
-            </Box>
-          )}
-        </RowGroup>
+              <RowGroup>
+                <FormRow label={t('newOrder.bookLater')}>
+                  <Switch checked={later} onChange={(e) => setLater(e.currentTarget.checked)} aria-label={t('newOrder.bookLater')} />
+                </FormRow>
+                {later && (
+                  <Box px="md" pb="md" pt={4} className="rise-enter">
+                    <DateTimeField label={t('newOrder.bookedFor')} value={bookedFor} onChange={setBookedFor} />
+                  </Box>
+                )}
+              </RowGroup>
+            </>
+          }
+        />
       </Stack>
 
       <StickyBar>

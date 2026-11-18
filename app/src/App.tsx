@@ -1,4 +1,4 @@
-import { AppShell, Box, Kbd, MantineProvider, NavLink as MNavLink, Stack, Text, TextInput } from '@mantine/core';
+import { Kbd, MantineProvider, Popover, UnstyledButton } from '@mantine/core';
 import { DatesProvider } from '@mantine/dates';
 import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
@@ -9,6 +9,7 @@ import {
   IconLayoutKanban,
   IconNotes,
   IconPackage,
+  IconPalette,
   IconSearch,
   IconSettings,
   IconTruck,
@@ -38,16 +39,17 @@ import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
 import { useResolvedScheme } from './ui/scheme';
 import { Celebration, Logo, Money, Tip } from './ui/components';
 import { ErrorBoundary } from './ui/ErrorBoundary';
-import { useLang, usePhone } from './ui/hooks';
+import { useLang, usePhone, useSettings } from './ui/hooks';
 import { PwaUpdater } from './ui/pwa';
 import { useBackClosesSheets } from './ui/backCloses';
 import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useViewportSync } from './ui/stack';
-import { DeskContext, DeskKeys, deskPage, useDeskShell, useDeskWheel } from './ui/desk';
+import { DeskContext, DeskKeys, deskPage, sheetOpen, useDeskShell, useDeskWheel } from './ui/desk';
+import { DeskPalette } from './features/search/DeskPalette';
 import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
-import { cssResolver, phoneTheme, theme } from './ui/theme';
+import { cssResolver, deskTheme, phoneTheme } from './ui/theme';
 import { useRestoreReport } from './features/settings/RestoreModal';
 import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 // The developer's feedback tool (temporary): removed with src/devtools/feedback and this line and the one below.
@@ -85,40 +87,26 @@ function AppRoutes({ location }: { location: Location }) {
 
 /* ---------------- PC ---------------- */
 
+/**
+ * The sidebar's search (v0.42): it looks like a field, a click — or Ctrl+K, or «/» from anywhere (by the keys' places, so
+ * the Russian layout works too) — opens the search over the window (DeskPalette): a plate, a name, a phone, a VIN.
+ */
 function SideSearch() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [q, setQ] = useState('');
-  const ref = useRef<HTMLInputElement>(null);
-  // "/" or Ctrl+K jumps to search from anywhere on a PC — by the keys' places, so the Russian layout works too (v0.41).
+  const [open, setOpen] = useState(false);
   useHotkeys([
-    ['/', () => ref.current?.focus(), { preventDefault: true, usePhysicalKeys: true }],
-    ['mod+K', () => ref.current?.focus(), { preventDefault: true, usePhysicalKeys: true }],
+    ['/', () => !sheetOpen() && setOpen(true), { preventDefault: true, usePhysicalKeys: true }],
+    ['mod+K', () => setOpen((o) => !o), { preventDefault: true, usePhysicalKeys: true }],
   ]);
   return (
-    <TextInput
-      ref={ref}
-      size="sm"
-      radius="md"
-      mb="sm"
-      leftSection={<IconSearch size={16} />}
-      rightSection={!q ? <Kbd size="xs">/</Kbd> : undefined}
-      placeholder={t('nav.search')}
-      aria-label={t('search.placeholder')}
-      value={q}
-      onChange={(e) => setQ(e.currentTarget.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          navigate(`/search?q=${encodeURIComponent(q)}`);
-          setQ('');
-          ref.current?.blur();
-        }
-        if (e.key === 'Escape') {
-          setQ('');
-          ref.current?.blur();
-        }
-      }}
-    />
+    <>
+      <UnstyledButton className="desk-search-btn" aria-label={t('search.placeholder')} onClick={() => setOpen(true)}>
+        <IconSearch size={16} stroke={2} aria-hidden />
+        <span>{t('nav.search')}</span>
+        <Kbd size="xs">Ctrl K</Kbd>
+      </UnstyledButton>
+      <DeskPalette opened={open} onClose={() => setOpen(false)} />
+    </>
   );
 }
 
@@ -127,7 +115,6 @@ const NAV_GROUPS = [
     key: 'nav.groupWork',
     items: [
       { to: '/', icon: IconLayoutKanban, key: 'nav.board', end: true },
-      { to: '/search', icon: IconSearch, key: 'nav.search' },
       { to: '/customers', icon: IconUsers, key: 'nav.customers' },
       { to: '/parts', icon: IconPackage, key: 'nav.parts' },
       { to: '/parts?tab=suppliers', icon: IconTruck, key: 'nav.suppliers' },
@@ -144,12 +131,35 @@ const NAV_GROUPS = [
   { key: 'nav.groupSystem', items: [{ to: '/settings', icon: IconSettings, key: 'nav.settings' }] },
 ];
 
-/** PC sidebar: logo, search, "New job", sections, cash, appearance. */
+/** The language, the theme, the accent: once set, rarely touched — behind one button at the sidebar's foot (v0.42). */
+function AppearanceButton() {
+  const { t } = useTranslation();
+  return (
+    <Popover position="right-end" offset={14} width={260} shadow="lg" radius="lg" withinPortal trapFocus returnFocus>
+      <Popover.Target>
+        <UnstyledButton className="desk-side-btn" aria-label={t('app.appearance')}>
+          <IconPalette size={18} stroke={1.9} aria-hidden />
+          <span>{t('app.appearance')}</span>
+        </UnstyledButton>
+      </Popover.Target>
+      <Popover.Dropdown className="desk-appearance">
+        <div className="desk-pop-title">{t('app.appearance')}</div>
+        <AppearanceControls />
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
+/**
+ * PC sidebar (v0.42): a panel floating at the window's left edge, as on a Mac — the garage (its logo and name),
+ * search, «Новый заказ», the sections, and at the foot the cash and the appearance.
+ */
 function SideNav() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const cash = useLiveQuery(cashState, []);
+  const settings = useSettings();
   // "Parts" and "Suppliers" share a route: highlight by the tab, not just the path.
   const isActive = (to: string, end?: boolean) => {
     const [path, query] = to.split('?');
@@ -158,42 +168,48 @@ function SideNav() {
     return true;
   };
   return (
-    <Stack h="100%" justify="space-between" gap="md">
-      <Box>
-        <Box component={Link} to="/" px={8} py={6} mb="md" style={{ display: 'block', textDecoration: 'none', color: 'inherit' }} aria-label={t('nav.board')}>
-          <Logo size={28} />
-        </Box>
-        <SideSearch />
-        <QuickNewButton />
-        {NAV_GROUPS.map((g) => (
-          <Box key={g.key} mb="md">
-            <div className="nav-group">{t(g.key)}</div>
-            {g.items.map((s) => (
-              <MNavLink
-                key={s.to}
-                component={Link}
-                to={s.to}
-                active={isActive(s.to, s.end)}
-                aria-current={isActive(s.to, s.end) ? 'page' : undefined}
-                label={t(s.key)}
-                leftSection={<s.icon size={19} stroke={1.8} />}
-              />
-            ))}
-          </Box>
-        ))}
-      </Box>
-      <Stack gap="sm">
-        {cash && (
-          <Box p="sm" className="nav-cash tap" onClick={() => navigate('/money?tab=cash')} role="button" tabIndex={0}>
-            <div className="eyebrow">{t('board.cash')}</div>
-            <Text size="lg" mt={2}>
-              <Money fils={cash.expected} display />
-            </Text>
-          </Box>
+    <>
+      <Link to="/" className="desk-brand" aria-label={t('nav.board')}>
+        {settings?.logoDataUrl ? (
+          <>
+            <span className="desk-brand-logo">
+              <img src={settings.logoDataUrl} alt="" />
+            </span>
+            <span className="desk-brand-name">{settings.name || 'MyGarage'}</span>
+          </>
+        ) : (
+          <Logo size={30} />
         )}
-        <AppearanceControls />
-      </Stack>
-    </Stack>
+      </Link>
+      <SideSearch />
+      <QuickNewButton />
+      <div className="desk-nav">
+        {NAV_GROUPS.map((g) => (
+          <div key={g.key} className="desk-nav-group">
+            <div className="nav-group">{t(g.key)}</div>
+            {g.items.map((s) => {
+              const on = isActive(s.to, s.end);
+              return (
+                <Link key={s.to} to={s.to} className="desk-nav-item" data-active={on || undefined} aria-current={on ? 'page' : undefined}>
+                  <s.icon size={18} stroke={1.9} aria-hidden />
+                  <span>{t(s.key)}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="desk-side-foot">
+        {cash && (
+          <UnstyledButton className="desk-side-btn desk-side-cash" onClick={() => navigate('/money?tab=cash')}>
+            <IconCash size={18} stroke={1.9} aria-hidden />
+            <span>{t('board.cash')}</span>
+            <Money fils={cash.expected} fw={650} />
+          </UnstyledButton>
+        )}
+        <AppearanceButton />
+      </div>
+    </>
   );
 }
 
@@ -273,28 +289,28 @@ function DesktopShell() {
   useDeskWheel();
   return (
     <DeskContext.Provider value>
-    <AppShell navbar={{ width: 256, breakpoint: 0 }} padding={0}>
-      <ScrollManager />
-      <AppShell.Navbar p="sm" className="app-nav" aria-label={t('nav.menu')}>
-        <SideNav />
-      </AppShell.Navbar>
-      <AppShell.Main>
-        {/* The screen decides its width (styles.css «Desk»): the board the whole window, a job two columns, a form one. */}
-        <div className="page-shell" data-page={deskPage(location.pathname)}>
-          <div className="desk-page">
-            <PreviewNotice />
-            <ErrorBoundary resetKey={location.pathname}>
-              <div key={location.pathname} className="page-enter">
-                <AppRoutes location={location} />
-              </div>
-            </ErrorBoundary>
+      <div className="desk-shell">
+        <ScrollManager />
+        <nav className="app-nav desk-side" aria-label={t('nav.menu')}>
+          <SideNav />
+        </nav>
+        <main className="desk-main">
+          {/* The screen decides its width (desk.css): the board the whole window, a job two columns, a form one. */}
+          <div className="page-shell" data-page={deskPage(location.pathname)}>
+            <div className="desk-page">
+              <PreviewNotice />
+              <ErrorBoundary resetKey={location.pathname}>
+                <div key={location.pathname} className="page-enter">
+                  <AppRoutes location={location} />
+                </div>
+              </ErrorBoundary>
+            </div>
           </div>
-        </div>
-      </AppShell.Main>
-      <DeskKeys />
-      <PwaUpdater />
-      <UnsavedGuard />
-    </AppShell>
+        </main>
+        <DeskKeys />
+        <PwaUpdater />
+        <UnsavedGuard />
+      </div>
     </DeskContext.Provider>
   );
 }
@@ -392,7 +408,7 @@ export function App() {
   // Light, dark, or by the sun in Dubai ("Auto") — the app decides, not the phone's dark mode.
   const scheme = useResolvedScheme();
   return (
-    <MantineProvider theme={mobile ? phoneTheme : theme} cssVariablesResolver={cssResolver} defaultColorScheme="light" forceColorScheme={scheme}>
+    <MantineProvider theme={mobile ? phoneTheme : deskTheme} cssVariablesResolver={cssResolver} defaultColorScheme="light" forceColorScheme={scheme}>
       <Providers>
         <HashRouter>
           <Shell />

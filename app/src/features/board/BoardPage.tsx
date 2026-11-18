@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Button, Group, Stack, Tooltip } from '@mantine/core';
 import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -78,95 +78,89 @@ type Filter = 'all' | 'archive' | 'debts' | Phase;
 type Job = { b: OrderBundle; phase: Phase };
 const isStep = (k: string): k is Phase => (STEPS as string[]).includes(k);
 
-/** Fades the edge of a horizontal scroller where more content is hidden. */
-function useEdgeFade() {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const update = () => {
-      el.dataset.fadeLeft = String(el.scrollLeft > 4);
-      el.dataset.fadeRight = String(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-    };
-    update();
-    el.addEventListener('scroll', update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener('scroll', update);
-      ro.disconnect();
-    };
-  }, []);
-  return ref;
-}
-
-/** Where each lane of the PC board was scrolled to: back from a job, the lanes are where they were (v0.41). */
-const laneScroll = new Map<string, number>();
+/** The colours of a step for its strip button and its section: `--c` bright, `--c-ink` its words on a tint. */
+const stepVars = (p: Phase) => ({ '--c': `var(--mantine-color-${PHASE_META[p].color}-6)`, '--c-ink': `var(--mantine-color-${PHASE_META[p].color}-light-color)` }) as CSSProperties;
 
 /**
- * PC board: one lane per step, in the order of the board's tabs («Вид»); empty steps fold into thin strips so busy
- * lanes get the width. A step hidden from the phone's strip keeps its lane — a lane holds cars. v0.41: the lanes are
- * the height of the window and each scrolls by itself (desk.css); a lane's head says how many cars and what they
- * come to.
+ * PC board (v0.42): every step that has cars is a section — its name, how many cars, what they come to — and its cars
+ * a grid of cards the size of the phone's. A card never grows with the window: one busy step no longer stretches its
+ * cars over the whole screen (v0.41's lanes did — one car to a screen). On top, a strip of every step in the board's
+ * order («Вид»), the empty ones too, greyed: the way through the garage at a glance; a click shows that step alone.
  */
-function Kanban({ jobs, covers, swipe, tick, order, compact }: { jobs: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe; tick: number; order: BoardTab[]; compact: boolean }) {
+function DeskBoard({
+  jobs,
+  covers,
+  swipe,
+  tick,
+  order,
+  compact,
+  step,
+  onStep,
+}: {
+  jobs: Job[];
+  covers?: Map<string, string>;
+  swipe: (b: OrderBundle) => RowSwipe;
+  tick: number;
+  order: BoardTab[];
+  compact: boolean;
+  step?: Phase;
+  onStep: (f: Filter) => void;
+}) {
   const { t } = useTranslation();
-  const ref = useEdgeFade();
   const lanes = (order.filter((k) => isStep(k)) as Phase[]).map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
-  // Every step's lane in sight at 1440 (four busy, three folded): a busy lane from 224 px, a folded one 40.
-  const cols = lanes.map((l) => (l.list.length ? `minmax(${compact ? 212 : 224}px, 1fr)` : '40px')).join(' ');
-  // Each lane's scroll is kept as it moves, and put back when the board comes back.
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.scrollLeft = laneScroll.get('') ?? 0;
-    el.querySelectorAll<HTMLElement>('.kanban-col[data-lane] > .list').forEach((list) => {
-      list.scrollTop = laneScroll.get(list.parentElement!.dataset.lane!) ?? 0;
-    });
-    const onScroll = (e: Event) => {
-      const at = e.target as HTMLElement;
-      if (at === el) laneScroll.set('', el.scrollLeft);
-      else if (at.parentElement?.dataset.lane) laneScroll.set(at.parentElement.dataset.lane, at.scrollTop);
-    };
-    el.addEventListener('scroll', onScroll, { capture: true, passive: true });
-    return () => el.removeEventListener('scroll', onScroll, { capture: true });
-  }, [ref]);
+  const shown = lanes.filter((l) => l.list.length && (!step || l.p === step));
   return (
-    <div className="kanban edge-fade" ref={ref} style={{ gridTemplateColumns: cols, gridAutoFlow: 'initial' }}>
-      {lanes.map(({ p, list }) => {
-        const m = PHASE_META[p];
-        const name = t(`job.phase.${p}`);
-        if (!list.length)
+    <>
+      <div className="desk-steps" role="toolbar" aria-label={t('board.title')}>
+        <button type="button" className="desk-step" data-active={!step || undefined} onClick={() => onStep('all')}>
+          <span>{t('board.all')}</span>
+          <span className="desk-step-n">{jobs.length}</span>
+        </button>
+        {lanes.map(({ p, list }) => {
+          const m = PHASE_META[p];
           return (
-            <Tooltip key={p} label={`${name} · 0`} position="top">
-              <div className="kanban-fold" aria-label={`${name}: 0`}>
-                <span className="stage-dot" style={{ background: `var(--mantine-color-${m.color}-6)` }} />
-                <span className="fold-label">{name}</span>
-              </div>
-            </Tooltip>
+            <button
+              key={p}
+              type="button"
+              className="desk-step"
+              style={stepVars(p)}
+              data-active={step === p || undefined}
+              data-empty={!list.length || undefined}
+              disabled={!list.length}
+              aria-pressed={step === p}
+              onClick={() => onStep(step === p ? 'all' : p)}
+            >
+              <m.icon size={15} stroke={2.2} aria-hidden />
+              <span>{t(`job.phase.${p}`)}</span>
+              <span className="desk-step-n">{list.length}</span>
+            </button>
           );
+        })}
+      </div>
+      {!shown.length && <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />}
+      {shown.map(({ p, list }) => {
         const sum = list.reduce((s, j) => s + jobAmount(j.b), 0);
         return (
-          <div key={p} className="kanban-col" data-lane={p} style={{ '--c': `var(--mantine-color-${m.color}-6)`, '--c-ink': `var(--mantine-color-${m.color}-light-color)` } as CSSProperties}>
-            <div className="kanban-head">
+          <section key={p} className="desk-lane" data-lane={p} style={stepVars(p)} aria-label={t(`job.phase.${p}`)}>
+            <header className="desk-lane-head">
               <span className="stage-dot" style={{ background: 'var(--c)' }} />
-              <span className="kanban-name">{name}</span>
-              <span className="kanban-count">{list.length}</span>
+              <span className="desk-lane-name">{t(`job.phase.${p}`)}</span>
+              <span className="desk-lane-count">{list.length}</span>
               {sum > 0 && (
-                <span className="kanban-sum">
+                <span className="desk-lane-sum">
                   <Money fils={sum} />
                 </span>
               )}
-            </div>
-            <List animate className={compact ? 'mini-list' : 'board-cards'}>
+            </header>
+            <List animate className={compact ? 'desk-grid mini-list' : 'desk-grid board-cards'}>
               {list.map((j) => (
                 <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} variant={compact ? 'row' : 'card'} />
               ))}
             </List>
-          </div>
+          </section>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -304,8 +298,10 @@ export function BoardPage() {
   const hidden = new Set<string>(view.hidden);
   const stepShown = (p: Phase) => count(p) > 0 && !hidden.has(p);
   const phaseFilter = isStep(filter) && stepShown(filter) ? filter : undefined;
+  // On a PC every step is in its strip (v0.42): one picked counts while it has cars, whatever «Вид» leaves out on a phone.
+  const deskStep = !mobile && isStep(filter) && count(filter) > 0 ? filter : undefined;
   // Its last car gone, or the step left out: the board is back on «Все» (and stays there when a car comes).
-  const lost = !!data && isStep(filter) && !phaseFilter;
+  const lost = !!data && isStep(filter) && !(mobile ? phaseFilter : deskStep);
   useEffect(() => {
     if (lost) setFilter('all');
   }, [lost]);
@@ -488,7 +484,7 @@ export function BoardPage() {
           <Box maw={720}>{archiveList}</Box>
         )
       ) : (
-        <Kanban jobs={jobs} covers={covers} swipe={toArchive} tick={tick} order={view.order} compact={compact} />
+        <DeskBoard jobs={jobs} covers={covers} swipe={toArchive} tick={tick} order={view.order} compact={compact} step={deskStep} onStep={setFilter} />
       )}
     </>
   );

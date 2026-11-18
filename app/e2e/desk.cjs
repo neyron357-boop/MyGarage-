@@ -66,19 +66,50 @@ async function launchBrowser() {
       await p.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
       await shot('01-board');
       const first = width === SIZES[0] && scheme === SCHEMES[0];
-      if (first) {
-        // The lanes fill the window (the page does not scroll), each with its count; all of them in sight.
-        const lanes = await p.evaluate(() => {
-          const k = document.querySelector('.kanban');
+      // v0.42: a section per busy step, every step in the strip on top, the cards the size of a phone's whatever the
+      // window — one busy step no longer stretches its cars over the screen (the user's 1920 window: one car to a screen).
+      const board = async () =>
+        p.evaluate(() => {
+          const w = [...document.querySelectorAll('.desk-grid.board-cards > .job-card')].map((c) => c.getBoundingClientRect().width);
           return {
-            docScroll: document.scrollingElement.scrollHeight - innerHeight,
-            heads: document.querySelectorAll('.kanban-head .kanban-count').length,
-            cols: document.querySelectorAll('.kanban-col').length,
-            bottom: Math.round(k.getBoundingClientRect().bottom),
-            overflowX: k.scrollWidth - k.clientWidth,
+            sections: document.querySelectorAll('.desk-lane').length,
+            heads: document.querySelectorAll('.desk-lane-head .desk-lane-count').length,
+            steps: document.querySelectorAll('.desk-steps .desk-step').length,
+            widest: Math.round(Math.max(...w)),
+            narrowest: Math.round(Math.min(...w)),
+            overflowX: document.scrollingElement.scrollWidth - innerWidth,
           };
         });
-        check('board: lanes the height of the window, a head with its count each, no sideways scroll', lanes.docScroll <= 1 && lanes.heads === lanes.cols && lanes.cols > 0 && Math.abs(lanes.bottom - height) <= 2 && lanes.overflowX <= 1, lanes);
+      {
+        const b = await board();
+        check(`board ${width}: a section per busy step, every step in the strip, cards 260–440 px, no sideways scroll`, b.sections > 0 && b.heads === b.sections && b.steps === 8 && b.widest <= 440 && b.narrowest >= 260 && b.overflowX <= 1, b);
+      }
+      if (first) {
+        // One step picked: only its section, its cards as large as before.
+        await p.locator('.desk-step').filter({ hasText: 'В работе' }).click();
+        await settle(500);
+        const one = await board();
+        check('board: one step picked — its section alone, the cards keep their size', one.sections === 1 && one.widest <= 440, one);
+        await p.locator('.desk-step').filter({ hasText: 'Все' }).click();
+        await settle(400);
+        // The appearance (language, theme, colour) behind one button at the sidebar's foot.
+        await p.locator('.app-nav').getByRole('button', { name: 'Оформление' }).click();
+        await settle(400);
+        check('sidebar: «Оформление» shows the language, the theme and the colour', (await p.locator('.desk-appearance').getByText('English', { exact: true }).isVisible()) && (await p.locator('.desk-appearance').getByText('Тёмная', { exact: true }).isVisible()));
+        await p.keyboard.press('Escape');
+        await settle(400);
+        check('sidebar: Esc closes «Оформление»', (await p.locator('.desk-appearance').count()) === 0);
+        // Ctrl+K: the search over the window; a car in the garage opens its job.
+        await p.keyboard.press('Control+KeyK');
+        await settle(500);
+        await p.keyboard.type('Nissan');
+        await settle(900);
+        const pal = await p.evaluate(() => ({ rows: document.querySelectorAll('.desk-pal-row').length, job: document.querySelector('.desk-pal-row[data-selected] .desk-pal-job')?.textContent ?? '' }));
+        await shot('01d-search');
+        await p.keyboard.press('Enter');
+        await settle(900);
+        check('search: Ctrl+K finds the car, Enter opens its job', pal.rows > 1 && /^№[0-9]+/.test(pal.job) && (await p.evaluate(() => location.hash)).startsWith('#/orders/'), pal);
+        await go('#/', 700);
       }
       // A right click on a card: its menu where the mouse is.
       const card = p.locator('.job-card').first();
@@ -163,15 +194,16 @@ async function launchBrowser() {
       await go('#/orders/new', 900);
       await shot('04-new-order');
       if (first) {
-        // The car makes run past the edge: the mouse's wheel brings them in.
-        const row = p.locator('.chip-row:not(.wrap)').filter({ hasText: 'Toyota' }).first();
-        const rb = await row.boundingBox();
-        await p.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
-        await p.mouse.wheel(0, 300);
-        await settle(300);
-        const left = await row.evaluate((el) => el.scrollLeft);
-        check('wheel: a sideways row of chips scrolls with the mouse wheel', left > 100, { left });
-        await p.mouse.move(5, 5);
+        // Two columns: the car | the complaint and the customer; every emirate, make and complaint in sight (no row
+        // that hides chips past its edge — a mouse has no sideways swipe).
+        const form = await p.evaluate(() => {
+          const r = (q) => document.querySelector(q)?.getBoundingClientRect();
+          const side = r('.desk-form > .desk-split-side');
+          const main = r('.desk-form > .desk-split-main');
+          const hidden = [...document.querySelectorAll('.desk-form .chip-row')].map((el) => el.scrollWidth - el.clientWidth);
+          return side && main ? { side: Math.round(side.right), main: Math.round(main.left), top: Math.round(Math.abs(side.top - main.top)), hidden: Math.max(0, ...hidden) } : null;
+        });
+        check('new job: the car beside the complaint and the customer, every chip in sight', !!form && form.side < form.main && form.top < 4 && form.hidden <= 1, form);
       }
       await go('#/search?q=' + encodeURIComponent('масло'), 1200);
       await shot('05-search');

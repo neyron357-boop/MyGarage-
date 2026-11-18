@@ -1,11 +1,271 @@
 /* =====================================================================================================
-   Desk (v0.41) — the computer's own layout: the board's lanes the height of the window, a job in two
-   columns, lists as tables, a right click's menu where the mouse is, keys. Every rule here is under
-   html.desk, which only the PC shell sets (ui/desk.tsx → useDeskShell): the phone never has it, so not a
-   pixel of the phone changes. Colours and sizes are the app's own tokens (styles.css, ui/theme.ts).
+   Desk (v0.41, redrawn in v0.42) — the computer's own app: a sidebar floating at the window's edge, a toolbar
+   on every screen instead of the phone's large title, 14 px text and 34 px controls (ui/theme.ts → deskTheme),
+   the board as sections of cards the size of the phone's, a job with its car and actions beside it, lists as
+   tables, keys and right clicks. Every rule here is under html.desk, which only the PC shell sets
+   (ui/desk.tsx → useDeskShell): the phone never has it, so not a pixel of the phone changes. Colours are the
+   app's own tokens (styles.css, ui/theme.ts).
    ===================================================================================================== */
 
-/* ---------- Widths: each screen its own (App.tsx → .page-shell[data-page]) ---------- */
+/* ---------- Tokens of the desk ---------- */
+html.desk {
+  /* The toolbar's height: what sticks under it (a table's head, the job's tabs) starts below it. */
+  --app-nav-h: 64px;
+  --page-pad: 28px;
+  --desk-side-w: 236px;
+  --desk-side-gap: 10px;
+  --desk-radius: 16px;
+  --desk-row: 44px;
+  scrollbar-color: color-mix(in srgb, var(--app-label-3) 70%, transparent) transparent;
+}
+/* A PC screen in the dark is not an OLED phone: a deep grey window, the panels a step lighter. */
+html.desk[data-mantine-color-scheme='dark'] {
+  --app-canvas: #0f0f11;
+}
+html.desk body {
+  font-size: 14px;
+}
+
+/* ---------- The window: the sidebar floating at the left, the screen beside it ---------- */
+html.desk .desk-shell {
+  min-height: 100dvh;
+}
+html.desk .desk-side {
+  position: fixed;
+  z-index: 100;
+  top: var(--desk-side-gap);
+  bottom: var(--desk-side-gap);
+  left: var(--desk-side-gap);
+  width: var(--desk-side-w);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px 10px;
+  border-radius: 20px;
+  background: var(--app-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 28px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+html.desk .desk-side::-webkit-scrollbar {
+  display: none;
+}
+html.desk[data-mantine-color-scheme='dark'] .desk-side {
+  background: #1c1c1e;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45), inset 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+}
+html.desk .desk-main {
+  margin-left: calc(var(--desk-side-w) + 2 * var(--desk-side-gap));
+  min-width: 0;
+}
+
+/* The garage on top: its logo and name (or MyGarage), a click — the board. */
+html.desk .desk-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 0 10px;
+  padding: 4px 6px;
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-1) ease;
+}
+html.desk .desk-brand:hover {
+  background: var(--app-fill);
+}
+html.desk .desk-brand-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+html.desk .desk-brand-logo img {
+  max-width: 32px;
+  max-height: 32px;
+  object-fit: contain;
+}
+html.desk .desk-brand-name {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Search: looks like a field, its key at its end; a click opens the search over the window (DeskPalette). */
+html.desk .desk-search-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  margin-bottom: 8px;
+  padding: 0 6px 0 10px;
+  border-radius: 10px;
+  background: var(--app-fill);
+  color: var(--app-label-3);
+  font-size: 14px;
+  transition: background-color var(--dur-1) ease;
+}
+html.desk .desk-search-btn > svg {
+  flex: none;
+  color: var(--app-label-2);
+}
+html.desk .desk-search-btn > span {
+  flex: 1;
+  text-align: start;
+}
+html.desk .desk-search-btn:hover {
+  background: var(--app-press);
+}
+html.desk .desk-search-btn:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 0;
+}
+html.desk .desk-search-btn .mantine-Kbd-root {
+  font-size: 10.5px;
+  padding: 0 5px;
+  color: var(--app-label-2);
+  background: var(--app-card);
+  border-color: var(--app-hairline);
+}
+/* «Новый заказ»: the one filled button of the sidebar. */
+html.desk .desk-side > .mantine-Button-root {
+  margin-bottom: 14px !important;
+  --button-height: 36px !important;
+  border-radius: 10px;
+}
+html.desk .desk-side > .mantine-Button-root .mantine-Button-inner {
+  justify-content: flex-start;
+}
+html.desk .desk-side > .mantine-Button-root .mantine-Button-section[data-position='right'] {
+  margin-left: auto;
+}
+
+/* The sections: 32 px rows, the one you are in tinted with the accent. */
+html.desk .desk-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+html.desk .desk-nav .nav-group {
+  padding: 0 10px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--app-label-2);
+}
+html.desk .desk-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: var(--mantine-color-text);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+html.desk .desk-nav-item > svg {
+  flex: none;
+  color: var(--app-label-2);
+}
+html.desk .desk-nav-item:hover {
+  background: var(--app-fill);
+}
+html.desk .desk-nav-item[data-active] {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 12%, transparent);
+  color: var(--mantine-color-cobalt-7);
+  font-weight: 600;
+}
+html.desk .desk-nav-item[data-active] > svg {
+  color: inherit;
+}
+html.desk[data-mantine-color-scheme='dark'] .desk-nav-item[data-active] {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-5) 22%, transparent);
+  color: var(--mantine-color-cobalt-3);
+}
+html.desk .desk-nav-item:focus-visible,
+html.desk .desk-brand:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: -2px;
+}
+
+/* The foot: the cash in hand, the appearance. */
+html.desk .desk-side-foot {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 0.5px solid var(--app-hairline);
+}
+html.desk .desk-side-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: var(--mantine-color-text);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color var(--dur-1) ease;
+}
+html.desk .desk-side-btn > svg {
+  flex: none;
+  color: var(--app-label-2);
+}
+html.desk .desk-side-btn:hover {
+  background: var(--app-fill);
+}
+html.desk .desk-side-btn:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: -2px;
+}
+html.desk .desk-side-cash .money {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+html.desk .desk-side-cash .money .cur {
+  font-size: 10.5px;
+}
+html.desk .desk-appearance {
+  padding: 12px;
+}
+html.desk .desk-pop-title {
+  margin: 0 2px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+html.desk .desk-appearance .accent-swatches {
+  justify-content: space-between;
+}
+
+/* ---------- The screen: its width, its toolbar ---------- */
+html.desk .page-shell {
+  padding: 0 var(--page-pad) 40px;
+  min-height: 100dvh;
+}
+/* No glow on a PC: the toolbar and the step's pill say where you are. */
+html.desk .page-shell::before {
+  display: none;
+}
 html.desk .desk-page {
   max-width: 1320px;
   margin-inline: auto;
@@ -15,16 +275,470 @@ html.desk .page-shell[data-page='board'] .desk-page {
   max-width: none;
 }
 /* A job (its lines and the car beside them) and the lists (their tables): wide, still read in one sweep. */
-html.desk .page-shell:is([data-page='job'], [data-page='customers'], [data-page='parts'], [data-page='money'], [data-page='search'], [data-page='reports']) .desk-page {
+html.desk .page-shell:is([data-page='job'], [data-page='customers'], [data-page='parts'], [data-page='money'], [data-page='search'], [data-page='reports'], [data-page='customers-one'], [data-page='vehicles-one']) .desk-page {
   max-width: 1480px;
 }
 /* The notes, a single screen of a job: a readable column. */
 html.desk .page-shell:is([data-page='notes'], [data-page='claim'], [data-page='suppliers'], [data-page='more']) .desk-page {
   max-width: 1080px;
 }
-/* A new job is a form: one column, its chips in reach of one look. */
+/* A new job is a form. */
 html.desk .page-shell[data-page='new'] .desk-page {
-  max-width: 820px;
+  max-width: 1080px;
+}
+html.desk .page-enter {
+  animation-duration: 160ms;
+}
+
+/* The toolbar: back, the title and its small line, the screen's own buttons — one row at the top. */
+html.desk .desk-bar {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--app-nav-h);
+  margin: 0 calc(-1 * var(--page-pad)) 6px;
+  padding: 0 var(--page-pad);
+}
+html.desk .desk-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: color-mix(in srgb, var(--app-canvas) 84%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  backdrop-filter: saturate(180%) blur(18px);
+  box-shadow: 0 0.5px 0 var(--app-hairline);
+  opacity: 0;
+  transition: opacity var(--dur-2) ease;
+}
+html.desk .desk-bar[data-scrolled='true']::before {
+  opacity: 1;
+}
+html.desk .desk-back {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--mantine-color-text);
+  cursor: pointer;
+  transition: background-color var(--dur-1) ease;
+}
+html.desk .desk-back:hover {
+  background: var(--app-fill);
+}
+html.desk .desk-back:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 0;
+}
+html.desk .desk-bar-head {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+html.desk .desk-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.desk .desk-bar-sub {
+  display: flex;
+  gap: 0 8px;
+  margin-top: 1px;
+  color: var(--app-label-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+}
+html.desk .desk-bar-sub > span + span::before {
+  content: '·';
+  margin-right: 8px;
+}
+html.desk .desk-bar-sub > span:first-child::first-letter {
+  text-transform: uppercase;
+}
+html.desk .desk-bar-right {
+  margin-left: auto;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The toolbar's buttons: 34 px, the plain ones grey capsules, icons in round ones. */
+html.desk .desk-bar-right .mantine-Button-root {
+  --button-height: 34px !important;
+  --button-fz: 14px !important;
+  --button-padding-x: 14px !important;
+}
+html.desk .desk-bar-right .mantine-ActionIcon-root {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  --ai-size: 34px !important;
+}
+html.desk .desk-bar-right .mantine-ActionIcon-root svg {
+  width: 19px;
+  height: 19px;
+}
+html.desk .desk-bar-right .mantine-Button-root[data-variant='filled'] {
+  box-shadow: none;
+}
+
+/* ---------- The app's parts at the desk's scale ---------- */
+/* Groups and lists: 16 px corners, 44 px rows, 14–15 px words. */
+html.desk {
+  --radius-group: 16px;
+}
+html.desk .list-row {
+  min-height: var(--desk-row);
+  padding: 0 14px;
+  gap: 10px;
+}
+html.desk .list-row > .body {
+  padding: 8px 0;
+}
+html.desk .list-row .title {
+  font-size: 14.5px;
+}
+html.desk .list-row .subtitle {
+  font-size: 12.5px;
+  margin-top: 1px;
+}
+html.desk .ios-row {
+  min-height: var(--desk-row);
+  padding: 4px 14px;
+}
+html.desk .ios-row + .ios-row::before {
+  left: 14px;
+}
+html.desk .ios-row > .label,
+html.desk .ios-row > .value,
+html.desk .ios-row .mantine-Input-input {
+  font-size: 14.5px;
+}
+html.desk .group-title {
+  font-size: 14px;
+  margin: 0 4px 6px;
+}
+html.desk .group-title .count {
+  height: 19px;
+  min-width: 19px;
+  font-size: 11.5px;
+}
+html.desk .group-note {
+  font-size: 12.5px;
+}
+html.desk h5.mantine-Title-root {
+  font-size: 16px !important;
+}
+html.desk .row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+html.desk .row-icon svg {
+  width: 17px;
+  height: 17px;
+}
+/* Chips: 30 px, 13.5 px. */
+html.desk .chip {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 13.5px;
+}
+html.desk .chip-row {
+  gap: 6px;
+}
+/* Tabs inside a screen: a segmented control of a desktop app — a grey track, the chosen one white. */
+html.desk .scroll-tabs {
+  width: fit-content;
+  max-width: 100%;
+  gap: 2px;
+  margin: 0 0 14px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--app-fill);
+}
+html.desk .scroll-tabs button {
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--app-label-2);
+}
+html.desk .scroll-tabs button:hover {
+  color: var(--mantine-color-text);
+}
+html.desk .scroll-tabs button[data-active='true'],
+html.desk .scroll-tabs button[data-tint][data-active='true'] {
+  color: var(--mantine-color-text);
+}
+html.desk .scroll-tabs button[data-tint][data-active='true'] .tab-icon {
+  color: var(--c);
+}
+html.desk .scroll-tabs .scroll-tabs-pill,
+html.desk .scroll-tabs:not([data-ready='true']) button[data-active='true'] {
+  background: var(--app-card) !important;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+html.desk[data-mantine-color-scheme='dark'] .scroll-tabs .scroll-tabs-pill,
+html.desk[data-mantine-color-scheme='dark'] .scroll-tabs:not([data-ready='true']) button[data-active='true'] {
+  background: #636366 !important;
+}
+html.desk .scroll-tabs .count {
+  height: 18px;
+  min-width: 18px;
+  font-size: 11px;
+}
+html.desk .scroll-tabs button[data-active='true'] .count {
+  background: var(--app-fill);
+  color: inherit;
+}
+/* Segmented controls and switches at the desk's size. */
+html.desk .mantine-SegmentedControl-label {
+  font-size: 13px;
+}
+/* Fields: 36 px, 14 px words (no zoom to fear at a desk). */
+html.desk .mantine-Input-wrapper {
+  --input-height-md: 36px;
+  --input-fz: 14px;
+}
+html.desk .mantine-Input-input {
+  border-radius: 10px;
+}
+html.desk .mantine-InputWrapper-label {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+/* Action tiles (the job's «…», a supplier's ways to ask): a symbol and a word, smaller. */
+html.desk .action-tile {
+  min-height: 76px;
+  border-radius: 14px;
+  font-size: 12.5px;
+}
+html.desk .action-tile > .tile-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+html.desk .action-tile > .tile-icon svg {
+  width: 19px;
+  height: 19px;
+}
+/* Under a job's lines: work, part, service — buttons of a desk, their key shown on hover. */
+html.desk .add-row > .action-tile {
+  min-height: 40px;
+  padding: 0 12px;
+  gap: 8px;
+  border-radius: 12px;
+  font-size: 14px;
+  flex-direction: row;
+}
+html.desk .add-row > .add-btn > .tile-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+html.desk .add-row > .add-btn > .tile-icon svg {
+  width: 15px;
+  height: 15px;
+}
+html.desk .add-row > .add-extra {
+  flex: 0 0 40px;
+}
+/* Empty states and skeletons: quieter. */
+html.desk .empty-icon {
+  transform: scale(0.85);
+}
+/* Sheets: centred windows of a desk, 520 wide for a form (Mantine sets the sizes on each modal's root). */
+html.desk .mantine-Modal-root {
+  --modal-size-md: calc(32.5rem * var(--mantine-scale));
+}
+html.desk .mantine-Modal-content {
+  border-radius: 18px;
+}
+html.desk .mantine-Notification-root {
+  border-radius: 14px;
+}
+
+/* ---------- Board (v0.42): the steps on top, each step's cars as a grid of cards ---------- */
+html.desk .desk-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 20px;
+}
+html.desk .desk-step {
+  --c: var(--mantine-color-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 8px 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--app-card);
+  box-shadow: 0 0 0 0.5px var(--app-hairline);
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease, box-shadow var(--dur-1) ease, opacity var(--dur-1) ease;
+}
+html.desk .desk-step > svg {
+  color: var(--c);
+}
+html.desk .desk-step-n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--app-fill);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+html.desk .desk-step:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c) 8%, var(--app-card));
+}
+html.desk .desk-step[data-active] {
+  background: var(--c);
+  box-shadow: none;
+  color: #fff;
+}
+html.desk .desk-step:not([style])[data-active] {
+  background: var(--app-pill);
+  color: var(--app-pill-text);
+}
+html.desk .desk-step[data-active] > svg {
+  color: inherit;
+}
+html.desk .desk-step[data-active] .desk-step-n {
+  background: rgba(255, 255, 255, 0.24);
+}
+html.desk .desk-step:not([style])[data-active] .desk-step-n {
+  background: color-mix(in srgb, var(--app-pill-text) 22%, transparent);
+}
+/* A step without cars: in its place on the way, faded. */
+html.desk .desk-step[data-empty] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--app-hairline);
+  color: var(--app-label-3);
+  cursor: default;
+}
+html.desk .desk-step[data-empty] > svg {
+  color: inherit;
+}
+html.desk .desk-step[data-empty] .desk-step-n {
+  background: transparent;
+}
+html.desk .desk-step:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+
+html.desk .desk-lane + .desk-lane {
+  margin-top: 26px;
+}
+html.desk .desk-lane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 10px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+html.desk .desk-lane-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  color: var(--c-ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+html.desk .desk-lane-sum {
+  margin-left: 4px;
+  color: var(--app-label-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+html.desk .desk-lane-sum .money .cur {
+  font-size: 11px;
+}
+/* The cards: a grid whose columns never pass ~400 px — a card as big as on a phone, however wide the window. */
+html.desk .list.desk-grid.board-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+html.desk .list.desk-grid.board-cards > .job-card {
+  min-width: 0;
+}
+/* Compact: rows of a list, each its own small card, side by side. */
+html.desk .list.desk-grid.mini-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 10px;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+html.desk .list.desk-grid.mini-list > .job-mini {
+  border-radius: 14px;
+  background: var(--app-card);
+  overflow: clip;
+}
+html.desk[data-mantine-color-scheme='dark'] .list.desk-grid.mini-list > .job-mini {
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+}
+html.desk .list.desk-grid.mini-list > .job-mini > .job-card-open::before {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  /* A card under the mouse lifts a little: this one opens. */
+  html.desk .job-card,
+  html.desk .desk-grid > .job-mini {
+    transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+  }
+  html.desk .job-card:hover,
+  html.desk .desk-grid > .job-mini:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.14);
+  }
+  html.desk[data-mantine-color-scheme='dark'] .job-card:hover,
+  html.desk[data-mantine-color-scheme='dark'] .desk-grid > .job-mini:hover {
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  }
 }
 
 /* ---------- Keys: the PC's own (ui/desk.tsx → DeskKeys) ---------- */
@@ -52,7 +766,7 @@ html.desk .desk-keys-row {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 40px;
+  min-height: 38px;
   padding: 4px 2px;
 }
 html.desk .desk-keys-row + .desk-keys-row {
@@ -74,134 +788,19 @@ html.desk .desk-menu-anchor {
   height: 0;
   pointer-events: none;
 }
-html.desk .mantine-Menu-item {
-  font-size: 15px;
-  padding: 9px 12px;
-  border-radius: 12px;
-}
-
-/* ---------- Board: lanes the height of the window, each scrolling by itself ---------- */
-/* While the lanes show (not the archive or the debts): the screen is the window — its head on top, the lanes
-   under it to the bottom edge; a lane with many cars scrolls by itself, every lane's head stays in sight. */
-html.desk .page-shell[data-page='board']:has(.kanban) {
-  height: 100dvh;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 0;
-}
-html.desk .page-shell[data-page='board']:has(.kanban) .desk-page,
-html.desk .page-shell[data-page='board']:has(.kanban) .page-enter {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-}
-html.desk .kanban {
-  flex: 1;
-  min-height: 0;
-  align-items: stretch;
-  gap: 12px;
-  padding-bottom: 0;
-  /* Room at the sides for the cards' lift (the lanes' scroll would cut it), the lanes still level with the title. */
-  margin-inline: -6px;
-  padding-inline: 6px;
-  scroll-padding-inline: 6px;
-}
-html.desk .kanban-col {
-  min-height: 0;
-}
-html.desk .kanban-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 0 6px 8px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
-html.desk .kanban-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-html.desk .kanban-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c) 14%, transparent);
-  color: var(--c-ink);
-  font-size: 12.5px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-/* What the lane's cars come to (the money at «Оплата» waiting, the quotes at «Цена»): quiet, at the end. */
-html.desk .kanban-sum {
-  margin-left: auto;
-  color: var(--app-label-2);
-  font-size: 13px;
-  font-weight: 600;
-}
-html.desk .kanban-sum .money .cur {
-  font-size: 11px;
-}
-/* The cars of a lane scroll in it; room round them for a card's lift and shadow. */
-html.desk .kanban-col > .list {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--app-fill) transparent;
-}
-html.desk .kanban-col > .list.board-cards {
-  flex: 1 1 auto;
-  margin: -6px -6px 0;
-  padding: 6px 6px 28px;
-}
-/* Compact: one white group of rows, as long as its rows (not the lane). */
-html.desk .kanban-col > .list.mini-list {
-  flex: 0 1 auto;
-  margin-bottom: 28px;
-}
-html.desk .kanban-fold {
-  cursor: default;
-}
-/* A lane's card is never shorter than its facts (a narrow lane would squeeze them under the step). */
-html.desk .kanban .job-card[data-photo] .job-card-open {
-  padding-bottom: max(50%, 132px);
-}
-@media (hover: hover) and (pointer: fine) {
-  /* A card under the mouse lifts a little: this one opens. */
-  html.desk .job-card {
-    transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
-  }
-  html.desk .job-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--mantine-shadow-md);
-  }
-  html.desk[data-mantine-color-scheme='dark'] .job-card:hover {
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
-  }
-}
 
 /* ---------- A job: its lines in a wide column, the car and its actions beside them ---------- */
 html.desk .job-body.job-desk {
   max-width: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0 28px;
+  gap: 0 24px;
   align-items: start;
 }
 html.desk .job-desk-aside {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
   min-width: 0;
 }
 html.desk .job-desk-aside > .surface {
@@ -210,33 +809,89 @@ html.desk .job-desk-aside > .surface {
 html.desk .job-desk-main {
   min-width: 0;
 }
-/* The tabs stay under the bar (not under it out of sight) and keep to their column. */
+/* The tabs stay under the toolbar and keep to their column. */
 html.desk .job-desk .job-tabs {
   top: var(--app-nav-h);
   margin-inline: 0;
   padding-inline: 0;
+  padding-top: 0;
 }
-/* The "…" tiles laid out beside the job: one click each, smaller than the sheet's. */
+html.desk .job-desk .job-tabs .scroll-tabs {
+  margin-bottom: 0;
+}
+/* The "…" tiles laid out beside the job as an inspector's buttons: the symbol on its colour and the word beside it,
+   two to a row, one click each. */
 html.desk .job-desk-actions .action-tiles {
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 html.desk .job-desk-actions .action-tile {
-  min-height: 82px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 12px;
   background: var(--app-card);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-align: start;
+}
+html.desk[data-mantine-color-scheme='dark'] .job-desk-actions .action-tile {
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
 }
 html.desk .job-desk-actions .action-tile > .tile-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  border-radius: 8px;
+  box-shadow: none;
 }
 html.desk .job-desk-actions .action-tile > .tile-icon svg {
-  width: 21px;
-  height: 21px;
+  width: 16px;
+  height: 16px;
 }
-/* The next step stays in reach at the window's foot while the lines scroll. */
+html.desk .job-desk-actions .action-tile > span:not(.tile-icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+/* Work, part, service: their keys at their end. */
+html.desk .add-kbd {
+  margin-left: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 0 5px;
+  color: var(--app-label-2);
+  background: var(--app-fill);
+  border: 0;
+}
+/* The next step stays in reach at the window's foot while the lines scroll — at the column's right end, as the
+   main button of a desktop window: as wide as its words (and a little more), not across the whole column. */
 html.desk .job-desk-main .sticky-bar {
   z-index: 5;
   margin-top: 8px;
+}
+html.desk .job-desk-main .sticky-bar .bar-swap {
+  display: flex;
+  justify-content: flex-end;
+}
+html.desk .job-desk-main .sticky-bar .bar-swap > .mantine-Button-root {
+  width: auto;
+  min-width: 300px;
+}
+html.desk .job-desk-main .sticky-bar .bar-swap > .mantine-Group-root {
+  justify-content: flex-end;
+}
+html.desk .job-desk-main .sticky-bar .bar-swap > .mantine-Group-root > .mantine-Button-root {
+  flex: 0 0 auto !important;
+  min-width: 140px;
+}
+html.desk .job-desk-main .sticky-bar .bar-swap > .mantine-Group-root > .mantine-Button-root:last-child {
+  min-width: 300px;
 }
 /* Quick lines under the job's lines wrap in their column: every one in sight (no sideways scroll on a PC). */
 html.desk .job-desk-main .job-panel > .chip-row {
@@ -245,7 +900,7 @@ html.desk .job-desk-main .job-panel > .chip-row {
 }
 @media (min-width: 75em) {
   html.desk .job-body.job-desk {
-    grid-template-columns: minmax(0, 1fr) clamp(340px, 30%, 420px);
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 28%, 380px);
     grid-template-areas: 'main aside';
   }
   html.desk .job-desk-main {
@@ -253,11 +908,16 @@ html.desk .job-desk-main .job-panel > .chip-row {
   }
   html.desk .job-desk-aside {
     grid-area: aside;
-    /* Level with the tabs of the column beside it. */
-    padding-top: 4px;
+    position: sticky;
+    top: calc(var(--app-nav-h) + 4px);
+    max-height: calc(100dvh - var(--app-nav-h) - 12px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    padding-bottom: 12px;
   }
   /* The "…" of the head: its tiles are already here. */
-  html.desk .page-shell[data-page='job'] .nav-right .job-more-btn {
+  html.desk .page-shell[data-page='job'] .desk-bar-right .job-more-btn {
     display: none;
   }
 }
@@ -272,8 +932,11 @@ html.desk .job-desk-main .job-panel > .chip-row {
 html.desk .dt {
   background: var(--app-card);
   border-radius: var(--radius-group);
-  /* Not a scroll box: the head sticks under the bar while the window scrolls. */
+  /* Not a scroll box: the head sticks under the toolbar while the window scrolls. */
   overflow: clip;
+}
+html.desk[data-mantine-color-scheme='dark'] .dt {
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
 }
 html.desk .dt table {
   width: 100%;
@@ -281,19 +944,19 @@ html.desk .dt table {
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 html.desk .dt th {
   position: sticky;
   top: var(--app-nav-h);
   z-index: 2;
-  height: 40px;
-  padding: 0 14px;
+  height: 36px;
+  padding: 0 12px;
   background: var(--app-card);
   border-bottom: 0.5px solid var(--app-hairline);
   color: var(--app-label-2);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   text-align: start;
   white-space: nowrap;
@@ -308,20 +971,20 @@ html.desk .dt td[data-align='center'] {
 }
 html.desk .dt th:first-child,
 html.desk .dt td:first-child {
-  padding-left: 18px;
+  padding-left: 16px;
 }
 html.desk .dt th:last-child,
 html.desk .dt td:last-child {
-  padding-right: 18px;
+  padding-right: 16px;
 }
 html.desk .dt-sort {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin: 0 -6px;
-  padding: 4px 6px;
+  padding: 3px 6px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: none;
   color: inherit;
   font: inherit;
@@ -346,8 +1009,8 @@ html.desk .dt-sort:focus-visible {
   outline-offset: 0;
 }
 html.desk .dt td {
-  height: 52px;
-  padding: 6px 14px;
+  height: 46px;
+  padding: 5px 12px;
   border-bottom: 0.5px solid var(--app-hairline);
   vertical-align: middle;
 }
@@ -356,14 +1019,14 @@ html.desk .dt tbody tr:last-child td {
 }
 html.desk .dt td[data-muted] {
   color: var(--app-label-2);
-  font-size: 14px;
+  font-size: 13px;
 }
 html.desk .dt td[data-nowrap] {
   white-space: nowrap;
 }
 html.desk .dt tr[data-row] {
   cursor: pointer;
-  transition: background-color 160ms ease;
+  transition: background-color 140ms ease;
 }
 html.desk .dt tr[data-row]:hover {
   background: color-mix(in srgb, var(--app-press) 55%, transparent);
@@ -381,11 +1044,11 @@ html.desk .dt tr[data-dim] {
 }
 /* A group's head inside the table (the book's day): its name and its sum, on the canvas between the rows. */
 html.desk .dt tr.dt-group td {
-  height: 38px;
-  padding-top: 14px;
+  height: 34px;
+  padding-top: 12px;
   background: var(--app-soft);
   color: var(--app-label-2);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 650;
 }
 html.desk[data-mantine-color-scheme='dark'] .dt tr.dt-group td {
@@ -399,7 +1062,7 @@ html.desk .dt-main {
 html.desk .dt-sub {
   margin-top: 1px;
   color: var(--app-label-2);
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.3;
 }
 html.desk .dt-clip {
@@ -412,7 +1075,7 @@ html.desk .dt-clip {
 html.desk .dt-who {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 html.desk .dt-actions {
@@ -422,15 +1085,15 @@ html.desk .dt-actions {
   gap: 6px;
 }
 html.desk .dt-empty {
-  padding: 36px 18px;
+  padding: 32px 16px;
   text-align: center;
   color: var(--app-label-2);
 }
 html.desk .dt-thumb {
   flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -438,25 +1101,31 @@ html.desk .dt-thumb {
   color: var(--app-label-3);
 }
 html.desk .dt-thumb img {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   object-fit: cover;
 }
-
 html.desk .dt-group-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
 }
+html.desk .dt .mantine-Avatar-root {
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  font-size: 11.5px;
+}
 
 /* ---------- Money → Учёт: the card and the filters in a column, the book beside them ---------- */
 @media (min-width: 75em) {
   html.desk .desk-ledger {
     display: grid;
-    grid-template-columns: clamp(340px, 30%, 400px) minmax(0, 1fr);
+    grid-template-columns: clamp(320px, 28%, 380px) minmax(0, 1fr);
     grid-template-rows: auto 1fr;
-    gap: 16px 28px;
+    gap: 14px 24px;
     align-items: start;
   }
   html.desk .desk-ledger > :nth-child(1) {
@@ -483,8 +1152,8 @@ html.desk .dt-group-head {
 @media (min-width: 75em) {
   html.desk :is(.desk-cash, .desk-expenses) {
     display: grid;
-    grid-template-columns: clamp(340px, 30%, 400px) minmax(0, 1fr);
-    gap: 16px 28px;
+    grid-template-columns: clamp(320px, 28%, 380px) minmax(0, 1fr);
+    gap: 14px 24px;
     align-items: start;
   }
   html.desk :is(.desk-cash, .desk-expenses) > * {
@@ -515,7 +1184,7 @@ html.desk .dt-group-head {
   html.desk .desk-search {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0 28px;
+    gap: 0 24px;
     align-items: start;
   }
   /* Only one of them found: it takes the width. */
@@ -534,8 +1203,8 @@ html.desk .dt-group-head {
 @media (min-width: 75em) {
   html.desk .desk-split {
     display: grid;
-    grid-template-columns: clamp(340px, 34%, 420px) minmax(0, 1fr);
-    gap: 0 28px;
+    grid-template-columns: clamp(320px, 32%, 400px) minmax(0, 1fr);
+    gap: 0 24px;
     align-items: start;
   }
   html.desk .desk-split-main > :first-child {
@@ -547,21 +1216,21 @@ html.desk .dt-group-head {
   }
 }
 
-/* ---------- Two columns where a screen has two things to show (search, a customer, a car) ---------- */
+/* ---------- Two columns where a screen has two things to show ---------- */
 @media (min-width: 75em) {
   html.desk .desk-cols {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0 28px;
+    gap: 0 24px;
     align-items: start;
   }
   html.desk .desk-cols.desk-cols-gap {
-    gap: 16px 20px;
+    gap: 14px 18px;
   }
   html.desk .desk-cols-side {
     display: grid;
     grid-template-columns: clamp(320px, 32%, 400px) minmax(0, 1fr);
-    gap: 0 28px;
+    gap: 0 24px;
     align-items: start;
   }
 }
@@ -578,7 +1247,7 @@ html.desk .row-hover {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 14px 0 32px;
+  padding: 0 12px 0 32px;
   background-color: var(--app-card);
   -webkit-mask-image: linear-gradient(to right, transparent, black 26px);
   mask-image: linear-gradient(to right, transparent, black 26px);
@@ -604,14 +1273,14 @@ html.desk .row-hover-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 11px;
   border: 0;
   border-radius: 999px;
   background: color-mix(in srgb, var(--c) 14%, var(--app-card));
   color: var(--c-ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -648,21 +1317,147 @@ html.desk .row-hover-btn:focus-visible {
   }
 }
 
-/* ---------- Scrollbars of a PC: thin, in the app's greys ---------- */
-html.desk {
-  scrollbar-color: color-mix(in srgb, var(--app-label-3) 70%, transparent) transparent;
-}
-
 /* ---------- The main action at the foot (StickyBar): on a PC it stays at the window's foot over a fade of the
-   page's own colour — before, the buttons floated over the form with nothing under them. ---------- */
+   page's own colour; its buttons at the desk's size. ---------- */
 html.desk .sticky-bar {
   margin-top: 16px;
-  padding: 18px 0 22px;
+  padding: 16px 0 20px;
   background: linear-gradient(to top, var(--app-canvas) 62%, color-mix(in srgb, var(--app-canvas) 0%, transparent));
 }
+html.desk .sticky-bar .mantine-Button-root {
+  height: 42px;
+  min-height: 42px;
+  font-size: 15px;
+}
 
-/* ---------- Sheets: a little wider on a PC (a form reads in fewer lines) ---------- */
-/* (Mantine sets the sizes on each modal's root, so they are set there.) */
-html.desk .mantine-Modal-root {
-  --modal-size-md: calc(32.5rem * var(--mantine-scale));
+/* ---------- A new job (v0.42): two columns — the car | what is wrong and whose it is; «Принять» at the right ---------- */
+@media (min-width: 75em) {
+  html.desk .desk-split.desk-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  html.desk .desk-form > div > .group-title:first-child {
+    margin-top: 0 !important;
+  }
+}
+html.desk .page-shell[data-page='new'] .sticky-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+html.desk .page-shell[data-page='new'] .sticky-bar > .mantine-Button-root {
+  width: auto;
+  min-width: 320px;
+}
+/* Its rows of chips (emirates, makes, models) wrap: every one in sight at once — the mouse has no sideways swipe. */
+html.desk .desk-form .chip-row {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+/* ---------- Search from anywhere (Ctrl+K, DeskPalette): one field, what it found, what can be done ---------- */
+html.desk .desk-pal {
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+html.desk[data-mantine-color-scheme='dark'] .desk-pal {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+}
+html.desk .desk-pal-field {
+  border-bottom: 0.5px solid var(--app-hairline);
+}
+html.desk .desk-pal-field .mantine-Input-input {
+  height: 56px;
+  min-height: 56px;
+  padding-left: 50px !important;
+  font-size: 17px;
+}
+html.desk .desk-pal-field .mantine-Input-section[data-position='left'] {
+  width: 50px;
+  color: var(--app-label-2);
+}
+html.desk .desk-pal-list {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+}
+html.desk .desk-pal-list:empty {
+  display: none;
+}
+html.desk .desk-pal-group + .desk-pal-group {
+  margin-top: 4px;
+}
+html.desk .desk-pal-head {
+  padding: 8px 10px 4px;
+  color: var(--app-label-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+html.desk .desk-pal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  color: var(--mantine-color-text);
+}
+html.desk .desk-pal-row[data-selected] {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 12%, transparent);
+}
+html.desk[data-mantine-color-scheme='dark'] .desk-pal-row[data-selected] {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-5) 24%, transparent);
+}
+html.desk .desk-pal-left {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+}
+html.desk .desk-pal-left .row-icon {
+  width: 28px;
+  height: 28px;
+}
+html.desk .desk-pal-left .car-thumb {
+  border-radius: 8px;
+  overflow: hidden;
+}
+html.desk .desk-pal-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+html.desk .desk-pal-title {
+  font-size: 14px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.desk .desk-pal-car {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+html.desk .desk-pal-sub {
+  color: var(--app-label-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.desk .desk-pal-job {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--mantine-color-cobalt-light);
+  color: var(--mantine-color-cobalt-light-color);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+html.desk .desk-pal-go {
+  flex: none;
+  color: var(--mantine-color-cobalt-6);
 }

@@ -254,6 +254,47 @@ const phoneOverrides = createTheme({
 
 export const phoneTheme = mergeThemeOverrides(theme, phoneOverrides);
 
+/*
+ * The computer's own scale (v0.42): a desk is read from half a metre with a mouse in hand — 14 px text, 34 px
+ * buttons and fields, tighter gaps, smaller corners, as the apps of a Mac or a PC. Only the PC's shell uses it
+ * (App.tsx); the phone's theme is the one above, untouched.
+ */
+const deskOverrides = createTheme({
+  headings: {
+    sizes: {
+      h1: { fontSize: rem(26), lineHeight: '1.2' },
+      h2: { fontSize: rem(22), lineHeight: '1.25' },
+      h3: { fontSize: rem(19), lineHeight: '1.3' },
+      h4: { fontSize: rem(17), lineHeight: '1.3' },
+      h5: { fontSize: rem(15), lineHeight: '1.35' },
+      h6: { fontSize: rem(13), lineHeight: '1.4' },
+    },
+  },
+  fontSizes: { xs: rem(12), sm: rem(13), md: rem(14), lg: rem(16), xl: rem(18) },
+  lineHeights: { xs: '1.35', sm: '1.4', md: '1.45', lg: '1.4', xl: '1.35' },
+  radius: { xs: rem(6), sm: rem(8), md: rem(10), lg: rem(16), xl: rem(20) },
+  spacing: { xs: rem(6), sm: rem(10), md: rem(14), lg: rem(18), xl: rem(24) },
+  components: {
+    Button: Button.extend({
+      vars: (_theme, props) => {
+        if (props.size === 'lg') return { root: { '--button-height': rem(40), '--button-fz': rem(15), '--button-radius': CAPSULE, '--button-padding-x': rem(18) } };
+        if (props.size === 'md' || !props.size) return { root: { '--button-height': rem(34), '--button-fz': rem(14), '--button-radius': CAPSULE, '--button-padding-x': rem(14) } };
+        return { root: { '--button-radius': CAPSULE } };
+      },
+    }),
+    Switch: Switch.extend({ defaultProps: { size: 'md' } }),
+    Modal: Modal.extend({
+      styles: { title: { fontWeight: 700, fontSize: rem(16), lineHeight: 1.3, letterSpacing: '-0.01em' }, header: { paddingBottom: rem(6) } },
+    }),
+    Menu: Menu.extend({
+      styles: { dropdown: { padding: 5 }, item: { fontSize: rem(14), padding: `${rem(8)} ${rem(10)}`, borderRadius: rem(10) }, divider: { marginBlock: 4 } },
+    }),
+    Tooltip: Tooltip.extend({ defaultProps: { radius: 'sm', withArrow: false, openDelay: 350, fz: 12 } }),
+  },
+});
+
+export const deskTheme = mergeThemeOverrides(theme, deskOverrides);
+
 /** App-level CSS variables: the iOS system colours in both appearances. */
 export const cssResolver: CSSVariablesResolver = () => ({
   variables: {

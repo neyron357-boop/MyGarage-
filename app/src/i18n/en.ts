@@ -39,6 +39,12 @@ export const en: typeof ru = {
     keyLines: 'Work · Part · Service on a job',
     keyClose: 'Close the sheet',
     actions: 'Actions',
+    palette: {
+      placeholder: 'Plate, name, phone, VIN',
+      found: 'Cars and customers',
+      actions: 'Actions',
+      everywhere: 'Search “{{q}}” everywhere',
+    },
     col: {
       customer: 'Customer',
       phone: 'Phone',

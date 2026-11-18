@@ -2747,7 +2747,9 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     await page.getByText('Lexus').first().waitFor();
     await shot('16-board-desktop');
-    await page.locator('.app-nav').getByText('English', { exact: true }).click();
+    // The language is in «Оформление» at the sidebar's foot (v0.42).
+    await page.locator('.app-nav').getByRole('button', { name: 'Оформление' }).click();
+    await page.locator('.desk-appearance').getByText('English', { exact: true }).click();
     await page.getByText('Workshop', { exact: true }).first().waitFor();
     await shot('17-board-desktop-en');
   });
