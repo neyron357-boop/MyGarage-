@@ -23,15 +23,25 @@ export interface DocLine {
   vatFils: number;
   /** The line's total with VAT (after its discount): what the customer pays for it. */
   totalFils: number;
+  /** The discount printed in its Discount column (v0.45). */
+  discountFils?: number;
+  /** Its words as printed, spaces evened (v0.45: the title is upper case). */
+  printed?: string;
 }
 
 export interface GarageDoc {
   kind: 'invoice' | 'quotation';
   number?: string;
+  /** What the number is (v0.45): a job's ("Job ID") or the document's own ("Invoice Number"). */
+  numberKind?: 'job' | 'invoice';
+  /** The time printed after the date ("4:50 PM"), v0.45. */
+  time?: string;
+  /** "Payment method : Cash" (v0.45). */
+  paymentMethod?: string;
   /** YYYY-MM-DD */
   date?: string;
   customer: { name: string; phone?: string; email?: string; trn?: string };
-  vehicle: { make: string; model: string; color?: string; vin?: string; plate?: { emirate: Emirate; code: string; number: string } };
+  vehicle: { make: string; model: string; color?: string; vin?: string; plate?: { emirate: Emirate; code: string; number: string }; plateText?: string; carText?: string };
   lines: DocLine[];
   totalFils?: number;
 }
@@ -39,12 +49,14 @@ export interface GarageDoc {
 const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-interface Piece {
+export interface Piece {
   x: number;
   w?: number;
   str: string;
+  /** A space of the PDF stands right before it (v0.45): a word of its own, however close it comes to the last. */
+  spaced?: boolean;
 }
-interface Row {
+export interface Row {
   page: number;
   y: number;
   pieces: Piece[];
@@ -52,7 +64,7 @@ interface Row {
 }
 
 /** The page's lines, top to bottom: pieces on one height, left to right, glued where the PDF split a word. */
-function rowsOf(items: TextItem[]): Row[] {
+export function rowsOf(items: TextItem[]): Row[] {
   const rows: Row[] = [];
   const latin = items.filter((i) => !ARABIC.test(i.str) && i.str.trim());
   for (const it of [...latin].sort((a, b) => a.page - b.page || b.y - a.y)) {
@@ -60,19 +72,29 @@ function rowsOf(items: TextItem[]): Row[] {
     if (row) row.pieces.push({ x: it.x, w: it.w, str: it.str });
     else rows.push({ page: it.page, y: it.y, pieces: [{ x: it.x, w: it.w, str: it.str }], text: '' });
   }
+  // Spaces the PDF sets as pieces of their own (when the text comes with them — v0.45): "BALANCING" · " " · "AND
+  // ALIGNMENT" touch, and are two words all the same.
+  const blanks = items.filter((i) => i.str.length > 0 && !i.str.trim());
   for (const r of rows) {
     r.pieces.sort((a, b) => a.x - b.x);
+    if (blanks.length)
+      for (let k = 1; k < r.pieces.length; k++) {
+        const prev = r.pieces[k - 1];
+        const end = prev.x + (prev.w ?? 0);
+        const cur = r.pieces[k];
+        if (blanks.some((b) => b.page === r.page && Math.abs(b.y - r.y) <= 2 && b.x >= end - 1 && b.x <= cur.x + 0.5)) cur.spaced = true;
+      }
     r.text = join(r.pieces);
   }
   return rows;
 }
 
 /** Pieces as text: a piece that starts where the last one ended is the same word ("M" + "itsubishi"). */
-function join(pieces: Piece[]): string {
+export function join(pieces: Piece[]): string {
   let out = '';
   let end: number | undefined;
   for (const p of pieces) {
-    const glued = end !== undefined && p.x - end < 1.2;
+    const glued = end !== undefined && p.x - end < 1.2 && !p.spaced;
     out += out && !glued ? ' ' + p.str.trimStart() : p.str;
     end = p.w !== undefined ? p.x + p.w : undefined;
   }
@@ -80,7 +102,7 @@ function join(pieces: Piece[]): string {
 }
 
 /** "4,285.71", "AED 210.00", "-AED 92.00" → fils. */
-const money = (s: string): number | undefined => {
+export const money = (s: string): number | undefined => {
   const m = /^(-?)(?:AED\s*)?([\d,]+)(?:\.(\d{1,2}))?$/i.exec(s.trim());
   if (!m) return undefined;
   const whole = Number(m[2].replace(/,/g, ''));
@@ -90,7 +112,7 @@ const money = (s: string): number | undefined => {
 };
 
 /** "30 Nov 2026" → "2026-11-30". */
-function docDate(text: string): string | undefined {
+export function docDate(text: string): string | undefined {
   const m = /(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?,?\s+(\d{4})/.exec(text);
   if (!m) return undefined;
   const month = MONTHS.indexOf(m[2].toLowerCase());
@@ -168,6 +190,9 @@ export function parseGarageDoc(items: TextItem[]): GarageDoc | null {
   // "Invoice Number : 271", "Quotation Number : 245", "Invoice Number : INV-2026-00004" (this app) or "Job ID : 106".
   const number = (/(?:invoice|quotation|estimate)\s*(?:number|no\.?|#)\s*:?\s*([A-Z0-9][A-Z0-9/-]*)/i.exec(all) ?? /\bJob\s*ID\s*:?\s*(\d+)/i.exec(all))?.[1];
   const date = docDate(/\bDate\s*:?\s*([^\n]+)/i.exec(all)?.[1] ?? '');
+  const numberKind: GarageDoc['numberKind'] = /\bJob\s*ID\s*:/i.test(all) && !/(?:invoice|quotation|estimate)\s*(?:number|no\.?|#)\s*:/i.test(all) ? 'job' : 'invoice';
+  const time = /\bDate\s*:?[^\n]*?(\d{1,2}:\d{2})(?::\d{2})?\s*([AP]M)/i.exec(all);
+  const paymentMethod = /\bPayment\s+method\s*:?\s*([A-Za-z][A-Za-z ,/&-]*?)\s*$/im.exec(all)?.[1]?.trim();
 
   // The customer and the car: the right-hand column between "BILL TO" and the table.
   const toRow = rows.find((r) => r.page === head.page && /\b(BILL\s+TO|QUOTATION\s+TO|INVOICE\s+TO|CUSTOMER)\b/i.test(r.text) && r.y > head.y);
@@ -191,6 +216,7 @@ export function parseGarageDoc(items: TextItem[]): GarageDoc | null {
     const trn = /\bTRN\b\)?\s*:?\s*(\d{15})/i.exec(line);
     if (plate) {
       vehicle.plate = parsePlateText(plate[1]);
+      vehicle.plateText = plate[1].trim();
       plateAt = at;
     } else if (vin) vehicle.vin = vin[1].toUpperCase();
     else if (trn) customer.trn = trn[1];
@@ -200,7 +226,7 @@ export function parseGarageDoc(items: TextItem[]): GarageDoc | null {
   });
   // The car is the line right above its plate; the name is what comes first.
   const carLine = plateAt > 0 ? other.find((o) => o.at === plateAt - 1) : undefined;
-  if (carLine) Object.assign(vehicle, parseCarText(carLine.text));
+  if (carLine) Object.assign(vehicle, parseCarText(carLine.text), { carText: carLine.text });
   const name = other
     .filter((o) => o !== carLine && o.at < (carLine?.at ?? Infinity))
     .map((o) => o.text)
@@ -265,10 +291,14 @@ export function parseGarageDoc(items: TextItem[]): GarageDoc | null {
     vehicle,
     lines: lines
       .filter((l) => l.title.trim())
-      .map(({ title, qty, priceFils, vatFils, totalFils: t }) => {
-        const clean = title.replace(/\s+/g, ' ').trim().toUpperCase();
-        return { title: clean, kind: lineKind(clean), qty, priceFils, vatFils, totalFils: t };
+      .map(({ title, qty, priceFils, vatFils, totalFils: t, discountFils }) => {
+        const printed = title.replace(/\s+/g, ' ').trim();
+        const clean = printed.toUpperCase();
+        return { title: clean, kind: lineKind(clean), qty, priceFils, vatFils, totalFils: t, ...(discountFils ? { discountFils } : {}), printed };
       }),
     totalFils,
+    numberKind,
+    ...(time ? { time: `${time[1]} ${time[2].toUpperCase()}` } : {}),
+    ...(paymentMethod ? { paymentMethod } : {}),
   };
 }

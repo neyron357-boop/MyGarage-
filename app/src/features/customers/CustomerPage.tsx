@@ -14,6 +14,7 @@ import { ContactTiles, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader,
 import { LinkedMoney } from '../money/MoneyEntry';
 import { OrderStatus } from '../job/phase';
 import { CustomerDrivers } from '../job/Driver';
+import { CustomerHistory } from './HistoryInvoices';
 import { CustomerModal, VehicleModal } from './forms';
 
 export function CustomerPage() {
@@ -142,6 +143,8 @@ export function CustomerPage() {
             </Section>
             {/* Who brought its cars (v0.43): a company's drivers, each with the jobs he brought. */}
             <CustomerDrivers customerId={c.id} />
+            {/* Its invoices from before the app (v0.45): read off their PDFs, for its reports. */}
+            <CustomerHistory customer={c} />
             <Section title={t('customer.orders')}>
               {orders.length === 0 ? (
                 <EmptyState>{t('customer.noOrders')}</EmptyState>

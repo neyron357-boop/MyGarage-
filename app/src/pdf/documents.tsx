@@ -262,10 +262,14 @@ function SellerBlock({ s, lines }: { s: { name: string; phone?: string; email?: 
   );
 }
 
-/** "BILL TO" / "QUOTATION TO": the customer and the car, right-aligned. */
-function CustomerBlock({ en, ar, party, vehicle }: { en: string; ar: string; party: { name: string; phone?: string; email?: string; trn?: string; address?: string }; vehicle: Vehicle }) {
-  const car = [vehicle.make, vehicle.model].filter(Boolean).join(' ');
-  const plate = plateText(vehicle);
+/** A car as a document shows it: its make and model, its plate, its VIN. */
+const carShown = (v: Vehicle) => ({ name: [v.make, v.model].filter(Boolean).join(' '), plate: plateText(v), ...(v.vin ? { vin: v.vin } : {}) });
+
+/** "BILL TO" / "QUOTATION TO": the customer and the car (as the document has it — `shown`), right-aligned. */
+function CustomerBlock({ en, ar, party, vehicle, shown }: { en: string; ar: string; party: { name: string; phone?: string; email?: string; trn?: string; address?: string }; vehicle?: Vehicle; shown?: { name: string; plate: string; vin?: string } }) {
+  const as = shown ?? (vehicle ? carShown(vehicle) : { name: '', plate: '' });
+  const car = as.name;
+  const plate = as.plate;
   return (
     <View style={{ width: 236, alignItems: 'flex-end', paddingRight: 3.7 }}>
       <BlockLabel en={en} ar={ar} right />
@@ -276,7 +280,7 @@ function CustomerBlock({ en, ar, party, vehicle }: { en: string; ar: string; par
       {party.address ? <Text style={{ fontSize: 9, textAlign: 'right', marginBottom: 3 }}>{party.address}</Text> : null}
       {car ? <Text style={{ fontSize: 9, marginTop: 3, marginBottom: 3 }}>{car}</Text> : null}
       {plate ? <BiLine right en="PLATE" ar={AR_LABEL.plate} value={plate} /> : null}
-      {vehicle.vin ? <BiLine right en="VIN / Chassis Num  (VIN)" ar={AR_LABEL.vin} value={vehicle.vin} /> : null}
+      {as.vin ? <BiLine right en="VIN / Chassis Num  (VIN)" ar={AR_LABEL.vin} value={as.vin} /> : null}
     </View>
   );
 }
@@ -417,8 +421,79 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
  * VAT (Subtotal − Discount = Total), barcodes and a QR code with the invoice summary. Always in English
  * with Arabic labels (UAE tax invoice).
  */
-/** `paidAt` — paid in full then (v0.38): the PAID stamp beside the totals. */
-export async function renderInvoice(invoiceId: string, paidAt?: string): Promise<Blob> {
+/**
+ * A tax invoice's page as it is drawn (v0.45: the garage's own invoices and those from before this app, in a customer's
+ * report, go through the one page): the letterhead, the seller with the document's number and day, the buyer with the
+ * car as the document has it, the lines, the totals, the codes.
+ */
+export interface InvoicePageView {
+  head: Settings;
+  seller: { name: string; phone?: string; email?: string; trn?: string };
+  credit?: boolean;
+  /** "Invoice Number" (or a job's "Job ID" on an invoice from before), and the number. */
+  numberLabel: { en: string; ar: string };
+  number: string;
+  reference?: string;
+  dateText: string;
+  buyer: { name: string; phone?: string; email?: string; trn?: string; address?: string };
+  /** The car as the document has it: "Nissan Urvan (White)", "W 93527", its VIN. */
+  car: { name: string; plate: string; vin?: string };
+  rows: DocRow[];
+  qty: number;
+  discount: number;
+  discountLabel?: string;
+  vat: number;
+  vatRateBp?: number;
+  total: number;
+  paidAt?: string;
+  paymentMethod?: string;
+  bankDetails?: string;
+  codes?: { invoiceNo: string; qrText: string };
+}
+
+export function InvoicePage({ fam, v }: { fam: string; v: InvoicePageView }) {
+  return (
+    <Page size="A4" style={[s.page, { fontFamily: fam }]}>
+      <GarageHeader s={v.head} />
+      <TitleBar en={v.credit ? 'TAX CREDIT NOTE' : 'TAX INVOICE'} ar={v.credit ? AR_LABEL.creditNote : AR_LABEL.taxInvoice} />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+        <SellerBlock
+          s={v.seller}
+          lines={
+            <>
+              <BiLine en={v.numberLabel.en} ar={v.numberLabel.ar} value={v.number} />
+              {v.reference ? <BiLine en="Reference" ar={AR_LABEL.reference} value={v.reference} /> : null}
+              <BiLine en="Date" ar={AR_LABEL.date} value={v.dateText} />
+            </>
+          }
+        />
+        <CustomerBlock en="BILL TO" ar={AR_LABEL.billTo} party={v.buyer} shown={v.car} />
+      </View>
+      <ItemsTable rows={v.rows} />
+      <Totals
+        qty={v.qty}
+        discount={v.discount}
+        discountLabel={v.discountLabel}
+        vat={v.vat}
+        vatRateBp={v.vatRateBp}
+        total={v.total}
+        notes={
+          <>
+            {v.paidAt ? <PaidStamp on={formatDate(v.paidAt)} /> : null}
+            {v.paymentMethod ? <BiLine en="Payment method" ar={AR_LABEL.paymentMethod} value={v.paymentMethod} color={COLOR.head} /> : null}
+            {v.bankDetails ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 2 }}>{v.bankDetails}</Text> : null}
+          </>
+        }
+      />
+      {/* Only the invoice's own number (v0.42.3, the user: «только инвойс номер в инвойсе, убери job номер»). */}
+      {v.codes ? <Codes invoiceNo={v.codes.invoiceNo} qrText={v.codes.qrText} /> : null}
+      <GarageFooter s={v.head} />
+    </Page>
+  );
+}
+
+/** The page of one of this app's invoices (or credit notes). `paidAt` — paid in full then: the PAID stamp. */
+export async function invoicePageView(invoiceId: string, paidAt?: string): Promise<InvoicePageView> {
   const inv = await db.invoices.get(invoiceId);
   if (!inv) throw new Error('not found');
   const b = (await loadOrderBundle(inv.orderId))!;
@@ -443,45 +518,37 @@ export async function renderInvoice(invoiceId: string, paidAt?: string): Promise
   const qty = inv.lines.filter((l) => l.kind !== 'discount').reduce((a, l) => a + l.qty, 0);
   const methods = [...new Set(b.payments.filter((p) => p.kind !== 'refund').map((p) => METHOD_EN[p.method]))].join(', ');
   const qrText = [seller.name, `TRN ${seller.trn || '-'}`, `${credit ? 'Tax Credit Note' : 'Tax Invoice'} ${inv.number}`, formatDocDate(inv.issuedAt), `Total ${aed(inv.totalFils)}`, `VAT ${aed(inv.vatFils)}`].join('\n');
+  return {
+    head,
+    seller,
+    credit,
+    numberLabel: credit ? { en: 'Credit Note Number', ar: AR_LABEL.creditNumber } : { en: 'Invoice Number', ar: AR_LABEL.invoiceNumber },
+    number: inv.number,
+    ...(original ? { reference: `${original.number}${inv.reason ? ` — ${inv.reason}` : ''}` } : {}),
+    dateText: formatDocDate(inv.issuedAt),
+    // The buyer it was issued to; what that left blank — the job's customer now (added after the invoice).
+    buyer: invoiceBuyer(inv.buyer, b.customer),
+    car: carShown(b.vehicle),
+    rows,
+    qty,
+    discount: netDiscount(inv.lines),
+    discountLabel,
+    vat: inv.vatFils,
+    vatRateBp: oneRate(inv.lines),
+    total: inv.totalFils,
+    ...(paidAt ? { paidAt } : {}),
+    ...(methods ? { paymentMethod: methods } : {}),
+    ...(b.settings.bankDetails ? { bankDetails: b.settings.bankDetails } : {}),
+    codes: { invoiceNo: inv.number, qrText },
+  };
+}
+
+/** `paidAt` — paid in full then (v0.38): the PAID stamp beside the totals. */
+export async function renderInvoice(invoiceId: string, paidAt?: string): Promise<Blob> {
+  const v = await invoicePageView(invoiceId, paidAt);
   return render((fam) => (
-    <Document title={inv.number}>
-      <Page size="A4" style={[s.page, { fontFamily: fam }]}>
-        <GarageHeader s={head} />
-        <TitleBar en={credit ? 'TAX CREDIT NOTE' : 'TAX INVOICE'} ar={credit ? AR_LABEL.creditNote : AR_LABEL.taxInvoice} />
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-          <SellerBlock
-            s={seller}
-            lines={
-              <>
-                <BiLine en={credit ? 'Credit Note Number' : 'Invoice Number'} ar={credit ? AR_LABEL.creditNumber : AR_LABEL.invoiceNumber} value={inv.number} />
-                {original ? <BiLine en="Reference" ar={AR_LABEL.reference} value={`${original.number}${inv.reason ? ` — ${inv.reason}` : ''}`} /> : null}
-                <BiLine en="Date" ar={AR_LABEL.date} value={formatDocDate(inv.issuedAt)} />
-              </>
-            }
-          />
-          {/* The buyer it was issued to; what that left blank — the job's customer now (added after the invoice). */}
-          <CustomerBlock en="BILL TO" ar={AR_LABEL.billTo} party={invoiceBuyer(inv.buyer, b.customer)} vehicle={b.vehicle} />
-        </View>
-        <ItemsTable rows={rows} />
-        <Totals
-          qty={qty}
-          discount={netDiscount(inv.lines)}
-          discountLabel={discountLabel}
-          vat={inv.vatFils}
-          vatRateBp={oneRate(inv.lines)}
-          total={inv.totalFils}
-          notes={
-            <>
-              {paidAt ? <PaidStamp on={formatDate(paidAt)} /> : null}
-              {methods ? <BiLine en="Payment method" ar={AR_LABEL.paymentMethod} value={methods} color={COLOR.head} /> : null}
-              {b.settings.bankDetails ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 2 }}>{b.settings.bankDetails}</Text> : null}
-            </>
-          }
-        />
-        {/* Only the invoice's own number (v0.42.3, the user: «только инвойс номер в инвойсе, убери job номер»). */}
-        <Codes invoiceNo={inv.number} qrText={qrText} />
-        <GarageFooter s={head} />
-      </Page>
+    <Document title={v.number}>
+      <InvoicePage fam={fam} v={v} />
     </Document>
   ));
 }

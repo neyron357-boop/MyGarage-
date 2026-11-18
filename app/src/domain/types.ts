@@ -91,12 +91,143 @@ export interface Vehicle {
   year?: number;
   engine?: string;
   color?: string;
+  /** Its body (v0.45): a fleet's reports group the cars by it. */
+  type?: VehicleType;
   customerId: string;
   notes?: string;
   /** "Time for a service" sent (or dismissed) after its last job: it leaves the Today list until the next one. */
   serviceRemindedAt?: string;
   createdAt: string;
   archivedAt?: string;
+}
+
+/** A car's body, as a fleet's report names it (v0.45): Pickup, Van / Minibus, Bus, Truck, SUV, MPV, Sedan. */
+export type VehicleType = 'pickup' | 'van' | 'bus' | 'truck' | 'suv' | 'mpv' | 'sedan';
+
+/**
+ * An invoice the garage gave a customer before this app, read off its PDF (v0.45 — a corporate customer's history, May–October 2026):
+ * the document as it is — its number, day, car, lines and sums as printed. Not this app's invoice: it is not revenue,
+ * VAT, a debt or money here; it goes into the customer's reports. One record per document: the same document read again
+ * is the same record (`id` — the template, the kind of number, the number and the day: numbers repeat between the two
+ * templates).
+ */
+export interface HistoryInvoice {
+  id: string;
+  customerId: string;
+  /** The car (the printed plate's; a plate that is surely a typo — the car it is, with a flag). */
+  vehicleId: string;
+  /** The job in MyGarage it is the invoice of — an Eaglecart job brought in as history (July–October). */
+  orderId?: string;
+  /** 'A' — the old template (May–June: "INVOICE # 224", Item · Quantity · Rate · Amount); 'B' — the Tax Invoice. */
+  template: 'A' | 'B';
+  /** The number printed: an invoice's ("INVOICE #", "Invoice Number") or a job's ("Job ID"). */
+  numberKind: 'invoice' | 'job';
+  number: string;
+  /** YYYY-MM-DD, as printed; `time` — "4:50 PM" when printed. */
+  date: string;
+  time?: string;
+  /** The plate as printed ("PLATE NO.EE-12345", "W - 12345") and as code-number ("EE-12345"). */
+  plateRaw: string;
+  plate: string;
+  /** The car as printed ("NISSAN URVAN", "Nissan Urvan (White)"); the VIN when printed. */
+  vehicleText: string;
+  vin?: string;
+  lines: HistoryLine[];
+  /** Without VAT, the VAT, with VAT — the lines' sums (equal to what is printed: checked when read). */
+  netFils: number;
+  vatFils: number;
+  totalFils: number;
+  paymentMethod?: string;
+  /** Where it was read: the file (its SHA-256), the page; `pages` — when it goes on (May's 224: its terms). */
+  source: { file: string; sha256: string; page: number; pages?: number };
+  /** What does not agree, marked — nothing is put right silently. */
+  flags?: HistoryFlag[];
+  importedAt: string;
+}
+
+/** A line of a history invoice: the work or part as printed, its quantity and sums; its standard service. */
+export interface HistoryLine {
+  description: string;
+  qty: number;
+  /** Price of one, without VAT, as printed. */
+  unitNetFils: number;
+  /** The line's discount without VAT, when printed (Tax Invoice's Discount column). */
+  discountFils?: number;
+  netFils: number;
+  /** ROUND(net × rate) — the line's VAT. */
+  vatFils: number;
+  grossFils: number;
+  /** The standard service (services table): by the catalogue's rules or by hand; none — waits in «Проверить». */
+  serviceId?: string;
+}
+
+export interface HistoryFlag {
+  /**
+   * job-sum — the job here has another sum; job-car — the job here is on another car; job-twin — its job is the one
+   * Eaglecart's double of it was taken into; no-job — no job here; plate — the printed plate is not a car of the customer,
+   * the car it surely is is named; new-car — a car brought in with it.
+   */
+  code: 'job-sum' | 'job-car' | 'job-twin' | 'no-job' | 'plate' | 'new-car';
+  text: string;
+}
+
+/**
+ * A row of a month's summary page (v0.45): typed by hand there, so kept apart from the invoices and matched with them —
+ * for the garage's own check, never for the customer. `kind: 'total'` — the summary's printed TOTAL.
+ */
+export interface HistorySummaryRow {
+  id: string;
+  customerId: string;
+  /** YYYY-MM */
+  month: string;
+  kind: 'row' | 'total';
+  /** Its place in the summary (1…); the total — 0. */
+  no: number;
+  date?: string;
+  vehicleText?: string;
+  plateRaw?: string;
+  plate?: string;
+  invoiceNo?: string;
+  amountFils: number;
+  /** The invoice it is (none — no document for it). */
+  invoiceId?: string;
+  /** ok · amount (another sum) · plate (another plate: a typo) · plate-amount · missing (no document). */
+  status: 'ok' | 'amount' | 'plate' | 'plate-amount' | 'missing' | 'total';
+  source: { file: string; sha256: string; page: number };
+  importedAt: string;
+}
+
+/** A category of the standard services (v0.45): «Engine», «Brakes»… — edited in the app. */
+export interface ServiceCategory {
+  id: string;
+  name: string;
+  position: number;
+  archivedAt?: string;
+}
+
+/**
+ * A standard service (v0.45): what a line of an invoice is, whatever its words — «Oil change (engine oil + filter)».
+ * `keywords` — the rules: a line whose words hold one of them is this service (the longest that fits wins); `kind: 'oil'`
+ * — an oil change (a fleet's report counts them per car).
+ */
+export interface Service {
+  id: string;
+  name: string;
+  categoryId: string;
+  keywords: string[];
+  kind?: 'oil';
+  position: number;
+  archivedAt?: string;
+}
+
+/** A description as printed → its standard service (v0.45): the catalogue's own entries, a rule's find, or by hand. */
+export interface ServiceMapEntry {
+  /** The description's key: upper case, its spaces and marks evened (`descKey`). */
+  id: string;
+  description: string;
+  serviceId: string;
+  by: 'seed' | 'rule' | 'hand';
+  at: string;
 }
 
 export interface Ownership {

@@ -136,7 +136,7 @@ describe('reading the garage invoice or quotation', () => {
     at(334, 500, 'Total');
     at(495, 500, 'AED 210.00');
     const d = parseGarageDoc(items)!;
-    expect(d.lines).toEqual([{ title: 'BRAKE PADS FRONT', kind: 'part', qty: 1, priceFils: 20000, vatFils: 1000, totalFils: 21000 }]);
+    expect(d.lines).toEqual([{ title: 'BRAKE PADS FRONT', kind: 'part', qty: 1, priceFils: 20000, vatFils: 1000, totalFils: 21000, printed: 'BRAKE PADS FRONT' }]);
     expect(d.totalFils).toBe(21000);
   });
 

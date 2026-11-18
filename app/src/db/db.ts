@@ -14,6 +14,8 @@ import type {
   EstimateVersion,
   Expense,
   ExpenseCategory,
+  HistoryInvoice,
+  HistorySummaryRow,
   Incident,
   Income,
   IncomeCategory,
@@ -32,6 +34,9 @@ import type {
   Payment,
   RelatedRule,
   SalaryPayment,
+  Service,
+  ServiceCategory,
+  ServiceMapEntry,
   Settings,
   StoredBook,
   Supplier,
@@ -87,6 +92,14 @@ export class GarageDB extends Dexie {
   creditPayments!: Table<CreditPayment, string>;
   /** The customers' drivers (v0.43): who brings a company's cars; a job keeps its own (`order.driver`). */
   drivers!: Table<Driver, string>;
+  /** Invoices given before this app, read off their PDFs (v0.45): the customer's reports read them, money here does not. */
+  historyInvoices!: Table<HistoryInvoice, string>;
+  /** The rows of the monthly summaries that came with them (v0.45): the garage's own check. */
+  historySummaryRows!: Table<HistorySummaryRow, string>;
+  /** The standard services and their categories (v0.45), and which description is which service. */
+  serviceCategories!: Table<ServiceCategory, string>;
+  services!: Table<Service, string>;
+  serviceMap!: Table<ServiceMapEntry, string>;
   /** Records deleted here, waiting to be told to the server (v0.40). */
   syncTombs!: Table<{ n?: number; t: string; k: string }, number>;
 
@@ -193,6 +206,15 @@ export class GarageDB extends Dexie {
     this.version(8).stores({
       drivers: 'id, phone, _t',
       orders: 'id, number, customerId, vehicleId, stage, createdAt, _t, driver.id',
+    });
+    // v9 (v0.45): a customer's invoices from before this app and its monthly summaries, read off their PDFs; the
+    // catalogue of standard services. New tables only — nothing to move (a car's body type is a field of its own).
+    this.version(9).stores({
+      historyInvoices: 'id, customerId, vehicleId, orderId, date, _t',
+      historySummaryRows: 'id, customerId, month, _t',
+      serviceCategories: 'id, _t',
+      services: 'id, categoryId, _t',
+      serviceMap: 'id, serviceId, _t',
     });
     installGuards(this);
     installSyncHooks(this);

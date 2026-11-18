@@ -1,7 +1,7 @@
 {
   "name": "mygarage",
   "private": true,
-  "version": "0.44.1",
+  "version": "0.45.0",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/ocr-assets.cjs",
@@ -18,7 +18,8 @@
     "e2e:motion": "node e2e/motion.cjs",
     "e2e:photo": "node e2e/photopick.cjs",
     "shots": "node e2e/shots.cjs",
-    "moves": "node e2e/moves.cjs dist 4"
+    "moves": "node e2e/moves.cjs dist 4",
+    "history:check": "vite-node scripts/history-check.ts --"
   },
   "dependencies": {
     "@expo-google-fonts/noto-sans": "^0.4.2",

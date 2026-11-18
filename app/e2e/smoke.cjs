@@ -2811,6 +2811,92 @@ async function launchBrowser() {
     await page.getByText('123 460 км').first().waitFor();
     await page.getByText('118 200 км').first().waitFor();
   });
+  await step('v0.45: a company’s invoices from before the app — a PDF of the old template brought in on its card (the check, then «Импортировать»: the invoice, its new car); the month’s report as one PDF (summary, then the invoice)', async () => {
+    /** A one-page PDF of text pieces at their places (Helvetica) — a made-up invoice of the old template. */
+    const textPdf = (pieces) => {
+      const esc = (s) => s.split('\\').join('\\\\').split('(').join('\\(').split(')').join('\\)');
+      const content = pieces.map(([x, y, t]) => `BT /F1 10 Tf 1 0 0 1 ${x} ${y} Tm (${esc(t)}) Tj ET`).join('\n');
+      const objs = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        `<< /Length ${Buffer.byteLength(content, 'latin1')} >>\nstream\n${content}\nendstream`,
+      ];
+      let out = '%PDF-1.4\n';
+      const at = [];
+      objs.forEach((o, i) => {
+        at.push(Buffer.byteLength(out, 'latin1'));
+        out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+      });
+      const xref = Buffer.byteLength(out, 'latin1');
+      out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+      return Buffer.from(out, 'latin1');
+    };
+    const invoice = textPdf([
+      [400, 800, 'INVOICE'],
+      [400, 786, '# 301'],
+      [400, 772, 'Date:'],
+      [460, 772, 'May 2, 2026'],
+      [40, 758, 'Bill To:'],
+      [40, 744, 'ACME TEST CONTRACTING L.L.C.'],
+      [40, 730, 'TOYOTA HILLUX'],
+      [40, 716, 'PLATE NO.EE 12345'],
+      [40, 702, 'Item'],
+      [300, 702, 'Quantity'],
+      [380, 702, 'Rate'],
+      [470, 702, 'Amount'],
+      [40, 688, 'CHANGE OIL & FILTER'],
+      [300, 688, '1'],
+      [380, 688, 'AED 220.00'],
+      [470, 688, 'AED 220.00'],
+      [40, 674, '(10K KILOMETERS)'],
+      [380, 660, 'Subtotal:'],
+      [470, 660, 'AED 220.00'],
+      [380, 646, 'Tax (5%):'],
+      [470, 646, 'AED 11.00'],
+      [380, 632, 'Total:'],
+      [470, 632, 'AED 231.00'],
+    ]);
+    const id = await page.evaluate(async () => {
+      const { createCustomer } = await import('/src/services/customers.ts');
+      return (await createCustomer({ name: 'ACME TEST CONTRACTING LLC', phone: '', preferredChannel: 'whatsapp', docLanguage: 'en', type: 'company', trn: '100000000000003' })).id;
+    });
+    await page.goto(BASE + '#/customers/' + id);
+    await page.getByText('Загрузить PDF').first().click();
+    const dlg = page.getByRole('dialog');
+    const [pick] = await Promise.all([page.waitForEvent('filechooser'), dlg.getByRole('button', { name: 'Выбрать PDF' }).click()]);
+    await pick.setFiles({ name: 'acme-may-2026.pdf', mimeType: 'application/pdf', buffer: invoice });
+    // The check before anything is written: the month, its invoice, its sums; a car brought in.
+    await dlg.getByText('Всего').first().waitFor({ timeout: 60000 });
+    await dlg.getByText('Машин: 1, новых: 1').waitFor();
+    await dlg.getByText('231,00').first().waitFor();
+    await shot('47a-history-check');
+    // «Импортировать» stands where «Выбрать PDF» was tapped: a tap there right after the reading is a double tap's
+    // second (ui/tapGuard.ts drops it) — a person looks at the table first.
+    await page.waitForTimeout(500);
+    await dlg.getByRole('button', { name: 'Импортировать: 1' }).click();
+    await dlg.getByText('Импортировано: 1').waitFor();
+    await dlg.getByRole('button', { name: 'Закрыть' }).click();
+    await page.getByText('1 инвойс').first().waitFor();
+    const written = await page.evaluate(async (customerId) => {
+      const { db } = await import('/src/db/db.ts');
+      const [inv] = await db.historyInvoices.where('customerId').equals(customerId).toArray();
+      return { lines: inv.lines.map((l) => [l.description, l.netFils, l.vatFils, l.grossFils]), plate: inv.plate, cars: await db.vehicles.where('customerId').equals(customerId).count() };
+    }, id);
+    if (JSON.stringify(written) !== JSON.stringify({ lines: [['CHANGE OIL & FILTER (10K KILOMETERS)', 22000, 1100, 23100]], plate: 'EE-12345', cars: 1 })) throw new Error(`written: ${JSON.stringify(written)}`);
+    // The month's report: one PDF — the summary, then the invoice.
+    await page.getByText('Отчёт').first().click();
+    // The PDF is made as the sheet opens (a phone shares only in the tap); headless there is no share sheet — a download.
+    await page.evaluate(() => {
+      navigator.canShare = () => false;
+    });
+    const [file] = await Promise.all([page.waitForEvent('download'), page.getByRole('dialog').getByRole('button', { name: /^PDF для клиента · 1/ }).click({ timeout: 60000 })]);
+    if (!/MONTHLY INVOICE SUMMARY – MAY 2026\.pdf$/.test(file.suggestedFilename())) throw new Error(`the report is ${file.suggestedFilename()}`);
+    const size = fs.statSync(await file.path()).size;
+    if (size < 20_000) throw new Error(`the report is ${size} bytes`);
+    await shot('47b-history-card');
+  });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
     await page.goto(BASE + '#/');
