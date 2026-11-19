@@ -310,6 +310,8 @@ export interface ExpenseInput {
   amountFils: number;
   vatFils: number;
   vendor?: string;
+  /** The supplier it was bought from (v0.50.2). */
+  supplierId?: string;
   /** "credit" — not paid yet: no money moves, the garage owes it (services/debts.ts, `payCredit`). */
   method: ExpenseMethod;
   /** What it was spent on: a job, or a car / a customer without a job. */
@@ -348,6 +350,7 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
     amountFils: input.amountFils,
     vatFils: input.vatFils,
     vendor: input.vendor?.trim() || undefined,
+    supplierId: input.supplierId || undefined,
     method: input.method,
     receiptMediaId,
     orderId: input.orderId || undefined,

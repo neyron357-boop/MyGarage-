@@ -34,6 +34,8 @@ const COOL = 10 * 60_000;
 /** A part's number is worth a stronger model: it searches better. The light ones if the strong do not answer. */
 const FIND_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const LOOK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+/** A receipt: every digit counts (the date under a stamp, a total) — the stronger model reads it, the light ones if it does not answer. */
+const RECEIPT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 const DAY = 24 * 60 * 60_000;
 /** How long an answer serves: a VIN and a name do not change; a number found on the web — a month; a guess — half an hour. */
@@ -60,8 +62,11 @@ numbers: each {number (as written), brand, note (variants, market, replaces…, 
 Answer:
 ${text}`,
   receipt: () =>
-    `A photo of a supplier's invoice or receipt from a car parts shop in the UAE (amounts in AED; VAT 5 %). Read it exactly as printed.
-Return: isReceipt (is it an invoice/receipt/bill at all); vendor (the seller's name as printed); vendorTrn; vendorPhone (the seller's phone as printed, a mobile first, "" if none); vendorAddress (the seller's address in a few words, "" if none); kind — "parts" (car parts, accessories, oils and consumables from a parts shop), "service" (a workshop's or contractor's bill for work done: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo; date (YYYY-MM-DD, "" if none); items — each {name (as printed, English or Russian), partNumber ("" if none), qty, unitPrice, total} (line totals as printed); subtotal (before VAT, "" if not printed); vat (the VAT amount as printed, 0 if the paper says none, "" if not printed); total (the amount paid / grand total incl. VAT); paymentMethod ("cash", "card", "transfer", "credit" when the paper says unpaid / credit / due, "" if not said); carText (car model, plate or VIN written on the paper, "" if none); confidence 0..1.
+    `A photo of a supplier's invoice or receipt in the UAE (amounts in AED; VAT 5 %). The garage is the buyer; read the seller's paper exactly as printed.
+Return: isReceipt (an invoice/receipt/bill at all); vendor (the seller's name as printed, not the buyer's); vendorTrn; vendorPhone (a mobile first, "" if none); vendorAddress (a few words, "" if none); kind — "parts" (car parts, accessories, oils, consumables), "service" (a workshop's or contractor's bill for work: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo;
+dateText — the document's date exactly as printed ("18-Nov-2026", "17/11/26"; "" if none); date — that date as YYYY-MM-DD: UAE papers write the day first (05/11/2026 is 5 November); read every digit of day, month and year — a stamp or a fold may cover some; dateSure — false if any digit of the date is hidden or unclear;
+items — each {name (as printed), part (the usual English name of the part alone: no brand, car, years, sizes, side or quantity — "TAIL LIGHT COVER", "MUD FLAP", "ATF PAN GASKET"), car (the car make/model the line names, "" if none), partNumber ("" if none), qty, unitPrice, total (as printed)};
+subtotal (before VAT, "" if not printed); vat (as printed, 0 if the paper says none, "" if not printed); total (the amount to pay incl. VAT); paymentMethod ("cash", "card", "transfer", "credit" when it says credit / sales credit / unpaid / due, "" if not said); carText (car model, plate, chassis or VIN on the paper, "" if none); confidence 0..1.
 Numbers as numbers; never invent a value the paper does not show.`,
   look: (n, part, car) =>
     `${n} pictures from parts-catalogue pages for "${part}"${car ? ` of a ${car}` : ''}, each under its label «Picture N:» (N 1…${n}); answer with index = N.
@@ -542,7 +547,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       const data = String(image?.data ?? '');
       if (!/^image\/(jpeg|png|webp)$/.test(type) || data.length < 1000 || data.length > 8_000_000) throw httpError(400, 'no picture');
       const hash = createHash('sha256').update(data).digest('hex');
-      return cached(`receipt:2:${hash}`, 'receipt', TTL.vin, async () => {
+      return cached(`receipt:3:${hash}`, 'receipt', TTL.vin, async () => {
         const { value, model } = await json(
           P.receipt(),
           {
@@ -555,8 +560,17 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
               vendorAddress: { type: 'string' },
               kind: { type: 'string', enum: ['parts', 'service', 'fuel', 'food', 'other'] },
               invoiceNo: { type: 'string' },
+              dateText: { type: 'string' },
               date: { type: 'string' },
-              items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, partNumber: { type: 'string' }, qty: { type: 'number' }, unitPrice: { type: 'number' }, total: { type: 'number' } }, required: ['name'] } },
+              dateSure: { type: 'boolean' },
+              items: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { name: { type: 'string' }, part: { type: 'string' }, car: { type: 'string' }, partNumber: { type: 'string' }, qty: { type: 'number' }, unitPrice: { type: 'number' }, total: { type: 'number' } },
+                  required: ['name'],
+                },
+              },
               subtotal: { type: 'string' },
               vat: { type: 'string' },
               total: { type: 'number' },
@@ -564,9 +578,9 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
               carText: { type: 'string' },
               confidence: { type: 'number' },
             },
-            required: ['isReceipt', 'kind', 'items', 'total', 'confidence'],
+            required: ['isReceipt', 'kind', 'dateText', 'date', 'items', 'total', 'confidence'],
           },
-          { kind: 'receipt', images: [{ type, data }], models: LOOK_MODELS, timeout: 60_000 },
+          { kind: 'receipt', images: [{ type, data }], models: RECEIPT_MODELS, timeout: 60_000 },
         );
         const num = (x) => (x === '' || x === null || x === undefined || Number.isNaN(Number(x)) ? undefined : Number(x));
         return { ...value, subtotal: num(value.subtotal), vat: num(value.vat), total: num(value.total), by: model };

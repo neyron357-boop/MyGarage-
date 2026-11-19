@@ -75,7 +75,7 @@ describe('a receipt scanned', () => {
     expect(img.data.length).toBeGreaterThan(100);
     const e = (await db.expenses.get(r.expense!.id))!;
     const cat = (await db.expenseCategories.get(e.categoryId))!;
-    expect([e.amountFils, e.vatFils, e.vendor, e.method, cat.code, e.orderId]).toEqual([12600, 600, 'Al Quoz Auto Parts', 'cash', 'parts', lc.id]);
+    expect([e.amountFils, e.vatFils, e.vendor, e.method, cat.code, e.orderId, e.supplierId]).toEqual([12600, 600, 'Al Quoz Auto Parts', 'cash', 'parts', lc.id, known.id]);
     // The seller: the supplier already in the base (by its name), not a second one; its empty address filled off the paper.
     expect(r.supplier).toEqual({ id: known.id, name: 'Al Quoz Auto Parts', added: false });
     expect(await db.suppliers.count()).toBe(1);
@@ -143,6 +143,20 @@ describe('a receipt scanned', () => {
     const back = (await db.items.get(line.id))!;
     expect([back.outsource?.expenseId, back.outsource?.supplierId, back.costPriceFils]).toEqual([undefined, undefined, 50000]);
     expect(await db.suppliers.get(s.id)).toBeUndefined();
+  });
+
+  it('two jobs alike: the fresher one, to be looked at — its lines left alone; the other a tap away; the day as read, said', async () => {
+    const older = await job('Toyota', 'Corolla', ['OIL FILTER']);
+    await new Promise((r) => setTimeout(r, 5));
+    const fresher = await job('Toyota', 'Corolla', ['OIL FILTER']);
+    answer = { ...base(), carText: '', dateText: '19-Nov-2024', date: '2024-11-19', dateSure: false, items: [{ name: 'Oil filter', total: 35 }], subtotal: undefined, vat: undefined, total: 35 };
+    const r = await scanReceipt(PHOTO());
+    expect(r.job).toMatchObject({ orderId: fresher.id, close: true });
+    expect((await db.items.get(fresher.lines[0]))!.costPriceFils ?? 0).toBe(0);
+    expect(r.others).toEqual([{ orderId: older.id, vehicleId: (await db.orders.get(older.id))!.vehicleId, customerId: (await db.orders.get(older.id))!.customerId, number: (await db.orders.get(older.id))!.number, car: 'Toyota Corolla' }]);
+    const n = notices.find((x) => x.kind === 'expense')!;
+    expect(n).toMatchObject({ close: true, dateSure: false });
+    expect(n.kind === 'expense' && n.date).toBe(r.expense!.date);
   });
 
   it('a price already typed on a line stays; a receipt naming no job’s parts is recorded without a job', async () => {

@@ -245,13 +245,15 @@ describe('the AI', () => {
 
   it('a receipt photographed (v0.50): a light model reads it with the picture, the sums come as numbers; the same picture is not asked twice; no picture — 400', async () => {
     const { f, seen } = fake([
-      [/gemini-3\.5-flash-lite/, () => answer({ isReceipt: true, kind: 'parts', vendor: 'AL QUOZ AUTO PARTS', vendorPhone: '050 442 1190', invoiceNo: 'A-1042', date: '2026-11-18', items: [{ name: 'OIL FILTER', partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: '35', vat: '1.75', total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 })],
+      [/gemini-3\.8-flash/, () => answer({ isReceipt: true, kind: 'parts', dateText: '18-Nov-2026', dateSure: true, vendor: 'AL QUOZ AUTO PARTS', vendorPhone: '050 442 1190', invoiceNo: 'A-1042', date: '2026-11-18', items: [{ name: 'OIL FILTER', partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: '35', vat: '1.75', total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 })],
     ]);
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
     const image = { type: 'image/jpeg', data: 'x'.repeat(5000) };
     const r = await ai.receipt({ image });
-    assert.deepEqual([r.vendor, r.vendorPhone, r.kind, r.subtotal, r.vat, r.total, r.items[0].partNumber, r.by], ['AL QUOZ AUTO PARTS', '050 442 1190', 'parts', 35, 1.75, 36.75, '90915-YZZE1', 'gemini-3.5-flash-lite']);
-    const ask = seen.find((x) => /gemini-3\.5-flash-lite/.test(x.url));
+    assert.deepEqual([r.vendor, r.vendorPhone, r.kind, r.subtotal, r.vat, r.total, r.items[0].partNumber, r.by], ['AL QUOZ AUTO PARTS', '050 442 1190', 'parts', 35, 1.75, 36.75, '90915-YZZE1', 'gemini-3.8-flash']);
+    // A paper's figures and its date: the stronger model reads it (v0.50.2), the date as printed with it.
+    assert.equal(r.dateText, '18-Nov-2026');
+    const ask = seen.find((x) => /gemini-3\.8-flash/.test(x.url));
     const pic = ask.body.contents[0].parts.find((p) => p.inline_data);
     assert.deepEqual(pic.inline_data, { mime_type: 'image/jpeg', data: image.data });
     assert.equal(ask.body.generationConfig.responseMimeType, 'application/json');
@@ -260,6 +262,8 @@ describe('the AI', () => {
     const schema = ask.body.generationConfig.responseJsonSchema;
     assert.deepEqual(schema.properties.kind.enum, ['parts', 'service', 'fuel', 'food', 'other']);
     assert.ok(schema.required.includes('kind') && schema.properties.vendorPhone && schema.properties.vendorAddress);
+    assert.ok(schema.required.includes('dateText') && schema.properties.dateSure && schema.properties.items.items.properties.part && schema.properties.items.items.properties.car);
+    assert.match(ask.body.contents[0].parts[0].text, /day first/);
     // The same paper photographed again (or asked by another device) — the reading kept, no second question.
     await ai.receipt({ image });
     assert.equal(seen.filter((x) => /generateContent/.test(x.url)).length, 1);

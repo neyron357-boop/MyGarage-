@@ -984,6 +984,8 @@ export interface Expense {
   /** 'credit' — nothing paid yet: the garage owes it (no money moves; paid later with `CreditPayment`s). */
   method: ExpenseMethod;
   receiptMediaId?: string;
+  /** The supplier it was bought from (v0.50.2: a receipt's seller) — «Мы должны» puts its credits under it. */
+  supplierId?: string;
   /** What it was spent on: a job, or just a car / a customer (filled from the job when one is picked). */
   orderId?: string;
   vehicleId?: string;

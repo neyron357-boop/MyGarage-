@@ -1233,6 +1233,10 @@ export const ru = {
     cars_many: '{{count}} машин',
     cars_other: '{{count}} машины',
     payCredit: 'Оплатить кредит',
+    credits_one: '{{count}} кредит',
+    credits_few: '{{count}} кредита',
+    credits_many: '{{count}} кредитов',
+    credits_other: '{{count}} кредита',
   },
   send: {
     withPhotos: 'Фото и текст · {{n}}',
@@ -1309,6 +1313,7 @@ export const ru = {
     saveIn: 'Записать приход',
     saveOut: 'Записать расход',
     forWhat: 'Для какой машины / клиента',
+    otherJobs: 'Другие заказы',
     forJob: 'Заказ',
     linkSearch: 'Номер машины, имя или телефон — необязательно',
     note: 'Заметка',

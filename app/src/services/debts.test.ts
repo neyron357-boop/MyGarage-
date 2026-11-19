@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { computeReport } from '../domain/reports';
-import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit } from './debts';
+import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadCreditors, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit, paySupplier } from './debts';
 import { removeEntry, restoreEntry } from './entries';
 import { voidCreditPayment, voidExpense, voidIncome } from './legacyVoid';
 import { addItem } from './estimate';
@@ -263,5 +263,29 @@ describe('the invoices from before the app among a customer\u2019s debts (v0.47)
     expect((await loadDebtors()).find((d) => d.customer.id === customerId)).toMatchObject({ totalFils: 50_000, cars: [] });
     await addDebtPayment({ amountFils: 50_000, method: 'transfer', customerId });
     expect((await loadDebtors()).find((d) => d.customer.id === customerId)).toBeUndefined();
+  });
+});
+
+describe('a seller the garage owes (v0.50.2)', () => {
+  it('its two credits are one card; one sum to it goes to the oldest first, each part a payment of its own; more than owed — refused', async () => {
+    await setOpeningBalances(500_000, 0);
+    const parts = await cat('parts');
+    const newer = await addExpense({ date: '2026-11-17', categoryId: parts, amountFils: 9_450, vatFils: 450, vendor: 'Al Maroof Auto Spare Parts Trading LLC', method: 'credit' });
+    const older = await addExpense({ date: '2026-11-16', categoryId: parts, amountFils: 6_825, vatFils: 325, vendor: 'AL MAROOF AUTO SPARE PARTS TRADING L.L.C', method: 'credit' });
+    await addExpense({ date: '2026-11-15', categoryId: parts, amountFils: 5_000, vatFils: 0, method: 'credit' });
+    const { creditors, loose } = await loadCreditors();
+    expect(creditors.map((c) => [c.credits.map((d) => d.expense.id), c.leftFils])).toEqual([[[older.id, newer.id], 16_275]]);
+    expect(loose).toHaveLength(1);
+    const before = await cash();
+    await expect(paySupplier([older.id, newer.id], { amountFils: 20_000, method: 'cash' })).rejects.toMatchObject({ code: 'err.creditOver' });
+    const paid = await paySupplier([older.id, newer.id], { amountFils: 10_000, method: 'cash' });
+    expect(paid.map((p) => [p.expenseId, p.amountFils])).toEqual([
+      [older.id, 6_825],
+      [newer.id, 3_175],
+    ]);
+    expect((await companyDebtOf(older.id))!.leftFils).toBe(0);
+    expect((await companyDebtOf(newer.id))!.leftFils).toBe(6_275);
+    expect(await cash()).toEqual({ book: before.book - 10_000, box: before.box - 10_000 });
+    expect((await loadCreditors()).creditors[0].credits.map((d) => d.expense.id)).toEqual([newer.id]);
   });
 });

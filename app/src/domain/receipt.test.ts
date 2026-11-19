@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guessJob, receiptExpense, supplierFromReceipt, type JobForGuess, type ReceiptRead } from './receipt';
+import { guessJob, printedDate, rankJobs, receiptDate, receiptExpense, supplierFromReceipt, type JobForGuess, type ReceiptRead } from './receipt';
 
 const TODAY = '2026-11-19';
 
@@ -65,37 +65,100 @@ describe('a receipt as an expense', () => {
 });
 
 describe('the job the parts were bought for', () => {
-  const job = (id: string, number: number, lines: string[], car = { make: 'Toyota', model: 'Camry', plateNumber: '12345' }, changedAt = '2026-11-10'): JobForGuess => ({
+  const job = (id: string, number: number, lines: (string | { name: string; partNumber?: string; costFils?: number; supplierId?: string })[], car = { make: 'Toyota', model: 'Camry', plateNumber: '12345' }, changedAt = '2026-11-10', openedOn = '2026-11-01'): JobForGuess => ({
     id,
     number,
     changedAt,
-    lines: lines.map((name, i) => ({ id: `${id}-${i}`, name })),
+    openedOn,
+    lines: lines.map((l, i) => ({ id: `${id}-${i}`, ...(typeof l === 'string' ? { name: l } : l) })),
     car,
   });
   const camry = job('a', 351, ['FRONT BRAKE PADS', 'OIL FILTER']);
   const patrol = job('b', 352, ['OIL FILTER', 'AIR FILTER'], { make: 'Nissan', model: 'Patrol', plateNumber: '80769' });
+  const canter = job('c', 371, ['REAR STOP LIGHT LEFT & RIGHT', 'MUD GUARD REAR LEFT RIGHT'], { make: 'Fuso', model: 'Canter', plateNumber: '44021' });
+  const canter2 = job('d', 382, ['AC EVAPORATOR NEW ORIGINAL'], { make: 'Fuso', model: 'Canter', plateNumber: '51177' });
+  const pajero = job('e', 302, ['ENGINE BELT', 'TENSIONER', 'TENSIONER PULLEY'], { make: 'Mitsubishi', model: 'Pajero', plateNumber: '30902' });
+  const urvan = job('f', 380, ['TENSIONER PULLEY'], { make: 'Nissan', model: 'Urvan', plateNumber: '77310' }, '2026-11-18');
+  const guess = (items: Parameters<typeof rankJobs>[0], jobs: JobForGuess[], ctx: Parameters<typeof rankJobs>[2] = {}) => guessJob(rankJobs(items, jobs, ctx));
 
-  it('is the one whose lines name the parts — by the dictionary’s key under any words, or by most of their words', () => {
-    const g = guessJob([{ name: 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' }, { name: 'OIL FILTER 90915-YZZE1' }], '', [camry, patrol]);
-    expect(g).toMatchObject({ orderId: 'a', number: 351, close: false });
-    expect(g!.matched.map((m) => [m.item, m.lineId, m.how])).toEqual([
-      [0, 'a-0', 'key'],
-      [1, 'a-1', 'key'],
+  it('is the one whose lines name the parts — by the dictionary’s key under any words, or by what the part is', () => {
+    const g = guess([{ name: 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' }, { name: 'OIL FILTER 90915-YZZE1' }], [camry, patrol]);
+    expect(g).toMatchObject({ orderId: 'a', number: 351, close: false, by: 'app' });
+    expect(g!.matched.map((m) => [m.item, m.lineId])).toEqual([
+      [0, 'a-0'],
+      [1, 'a-1'],
     ]);
-    expect(guessJob([{ name: 'Air filter element' }], '', [camry, patrol])).toMatchObject({ orderId: 'b' });
+    expect(guess([{ name: 'Air filter element' }], [camry, patrol])).toMatchObject({ orderId: 'b' });
   });
 
-  it('the car named on the paper decides between two jobs with the same part; none fits — no job', () => {
-    expect(guessJob([{ name: 'OIL FILTER' }], 'Nissan Patrol 80769', [camry, patrol])).toMatchObject({ orderId: 'b', close: false });
-    expect(guessJob([{ name: 'OIL FILTER' }], '', [camry, patrol])).toMatchObject({ orderId: 'a', close: true });
-    expect(guessJob([{ name: 'WIPER BLADES' }], '', [camry, patrol])).toBeUndefined();
-    expect(guessJob([], '', [camry, patrol])).toBeUndefined();
+  it('the garage’s real papers: a truck’s «TALLLAMP COVER» and «MUD FLAP» are its «REAR STOP LIGHT» and «MUD GUARD»; «FEBEST PULLY» with PAJERO on the paper is the Pajero’s pulley, not a Nissan’s', () => {
+    const jobs = [camry, patrol, canter, canter2, pajero, urvan];
+    const truck = guess([{ name: 'CANTER TALLLAMP COVER 96 -2013', car: 'CANTER' }, { name: 'MUD FLAP 2.5 TON' }], jobs);
+    expect(truck).toMatchObject({ orderId: 'c', number: 371, close: false });
+    expect(truck!.matched.map((m) => m.lineId)).toEqual(['c-0', 'c-1']);
+    expect(guess([{ name: 'FEBEST PULLY 14 FEB', part: 'PULLY' }], jobs, { carText: 'DCT 10 PAJERO 4-1.30 X 7' })).toMatchObject({ orderId: 'e', number: 302 });
+    // Without the car on the paper, the two pulleys are alike: the fresher one, to be looked at.
+    expect(guess([{ name: 'FEBEST PULLY 14 FEB' }], jobs)).toMatchObject({ orderId: 'f', close: true });
   });
 
-  it('one line of the job takes one line of the receipt; a part on no job is no match', () => {
-    const g = guessJob([{ name: 'OIL FILTER' }, { name: 'OIL FILTER' }, { name: 'COOLANT' }], '', [patrol])!;
-    expect(g.matched).toHaveLength(1);
-    expect(g.score).toBe(1);
+  it('the car on the paper decides between two jobs with the same part; a line naming another car is none of its; none fits — no job', () => {
+    expect(guess([{ name: 'OIL FILTER' }], [camry, patrol], { carText: 'Nissan Patrol' })).toMatchObject({ orderId: 'b', close: false });
+    expect(guess([{ name: 'OIL FILTER' }], [camry, patrol])).toMatchObject({ orderId: 'a', close: true });
+    expect(guess([{ name: 'NISSAN OIL FILTER' }], [camry])).toBeUndefined();
+    expect(guess([{ name: 'WIPER BLADES' }], [camry, patrol])).toBeUndefined();
+    expect(guess([], [camry, patrol])).toBeUndefined();
+    // The plate's digits on the paper.
+    expect(guess([{ name: 'OIL FILTER' }], [camry, patrol], { paperText: 'Vehicle 80769' })).toMatchObject({ orderId: 'b', close: false });
+  });
+
+  it('the same part number is the surest; the price as typed on the line and the line already on this seller count too', () => {
+    const a = job('x', 400, [{ name: 'FILTER', partNumber: '90915-YZZE1' }]);
+    const b = job('y', 401, ['OIL FILTER'], camry.car, '2026-11-15');
+    expect(guess([{ name: 'OIL FILTER', partNumber: '90915YZZE1' }], [a, b])).toMatchObject({ orderId: 'x', close: false });
+    const c = job('z', 402, [{ name: 'OIL FILTER', costFils: 3500 }]);
+    expect(rankJobs([{ name: 'OIL FILTER', unitNetFils: 3500 }], [b, c])[0]).toMatchObject({ orderId: 'z', score: 1.3 });
+    const d = job('w', 403, [{ name: 'OIL FILTER', supplierId: 's1' }]);
+    expect(rankJobs([{ name: 'OIL FILTER' }], [b, d], { supplierId: 's1' })[0]).toMatchObject({ orderId: 'w', score: 1.2 });
+  });
+
+  it('a job opened after the receipt’s day is not it', () => {
+    const later = job('n', 410, ['OIL FILTER'], camry.car, '2026-11-19', '2026-11-19');
+    expect(guess([{ name: 'OIL FILTER' }], [later], { date: '2026-11-17' })).toBeUndefined();
+    expect(guess([{ name: 'OIL FILTER' }], [later], { date: '2026-11-19' })).toMatchObject({ orderId: 'n' });
+  });
+
+  it('one line of the job takes one line of the receipt; the surest pairs first', () => {
+    const ranked = rankJobs([{ name: 'OIL FILTER' }, { name: 'OIL FILTER' }, { name: 'COOLANT' }], [patrol]);
+    expect(ranked[0].matched).toHaveLength(1);
+    expect(ranked[0].score).toBe(1);
+  });
+
+});
+
+describe('a receipt’s day', () => {
+  const T = '2026-11-19';
+  it('is read as printed, day first, as UAE papers write it', () => {
+    expect(printedDate('18-Nov-2026')).toBe('2026-11-18');
+    expect(printedDate('Date: 05/11/2026')).toBe('2026-11-05');
+    expect(printedDate('17/11/26')).toBe('2026-11-17');
+    expect(printedDate('11/25/2026')).toBe('2026-11-25');
+    expect(printedDate('Nov 3, 2026')).toBe('2026-11-03');
+    expect(printedDate('2026-11-04')).toBe('2026-11-04');
+    expect(printedDate('31/02/2026')).toBeUndefined();
+    expect(receiptDate({ dateText: '05/11/2026', date: '2026-05-11' }, T)).toEqual({ date: '2026-11-05', sure: false });
+    expect(receiptDate({ dateText: '17-Nov-2026', date: '2026-11-17', dateSure: true }, T)).toEqual({ date: '2026-11-17', sure: true });
+  });
+
+  it('a year under a stamp («19-Nov-202?» read 2024 or 2023) is this year’s or last year’s day — whichever has passed — and not sure', () => {
+    expect(receiptDate({ dateText: '19-Nov-2024', date: '2024-11-19', dateSure: false }, T)).toEqual({ date: '2026-11-19', sure: false });
+    expect(receiptDate({ date: '2023-11-19' }, T)).toEqual({ date: '2026-11-19', sure: false });
+    // Put right only to a recent day; else today.
+    expect(receiptDate({ dateText: '20-Dec-2026' }, T)).toEqual({ date: T, sure: false });
+    expect(receiptDate({ date: '2024-01-01' }, T)).toEqual({ date: T, sure: false });
+    // Day and month swapped into the future: put back.
+    expect(receiptDate({ date: '2026-12-11' }, T)).toEqual({ date: '2026-11-12', sure: false });
+    expect(receiptDate({}, T)).toEqual({ date: T, sure: false });
+    expect(receiptDate({ dateText: '', date: '' }, T)).toEqual({ date: T, sure: false });
   });
 });
 

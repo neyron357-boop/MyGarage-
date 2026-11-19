@@ -8,8 +8,63 @@ export function liveCameraAvailable(): boolean {
   return window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
 }
 
+/*
+ * The camera kept a while after it closes (v0.50.2, the user: «каждый раз при открытии камеры запрашивается
+ * разрешение — один раз нажал, и больше чтобы не мучило»). A web app on the iPhone's home screen asks for the camera
+ * again once the camera has been let go for about a minute (and at every launch — no page can keep that); while it is
+ * taken it does not ask. So a camera that closes is kept for a few minutes with its picture off (its tracks disabled),
+ * and the next one in that time — the next receipt, the next plate — takes it back without a word. The app going away
+ * (hidden, closed) lets it go at once.
+ */
+const KEEP_MS = 3 * 60_000;
+let kept: { stream: MediaStream; timer: number } | undefined;
+
+function dropKept() {
+  if (!kept) return;
+  window.clearTimeout(kept.timer);
+  kept.stream.getTracks().forEach((t) => t.stop());
+  kept = undefined;
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => document.hidden && dropKept());
+  window.addEventListener('pagehide', dropKept);
+}
+
+/** The camera kept from the last time, if it is still there (live). */
+function takeKept(): MediaStream | undefined {
+  if (!kept) return undefined;
+  const s = kept.stream;
+  window.clearTimeout(kept.timer);
+  kept = undefined;
+  if (s.getVideoTracks().length && s.getVideoTracks().every((t) => t.readyState === 'live')) {
+    s.getTracks().forEach((t) => (t.enabled = true));
+    return s;
+  }
+  s.getTracks().forEach((t) => t.stop());
+  return undefined;
+}
+
+/**
+ * The camera let go: kept a few minutes with its picture off (the next camera takes it without asking again), or
+ * stopped at once — `now`, or the app is away.
+ */
+export function releaseCamera(stream: MediaStream | null | undefined, now = false): void {
+  if (!stream) return;
+  if (kept?.stream === stream) return;
+  const live = stream.getVideoTracks().some((t) => t.readyState === 'live');
+  if (now || !live || typeof document === 'undefined' || document.hidden) {
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+  dropKept();
+  stream.getTracks().forEach((t) => (t.enabled = false));
+  kept = { stream, timer: window.setTimeout(dropKept, KEEP_MS) };
+}
+
 /** The back camera, 4:3 (the whole sensor), up to 1920 px on the long side — as the walk-around camera took. */
 export async function openBackCamera(): Promise<MediaStream> {
+  const again = takeKept();
+  if (again) return again;
   try {
     return await navigator.mediaDevices.getUserMedia({
       audio: false,

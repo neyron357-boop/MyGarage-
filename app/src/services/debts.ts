@@ -1,6 +1,6 @@
 import { db, nextNumber, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
-import { creditLeft, debtQueue, groupDebts, historyDues, historyKeyOf, isCustomerDebt, orderDue, spread, type DebtJob, type DebtShare, type Debtor, type HistoryDue } from '../domain/debts';
+import { creditLeft, debtQueue, groupCredits, groupDebts, historyDues, historyKeyOf, isCustomerDebt, orderDue, spread, type DebtJob, type Creditor, type DebtShare, type Debtor, type HistoryDue } from '../domain/debts';
 import { activeInvoice, amountDue, formatDocNumber } from '../domain/invoice';
 import type { CreditPayment, Customer, Expense, Income, Invoice, Order, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
 import { AppError } from './errors';
@@ -261,6 +261,29 @@ export async function loadCompanyDebts(): Promise<CompanyDebt[]> {
   return (await loadCredits()).filter((d) => d.leftFils > 0);
 }
 
+/** What the garage owes, by whom (v0.50.2): one seller — one card with its credits; a credit with no seller on its own. */
+export async function loadCreditors(): Promise<{ creditors: Creditor<CompanyDebt>[]; loose: CompanyDebt[] }> {
+  const [debts, suppliers] = await Promise.all([loadCompanyDebts(), db.suppliers.toArray()]);
+  return groupCredits(debts, suppliers);
+}
+
+/**
+ * A seller paid at once (v0.50.2): the sum goes to its credits the oldest first, each part a payment of its own (as
+ * `payCredit`: the money moves by the way it is paid). More than is owed — refused.
+ */
+export async function paySupplier(expenseIds: string[], input: { amountFils: number; method: PayMethod; date?: string }): Promise<CreditPayment[]> {
+  if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  const debts = (await Promise.all(expenseIds.map((id) => companyDebtOf(id)))).filter((d): d is CompanyDebt => !!d && d.leftFils > 0);
+  const { parts, restFils } = spread(
+    input.amountFils,
+    debts.map((d) => ({ key: d.expense.id, dueFils: d.leftFils, since: `${d.expense.date}|${d.expense.createdAt}` })),
+  );
+  if (restFils > 0) throw new AppError('err.creditOver');
+  const done: CreditPayment[] = [];
+  for (const p of parts) done.push(await payCredit(p.key, { amountFils: p.amountFils, method: input.method, date: input.date }));
+  return done;
+}
+
 /**
  * Pay towards an expense on credit — all of it or a part. The money moves now and by the way it is paid (cash:
  * out of the cash box); the expense itself is not counted again.
@@ -286,4 +309,4 @@ export async function payCredit(expenseId: string, input: { amountFils: number; 
   return paid;
 }
 
-export type { DebtJob, Debtor };
+export type { Creditor, DebtJob, Debtor };

@@ -1233,6 +1233,10 @@ export const en: typeof ru = {
     cars_many: '{{count}} cars',
     cars_other: '{{count}} cars',
     payCredit: 'Pay the credit',
+    credits_one: '{{count}} credit',
+    credits_few: '{{count}} credits',
+    credits_many: '{{count}} credits',
+    credits_other: '{{count}} credits',
   },
   send: {
     withPhotos: 'Photos and text · {{n}}',
@@ -1309,6 +1313,7 @@ export const en: typeof ru = {
     saveIn: 'Record income',
     saveOut: 'Record expense',
     forWhat: 'For which car / customer',
+    otherJobs: 'Other jobs',
     forJob: 'Job',
     linkSearch: 'Plate, name or phone — optional',
     note: 'Note',

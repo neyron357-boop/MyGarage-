@@ -3,7 +3,7 @@ import { IconBolt, IconBoltOff, IconCameraOff, IconPhoto, IconX } from '@tabler/
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { cameraErrorKind, captureFrame, openBackCamera, setTorch, torchSupported, waitForFrames, type CameraError } from './camera';
+import { cameraErrorKind, captureFrame, openBackCamera, releaseCamera, setTorch, torchSupported, waitForFrames, type CameraError } from './camera';
 import { haptic } from './haptics';
 import { useHistoryLayer, useLockScroll } from './historyLayer';
 
@@ -41,10 +41,14 @@ export function LiveCamera({
 
   /** Each opening counts: a camera that comes after it was let go (stopped, closed, opened again) is let go at once. */
   const opening = useRef(0);
+  // Let go (v0.50.2): kept a few minutes, its picture and torch off, for the next camera (ui/camera.ts) — the app away: at once.
   const stop = useCallback(() => {
     opening.current++;
-    stream.current?.getTracks().forEach((tr) => tr.stop());
+    const s = stream.current;
     stream.current = null;
+    const track = s?.getVideoTracks()[0];
+    if (track && torchSupported(track)) void setTorch(track, false).catch(() => undefined);
+    releaseCamera(s);
     setTorchOn(false);
   }, []);
 
@@ -55,7 +59,7 @@ export function LiveCamera({
     try {
       const s = await openBackCamera();
       if (stale()) {
-        s.getTracks().forEach((tr) => tr.stop());
+        releaseCamera(s);
         return;
       }
       stream.current = s;
@@ -70,7 +74,7 @@ export function LiveCamera({
       if (!stale()) setPhase('live');
     } catch (e) {
       if (stale()) return;
-      stream.current?.getTracks().forEach((tr) => tr.stop());
+      releaseCamera(stream.current, true);
       stream.current = null;
       setError(cameraErrorKind(e));
       setPhase('error');

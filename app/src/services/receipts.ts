@@ -1,7 +1,17 @@
 import { db } from '../db/db';
+import { dubaiDate } from '../domain/dates';
 import { formatNumber } from '../domain/partNumbers';
-import { guessJob, receiptExpense, supplierFromReceipt, type JobForGuess, type JobGuess, type ReceiptExpense, type ReceiptRead } from '../domain/receipt';
-import { alreadyInBase } from '../domain/suppliers';
+import {
+  guessJob,
+  rankJobs,
+  receiptExpense,
+  supplierFromReceipt,
+  type JobForGuess,
+  type JobGuess,
+  type ReceiptExpense,
+  type ReceiptRead,
+} from '../domain/receipt';
+import { alreadyInBase, sellerKey } from '../domain/suppliers';
 import type { Expense, OrderItem, Supplier } from '../domain/types';
 import { askAi, notifyAi } from './ai';
 import { removeEntry } from './entries';
@@ -13,19 +23,32 @@ import { shrinkPhoto } from './photoSize';
 /*
  * A supplier's receipt scanned (v0.50, the user: «нажал Расход — открылась камера — отсканировал — сохраняется фото,
  * берётся название деталей и сумма с VAT, создаётся расход и сам привязывается к заказу по названиям деталей»; v0.50.1:
- * «понимает поставщика и добавляет его»): the photo goes to the garage's server, which has Gemini read it
- * (server/src/ai.mjs `receipt`); the app turns the reading into an expense (domain/receipt.ts — nothing invented),
- * finds the job whose lines the receipt names (`guessJob`), knows the seller as a supplier of the garage's (the one in
- * the base by phone or name, else a new one off the paper), records the expense in «Запчасти» (a contractor's bill — in
- * «Подрядчики») with the photo as its receipt, and puts the purchase price and the supplier on the job's matched lines.
- * What it did is said once (AiNotices), with «Отменить»; the expense's sheet opens for a look.
+ * «понимает поставщика и добавляет его»; v0.50.2: «точно брать даты, определить точно заказ»): the photo goes to the
+ * garage's server, which has Gemini read it (server/src/ai.mjs `receipt`); the app turns the reading into an expense
+ * (domain/receipt.ts — nothing invented, the date read day first, a year under a stamp put right), knows the seller as a
+ * supplier of the garage's, finds the job the parts were bought for (`rankJobs`: what the parts are, their numbers,
+ * the car on the paper, the job's days — the app alone, no AI) — records the expense in
+ * «Запчасти» (a contractor's bill — «Подрядчики») with the photo as its receipt, and, the job sure, puts the purchase
+ * price and the supplier on its matched lines. What it did is said once (AiNotices), with «Отменить»; the expense's
+ * sheet opens for a look, the other likely jobs a tap away.
  */
+
+/** Another job the receipt may be for: a tap in the expense's sheet puts it there. */
+export interface JobOption {
+  orderId: string;
+  vehicleId: string;
+  customerId: string;
+  number: number;
+  car: string;
+}
 
 export interface ReceiptScan {
   expense?: Expense;
   fields?: ReceiptExpense;
   read?: ReceiptRead;
   job?: JobGuess & { car: string };
+  /** The other likely jobs (the likeliest first; at most three). */
+  others: JobOption[];
   /** The seller as a supplier of the garage's: found in the base, or added off the paper (`added`). */
   supplier?: { id: string; name: string; added: boolean };
   /** Job lines that got their purchase price off the receipt. */
@@ -46,18 +69,55 @@ async function picture(file: File): Promise<{ type: string; data: string }> {
   return { type: small.type || 'image/jpeg', data: btoa(bin) };
 }
 
-/** The jobs still in the garage, with their part and outsourced-work lines and their cars — what the paper may be for. */
-async function openJobs(): Promise<JobForGuess[]> {
-  const orders = await db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
-  if (!orders.length) return [];
+const DAY = 86_400_000;
+
+interface Jobs {
+  list: JobForGuess[];
+  /** Each job's car and customer (for a tap that puts the expense on another job). */
+  links: Map<string, { vehicleId: string; customerId: string; car: string }>;
+}
+
+/**
+ * The jobs the paper may be for: the ones in the garage, and the ones closed in the three days before the receipt's day
+ * (parts on credit are often scanned after the car has gone) — with their part lines, their work done outside, their cars.
+ */
+async function jobsFor(day: string): Promise<Jobs> {
+  const since = new Date(Date.parse(`${day}T00:00:00+04:00`) - 3 * DAY).toISOString();
+  const [open, closed] = await Promise.all([
+    db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray(),
+    db.orders
+      .where('stage')
+      .equals('closed')
+      .filter((o) => (o.closedAt ?? o.updatedAt ?? o.createdAt) >= since)
+      .toArray(),
+  ]);
+  const orders = [...open, ...closed];
+  const links = new Map<string, { vehicleId: string; customerId: string; car: string }>();
+  if (!orders.length) return { list: [], links };
   const [items, vehicles] = await Promise.all([db.items.where('orderId').anyOf(orders.map((o) => o.id)).toArray(), db.vehicles.bulkGet(orders.map((o) => o.vehicleId))]);
-  return orders.map((o, k) => ({
-    id: o.id,
-    number: o.number,
-    changedAt: o.updatedAt ?? o.createdAt,
-    lines: items.filter((i) => i.orderId === o.id && (i.kind === 'part' || !!i.outsource) && i.approvalState !== 'declined').map((i) => ({ id: i.id, name: i.titleEn || i.titleRu || '', costFils: i.costPriceFils })),
-    car: { make: vehicles[k]?.make ?? '', model: vehicles[k]?.model ?? '', plateNumber: vehicles[k]?.plate.number ?? '' },
-  }));
+  const list = orders.map((o, k) => {
+    const v = vehicles[k];
+    links.set(o.id, { vehicleId: o.vehicleId, customerId: o.customerId, car: [v?.make, v?.model].filter(Boolean).join(' ') });
+    return {
+      id: o.id,
+      number: o.number,
+      changedAt: o.updatedAt ?? o.createdAt,
+      openedOn: dubaiDate(o.createdAt),
+      lines: items
+        .filter((i) => i.orderId === o.id && (i.kind === 'part' || !!i.outsource) && i.approvalState !== 'declined')
+        .map((i) => ({ id: i.id, name: i.titleEn || i.titleRu || '', partNumber: i.partNumber, costFils: i.costPriceFils, supplierId: i.supplierId })),
+      car: { make: v?.make ?? '', model: v?.model ?? '', plateNumber: v?.plate.number ?? '', year: v?.year },
+    };
+  });
+  return { list, links };
+}
+
+/** The seller already in the base: the same phone or name (v0.24), or the same name without its company words. */
+async function knownSeller(fields: ReceiptExpense): Promise<Supplier | undefined> {
+  if (!supplierFromReceipt(fields)) return undefined;
+  const list = await db.suppliers.filter((s) => !s.archivedAt).toArray();
+  const key = sellerKey(fields.vendor ?? '');
+  return alreadyInBase(list, { name: fields.vendor, phone: fields.vendorPhone }) ?? (key.length >= 3 ? list.find((s) => sellerKey(s.name) === key) : undefined);
 }
 
 interface Seller {
@@ -67,15 +127,10 @@ interface Seller {
   filled: Partial<Pick<Supplier, 'phone' | 'address'>>;
 }
 
-/**
- * The seller as the garage's supplier: the one already in the base — by its phone or its name (v0.24 `alreadyInBase`),
- * its empty phone and address filled off the paper — else a new one with what the paper says.
- */
-async function sellerOf(fields: ReceiptExpense, make: string): Promise<Seller | undefined> {
+/** The seller as the garage's supplier: the known one, its empty phone and address filled off the paper — else a new one. */
+async function sellerOf(fields: ReceiptExpense, found: Supplier | undefined, make: string): Promise<Seller | undefined> {
   const wanted = supplierFromReceipt(fields, make);
   if (!wanted) return undefined;
-  const list = await db.suppliers.filter((s) => !s.archivedAt).toArray();
-  const found = alreadyInBase(list, { name: wanted.name, phone: wanted.phone });
   if (!found) return { supplier: await saveSupplier(wanted), added: true, filled: {} };
   const fill: Partial<Pick<Supplier, 'phone' | 'address'>> = {};
   if (!found.phone?.trim() && wanted.phone) fill.phone = wanted.phone;
@@ -91,19 +146,26 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
   try {
     read = await askAi<ReceiptRead>('receipt', { image: await picture(file) }, 'receipt', 90_000);
   } catch {
-    return { costed: 0, failed: 'ai' };
+    return { costed: 0, failed: 'ai', others: [] };
   }
   const fields = receiptExpense(read);
-  if (!fields.ok) return { costed: 0, failed: 'amount', read, fields };
+  if (!fields.ok) return { costed: 0, failed: 'amount', read, fields, others: [] };
   // Fuel, food, anything but parts or a contractor's work: which category is the manager's call — the sheet, filled in.
-  if (fields.kind !== 'parts' && fields.kind !== 'service') return { costed: 0, failed: 'kind', read, fields };
-  const jobs = await openJobs();
-  const guess = guessJob(fields.items, [read.carText, read.vendor, ...fields.items.map((i) => i.name)].filter(Boolean).join(' '), jobs);
-  const job = guess ? jobs.find((j) => j.id === guess.orderId) : undefined;
+  if (fields.kind !== 'parts' && fields.kind !== 'service') return { costed: 0, failed: 'kind', read, fields, others: [] };
+  const [jobs, found] = await Promise.all([jobsFor(fields.date), knownSeller(fields)]);
+  const ranked = rankJobs(fields.items, jobs.list, {
+    carText: read.carText,
+    paperText: [read.carText, ...fields.items.map((i) => i.name)].filter(Boolean).join(' '),
+    date: fields.date,
+    supplierId: found?.id,
+  });
+  // The job is the app's own guess (no AI is asked: «чтобы токены не тратились зря»); not sure — the likely ones a tap away.
+  const guess = guessJob(ranked);
+  const job = guess ? jobs.list.find((j) => j.id === guess.orderId) : undefined;
   const cats = await db.expenseCategories.filter((c) => c.active).toArray();
   const categoryId = fields.kind === 'service' ? await subcontractCategory() : (cats.find((c) => c.code === 'parts') ?? cats[0])?.id;
-  if (!categoryId) return { costed: 0, failed: 'amount', read, fields };
-  const seller = await sellerOf(fields, job?.car.make ?? '');
+  if (!categoryId) return { costed: 0, failed: 'amount', read, fields, others: [] };
+  const seller = await sellerOf(fields, found, job?.car.make ?? '');
   const expense = await addExpense({
     date: fields.date,
     categoryId,
@@ -111,6 +173,7 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     vatFils: fields.vatFils,
     // The seller in the garage's own words when it is in the base.
     vendor: seller?.supplier.name ?? fields.vendor,
+    supplierId: seller?.supplier.id,
     method: fields.method,
     note: fields.note,
     receipt: file,
@@ -118,13 +181,13 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     // The category's monthly limit is the manager's own warning: a receipt in hand is already spent.
     overLimitComment: 'receipt',
   });
-  // The job's matched lines: the purchase price and the seller's VAT off the paper (only where none was typed), the
-  // supplier where the line has none, the part number when the line has none; an outsourced work — who did it and that
-  // it is paid (its «Платим» is this expense).
+  // The job sure: its matched lines get the purchase price and the seller's VAT off the paper (only where none was
+  // typed), the supplier where the line has none, the part number when the line has none; an outsourced work — who
+  // did it and that it is paid (its «Платим» is this expense). Not sure — the lines are left alone (the job may change).
   let costed = 0;
   const linked: string[] = [];
   const paid: { id: string; supplier: boolean }[] = [];
-  if (guess && job) {
+  if (guess && job && !guess.close) {
     for (const m of guess.matched) {
       const it = fields.items[m.item];
       const cur = await db.items.get(m.lineId);
@@ -151,13 +214,22 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
       }
     }
   }
-  const car = job ? [job.car.make, job.car.model].filter(Boolean).join(' ') : '';
+  const car = guess ? (jobs.links.get(guess.orderId)?.car ?? '') : '';
+  const others: JobOption[] = ranked
+    .filter((r) => r.orderId !== guess?.orderId && r.score > 0)
+    .slice(0, 3)
+    .map((r) => {
+      const l = jobs.links.get(r.orderId)!;
+      return { orderId: r.orderId, vehicleId: l.vehicleId, customerId: l.customerId, number: r.number, car: l.car };
+    });
   notifyAi({
     kind: 'expense',
     expenseId: expense.id,
     amountFils: expense.amountFils,
     vendor: expense.vendor,
-    job: job && guess ? { number: guess.number, car } : undefined,
+    date: fields.date,
+    dateSure: fields.dateSure,
+    job: guess ? { number: guess.number, car } : undefined,
     supplier: seller ? { name: seller.supplier.name, added: seller.added } : undefined,
     items: fields.items.length,
     close: !!guess?.close,
@@ -192,7 +264,8 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     expense,
     fields,
     read,
-    job: guess && job ? { ...guess, car } : undefined,
+    job: guess ? { ...guess, car } : undefined,
+    others,
     supplier: seller ? { id: seller.supplier.id, name: seller.supplier.name, added: seller.added } : undefined,
     costed,
   };

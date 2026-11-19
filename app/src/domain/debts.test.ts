@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, creditLeft, debtQueue, groupDebts, historyDues, historyKey, isCustomerDebt, orderDue, spread, type DebtJob } from './debts';
+import { allocate, creditLeft, debtQueue, groupCredits, groupDebts, historyDues, historyKey, isCustomerDebt, orderDue, spread, type DebtJob } from './debts';
 import type { Customer, HistoryInvoice, Income, Invoice, Order, OrderItem, Payment, Vehicle } from './types';
 
 const customer = (id: string, name: string) => ({ id, name, type: 'individual' }) as Customer;
@@ -119,5 +119,35 @@ describe('the invoices from before the app as a debt (v0.47)', () => {
     const [both] = groupDebts([job(7, acme, car('hiace'), 50_000, '2026-11-12')], [{ customer: acme, dues }]);
     expect(both.totalFils).toBe(80_000);
     expect(both.cars).toHaveLength(1);
+  });
+});
+
+describe('whom the garage owes (v0.50.2)', () => {
+  const credit = (id: string, vendor: string | undefined, date: string, leftFils: number, supplierId?: string) => ({ expense: { id, vendor, date, supplierId }, leftFils });
+  const suppliers = [
+    { id: 's1', name: 'Al Maroof Auto Spare Parts Trading LLC', phone: '+971528850442' },
+    { id: 's2', name: 'Nakash', phone: undefined },
+  ];
+
+  it('one seller is one card, its credits inside the oldest first — by its supplier, its name without the company’s words, or the name as written', () => {
+    const { creditors, loose } = groupCredits(
+      [
+        credit('e1', 'Al Maroof Auto Spare Parts Trading LLC', '2026-11-19', 9450),
+        credit('e2', 'AL MAROOF AUTO SPARE PARTS TRADING L.L.C', '2026-11-17', 6825),
+        credit('e3', 'Something else', '2026-11-18', 5000, 's1'),
+        credit('e4', 'NAKASH', '2026-11-15', 12100),
+        credit('e5', 'Gulf Star', '2026-11-10', 3000),
+        credit('e6', 'GULF STAR TR. L.L.C.', '2026-11-12', 2000),
+        credit('e7', undefined, '2026-11-16', 26000),
+        credit('e8', '  ', '2026-11-16', 1000),
+      ],
+      suppliers,
+    );
+    expect(creditors.map((c) => [c.name, c.supplier?.id, c.credits.map((d) => d.expense.id), c.leftFils])).toEqual([
+      ['Al Maroof Auto Spare Parts Trading LLC', 's1', ['e2', 'e3', 'e1'], 21275],
+      ['Nakash', 's2', ['e4'], 12100],
+      ['Gulf Star', undefined, ['e5', 'e6'], 5000],
+    ]);
+    expect(loose.map((d) => d.expense.id)).toEqual(['e7', 'e8']);
   });
 });

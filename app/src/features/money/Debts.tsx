@@ -1,18 +1,19 @@
 import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileText, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileText, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
-import type { Debtor } from '../../domain/debts';
+import { spread, type Creditor, type Debtor } from '../../domain/debts';
 import { creditEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { formatPlate } from '../../domain/plates';
 import type { Customer, ExpenseCategory, PayMethod } from '../../domain/types';
-import { companyDebtOf, loadCompanyDebts, loadDebtors, payCredit, type CompanyDebt } from '../../services/debts';
+import { companyDebtOf, loadCreditors, loadDebtors, payCredit, paySupplier, type CompanyDebt } from '../../services/debts';
+import { openWhatsApp } from '../../services/messages';
 import { debtInvoicesZip, statementPdf } from '../../services/debtDocs';
 import { openPdf } from '../../services/documents';
 import { removeEntry, restoreEntry } from '../../services/entries';
@@ -208,6 +209,145 @@ export function CompanyDebtList({ list, cats, onOpen }: { list: CompanyDebt[]; c
 }
 
 /**
+ * A seller the garage owes (v0.50.2, the user: «один поставщик — раскрывающийся список, а там его кредиты»): folded —
+ * the name and what is owed to it all; a tap unfolds its credits (each opens to pay it, or to see it), the oldest first,
+ * and «Оплата» — one sum to the seller, spread over its credits the oldest first; WhatsApp to the seller.
+ */
+const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay }: { c: Creditor<CompanyDebt>; catName: (id: string) => string; onOpen: (expenseId: string) => void; onPay: (c: Creditor<CompanyDebt>) => void }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const phone = c.supplier?.phone;
+  return (
+    <List className={open ? 'debt-card is-open' : 'debt-card'}>
+      <ListRow
+        onClick={() => setOpen((o) => !o)}
+        left={<PersonAvatar name={c.name} company />}
+        title={
+          <Text span inherit fw={650} lineClamp={2}>
+            {c.name}
+          </Text>
+        }
+        subtitle={[phone ? formatPhone(phone) : '', t('debt.credits', { count: c.credits.length }), formatDate(c.credits[0].expense.date)].filter(Boolean).join(' · ')}
+        right={
+          <Group gap={6} wrap="nowrap" aria-expanded={open}>
+            <Money fils={c.leftFils} c="orange.7" fw={750} roll />
+            <IconChevronDown size={18} className="debt-fold" color="var(--app-label-3)" aria-hidden />
+          </Group>
+        }
+      />
+      <Collapse in={open} transitionDuration={260}>
+        {c.credits.map(({ expense: e, paid, leftFils }) => (
+          <ListRow
+            key={e.id}
+            chevron
+            onClick={() => onOpen(e.id)}
+            title={[formatDate(e.date), catName(e.categoryId)].join(' · ')}
+            subtitle={[paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ') || undefined}
+            right={<Money fils={leftFils} size="sm" c="orange.7" roll />}
+          />
+        ))}
+        <div className="debt-actions">
+          <button type="button" className="action-tile" data-pay-supplier onClick={() => onPay(c)}>
+            <span className="tile-icon" style={{ '--c': 'var(--mantine-color-red-6)' } as React.CSSProperties}>
+              <IconCash size={21} stroke={1.9} aria-hidden />
+            </span>
+            <span>{t('debt.takeShort')}</span>
+          </button>
+          {phone && (
+            <button type="button" className="action-tile" onClick={() => openWhatsApp(phone)}>
+              <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
+                <IconBrandWhatsapp size={21} stroke={1.9} aria-hidden />
+              </span>
+              <span>WhatsApp</span>
+            </button>
+          )}
+        </div>
+      </Collapse>
+    </List>
+  );
+});
+
+/**
+ * One sum to a seller (v0.50.2): all it is owed is offered (a part is typed over it); it goes to its credits the oldest
+ * first — the rows under the sum say how much to which — on the day it was paid, by the way it was paid.
+ */
+function SupplierPaySheet({ c, opened, onClose }: { c: Creditor<CompanyDebt>; opened: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { run, busy } = useAction();
+  const [amount, setAmount] = useState<number | undefined>(c.leftFils);
+  const [method, setMethod] = useState<PayMethod>('cash');
+  const [date, setDate] = useState(dubaiDate());
+  const parts = spread(amount ?? 0, c.credits.map((d) => ({ key: d.expense.id, dueFils: d.leftFils, since: `${d.expense.date}|${d.expense.createdAt}` }))).parts;
+  return (
+    <Modal opened={opened} onClose={onClose} title={c.name}>
+      <Stack gap="md">
+        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} big />
+        {parts.length > 0 && (
+          <List>
+            {parts.map((p) => {
+              const d = c.credits.find((x) => x.expense.id === p.key)!;
+              return (
+                <ListRow
+                  key={p.key}
+                  title={formatDate(d.expense.date)}
+                  subtitle={d.expense.note || undefined}
+                  right={
+                    <Text size="sm" className="tnum">
+                      <Money fils={p.amountFils} size="sm" /> <span className="chip-note">{t('debt.ofTotal', { sum: formatAed(d.leftFils) })}</span>
+                    </Text>
+                  }
+                />
+              );
+            })}
+          </List>
+        )}
+        <Group gap="xs">
+          <DayPill value={date} onChange={setDate} />
+        </Group>
+        <PursePicker value={method} onChange={(m) => setMethod(m === 'credit' ? 'cash' : m)} kind="out" />
+        <Button
+          size="lg"
+          color="red"
+          leftSection={<IconCash size={20} />}
+          loading={busy}
+          disabled={!amount || amount > c.leftFils}
+          onClick={() =>
+            run(async () => {
+              await paySupplier(
+                c.credits.map((d) => d.expense.id),
+                { amountFils: amount ?? 0, method, date },
+              );
+              haptic('success');
+              onClose();
+            }, 'debt.paid')
+          }
+        >
+          {t('debt.pay')}
+          {amount ? ` · ${formatAed(amount)}` : ''}
+        </Button>
+      </Stack>
+    </Modal>
+  );
+}
+
+/** What the garage owes, by whom: a card per seller; a credit with no seller as its own row. */
+export function CreditorList({ creditors, loose, cats, onOpen }: { creditors: Creditor<CompanyDebt>[]; loose: CompanyDebt[]; cats?: ExpenseCategory[]; onOpen: (expenseId: string) => void }) {
+  const catName = useCategoryName(cats);
+  const [pay, setPay] = useState<Creditor<CompanyDebt> | null>(null);
+  return (
+    <>
+      <Stack gap="md" className="debt-cards">
+        {creditors.map((c) => (
+          <CreditorCard key={c.key} c={c} catName={catName} onOpen={onOpen} onPay={setPay} />
+        ))}
+        {loose.length > 0 && <CompanyDebtList list={loose} cats={cats} onOpen={onOpen} />}
+      </Stack>
+      <SheetFor value={pay}>{(c, o) => <SupplierPaySheet c={c} opened={o} onClose={() => setPay(null)} />}</SheetFor>
+    </>
+  );
+}
+
+/**
  * An expense on credit, opened: what is left to pay and what was paid; pay all of it or a part, on the day it was paid
  * (v0.23: an earlier day too) — the money goes by the way it is paid (cash: out of the cash box). A payment opens as an
  * operation of the book (its day, sum and way change; it can be deleted); «Удалить» deletes the debt itself, with what
@@ -340,20 +480,22 @@ export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
     );
   const sw = useTabSwipe(DEBT_TABS, side, setSide, onEdge);
   const data = useScreenLiveQuery(async () => {
-    const [debtors, company, cats] = await Promise.all([loadDebtors(), loadCompanyDebts(), db.expenseCategories.toArray()]);
-    return { debtors, company, cats };
+    const [debtors, owe, cats] = await Promise.all([loadDebtors(), loadCreditors(), db.expenseCategories.toArray()]);
+    return { debtors, owe, cats };
   }, []);
   const [credit, setCredit] = useState<string | null>(null);
   if (!data) return <PageSkeleton />;
   const owed = data.debtors.reduce((s, d) => s + d.totalFils, 0);
-  const owe = data.company.reduce((s, d) => s + d.leftFils, 0);
+  const owe = data.owe.creditors.reduce((s, c) => s + c.leftFils, 0) + data.owe.loose.reduce((s, d) => s + d.leftFils, 0);
+  // Whom the garage owes: one seller is one (v0.50.2), however many credits it has.
+  const owing = data.owe.creditors.length + data.owe.loose.length;
   return (
     <Stack gap="lg">
       <SimpleGrid cols={2} spacing="sm" role="tablist">
         {(
           [
             ['owed', t('debt.owed'), owed, 'red', data.debtors.length],
-            ['owe', t('debt.weOwe'), owe, 'orange', data.company.length],
+            ['owe', t('debt.weOwe'), owe, 'orange', owing],
           ] as const
         ).map(([key, label, fils, color, n]) => (
           <button
@@ -387,8 +529,8 @@ export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
               {t('debt.noneHint')}
             </EmptyState>
           )
-        ) : data.company.length ? (
-          <CompanyDebtList list={data.company} cats={data.cats} onOpen={setCredit} />
+        ) : owing ? (
+          <CreditorList creditors={data.owe.creditors} loose={data.owe.loose} cats={data.cats} onOpen={setCredit} />
         ) : (
           <EmptyState icon={IconClockDollar} title={t('debt.companyNone')} />
         )}

@@ -6273,6 +6273,11 @@ button.kpi-tab .eyebrow {
   color: var(--mantine-color-dimmed);
   overflow-wrap: anywhere;
 }
+/* What the AI read but is not sure of (v0.50.2: a receipt's day with a digit under a stamp). */
+.ai-unsure {
+  color: var(--mantine-color-orange-text, var(--mantine-color-orange-6));
+  font-weight: 650;
+}
 /* A receipt being read on the server (v0.50): a glass pill above the tab bar, the AI's mark twinkling in it. */
 .ai-scan-pill {
   position: fixed;

@@ -1,7 +1,7 @@
 import { dubaiDate } from './dates';
 import { lineName } from './items';
 import { partKey } from './partsVocab';
-import { normalizeText } from './search';
+import { CAR_MAKES, carWordsOf, partName, partSimilarity } from './partMatch';
 import type { ExpenseMethod } from './types';
 
 /*
@@ -15,6 +15,10 @@ import type { ExpenseMethod } from './types';
 /** What the server read off the picture (server/src/ai.mjs `receipt`). */
 export interface ReceiptItem {
   name: string;
+  /** The part alone, in the usual English words (v0.50.2: the server's reading). */
+  part?: string;
+  /** The car the line names ("CANTER", "NISSAN"). */
+  car?: string;
   partNumber?: string;
   qty?: number;
   unitPrice?: number;
@@ -26,10 +30,16 @@ export interface ReceiptRead {
   vendorTrn?: string;
   vendorPhone?: string;
   vendorAddress?: string;
+  /** The seller's e-mail, as printed (v0.51: read on the phone — the supplier is known by it). */
+  vendorEmail?: string;
   /** What the paper is for: parts, a contractor's work, fuel, food, other (v0.50.1). */
   kind?: string;
   invoiceNo?: string;
+  /** The date as printed ("18-Nov-2026") — read here day first, as UAE papers write it. */
+  dateText?: string;
   date?: string;
+  /** False when a digit of the date was hidden (a stamp, a fold). */
+  dateSure?: boolean;
   items?: ReceiptItem[];
   subtotal?: number;
   vat?: number;
@@ -54,10 +64,12 @@ export interface ReceiptExpense {
   /** Parts and a contractor's work are recorded by themselves; anything else waits for the manager's category. */
   kind: ReceiptKind;
   date: string;
+  /** The date is as printed and read whole (false: a digit hidden, or its year put right here) — the manager should look. */
+  dateSure: boolean;
   method: ExpenseMethod;
   note: string;
   /** The lines, named as the garage names lines (capitals), each with its net price per piece in fils when the paper gives one. */
-  items: { name: string; qty: number; partNumber?: string; unitNetFils?: number; lineNetFils?: number }[];
+  items: { name: string; part?: string; car?: string; qty: number; partNumber?: string; unitNetFils?: number; lineNetFils?: number }[];
   /** The VAT's share of the net (basis points): a line's own VAT is its net × this. */
   vatShareBp: number;
 }
@@ -72,6 +84,65 @@ const receiptKind = (k: unknown): ReceiptKind => {
   if (/^food/.test(s)) return 'food';
   return 'other';
 };
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const pad = (n: number) => String(n).padStart(2, '0');
+function ymd(y: number, m: number, d: number): string | undefined {
+  if (y < 100) y += 2000;
+  if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2100)) return undefined;
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCMonth() === m - 1 ? `${y}-${pad(m)}-${pad(d)}` : undefined;
+}
+const daysBefore = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
+
+/** The date as printed: "18-Nov-2026", "Nov 18, 2026", "2026-11-18", "18/11/26" (day first, as UAE papers write it). */
+export function printedDate(text: string): string | undefined {
+  const t = text.toLowerCase();
+  let m = t.match(/(\d{1,2})(?:st|nd|rd|th)?[\s\-/.,]*([a-z]{3,9})[\s\-/.,']*(\d{2,4})/);
+  if (m && MONTHS.includes(m[2].slice(0, 3))) return ymd(Number(m[3]), MONTHS.indexOf(m[2].slice(0, 3)) + 1, Number(m[1]));
+  m = t.match(/([a-z]{3,9})[\s\-/.]*(\d{1,2})(?:st|nd|rd|th)?[\s,\-/.]+(\d{2,4})/);
+  if (m && MONTHS.includes(m[1].slice(0, 3))) return ymd(Number(m[3]), MONTHS.indexOf(m[1].slice(0, 3)) + 1, Number(m[2]));
+  m = t.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return ymd(Number(m[1]), Number(m[2]), Number(m[3]));
+  m = t.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    // Day first unless it cannot be (a "month" over 12).
+    return b > 12 && a <= 12 ? ymd(Number(m[3]), a, b) : ymd(Number(m[3]), b, a);
+  }
+  return undefined;
+}
+
+/**
+ * The receipt's day (v0.50.2, the user: «точно брать даты»): the date as printed, read day first; the server's
+ * YYYY-MM-DD when nothing printed reads. Parts are bought now: a day ahead of today or more than a year back is a
+ * misread — a year under a stamp («19-Nov-202?» read 2024): the same day and month this year or last, or day and month
+ * swapped — the latest of them that has passed, within the last 120 days; else today. Any of that, a hidden digit, or the two readings apart — not sure.
+ */
+export function receiptDate(read: Pick<ReceiptRead, 'dateText' | 'date' | 'dateSure'>, today = dubaiDate()): { date: string; sure: boolean } {
+  const printed = read.dateText ? printedDate(String(read.dateText)) : undefined;
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(String(read.date ?? '')) ? ymd(Number(read.date!.slice(0, 4)), Number(read.date!.slice(5, 7)), Number(read.date!.slice(8, 10))) : undefined;
+  let date = printed ?? iso;
+  if (!date) return { date: today, sure: false };
+  let sure = read.dateSure !== false && (!printed || !iso || printed === iso);
+  const yearAgo = daysBefore(today, 366);
+  // A day put right must be a recent one (parts are scanned within weeks of buying them).
+  const lately = daysBefore(today, 120);
+  const fits = (d?: string): boolean => !!d && d <= today && d >= yearAgo;
+  if (!fits(date)) {
+    const y = Number(today.slice(0, 4));
+    const m = Number(date.slice(5, 7));
+    const d = Number(date.slice(8, 10));
+    const again = [ymd(y, m, d), ymd(y - 1, m, d), d <= 12 ? ymd(Number(date.slice(0, 4)), d, m) : undefined, d <= 12 ? ymd(y, d, m) : undefined]
+      .filter((x): x is string => !!x && x <= today && x >= lately)
+      .sort()
+      .pop();
+    date = again ?? today;
+    sure = false;
+  }
+  return { date, sure };
+}
 
 const toFils = (x: unknown): number | undefined => {
   const n = Number(x);
@@ -88,7 +159,14 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
   const lines = raw.map((i) => {
     const qty = Number(i.qty) > 0 ? Number(i.qty) : 1;
     const lineTotal = toFils(i.total) ?? (toFils(i.unitPrice) !== undefined ? Math.round(toFils(i.unitPrice)! * qty) : undefined);
-    return { name: lineName(String(i.name).trim().slice(0, 80)), qty, partNumber: String(i.partNumber ?? '').trim().toUpperCase() || undefined, lineTotal };
+    return {
+      name: lineName(String(i.name).trim().slice(0, 80)),
+      part: clean(i.part, 60)?.toUpperCase(),
+      car: clean(i.car, 40)?.toUpperCase(),
+      qty,
+      partNumber: String(i.partNumber ?? '').trim().toUpperCase() || undefined,
+      lineTotal,
+    };
   });
   const itemsSum = lines.reduce((s, l) => s + (l.lineTotal ?? 0), 0);
   const subtotal = toFils(read.subtotal);
@@ -102,13 +180,11 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
   const linesGross = !near(itemsSum, net) && near(itemsSum, total) && vat > 0;
   const items = lines.map((l) => {
     const lineNet = l.lineTotal === undefined ? undefined : linesGross ? Math.round((l.lineTotal * net) / total) : l.lineTotal;
-    return { name: l.name, qty: l.qty, partNumber: l.partNumber, lineNetFils: lineNet, unitNetFils: lineNet === undefined ? undefined : Math.round(lineNet / l.qty) };
+    return { name: l.name, part: l.part, car: l.car, qty: l.qty, partNumber: l.partNumber, lineNetFils: lineNet, unitNetFils: lineNet === undefined ? undefined : Math.round(lineNet / l.qty) };
   });
   const pm = String(read.paymentMethod ?? '').toLowerCase();
   const method: ExpenseMethod = /card/.test(pm) ? 'card' : /transfer|bank/.test(pm) ? 'transfer' : /credit|unpaid|due/.test(pm) ? 'credit' : 'cash';
-  const d = String(read.date ?? '');
-  const yearAgo = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today && d >= yearAgo ? d : today;
+  const { date, sure: dateSure } = receiptDate(read, today);
   const note = [read.invoiceNo ? `#${String(read.invoiceNo).trim().slice(0, 20)}` : '', ...items.map((i) => (i.qty !== 1 ? `${i.name} ×${i.qty}` : i.name))].filter(Boolean).join(' · ').slice(0, 200);
   return {
     ok: total > 0 && read.isReceipt !== false && (read.confidence ?? 1) >= 0.4,
@@ -120,6 +196,7 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
     vendorAddress: clean(read.vendorAddress, 120),
     kind: receiptKind(read.kind),
     date,
+    dateSure,
     method,
     note,
     items,
@@ -160,86 +237,137 @@ export function supplierFromReceipt(fields: ReceiptExpense, make = ''): ReceiptS
   };
 }
 
-/** A job the parts may have been bought for: its part lines and its car. */
+/** A job the receipt's parts may have been bought for: its lines (parts, work done outside) and its car. */
 export interface JobForGuess {
   id: string;
   number: number;
   changedAt: string;
-  lines: { id: string; name: string; costFils?: number }[];
-  car: { make: string; model: string; plateNumber: string };
+  /** The day it was opened (YYYY-MM-DD, Dubai): no part is bought for a job before it is there. */
+  openedOn?: string;
+  lines: { id: string; name: string; partNumber?: string; costFils?: number; supplierId?: string }[];
+  car: { make: string; model: string; plateNumber: string; year?: number };
+}
+/** A receipt's line as the guess reads it. */
+export interface ReceiptLine {
+  name: string;
+  part?: string;
+  car?: string;
+  partNumber?: string;
+  unitNetFils?: number;
+}
+export interface GuessContext {
+  /** The car written on the paper. */
+  carText?: string;
+  /** All the paper's words (a plate's digits in them count). */
+  paperText?: string;
+  /** The receipt's day. */
+  date?: string;
+  /** The seller, when it is the garage's supplier: a line already put on it is likelier. */
+  supplierId?: string;
+}
+/** A receipt line taken for a job's line: by its number or by what it is. */
+export interface JobMatch {
+  item: number;
+  lineId: string;
+  how: 'number' | 'name';
+  s: number;
+}
+export interface JobScore {
+  orderId: string;
+  number: number;
+  score: number;
+  matched: JobMatch[];
+  /** The car on the paper is this job's model, its make, or the paper names no car. */
+  car: 'model' | 'make' | 'none';
+  changedAt: string;
 }
 export interface JobGuess {
   orderId: string;
   number: number;
   score: number;
-  /** Which receipt line is which job line (the first word-for-word match wins a line). */
-  matched: { item: number; lineId: string; how: 'key' | 'words' }[];
-  /** Another job fits nearly as well: the manager should look. */
+  matched: JobMatch[];
+  /** Another job fits nearly as well: the manager should look (the likely ones are a tap away). */
   close: boolean;
+  /** Who picked it: the app's own matching (v0.50.2: no AI is asked). */
+  by: 'app';
 }
 
-/** The words of a part's name that tell parts apart (three letters and more; English plurals folded). */
-const nameWords = (s: string): Set<string> =>
-  new Set(
-    normalizeText(s)
-      .split(' ')
-      .filter((w) => w.length >= 3)
-      .map((w) => (w.length > 4 && /[a-z]$/.test(w) && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)),
-  );
+const plainNo = (x?: string) => (x ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const carIn = (text: string, words: Set<string>) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((w) => words.has(w));
 
 /**
- * The job the parts on the receipt were bought for: the one whose part lines name them — by the dictionary's key (one
- * part under any words) or by most of their words; the car named on the paper (its model, its plate) counts too. One
- * line of the job takes one line of the receipt. Nothing fits — no job; two fit alike — the fresher, marked `close`.
+ * The jobs the receipt may be for, the likeliest first (v0.50.2). Each receipt line is paired with one job line at
+ * most and each job line with one receipt line, the surest pairs first: the same part number — 1.5; the same part
+ * (domain/partMatch.ts: «TAIL LAMP COVER» for «REAR STOP LIGHT», «PULLY» for «TENSIONER PULLEY», the dictionary's key) —
+ * up to 1 (0.5 and more counts); the line's purchase price as on the paper +0.3; the line already on this seller +0.2.
+ * The car: the paper's (its car, or a car a line names) is the job's model +0.6, its make +0.3; the paper names another
+ * car — not this job; a line naming another car pairs with none of its lines; the plate's digits on the paper +1. A
+ * job opened after the receipt's day is not it.
  */
-export function guessJob(items: { name: string }[], paperText: string, jobs: JobForGuess[]): JobGuess | undefined {
-  const names = [...new Set(items.map((i) => i.name.trim()).filter(Boolean))];
-  if (!names.length && !paperText.trim()) return undefined;
-  const keys = names.map((n) => partKey(n));
-  const words = names.map(nameWords);
-  const paper = normalizeText(paperText);
-  const scored = jobs.map((job) => {
-    const taken = new Set<string>();
-    const matched: JobGuess['matched'] = [];
-    let score = 0;
-    const lineKeys = job.lines.map((l) => partKey(l.name));
-    const lineWords = job.lines.map((l) => nameWords(l.name));
-    names.forEach((_, i) => {
-      let best: { lineId: string; how: 'key' | 'words'; w: number } | undefined;
-      job.lines.forEach((l, k) => {
-        if (taken.has(l.id)) return;
-        if (keys[i] && keys[i] === lineKeys[k]) {
-          if (!best || best.w < 1) best = { lineId: l.id, how: 'key', w: 1 };
-          return;
-        }
-        const a = words[i];
-        const b = lineWords[k];
-        if (!a.size || !b.size) return;
-        let common = 0;
-        for (const w of a) if (b.has(w)) common++;
-        const share = common / Math.min(a.size, b.size);
-        // Every word of the shorter name in the other («BRAKE PADS» for a line «FRONT BRAKE PADS», «AIR FILTER ELEMENT»
-        // for «AIR FILTER») is the part itself — as good as the dictionary's key; most of the words — likely.
-        const w = share >= 1 && Math.min(a.size, b.size) >= 2 ? 1 : common >= 1 && share >= 0.6 ? 0.6 : 0;
-        if (w && (!best || best.w < w)) best = { lineId: l.id, how: 'words', w };
-      });
-      if (best) {
-        taken.add(best.lineId);
-        matched.push({ item: i, lineId: best.lineId, how: best.how });
-        score += best.w;
+export function rankJobs(items: ReceiptLine[], jobs: JobForGuess[], ctx: GuessContext = {}): JobScore[] {
+  const carWords = new Set([...CAR_MAKES, ...jobs.flatMap((j) => carWordsOf(j.car.make, j.car.model))]);
+  const lines = items.map((it) => {
+    const a = partName(it.name, carWords);
+    const b = it.part ? partName(it.part, carWords) : undefined;
+    return { a, b, key: partKey(it.name), cars: [...new Set([...a.cars, ...(b?.cars ?? []), ...carIn(it.car ?? '', carWords)])], no: plainNo(it.partNumber) };
+  });
+  const paperCars = new Set([...carIn(ctx.carText ?? '', carWords), ...lines.flatMap((l) => l.cars)]);
+  const digits = ` ${(ctx.paperText ?? '').replace(/\D+/g, ' ')} `;
+  const out: JobScore[] = [];
+  for (const job of jobs) {
+    if (ctx.date && job.openedOn && job.openedOn > ctx.date) continue;
+    const jobCar = new Set(carWordsOf(job.car.make, job.car.model));
+    const models = new Set(carWordsOf('', job.car.model));
+    let car: JobScore['car'] = 'none';
+    if (paperCars.size && jobCar.size) {
+      const hit = [...paperCars].filter((w) => jobCar.has(w));
+      if (!hit.length) continue;
+      car = hit.some((w) => models.has(w)) ? 'model' : 'make';
+    }
+    const named = job.lines.map((l) => ({ l, p: partName(l.name, carWords), key: partKey(l.name), no: plainNo(l.partNumber) }));
+    const pairs: JobMatch[] = [];
+    lines.forEach((r, i) => {
+      if (r.cars.length && jobCar.size && !r.cars.some((w) => jobCar.has(w))) return;
+      for (const { l, p, key, no } of named) {
+        let s = Math.max(partSimilarity(r.a, p), r.b ? partSimilarity(r.b, p) : 0, r.key && r.key === key ? 1 : 0);
+        let how: JobMatch['how'] = 'name';
+        if (r.no.length >= 5 && r.no === no) (s = 1.5), (how = 'number');
+        if (s < 0.5) continue;
+        const price = items[i].unitNetFils;
+        if (l.costFils && price && Math.abs(l.costFils - price) <= 1) s += 0.3;
+        if (ctx.supplierId && l.supplierId === ctx.supplierId) s += 0.2;
+        pairs.push({ item: i, lineId: l.id, how, s: Math.round(s * 100) / 100 });
       }
     });
-    if (paper) {
-      const model = normalizeText(job.car.model);
-      if (model.length >= 3 && paper.includes(model)) score += 0.5;
-      const plate = job.car.plateNumber.replace(/\D/g, '');
-      if (plate.length >= 4 && paper.includes(plate)) score += 1;
+    pairs.sort((x, y) => y.s - x.s);
+    const usedItems = new Set<number>();
+    const usedLines = new Set<string>();
+    const matched: JobMatch[] = [];
+    for (const m of pairs) {
+      if (usedItems.has(m.item) || usedLines.has(m.lineId)) continue;
+      usedItems.add(m.item);
+      usedLines.add(m.lineId);
+      matched.push(m);
     }
-    return { job, score, matched };
-  });
-  scored.sort((a, b) => b.score - a.score || b.job.changedAt.localeCompare(a.job.changedAt));
-  const best = scored[0];
+    let score = matched.reduce((t, m) => t + m.s, 0) + (car === 'model' ? 0.6 : car === 'make' ? 0.3 : 0);
+    const plate = job.car.plateNumber.replace(/\D/g, '');
+    if (plate.length >= 4 && digits.includes(` ${plate} `)) score += 1;
+    out.push({ orderId: job.id, number: job.number, score: Math.round(score * 100) / 100, matched: matched.sort((x, y) => x.item - y.item), car, changedAt: job.changedAt });
+  }
+  return out.sort((a, b) => b.score - a.score || b.changedAt.localeCompare(a.changedAt));
+}
+
+/**
+ * The job the parts were bought for, by the app itself: the likeliest at 1 and more (a part of it on the paper, or its
+ * model and a part, or its plate); another within 0.5 of it — `close`. Below 1 — none.
+ */
+export function guessJob(ranked: JobScore[]): JobGuess | undefined {
+  const [best, second] = ranked;
   if (!best || best.score < 1) return undefined;
-  const second = scored[1];
-  return { orderId: best.job.id, number: best.job.number, score: best.score, matched: best.matched, close: !!second && best.score - second.score < 0.5 };
+  return { orderId: best.orderId, number: best.number, score: best.score, matched: best.matched, close: !!second && best.score - second.score < 0.5, by: 'app' };
 }

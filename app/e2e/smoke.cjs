@@ -1933,7 +1933,9 @@ async function launchBrowser() {
     before = await cashNow();
     // v0.30: what the garage owes is its own tab of the debts.
     await page.goto(BASE + '#/money?tab=debts&side=owe');
-    await front('.list-row').filter({ hasText: 'E2E AHMAD' }).first().click();
+    // v0.50.2: one seller is one card — unfolded, its credit opens.
+    await front('.debt-card').filter({ hasText: 'E2E AHMAD' }).locator('.list-row').first().click();
+    await front('.debt-card.is-open').filter({ hasText: 'E2E AHMAD' }).locator('.list-row').filter({ hasText: 'E2E RECOVERY' }).click();
     await dlg.getByLabel('Сумма').fill('10');
     await pickDay(dlg);
     await dlg.locator('button.day-pill-input').filter({ hasText: day === Number(today.slice(8)) ? 'Сегодня' : /Вчера|\d\d\/\d\d/ }).waitFor();
@@ -2447,7 +2449,8 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Снять фото' }).click();
     await page.waitForURL(/orders\/new\?photo=/);
     if (await page.locator('.cam').count()) throw new Error('the camera stayed up');
-    if (await page.evaluate(() => window.__e2eCamera.taken.some((t) => t.getTracks().some((x) => x.readyState === 'live')))) throw new Error('the camera was not let go');
+    // Let go (v0.50.2: kept a few minutes with its picture off, so the next camera does not ask again) — not filming.
+    if (await page.evaluate(() => window.__e2eCamera.taken.some((t) => t.getTracks().some((x) => x.readyState === 'live' && x.enabled)))) throw new Error('the camera was not let go');
     await page.locator('.car-shot').waitFor();
     await page.locator('.car-shot-badge[data-state="read"]').waitFor({ timeout: 90000 });
     await page.locator('.car-shot-box').waitFor();
@@ -2513,15 +2516,30 @@ async function launchBrowser() {
         const k = partKey(i.titleEn || i.titleRu);
         byKey.set(k, [...(byKey.get(k) ?? []), i]);
       }
-      const own = [...byKey.values()].filter((list) => list.length === 1).map(([it]) => it);
+      // The app must be sure of it by itself (v0.50.2: its own ranking — no other job close), so the lines are priced.
+      const { rankJobs, guessJob } = await import('/src/domain/receipt.ts');
+      const vehicles = await db.vehicles.bulkGet(orders.map((o) => o.vehicleId));
+      const jobs = orders.map((o, k) => ({
+        id: o.id,
+        number: o.number,
+        changedAt: o.updatedAt ?? o.createdAt,
+        lines: items.filter((i) => i.orderId === o.id && (i.kind === 'part' || i.outsource) && i.approvalState !== 'declined').map((i) => ({ id: i.id, name: i.titleEn || i.titleRu || '' })),
+        car: { make: vehicles[k]?.make ?? '', model: vehicles[k]?.model ?? '', plateNumber: vehicles[k]?.plate.number ?? '' },
+      }));
+      const sure = (x) => {
+        const g = guessJob(rankJobs([{ name: x.titleEn || x.titleRu }], jobs));
+        return !!g && !g.close && g.orderId === x.orderId;
+      };
+      const own = [...byKey.values()].filter((list) => list.length === 1).map(([it]) => it).filter(sure);
       const it = own.find((x) => !x.costPriceFils && !x.partNumber) ?? own[0];
       if (!it) return null;
       const o = orders.find((x) => x.id === it.orderId);
       return { name: it.titleEn || it.titleRu, orderId: o.id, number: o.number, itemId: it.id, cost: it.costPriceFils ?? null, pv: it.purchaseVatFils ?? null, pn: it.partNumber ?? null, supplierId: it.supplierId ?? null };
     });
     if (!target) throw new Error('no open job with a part of its own');
-    // The test's camera films a receipt (a canvas); the garage's server is played: Gemini's reading of it, after a moment.
-    await page.evaluate(async ({ name }) => {
+    // The test's camera films a receipt (a canvas) — the same paper as a photo for the phone's own camera; the garage's
+    // server is played: Gemini's reading of it, after a moment.
+    const paper = await page.evaluate(async ({ name }) => {
       const c = document.createElement('canvas');
       c.width = 1200;
       c.height = 1600;
@@ -2552,24 +2570,37 @@ async function launchBrowser() {
         await new Promise((r) => setTimeout(r, 900));
         if (path !== 'receipt') throw new Error('not here');
         if (window.__e2eReceipt.fail) throw new Error('ai off');
-        return { isReceipt: true, kind: 'parts', vendor: 'GULF STAR AUTO PARTS', vendorPhone: '050 442 1190', vendorAddress: 'Al Quoz Ind. Area 3', vendorTrn: '100234567800003', invoiceNo: 'A-1042', date: '', items: [{ name, partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: 35, vat: 1.75, total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 };
+        return { isReceipt: true, kind: 'parts', vendor: 'GULF STAR AUTO PARTS', vendorPhone: '050 442 1190', vendorAddress: 'Al Quoz Ind. Area 3', vendorTrn: '100234567800003', invoiceNo: 'A-1042', dateText: '', date: '', items: [{ name, partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: 35, vat: 1.75, total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 };
       });
+      return c.toDataURL('image/jpeg', 0.85).split(',')[1];
     }, target);
+    const photo = { name: 'receipt.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(paper, 'base64') };
     const plusBox = await page.locator('.tab-plus').boundingBox();
     const cx = plusBox.x + plusBox.width / 2;
     const cy = plusBox.y + plusBox.height / 2;
-    const out = async () => {
+    // «Расход» tapped (v0.50.2): the phone's own camera (a file picker — it never asks for the camera); slid onto and let
+    // go: the app's camera (a phone opens its own only for a tap).
+    const tapOut = async () => {
       await page.mouse.click(cx, cy, { button: 'right' });
       await page.locator('.quick-layer[data-mode="sticky"]').waitFor();
-      await page.locator('[data-quick="out"]').click();
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('[data-quick="out"]').click()]);
+      return chooser;
+    };
+    const out = async () => {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx, cy - 30, { steps: 3 });
+      await page.locator('.quick-menu').waitFor();
+      const b = await page.locator('[data-quick="out"]').boundingBox();
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 5 });
+      await page.mouse.up();
       await page.locator('.cam[data-phase="live"]').waitFor({ timeout: 8000 });
     };
-    // «Расход»: the camera at once, live; the shutter — the paper goes to the server (the pill says it is being read),
-    // the expense is recorded and said (its card), its sheet opens: the job it went to, the sum, the photo — a tap each.
-    await out();
-    await shot('40d-receipt-camera');
-    await page.getByRole('button', { name: 'Снять фото' }).click();
-    await page.locator('.cam').waitFor({ state: 'detached' });
+    // Tapped: the photo taken — the paper goes to the server (the pill says it is being read), the expense is recorded
+    // and said (its card), its sheet opens: the job it went to, the sum, the photo — a tap each.
+    const chooser = await tapOut();
+    if (await page.locator('.cam').count()) throw new Error('a tap opened the app’s camera');
+    await chooser.setFiles(photo);
     await page.locator('[data-ai-scanning]').waitFor({ timeout: 8000 });
     await page.locator('[data-ai-notice="expense"]').waitFor({ timeout: 30000 });
     const dlg = page.getByRole('dialog');
@@ -2618,9 +2649,11 @@ async function launchBrowser() {
       return { expense: !!(await db.expenses.get(id)), media: await db.media.where('ownerId').equals(id).count(), moves: await db.cashMovements.filter((m) => m.expenseId === id).count(), suppliers: await db.suppliers.filter((x) => x.name === 'GULF STAR AUTO PARTS').count() };
     }, { ...target, id: got.id });
     if (after.expense || after.media || after.moves || after.suppliers) throw new Error('«Отменить» left ' + JSON.stringify(after));
-    // Not read (no server, an unreadable paper): the plain expense sheet, the photo already on it — the sum is typed.
+    // Slid onto «Расход»: the app's camera. Not read (no server, an unreadable paper): the plain expense sheet, the photo
+    // already on it — the sum is typed.
     await page.evaluate(() => (window.__e2eReceipt.fail = true));
     await out();
+    await shot('40d-receipt-camera');
     await page.getByRole('button', { name: 'Снять фото' }).click();
     await page.getByText('Чек не прочитан — впишите сумму').waitFor({ timeout: 15000 });
     await page.getByRole('dialog').getByRole('button', { name: /^Записать расход/ }).waitFor();
@@ -2628,13 +2661,53 @@ async function launchBrowser() {
     await shot('40f-receipt-unread');
     await closeModal();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
-    // The camera's × — the expense sheet without a paper.
+    // The camera's × — the expense sheet without a paper; so does the phone's own camera closed without a photo.
     await out();
     await page.locator('.cam').getByRole('button', { name: 'Закрыть' }).click();
     await page.locator('.cam').waitFor({ state: 'detached' });
     await page.getByRole('dialog').getByRole('button', { name: /^Записать расход/ }).waitFor();
     await closeModal();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await tapOut();
+    await page.evaluate(() => document.querySelector('input[data-quick-receipt]').dispatchEvent(new Event('cancel')));
+    await page.getByRole('dialog').getByRole('button', { name: /^Записать расход/ }).waitFor();
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    // v0.50.2: two credits of one seller (written two ways) and one with no seller — «Мы должны»: one card with both
+    // inside, the oldest first; its «Оплата» — one sum, to the oldest first.
+    const credits = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { addExpense } = await import('/src/services/money.ts');
+      const parts = (await db.expenseCategories.where('code').equals('parts').first()).id;
+      const a = await addExpense({ date: '2026-11-16', categoryId: parts, amountFils: 6825, vatFils: 325, vendor: 'NORTH STAR SPARE PARTS TRADING L.L.C', method: 'credit', note: '#97981 · MUD FLAP' });
+      const b = await addExpense({ date: '2026-11-17', categoryId: parts, amountFils: 9450, vatFils: 450, vendor: 'North Star Spare Parts Trading LLC', method: 'credit', note: '#98054 · ATF GASKET' });
+      return [a.id, b.id];
+    });
+    await page.goto(BASE + '#/money?tab=debts&side=owe');
+    const card = front('.debt-card').filter({ hasText: 'NORTH STAR SPARE PARTS' });
+    await card.filter({ hasText: '2 кредита' }).filter({ hasText: '162,75' }).waitFor();
+    if ((await card.count()) !== 1) throw new Error('one seller, ' + (await card.count()) + ' cards');
+    await card.locator('.list-row').first().click();
+    const open = front('.debt-card.is-open').filter({ hasText: 'NORTH STAR SPARE PARTS' });
+    await open.locator('.list-row').filter({ hasText: '#98054' }).waitFor();
+    const rows = await open.locator('.list-row').allInnerTexts();
+    if (!(rows.findIndex((r) => r.includes('#97981')) < rows.findIndex((r) => r.includes('#98054')))) throw new Error('the oldest is not first: ' + rows.join(' | '));
+    await shot('40g-we-owe-seller');
+    await open.locator('[data-pay-supplier]').click();
+    const payDlg = page.getByRole('dialog');
+    await payDlg.getByLabel('Сумма').fill('100');
+    await payDlg.getByRole('button', { name: /^Оплатить/ }).click();
+    await payDlg.waitFor({ state: 'detached' });
+    const left = await page.evaluate(async (ids) => {
+      const { companyDebtOf } = await import('/src/services/debts.ts');
+      return Promise.all(ids.map(async (id) => (await companyDebtOf(id)).leftFils));
+    }, credits);
+    if (left.join() !== '0,6275') throw new Error('100 to the seller left ' + left.join());
+    await card.filter({ hasText: '62,75' }).waitFor();
+    await page.evaluate(async (ids) => {
+      const { removeEntry } = await import('/src/services/entries.ts');
+      for (const id of ids) await removeEntry({ source: 'expense', id });
+    }, credits);
     await page.evaluate(async () => {
       window.__e2eCamera.done();
       (await import('/src/services/ai.ts')).setAiTransport(undefined);

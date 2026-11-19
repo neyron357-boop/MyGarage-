@@ -95,7 +95,7 @@ export type AiNotice =
   | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
   | { kind: 'number'; itemId: string; number: string; catalogs: number; garage: number; undo: () => Promise<void> }
   /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
-  | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
+  | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; date: string; dateSure: boolean; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
 
 const listeners = new Set<(n: AiNotice) => void>();
 /** What the AI did by itself (the app's notices show it, with «Отменить»). */

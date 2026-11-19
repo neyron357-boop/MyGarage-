@@ -2,6 +2,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCircleCheckFilled, IconHistory } from '@tabler/icons-react';
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { dayShort, dubaiDate } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { useLang } from '../../ui/hooks';
 import { onAiNotice, type AiNotice } from '../../services/ai';
@@ -16,6 +17,10 @@ import { AiMark } from './Ai';
 export function AiNotices() {
   const { t } = useTranslation();
   const lang = useLang();
+  const day = (date: string) => {
+    const d = dayShort(`${date}T12:00:00+04:00`, `${dubaiDate()}T12:00:00+04:00`);
+    return d.word ? t(`common.${d.word}`) : d.text;
+  };
   useEffect(
     () =>
       onAiNotice((n: AiNotice) => {
@@ -49,6 +54,12 @@ export function AiNotices() {
             <>
               <span className="ai-toast-main">{[formatAed(n.amountFils, lang), n.vendor].filter(Boolean).join(' · ')}</span>
               <span className="ai-toast-sub">
+                {/* The receipt's day (v0.50.2): a digit hidden or its year put right — orange, to look at. */}
+                <span className={n.dateSure ? undefined : 'ai-unsure'} data-receipt-date={n.date}>
+                  {day(n.date)}
+                  {n.dateSure ? '' : '?'}
+                </span>
+                {' · '}
                 {[n.job ? `№${n.job.number}${n.job.car ? ` · ${n.job.car}` : ''}` : t('ai.receiptNoJob'), n.supplier?.added ? t('ai.receiptSupplierNew') : '', t('ai.receiptItems', { count: n.items })].filter(Boolean).join(' · ')}
               </span>
             </>

@@ -14,7 +14,7 @@ import { holdCarShot } from '../orders/carShot';
 import { EntryDetails } from '../money/LedgerTab';
 import { AiMark } from '../ai/Ai';
 import { useLang, useScreenLiveQuery } from '../../ui/hooks';
-import { scanReceipt } from '../../services/receipts';
+import { scanReceipt, type JobOption } from '../../services/receipts';
 import { expenseEntry } from '../../domain/ledger';
 import { db } from '../../db/db';
 import { notifications } from '@mantine/notifications';
@@ -54,7 +54,7 @@ export function useQuickActions(live = false) {
   const [cam, setCam] = useState<false | 'plate' | 'receipt'>(false);
   // A receipt being read on the server (v0.50): a pill says so; the expense's sheet opens once it is recorded.
   const [scanning, setScanning] = useState(false);
-  const [recorded, setRecorded] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<{ id: string; others: JobOption[] } | null>(null);
   // What the camera read off its frames while it was aimed (v0.33): the plate goes with the photo when they agreed.
   const seen = useRef<ScanTally | undefined>(undefined);
   /** The car's photo into "New job" (with the plate the frames agreed on: it is in the job's form at once). */
@@ -77,7 +77,7 @@ export function useQuickActions(live = false) {
       .then((r) => {
         if (r.expense) {
           haptic('success');
-          setRecorded(r.expense.id);
+          setRecorded({ id: r.expense.id, others: r.others });
         } else {
           // Fuel, food, another kind of paper: read, but which category is the manager's call — the sheet, filled in, no word.
           if (r.failed !== 'kind') notifications.show({ color: 'orange', message: t('ai.receiptFailed') });
@@ -86,17 +86,31 @@ export function useQuickActions(live = false) {
       })
       .finally(() => setScanning(false));
   };
-  const run = (k: QuickKey) => {
+  /**
+   * `slide` — the finger slid onto the action and let go there (the phone opens its own camera only for a tap).
+   * «Расход» (v0.50.2, the user: «каждый раз запрашивается разрешение камеры»): by a tap — the phone's own camera, which
+   * never asks (a home-screen web app on the iPhone is asked again a minute after the app's camera was let go, and at
+   * every launch); by a slide — the app's camera (kept a few minutes after it closes — ui/camera.ts — so the next
+   * receipt is not asked about again). Cancelled, or the camera's × — the sheet to type one without a paper.
+   */
+  const run = (k: QuickKey, slide = false) => {
     if (k === 'photo') {
       if (live && liveCameraAvailable()) setCam('plate');
       else camera.current?.click();
     } else if (k === 'out') {
-      // «Расход» is the receipt's camera first (v0.50); its × — the sheet to type one without a paper.
-      if (live && liveCameraAvailable()) setCam('receipt');
+      if (slide && live && liveCameraAvailable()) setCam('receipt');
       else receiptInput.current?.click();
     } else if (k === 'in') setSheet({ kind: k });
     else navigate('/notes');
   };
+  // The phone's own camera closed without a photo: the sheet to type the expense.
+  useEffect(() => {
+    const el = receiptInput.current;
+    if (!el) return;
+    const cancelled = () => setSheet({ kind: 'out' });
+    el.addEventListener('cancel', cancelled);
+    return () => el.removeEventListener('cancel', cancelled);
+  }, []);
   const picked = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
@@ -127,14 +141,14 @@ export function useQuickActions(live = false) {
         </div>
       )}
       <SheetFor value={sheet}>{(s, o) => <EntrySheet opened={o} onClose={() => setSheet(null)} preset={s} />}</SheetFor>
-      <SheetFor value={recorded}>{(id, o) => <RecordedExpense id={id} opened={o} onClose={() => setRecorded(null)} />}</SheetFor>
+      <SheetFor value={recorded}>{(r, o) => <RecordedExpense id={r.id} others={r.others} opened={o} onClose={() => setRecorded(null)} />}</SheetFor>
     </>
   );
   return { run, nodes };
 }
 
 /** The expense just recorded off a receipt, in its own sheet (the book's — the job, the category, the sum, the photo). */
-function RecordedExpense({ id, opened, onClose }: { id: string; opened: boolean; onClose: () => void }) {
+function RecordedExpense({ id, others, opened, onClose }: { id: string; others: JobOption[]; opened: boolean; onClose: () => void }) {
   const lang = useLang();
   const data = useScreenLiveQuery(async () => {
     const [expense, cats] = await Promise.all([db.expenses.get(id), db.expenseCategories.toArray()]);
@@ -150,7 +164,9 @@ function RecordedExpense({ id, opened, onClose }: { id: string; opened: boolean;
   const expense = data?.expense;
   if (!data || !expense) return null;
   const cat = data.cats.find((c) => c.id === expense.categoryId);
-  return <EntryDetails entry={{ ...expenseEntry(expense), cashAfter: 0, cardAfter: 0 }} label={cat ? (lang === 'ru' ? cat.nameRu : cat.nameEn) : ''} onClose={onClose} cats={data.cats} opened={opened} />;
+  // The other likely jobs, a tap each (v0.50.2) — not the one it is on now.
+  const suggest = others.filter((o) => o.orderId !== expense.orderId);
+  return <EntryDetails entry={{ ...expenseEntry(expense), cashAfter: 0, cardAfter: 0 }} label={cat ? (lang === 'ru' ? cat.nameRu : cat.nameEn) : ''} onClose={onClose} cats={data.cats} opened={opened} suggest={suggest} />;
 }
 
 /** A press held this long brings the actions up. */
@@ -220,9 +236,9 @@ export function QuickPlus() {
     }
     return near <= REACH ? best : null;
   };
-  const go = (k: QuickKey) => {
+  const go = (k: QuickKey, slide = false) => {
     close();
-    quick.run(k);
+    quick.run(k, slide);
   };
 
   // Escape closes them; so does the screen changing under them.
@@ -286,7 +302,7 @@ export function QuickPlus() {
           swallow.current = performance.now() + 800;
           const k = at(e.clientX, e.clientY);
           if (k && p.touch) pending.current = k;
-          else if (k) go(k);
+          else if (k) go(k, true);
           else if (!p.moved) setOpen('sticky');
           else close();
           if (!p.touch) press.current = null;
@@ -298,7 +314,7 @@ export function QuickPlus() {
           pending.current = null;
           // No click after a press that brought the actions up — it would land on what they opened.
           if (p?.opened && e.cancelable) e.preventDefault();
-          if (k) go(k);
+          if (k) go(k, true);
         }}
         onPointerCancel={() => {
           const p = press.current;

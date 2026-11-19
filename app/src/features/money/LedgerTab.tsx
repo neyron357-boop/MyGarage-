@@ -171,7 +171,22 @@ function AmountEdit({ fils, onSave, onCancel }: { fils: number; onSave: (fils: n
  * operation (a pair the old «Отменить запись» left in the cash box) and a day closing are only deleted; a debt payment
  * keeps its sum and customer (it was spread over the jobs) — its day and way change. Opened for a value — `SheetFor`.
  */
-export function EntryDetails({ entry, label, onClose, cats, opened = true }: { entry: LedgerEntry; label: string; onClose: () => void; cats?: ExpenseCategory[]; opened?: boolean }) {
+export function EntryDetails({
+  entry,
+  label,
+  onClose,
+  cats,
+  opened = true,
+  suggest,
+}: {
+  entry: LedgerEntry;
+  label: string;
+  onClose: () => void;
+  cats?: ExpenseCategory[];
+  opened?: boolean;
+  /** Other jobs it may be for (v0.50.2: a receipt's likely jobs), a tap each. */
+  suggest?: { orderId: string; vehicleId: string; customerId: string; number: number; car: string }[];
+}) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
@@ -260,6 +275,16 @@ export function EntryDetails({ entry, label, onClose, cats, opened = true }: { e
           </div>
         )}
         {relinkable && <LinkPicker value={{ orderId: entry.orderId, vehicleId: entry.vehicleId, customerId: entry.customerId }} onChange={relink} />}
+        {relinkable && !!suggest?.length && (
+          <div className="chip-row" aria-label={t('ledger.otherJobs')} data-suggest-jobs>
+            {suggest.map((s) => (
+              <button key={s.orderId} type="button" className="chip" onClick={() => relink({ orderId: s.orderId, vehicleId: s.vehicleId, customerId: s.customerId })}>
+                №{s.number}
+                {s.car && <span className="chip-note">{s.car}</span>}
+              </button>
+            ))}
+          </div>
+        )}
         {noteable ? (
           <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} onBlur={() => note !== typed && noteSave.run(() => updateEntry(ref, { note }))} />
         ) : (

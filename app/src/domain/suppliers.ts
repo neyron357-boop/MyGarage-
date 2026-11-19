@@ -80,6 +80,22 @@ export function supplierMatches(s: Parameters<typeof supplierHay>[0], query: str
 /** Typed like a number: digits, with "+", spaces or dashes — not a name. */
 export const looksLikePhone = (q: string) => /^\+?[\d\s\-()]{6,}$/.test(q.trim());
 
+/** A company's own words, not its name («TRADING L.L.C», «TR. LLC», «FZE»). */
+const LEGAL = new Set(['llc', 'fze', 'fzco', 'fzc', 'fz', 'est', 'establishment', 'trading', 'tr', 'trd', 'co', 'company', 'ltd', 'limited', 'general', 'gen', 'br', 'branch']);
+
+/**
+ * A seller's name as one seller (v0.50.2): letters and digits only, the company's own words left out — «AL MAROOF AUTO
+ * SPARE PARTS TRADING L.L.C», «Al Maroof Auto Spare Parts Trading LLC» and «… TR. LLC» are one.
+ */
+export function sellerKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\bl\.l\.c\.?/g, ' llc ')
+    .split(/[^a-z0-9؀-ۿЀ-ӿ]+/)
+    .filter((w) => w && !LEGAL.has(w))
+    .join('');
+}
+
 /** The supplier already in the base that this one is: the same phone, else the same name (letters and digits only). */
 export function alreadyInBase<T extends Pick<Supplier, 'id' | 'name' | 'phone' | 'archivedAt'>>(list: T[], v: { id?: string; name?: string; phone?: string }): T | undefined {
   const others = list.filter((s) => s.id !== v.id && !s.archivedAt);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardName, localPhone, looksLikePhone, phonesInText, alreadyInBase, supplierMatches } from './suppliers';
+import { cardName, localPhone, looksLikePhone, phonesInText, alreadyInBase, sellerKey, supplierMatches } from './suppliers';
 
 describe('adding a supplier (v0.24)', () => {
   it('reads the numbers a card prints, mobiles first, each once', () => {
@@ -49,5 +49,16 @@ describe('adding a supplier (v0.24)', () => {
     // Itself is not a twin of itself.
     expect(alreadyInBase(list, { id: 'a', name: 'Al Quoz Auto Parts', phone: '0501234567' })).toBeUndefined();
     expect(alreadyInBase(list, { name: 'Al' })).toBeUndefined();
+  });
+});
+
+describe('a seller’s name as one seller (v0.50.2)', () => {
+  it('leaves out the company’s own words and the signs', () => {
+    const k = sellerKey('AL MAROOF AUTO SPARE PARTS TRADING L.L.C');
+    expect(k).toBe('almaroofautospareparts');
+    expect(sellerKey('Al Maroof Auto Spare Parts Trading LLC')).toBe(k);
+    expect(sellerKey('AL MAROOF AUTO SPARE PARTS TR. L.L.C.')).toBe(k);
+    expect(sellerKey('Gulf Star FZE')).toBe('gulfstar');
+    expect(sellerKey('Al Quoz Auto Parts')).not.toBe(k);
   });
 });
