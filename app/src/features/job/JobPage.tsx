@@ -98,6 +98,7 @@ import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { useSendVersion } from './sendVersion';
 import { DueChip, DueSheet } from './Due';
 import { JobDayChip, JobDaySheet } from './JobDay';
+import { FirstRows } from '../../ui/firstRows';
 import { invoiceDayFor, jobDay } from '../../domain/jobDay';
 import { DayPill } from '../../ui/DateFields';
 import { DriverLine, DriverSheet } from './Driver';
@@ -1183,7 +1184,8 @@ export function JobPage() {
       <>
         {(lines.length > 0 || refusedLines.length > 0) && (
           <List animate={!picking}>
-            {lines.map(row)}
+            {/* A long job comes in two steps (v0.56): its first lines with the screen, the rest a frame later. */}
+            <FirstRows rows={lines.map(row)} />
             {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
             {refusedLines.map(row)}
             {sentAt && (
