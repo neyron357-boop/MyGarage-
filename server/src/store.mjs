@@ -91,6 +91,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
       at TEXT NOT NULL, PRIMARY KEY (id, variant)
     );
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS ai_cache (k TEXT PRIMARY KEY, kind TEXT NOT NULL, at INTEGER NOT NULL, value TEXT NOT NULL);
   `);
   // v0.41.2: the app's own install number on each device (the same app connected again is the same device).
   if (!db.prepare('PRAGMA table_info(devices)').all().some((c) => c.name === 'install')) db.exec('ALTER TABLE devices ADD COLUMN install TEXT');
@@ -437,7 +438,24 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
-  return { dataDir, push, pull, replace, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, close: () => db.close() };
+  /*
+   * The AI's answers (v0.49, ai.mjs): a VIN decoded, a name put right, a number found — kept here so a restart loses
+   * none and every device gets the same answer for no tokens. A year's worth; the AI decides how long each serves.
+   */
+  const aiCacheGet = (k) => {
+    const row = db.prepare('SELECT at, value FROM ai_cache WHERE k = ?').get(k);
+    if (!row) return undefined;
+    try {
+      return { at: Number(row.at), value: JSON.parse(row.value) };
+    } catch {
+      return undefined;
+    }
+  };
+  const aiCachePut = (k, kind, at, value) => db.prepare('INSERT INTO ai_cache (k, kind, at, value) VALUES (?, ?, ?, ?) ON CONFLICT (k) DO UPDATE SET kind = excluded.kind, at = excluded.at, value = excluded.value').run(k, String(kind), Number(at), JSON.stringify(value));
+  const aiCachePrune = (olderThan) => db.prepare('DELETE FROM ai_cache WHERE at < ?').run(Number(olderThan)).changes;
+  const aiCacheCount = () => Number(db.prepare('SELECT COUNT(*) AS n FROM ai_cache').get().n);
+
+  return { dataDir, push, pull, replace, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, aiCacheGet, aiCachePut, aiCachePrune, aiCacheCount, close: () => db.close() };
 }
 
 export function httpError(status, message) {

@@ -1,5 +1,6 @@
 import { canonicalMake, canonicalModel } from './carCatalog';
 import { lineName } from './items';
+import { numberPlausible } from './partNumbers';
 import type { Vehicle, VehicleType } from './types';
 import { isVin, makeMatches, vinYear } from './vin';
 
@@ -32,9 +33,10 @@ export interface AiName {
 
 /** The server's search for a part's number: each number and the catalogue pages it was seen on (opened there). */
 export interface AiFind {
-  /** `web` — found by Google Search and checked on the pages; `model` — the AI's own knowledge, not checked anywhere. */
-  search: 'web' | 'model';
-  numbers: { number: string; brand?: string; note?: string; seen: string[] }[];
+  /** `web` — found by Google Search and checked on the pages; `model` — the AI's own knowledge, not checked anywhere; `garage` — the garage's own jobs. */
+  search: 'web' | 'model' | 'garage';
+  /** `garage` — on how many of the garage's own lines for this car the number was (v0.49). */
+  numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number }[];
   sources?: { url: string; title?: string }[];
   /** Pictures off the catalogue pages, looked at by the AI: the part's diagram, or a photo of the part (a sample). */
   images?: { type: string; data: string; source: string; number?: string; kind?: 'diagram' | 'photo' }[];
@@ -130,11 +132,13 @@ export const catalogCount = (seen: string[]): number => new Set(seen.map(host).f
 export const siteOf = host;
 
 /**
- * A part number the app may write itself: found on the web and seen on the pages of two different catalogues. One page,
- * or the AI's own knowledge, is a candidate shown on the line — taken by a tap.
+ * A part number the app may write itself: found on the web and seen on the pages of two different catalogues — or on
+ * one and used by the garage itself before on this car (v0.49) — and shaped like the maker's numbers (a Toyota number
+ * is ten characters: a shape the maker's catalogue would not write is a guess). One page, or the AI's own knowledge, is
+ * a candidate shown on the line — taken by a tap.
  */
-export function provenNumber(find: Pick<AiFind, 'search' | 'numbers'>): string | undefined {
+export function provenNumber(find: Pick<AiFind, 'search' | 'numbers'>, make = ''): string | undefined {
   if (find.search !== 'web') return undefined;
-  const sure = find.numbers.filter((n) => catalogCount(n.seen) >= 2);
+  const sure = find.numbers.filter((n) => numberPlausible(make, n.number) !== false && catalogCount(n.seen) + ((n.garage ?? 0) > 0 ? 1 : 0) >= 2);
   return sure.length === 1 ? sure[0].number : undefined;
 }

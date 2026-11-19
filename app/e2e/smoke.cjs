@@ -664,11 +664,12 @@ async function launchBrowser() {
     await dlg.getByLabel('Запчасть').fill('Фильтр салона');
     await dlg.getByLabel('Кол-во').fill('2');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByText('Фильтр салона').first().waitFor();
+    // v0.49: the app's own dictionary names it in English at once (no AI): the line reads CABIN FILTER.
+    await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().waitFor();
     // No price yet: the quote cannot go.
     if (!(await page.getByRole('button', { name: /^Клиенту/ }).isDisabled())) throw new Error('a line without a price must hold the quote');
     if (await page.getByRole('button', { name: /Спросить запчасти/ }).count()) throw new Error('no ask-for-parts button on the job');
-    await page.getByText('Фильтр салона').first().click();
+    await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().click();
     await dlg.getByLabel('Закупка за шт.').fill('20');
     await dlg.getByLabel('Цена за шт.').fill('30');
     await dlg.getByText('Заказано', { exact: true }).click();
@@ -683,7 +684,7 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
     // A part shows its photo itself beside its name (v0.29).
-    await page.locator('.list-row').filter({ hasText: 'Фильтр салона' }).locator('.part-thumb:not([data-empty]) img').waitFor();
+    await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).locator('.part-thumb:not([data-empty]) img').waitFor();
     // The parts by name only, in one tap (for a parts seller).
     await page.getByRole('button', { name: 'Скопировать запчасти' }).click();
     await page.getByText('Запчасти скопированы').first().waitFor();
@@ -714,7 +715,7 @@ async function launchBrowser() {
     // The customer agrees in person: the work starts, the part is marked as here.
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.getByText('В работе').first().waitFor();
-    await page.getByText('Фильтр салона').first().click();
+    await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().click();
     await dlg.getByText('Есть', { exact: true }).click();
     await shot('31b-line-actions');
     await page.locator('.mantine-Modal-close').first().click();
@@ -2096,7 +2097,7 @@ async function launchBrowser() {
       ai.setAiTransport(async (path, body) => {
         window.__aiAsked.push(path);
         // Long enough to see the AI at work: the ring round the VIN chip, the mark on the line.
-        await new Promise((r) => setTimeout(r, path === 'part-find' ? 150 : 1200));
+        await new Promise((r) => setTimeout(r, 1200));
         if (path === 'vin') return { vin: body.vin, make: 'TOYOTA', model: 'Corolla', year: 2009, engine: '1.8L 4-cyl', body: 'sedan', confidence: 0.9 };
         if (path === 'part-name') return { fixed: 'колодки тормозные передние', english: 'FRONT BRAKE PADS', isPart: true, confidence: 0.95 };
         return {
@@ -2132,14 +2133,15 @@ async function launchBrowser() {
         return [v.make, v.model, v.year, v.engine, v.type];
       }, job.vehicleId);
       if (JSON.stringify(car) !== JSON.stringify(['Toyota', 'Corolla', 2009, '1.8L 4-cyl', 'sedan'])) throw new Error('the car from its VIN: ' + JSON.stringify(car));
-      // A part typed with mistakes: saved as typed, then put right by itself — and its English name for the documents.
+      // A part typed with mistakes: saved as typed, then put right by the app's own dictionary (v0.49: no AI asked for a
+      // name it knows) — and its English name for the documents.
       const dlg = page.getByRole('dialog');
       await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
       await dlg.getByLabel('Запчасть').fill('колодки тормазные передние');
       await dlg.getByRole('button', { name: 'Сохранить' }).click();
       await dlg.waitFor({ state: 'detached' });
-      // The AI looking at the line: its mark twinkles after the name.
-      await front('.list-row').filter({ hasText: 'КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ' }).locator('.ai-mark[data-busy]').waitFor();
+      // The name is put right by the dictionary at once; the AI looking up the number: its mark twinkles after the name.
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.ai-mark[data-busy]').waitFor();
       // Its card: the name as it is now, the one typed crossed out under it.
       const nameCard = page.locator('[data-ai-notice="name"]');
       await nameCard.filter({ hasText: 'Название исправлено' }).waitFor({ timeout: 15000 });
@@ -2177,8 +2179,31 @@ async function launchBrowser() {
         const i = (await db.items.where('orderId').equals(id).toArray())[0];
         return { ru: i.titleRu, en: i.titleEn, no: i.partNumber, diagrams: i.diagramIds?.length, samples: i.sampleIds?.length, photos: i.mediaIds?.length ?? 0, asked: window.__aiAsked };
       }, job.id);
-      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.samples !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-name,part-find')
+      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.samples !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-find')
         throw new Error('the line after the AI: ' + JSON.stringify(line));
+      // The same part again on the same car (v0.49): the garage's own memory answers — the web search made a minute ago
+      // serves again, its number and pictures with it; the server is not asked.
+      await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
+      await dlg.getByLabel('Запчасть').fill('Front brake pads');
+      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await dlg.waitFor({ state: 'detached' });
+      // Answered from memory in the background: waited for on the record itself (the first line's card may still be up).
+      await page.waitForFunction(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const lines = await db.items.where('orderId').equals(id).toArray();
+        return lines.length === 2 && lines.every((l) => !!l.aiFind);
+      }, job.id, { timeout: 15000 });
+      const again = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const lines = (await db.items.where('orderId').equals(id).toArray()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        const i = lines[lines.length - 1];
+        return { id: i.id, n: lines.length, no: i.partNumber, search: i.aiFind?.search, garage: i.aiFind?.numbers.find((x) => x.number === '04465-12610')?.garage, diagrams: i.diagramIds?.length, samples: i.sampleIds?.length, asked: window.__aiAsked };
+      }, job.id);
+      if (again.n !== 2 || again.no !== '04465-12610' || again.search !== 'web' || again.garage !== 1 || again.diagrams !== 1 || again.samples !== 1 || again.asked.join() !== 'vin,part-find')
+        throw new Error('the second line from the garage’s memory: ' + JSON.stringify(again));
+      // The job goes on with one line of the kind (the steps after pick parts by their names).
+      await page.evaluate(async (id) => void (await (await import('/src/services/estimate.ts')).removeItem(id)), again.id);
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).nth(1).waitFor({ state: 'detached' });
     } finally {
       await page.evaluate(async () => (await import('/src/services/ai.ts')).setAiTransport(undefined));
     }

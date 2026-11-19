@@ -91,27 +91,34 @@ describe('the AI', () => {
     assert.match(seen[0].body.contents[0].parts[0].text, /for a 2018 Toyota Camry: "колодки тормазные"/);
   });
 
-  it('a part’s number off the web: seen on the pages opened here and backed by Google’s reading; the pictures looked at — the diagram and the photo kept', async () => {
+  it('a part’s number off the web: the search in plain words with low thinking, written down by a light model; the number seen on pages opened here and by Google’s reading; the pictures looked at', async () => {
     const page = (n) => `<html><head><meta property="og:image" content="https://cdn.parts.example/d/${n}.png"></head><body>Toyota Camry front pads ${n}<img src="/x/${n}-photo.jpg" alt="photo"></body></html>`;
     const asked = [];
     const { f, seen } = fake([
       [/generateContent/, (u, init) => {
         const b = JSON.parse(init.body);
-        asked.push({ model: u.split('/models/')[1].split(':')[0], tools: !!b.tools, images: b.contents[0].parts.filter((x) => x.inline_data).length });
+        asked.push({ model: u.split('/models/')[1].split(':')[0], tools: !!b.tools, json: b.generationConfig.responseMimeType === 'application/json', thinking: b.generationConfig.thinkingConfig?.thinkingLevel, images: b.contents[0].parts.filter((x) => x.inline_data).length, text: b.contents[0].parts[0].text });
         // The pictures looked at: the first a diagram, the second a photo of the part, the third — the car (not kept).
         if (b.contents[0].parts.some((x) => x.inline_data)) return answer({ images: [{ index: 1, kind: 'diagram', matches: true }, { index: 2, kind: 'photo', matches: true }, { index: 3, kind: 'other', matches: false }] });
-        assert.ok(b.tools.some((t) => t.google_search));
-        const text = JSON.stringify({ numbers: [{ number: '04465-33471', brand: 'Toyota', pages: ['https://www.amayama.com/en/part/toyota/0446533471'] }, { number: '04465-06090', brand: 'Toyota', pages: [] }], images: [{ url: 'https://cdn.parts.example/car.jpg', kind: 'photo', page: 'https://www.amayama.com/en/part/toyota/0446533471' }] });
-        return json({
-          candidates: [{
-            content: { parts: [{ text }] },
-            groundingMetadata: {
-              groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'partsouq.com' } }, { web: { uri: 'http://127.0.0.1:8788/status.json', title: 'x' } }, { web: { uri: 'https://megazip.example/p/1', title: 'megazip' } }],
-              // Google's own reading backs the words with the first number by partsouq.com.
-              groundingSupports: [{ segment: { text: '"number":"04465-33471"' }, groundingChunkIndices: [0] }],
-            },
-          }],
-        });
+        if (b.tools) {
+          // The search: plain words (a JSON schema would keep the model from searching), Google's reading with it.
+          assert.ok(b.tools.some((t) => t.google_search));
+          return json({
+            candidates: [{
+              content: { parts: [{ text: 'OEM 04465-33471 (Toyota, GCC) — https://www.amayama.com/en/part/toyota/0446533471; North America: 04465-06090. Photo: https://cdn.parts.example/car.jpg' }] },
+              groundingMetadata: {
+                groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'partsouq.com' } }, { web: { uri: 'http://127.0.0.1:8788/status.json', title: 'x' } }, { web: { uri: 'https://megazip.example/p/1', title: 'megazip' } }],
+                // Google's own reading backs the words with the first number by partsouq.com.
+                groundingSupports: [{ segment: { text: 'OEM 04465-33471 (Toyota, GCC)' }, groundingChunkIndices: [0] }],
+                webSearchQueries: ['camry 2018 front pads partsouq', '04465-33471'],
+              },
+            }],
+            usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 600, toolUsePromptTokenCount: 1000 },
+          });
+        }
+        // Written down as JSON by the light model, from the search's words.
+        assert.match(b.contents[0].parts[0].text, /04465-33471/);
+        return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota', pages: ['https://www.amayama.com/en/part/toyota/0446533471'] }, { number: '04465-06090', brand: 'Toyota', pages: [] }], images: [{ url: 'https://cdn.parts.example/car.jpg', kind: 'photo', page: 'https://www.amayama.com/en/part/toyota/0446533471' }] });
       }],
       [/amayama\.com/, () => new Response(page('04465-33471'), { headers: { 'Content-Type': 'text/html' } })],
       [/megazip\.example/, () => new Response(page('0446533471'), { headers: { 'Content-Type': 'text/html' } })],
@@ -120,14 +127,22 @@ describe('the AI', () => {
       [/cdn\.parts\.example|\/x\//, () => png()],
     ]);
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
-    const r = await ai.partFind({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018, vin: 'JTNB11HK6J3012345' });
+    const u0 = ai.status().usage.today;
+    const r = await ai.partFind({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018, vin: 'JTNB11HK6J3012345', hints: ['04465-33471'] });
     assert.equal(r.search, 'web');
     // Seen: the two pages opened here (amayama, megazip) and partsouq.com by Google's reading — three sites.
     assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 3], ['04465-06090', 0]]);
     assert.ok(r.numbers[0].seen.includes('https://partsouq.com/'));
-    // The number is looked up by the strongest model first, with Google Search; the pictures by a light one.
+    // 1. The strongest model, Google Search, plain words, low thinking; where the VIN says the car was built and the
+    //    garage's own number in the question.
     assert.equal(asked[0].model, 'gemini-3.8-flash');
-    assert.ok(asked[0].tools);
+    assert.ok(asked[0].tools && !asked[0].json);
+    assert.equal(asked[0].thinking, 'low');
+    assert.match(asked[0].text, /built in Japan/);
+    assert.match(asked[0].text, /garage used 04465-33471/);
+    // 2. A light model writes it down as JSON, no tools.
+    assert.equal(asked[1].model, 'gemini-3.5-flash-lite');
+    assert.ok(!asked[1].tools && asked[1].json);
     const look = asked.find((x) => x.images);
     assert.equal(look.model, 'gemini-3.5-flash-lite');
     assert.ok(look.images >= 3);
@@ -136,6 +151,30 @@ describe('the AI', () => {
     // This computer's own page is never opened, whatever a search result says.
     assert.ok(!seen.some((x) => x.url.startsWith('http://127.0.0.1')));
     assert.equal(ai.status().search, 'on');
+    // What it spent: three questions, two Google searches, the tokens in (the search results count) and out.
+    const u1 = ai.status().usage.today;
+    assert.deepEqual([u1.questions - u0.questions, u1.searches - u0.searches, u1.in - u0.in, u1.out - u0.out, u1.think - u0.think], [3, 2, 1200, 600, 0]);
+    assert.deepEqual([u1.byKind.find - (u0.byKind.find ?? 0), u1.byKind.extract - (u0.byKind.extract ?? 0), u1.byKind.look - (u0.byKind.look ?? 0)], [1, 1, 1]);
+  });
+
+  it('a model that answered without searching is a guess: asked once more with medium thinking, then «not checked»', async () => {
+    const asked = [];
+    const { f } = fake([
+      [/generateContent/, (_u, init) => {
+        const b = JSON.parse(init.body);
+        asked.push(b.generationConfig.thinkingConfig?.thinkingLevel + (b.tools ? '+search' : ''));
+        // Tools given, none used: no grounding at all — the number came from memory.
+        if (b.tools) return json({ candidates: [{ content: { parts: [{ text: 'OEM 04465-33471 — https://www.amayama.com/en/part/toyota/0446533471' }] } }] });
+        return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota', pages: ['https://www.amayama.com/en/part/toyota/0446533471'] }] });
+      }],
+      [/amayama\.com/, () => new Response('<html>Camry pads 04465-33471</html>', { headers: { 'Content-Type': 'text/html' } })],
+    ]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
+    const r = await ai.partFind({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018 });
+    assert.deepEqual(asked.slice(0, 2), ['low+search', 'medium+search']);
+    assert.equal(r.search, 'model');
+    // The page it named was opened and does have the number: that much is seen — nothing more.
+    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 1]]);
   });
 
   it('without Google Search on the key (a paid plan’s): what the model knows — not checked anywhere', async () => {
@@ -150,17 +189,20 @@ describe('the AI', () => {
     assert.equal(ai.status().search, 'off');
   });
 
-  it('a guess without the web is kept half an hour, a find on the web a week', async () => {
+  it('a guess without the web is kept half an hour, a find on the web a month', async () => {
     let t = 0;
     let web = false;
     let calls = 0;
+    const grounded = (text) => json({ candidates: [{ content: { parts: [{ text }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://megazip.example/p/1', title: 'megazip.net' } }] } }] });
     const { f } = fake([
       [/generateContent/, (_u, init) => {
         calls++;
         const b = JSON.parse(init.body);
         if (b.tools && !web) return json({ error: { message: 'You exceeded your current quota' } }, 429);
+        if (b.tools) return grounded('OEM 04465-33471 — https://megazip.example/p/1');
         return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota' }] });
       }],
+      [/megazip\.example/, () => new Response('<html>pads 04465-33471</html>', { headers: { 'Content-Type': 'text/html' } })],
     ]);
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, now: () => t });
     const q = { part: 'BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018 };
@@ -168,15 +210,37 @@ describe('the AI', () => {
     t = 10 * 60_000;
     assert.equal((await ai.partFind(q)).search, 'model');
     const before = calls;
-    // The paid plan on: after half an hour the same part goes to the web — and stays a week.
+    // The paid plan on: after half an hour the same part goes to the web — and stays a month.
     web = true;
     t = 31 * 60_000;
     assert.equal((await ai.partFind(q)).search, 'web');
     assert.ok(calls > before);
     const now = calls;
-    t = 6 * 24 * 60 * 60_000;
+    t = 29 * 24 * 60 * 60_000;
     assert.equal((await ai.partFind(q)).search, 'web');
     assert.equal(calls, now);
+  });
+
+  it('a VIN the official decoder knows whole is not asked of Gemini; the answers are kept in the store for every device and restart', async () => {
+    let gemini = 0;
+    const rows = new Map();
+    const store = { aiCacheGet: (k) => rows.get(k), aiCachePut: (k, kind, at, value) => rows.set(k, { at, value, kind }) };
+    const { f } = fake([
+      [/vpic\.nhtsa/, () => json({ Results: [{ Make: 'TOYOTA', Model: 'Camry', ModelYear: '2018', DisplacementL: '2.5', EngineCylinders: '4', BodyClass: 'Sedan/Saloon', PlantCountry: 'UNITED STATES (USA)' }] })],
+      [/generateContent/, () => (gemini++, answer({ fixed: 'oil filter', english: 'OIL FILTER', isPart: true, confidence: 0.9 }))],
+    ]);
+    const one = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, store });
+    const v = await one.vin('4T1B11HK5JU123456');
+    assert.deepEqual([v.by, v.make, v.model, v.year, v.engine, v.body, v.built], ['nhtsa', 'Toyota', 'Camry', 2018, '2.5L 4-cyl', 'sedan', 'USA']);
+    assert.equal(gemini, 0);
+    await one.partName({ name: 'oil filtre' });
+    assert.equal(gemini, 1);
+    assert.equal(rows.size, 2);
+    // Another start (another server, a restart): the same questions, the store's answers, no tokens.
+    const two = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, store });
+    assert.equal((await two.vin('4T1B11HK5JU123456')).by, 'nhtsa');
+    assert.equal((await two.partName({ name: 'oil filtre' })).english, 'OIL FILTER');
+    assert.equal(gemini, 1);
   });
 
   it('a device may ask 40 times a minute', () => {

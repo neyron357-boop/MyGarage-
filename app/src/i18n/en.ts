@@ -1996,6 +1996,13 @@ export const en: typeof ru = {
     seenIn_few: 'In {{count}} catalogues',
     seenIn_many: 'In {{count}} catalogues',
     seenIn_other: 'In {{count}} catalogues',
+    // v0.49: the garage's own jobs answer before the AI.
+    ownJobs: 'Own jobs',
+    numberGarage: 'Part number from own jobs',
+    usedIn_one: 'In {{count}} job',
+    usedIn_few: 'In {{count}} jobs',
+    usedIn_many: 'In {{count}} jobs',
+    usedIn_other: 'In {{count}} jobs',
     status: 'AI',
     off: 'Off',
     paid: 'Catalogues — paid plan',

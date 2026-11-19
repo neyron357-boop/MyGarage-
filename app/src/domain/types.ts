@@ -608,7 +608,16 @@ export interface OrderItem {
   /** The garage's AI looked at the part's name as typed (v0.48): what it was, so it is not asked again; «Отменить» puts it back. */
   aiName?: { from: string; to?: string; at: string };
   /** The part's numbers the AI found (v0.48, domain/ai.ts `AiFind`): candidates on the line, a proven one written itself. */
-  aiFind?: { at: string; search: 'web' | 'model'; /** The name it was looked up by (a new name — looked up again). */ part?: string; numbers: { number: string; brand?: string; note?: string; seen: string[] }[]; filled?: string };
+  aiFind?: {
+    at: string;
+    /** `web` — found by Google Search; `model` — the AI's own guess; `garage` — the garage's own jobs (v0.49, no AI). */
+    search: 'web' | 'model' | 'garage';
+    /** The name it was looked up by (a new name — looked up again). */
+    part?: string;
+    /** `garage` — on how many of the garage's own lines for this car the number was (v0.49). */
+    numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number }[];
+    filled?: string;
+  };
   /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */
   diagramIds?: string[];
   /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */

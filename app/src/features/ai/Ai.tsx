@@ -1,5 +1,5 @@
 import { ActionIcon, Text } from '@mantine/core';
-import { IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
+import { IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
 import { useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
@@ -86,7 +86,7 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
       {find || busy ? (
         <div className="ai-head">
           <AiMark busy={busy} />
-          <span className="ai-text">{t('ai.catalogs')}</span>
+          <span className="ai-text">{find?.search === 'garage' ? t('ai.ownJobs') : t('ai.catalogs')}</span>
           {on && !busy && (
             <ActionIcon variant="subtle" color="gray" radius="xl" size={32} aria-label={t('ai.again')} onClick={again}>
               <IconRefresh size={18} stroke={1.8} />
@@ -111,18 +111,27 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
         </Text>
       )}
       {find?.numbers.map((n) => {
-        const count = find.search === 'web' ? catalogCount(n.seen) : 0;
-        const unsure = count === 0;
+        const count = find.search !== 'model' ? catalogCount(n.seen) : 0;
+        const garage = n.garage ?? 0;
+        // Not seen in a catalogue nor used by the garage: a guess — orange.
+        const unsure = count === 0 && garage === 0;
         const taken = !!chosen.trim() && plain(chosen) === plain(n.number);
         return (
-          <div key={n.number} className="ai-num" data-unsure={unsure || undefined}>
+          <div key={n.number} className="ai-num" data-unsure={unsure || undefined} data-garage={garage || undefined}>
             <button type="button" className="ai-pick" aria-pressed={taken} onClick={() => onPick(n.number)}>
               {taken ? <IconCircleCheckFilled size={22} color="var(--mantine-color-cobalt-6)" aria-hidden /> : <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />}
               <span className="ai-num-main">
                 <span className="ai-num-no">{n.number}</span>
-                {(n.brand || n.note) && <span className="ai-num-sub">{[n.brand, n.note].filter(Boolean).join(' · ')}</span>}
+                {(n.brand || n.note || garage > 0) && (
+                  <span className="ai-num-sub">{[garage > 0 ? t('ai.usedIn', { count: garage }) : '', n.brand, n.note].filter(Boolean).join(' · ')}</span>
+                )}
               </span>
-              {unsure ? (
+              {garage > 0 && count === 0 ? (
+                <span className="ai-seen" title={t('ai.usedIn', { count: garage })} aria-label={t('ai.usedIn', { count: garage })}>
+                  <IconHistory size={16} stroke={2.2} aria-hidden />
+                  {garage}
+                </span>
+              ) : unsure ? (
                 <span className="ai-seen" data-unsure title={t('ai.unsure')} aria-label={t('ai.unsure')}>
                   <IconHelpCircleFilled size={17} aria-hidden />
                 </span>

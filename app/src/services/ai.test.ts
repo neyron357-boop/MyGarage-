@@ -4,6 +4,7 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { aiFindPart, aiFixPartName, aiReadVin, onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { updateVehicle } from './customers';
 import { addItem, updateItem } from './estimate';
+import { addMedia } from './media';
 import { checkIn } from './orders';
 import { ensureSeed } from './seed';
 
@@ -74,6 +75,15 @@ describe('the AI reads a VIN put in the card', () => {
     expect([back.make, back.model, back.year, back.engine, back.type]).toEqual(['Toyota', '', 2010, undefined, undefined]);
   });
 
+  it('a card with everything already is not asked about', async () => {
+    const o = await car('Toyota', 'Corolla');
+    await updateVehicle(o.vehicleId, { year: 2009, engine: '1.8L 4-cyl', type: 'sedan' });
+    await updateVehicle(o.vehicleId, { vin: VIN });
+    await until(async () => !!(await db.vehicles.get(o.vehicleId))?.vinAi);
+    expect(asked).toHaveLength(0);
+    expect((await db.vehicles.get(o.vehicleId))!.vinAi).toMatchObject({ vin: VIN, filled: [] });
+  });
+
   it('without the garage’s server (or its key, or a network): nothing happens, quietly', async () => {
     const o = await car();
     setAiTransport(async () => {
@@ -87,11 +97,11 @@ describe('the AI reads a VIN put in the card', () => {
 });
 
 describe('the AI looks at a part', () => {
-  it('its name: the typing mistakes put right and its English name; «Отменить» brings the name as typed', async () => {
+  it('its name by the dictionary, no AI: the typing mistakes put right and its English name; «Отменить» brings the name as typed', async () => {
     const o = await car('Toyota', 'Corolla');
     const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'колодки тормазные передние', qty: 1, unitPriceFils: 0 });
     expect(await aiFixPartName(it1.id)).toBe(true);
-    expect(asked[0]).toEqual({ path: 'part-name', body: { name: 'КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ', make: 'Toyota', model: 'Corolla', year: '' } });
+    expect(asked).toHaveLength(0);
     let i = (await db.items.get(it1.id))!;
     expect([i.titleRu, i.titleEn]).toEqual(['КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ', 'FRONT BRAKE PADS']);
     // Not asked again about the name it gave.
@@ -101,7 +111,77 @@ describe('the AI looks at a part', () => {
     expect([i.titleRu, i.titleEn]).toEqual(['КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ', undefined]);
     // …nor about the name brought back.
     expect(await aiFixPartName(it1.id)).toBe(false);
-    expect(asked.filter((a) => a.path === 'part-name')).toHaveLength(1);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('a name the dictionary does not know goes to the AI; a line typed the same later takes that answer without asking', async () => {
+    const o = await car('Toyota', 'Corolla');
+    answers['part-name'] = { fixed: 'флюгер карбюратора', english: 'CARBURETTOR VANE', isPart: true, confidence: 0.9 };
+    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'флюгер карбюратора', qty: 1, unitPriceFils: 0 });
+    expect(await aiFixPartName(it1.id)).toBe(true);
+    expect(asked).toEqual([{ path: 'part-name', body: { name: 'ФЛЮГЕР КАРБЮРАТОРА', make: 'Toyota', model: 'Corolla', year: '' } }]);
+    expect((await db.items.get(it1.id))!.titleEn).toBe('CARBURETTOR VANE');
+    const it2 = await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'флюгер карбюратора', qty: 1, unitPriceFils: 0 });
+    expect(await aiFixPartName(it2.id)).toBe(true);
+    expect((await db.items.get(it2.id))!.titleEn).toBe('CARBURETTOR VANE');
+    expect(asked).toHaveLength(1);
+  });
+
+  it('its number from the garage’s own jobs, no AI: fitted before on this car — written at once, with that line’s pictures', async () => {
+    const first = await car('Toyota', 'Corolla');
+    await updateVehicle(first.vehicleId, { year: 2018, engine: '1.8L' });
+    const done = await addItem(first.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0, partNumber: '90915-YZZE1' });
+    const pic = await addMedia({ ownerType: 'item', ownerId: done.id, slot: 'diagram', file: new Blob([new Uint8Array(9000)], { type: 'image/png' }), name: 'https://www.amayama.com/p/1', compress: false });
+    await db.items.update(done.id, { procurementStatus: 'received', diagramIds: [pic.id] });
+    // The same model two years on, the engine the same: the same part.
+    const next = await car('Toyota', 'Corolla');
+    await updateVehicle(next.vehicleId, { year: 2020, engine: '1.8L' });
+    const it1 = await addItem(next.id, { kind: 'part', block: 'A', titleRu: 'масляный фильтр', qty: 1, unitPriceFils: 0 });
+    await aiFixPartName(it1.id);
+    await aiFindPart(it1.id);
+    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
+    const i = (await db.items.get(it1.id))!;
+    expect(i.partNumber).toBe('90915-YZZE1');
+    expect(i.aiFind).toMatchObject({ search: 'garage', filled: '90915-YZZE1' });
+    expect(i.aiFind!.numbers[0]).toMatchObject({ number: '90915-YZZE1', garage: 1 });
+    expect(i.diagramIds).toHaveLength(1);
+    expect(i.diagramIds![0]).not.toBe(pic.id);
+    expect(notices.find((n) => n.kind === 'number')).toMatchObject({ number: '90915-YZZE1', garage: 1, catalogs: 0 });
+    // Another car: not the same part — the AI is asked, with the garage's number as a hint only when the car is the same.
+    const other = await car('Nissan', 'Patrol');
+    const it2 = await addItem(other.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
+    await aiFindPart(it2.id);
+    const q = asked.find((a) => a.path === 'part-find')!;
+    expect(q.body).toMatchObject({ part: 'OIL FILTER', make: 'Nissan', hints: [] });
+  });
+
+  it('a number used before but not fitted is a hint to the AI and a candidate on the line; a web search made lately for the same part serves again', async () => {
+    const first = await car('Toyota', 'Camry');
+    await updateVehicle(first.vehicleId, { year: 2018, engine: '2.5L', vin: VIN });
+    asked = [];
+    const used = await addItem(first.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-33480' });
+    expect(used.partNumber).toBe('04465-33480');
+    const second = await car('Toyota', 'Camry');
+    await updateVehicle(second.vehicleId, { year: 2019, engine: '2.5L' });
+    const it1 = await addItem(second.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    await aiFindPart(it1.id);
+    const q = asked.find((a) => a.path === 'part-find')!;
+    expect(q.body).toMatchObject({ hints: ['04465-33480'], built: '' });
+    // The garage's number came back from the web too (04465-12610 in the answer is another): seen once + used before = proven.
+    const i = (await db.items.get(it1.id))!;
+    expect(i.aiFind!.numbers.map((n) => [n.number, n.garage ?? 0])).toEqual([['04465-12610', 0], ['04465-02220', 0], ['04465-33480', 1]]);
+    expect(i.partNumber).toBe('04465-12610');
+    // A third car of the kind within the month: the web answer again — the AI is not asked.
+    const third = await car('Toyota', 'Camry');
+    await updateVehicle(third.vehicleId, { year: 2018, engine: '2.5L' });
+    const it2 = await addItem(third.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    await aiFindPart(it2.id);
+    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(1);
+    const j = (await db.items.get(it2.id))!;
+    expect(j.aiFind?.search).toBe('web');
+    expect(j.partNumber).toBe('04465-12610');
+    expect(j.diagramIds).toHaveLength(1);
+    expect(j.sampleIds).toHaveLength(1);
   });
 
   it('a line sent to the customer keeps its words', async () => {
@@ -118,7 +198,7 @@ describe('the AI looks at a part', () => {
     asked = [];
     const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
     await aiFindPart(it1.id);
-    expect(asked.find((a) => a.path === 'part-find')?.body).toMatchObject({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Corolla', year: 2009, vin: VIN });
+    expect(asked.find((a) => a.path === 'part-find')?.body).toMatchObject({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Corolla', year: 2009, vin: VIN, built: 'Japan', hints: [] });
     const i = (await db.items.get(it1.id))!;
     expect(i.partNumber).toBe('04465-12610');
     expect(i.aiFind).toMatchObject({ search: 'web', part: 'FRONT BRAKE PADS', filled: '04465-12610' });

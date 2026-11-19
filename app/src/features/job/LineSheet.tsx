@@ -214,10 +214,12 @@ export function LineSheet({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, lang, incl, service]);
-  // A number the AI proved (two catalogues) while the sheet is open, into an empty field: the save keeps it.
+  // A number the AI proved (two catalogues) while the sheet is open, into an empty field: the save keeps it. Only this
+  // line's own record (v0.49: a new line opened right after another one must not inherit that line's number from a
+  // live read still on its way out).
   useEffect(() => {
-    if (opened && live?.partNumber && live.aiFind?.filled === live.partNumber) setPartNumber((n) => n || live.partNumber!);
-  }, [opened, live?.partNumber, live?.aiFind?.filled]);
+    if (opened && item && live?.id === item.id && live.partNumber && live.aiFind?.filled === live.partNumber) setPartNumber((n) => n || live.partNumber!);
+  }, [opened, item, live?.id, live?.partNumber, live?.aiFind?.filled]);
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
   /** A suggestion's price as it is typed: with VAT if it was typed with VAT last time. */
   const suggested = (s: Suggestion) => {

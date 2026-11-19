@@ -210,6 +210,41 @@ function makersOf(vin: string): string[] | undefined {
 /** The maker a VIN's first characters belong to, when it is one of those known. */
 export const vinMaker = (vin: string): string | undefined => makersOf(vin)?.[0];
 
+/**
+ * Where the VIN says the car was built — its first character is the region, the second narrows it (ISO 3780) — for the
+ * parts catalogues (v0.49): a Camry built in Japan for the Gulf and one built in the USA take different numbers.
+ */
+export function vinBuilt(vin: string): string | undefined {
+  const v = vin.toUpperCase();
+  if (v.length < 3) return undefined;
+  const a = v[0];
+  const ab = v.slice(0, 2);
+  const abc = v.slice(0, 3);
+  if ('145'.includes(a)) return 'USA';
+  if (a === '2') return 'Canada';
+  if (a === '3') return 'Mexico';
+  if (a === '6') return 'Australia';
+  if (a === '7') return 'New Zealand';
+  if (a === '8') return 'Argentina';
+  if (a === '9') return 'Brazil';
+  if (a === 'J') return 'Japan';
+  if (a === 'K') return 'Korea';
+  if (a === 'L') return 'China';
+  if (a === 'M') return 'ABCDE'.includes(v[1]) ? 'India' : 'FGHJK'.includes(v[1]) ? 'Indonesia' : 'LMNPR'.includes(v[1]) ? 'Thailand' : 'Asia';
+  if (a === 'N') return 'LMNPR'.includes(v[1]) ? 'Turkey' : 'Iran';
+  if (a === 'P') return 'LMNPR'.includes(v[1]) ? 'Malaysia' : 'Philippines';
+  if (a === 'R') return 'ABCDE'.includes(v[1]) ? 'UAE' : 'LMNPR'.includes(v[1]) ? 'Taiwan' : 'Asia';
+  if (a === 'S') return 'ABCDEFGHJKLM'.includes(v[1]) ? 'UK' : 'NPRST'.includes(v[1]) ? 'Germany' : 'Poland';
+  if (a === 'T') return 'ABCDEFGH'.includes(v[1]) ? 'Switzerland' : 'JKLMNP'.includes(v[1]) ? 'Czech Republic' : 'Hungary';
+  if (a === 'U') return 'Europe';
+  if (a === 'V') return 'ABCDE'.includes(v[1]) ? 'Austria' : 'FGHJKLMNPR'.includes(v[1]) ? 'France' : 'Spain';
+  if (a === 'W') return 'Germany';
+  if (a === 'X') return 'Russia';
+  if (a === 'Y') return 'ABCDE'.includes(v[1]) ? 'Belgium' : 'FGHJK'.includes(v[1]) ? 'Finland' : 'Sweden';
+  if (a === 'Z') return 'Italy';
+  return ab === 'AA' || abc === 'AHT' ? 'South Africa' : undefined;
+}
+
 /** Whether the VIN is one of the car's maker's: yes, no — or not known (the code or the car's make unknown). */
 export function makeMatches(vin: string, make?: string): boolean | undefined {
   const makes = makersOf(vin);

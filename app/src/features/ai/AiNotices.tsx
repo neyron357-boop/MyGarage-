@@ -1,5 +1,5 @@
 import { notifications } from '@mantine/notifications';
-import { IconCircleCheckFilled } from '@tabler/icons-react';
+import { IconCircleCheckFilled, IconHistory } from '@tabler/icons-react';
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { onAiNotice, type AiNotice } from '../../services/ai';
@@ -40,7 +40,8 @@ export function AiNotices() {
             </>
           );
         } else {
-          title = t('ai.numberTitle');
+          // From the garage's own jobs (v0.49) — said so: no catalogue was asked.
+          title = n.catalogs === 0 && n.garage > 0 ? t('ai.numberGarage') : t('ai.numberTitle');
           body = (
             <span className="ai-toast-main" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <span className="ai-num-no">{n.number}</span>
@@ -48,6 +49,12 @@ export function AiNotices() {
                 <span className="ai-seen" aria-label={t('ai.seenIn', { count: n.catalogs })}>
                   <IconCircleCheckFilled size={15} aria-hidden />
                   {n.catalogs}
+                </span>
+              )}
+              {n.garage > 0 && (
+                <span className="ai-seen" aria-label={t('ai.usedIn', { count: n.garage })}>
+                  <IconHistory size={15} stroke={2.2} aria-hidden />
+                  {n.garage}
                 </span>
               )}
             </span>

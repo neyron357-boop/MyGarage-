@@ -38,8 +38,15 @@ const events = createEvents();
 const cards = createCards({ store, dataDir: config.dataDir, log });
 // The address, sealed, where the devices find it after it changes (a reboot gives the tunnel a new one).
 const relay = createRelay({ store, base: config.relayUrl, log });
-// The garage's AI (v0.48): Gemini with the key kept on this computer (Служебное/ai.json).
-const ai = createAi({ dataDir: config.dataDir, log });
+// The garage's AI (v0.48): Gemini with the key kept on this computer (Служебное/ai.json); its answers kept in the
+// store (v0.49) — a year's worth.
+const ai = createAi({ dataDir: config.dataDir, log, store });
+try {
+  const gone = store.aiCachePrune(Date.now() - 366 * 24 * 60 * 60_000);
+  if (gone) log(`ai: ${gone} old answers forgotten`);
+} catch (e) {
+  log(`ai cache: ${e.message}`);
+}
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */

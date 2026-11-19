@@ -1997,6 +1997,13 @@ export const ru = {
     seenIn_few: 'Есть в {{count}} каталогах',
     seenIn_many: 'Есть в {{count}} каталогах',
     seenIn_other: 'Есть в {{count}} каталогах',
+    // v0.49: the garage's own jobs answer before the AI.
+    ownJobs: 'Свои заказы',
+    numberGarage: 'Номер из своих заказов',
+    usedIn_one: 'В {{count}} заказе',
+    usedIn_few: 'В {{count}} заказах',
+    usedIn_many: 'В {{count}} заказах',
+    usedIn_other: 'В {{count}} заказах',
     status: 'ИИ',
     off: 'Выключен',
     paid: 'Каталоги — платный план',

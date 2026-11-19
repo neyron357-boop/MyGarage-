@@ -95,9 +95,15 @@ let aiTyping = false;
 function aiHtml(a) {
   if (!a) return '<span class="dim">—</span>';
   const search = a.search === 'on' ? '<span class="ok">● работает</span>' : a.search === 'off' ? '<span class="bad">нужен платный план Gemini</span>' : '<span class="dim">ещё не проверен</span>';
+  // What the key paid for (v0.49): questions, Google searches (5 000 a month free on the paid plan, then $14 a 1 000),
+  // tokens in / out / thinking.
+  const k = (n) => (n >= 1000 ? (n / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' тыс.' : String(n));
+  const spent = (u) => u ? esc(u.questions + ' вопр. · ' + u.searches + ' поиск. · токены: ' + k(u.in) + ' вход, ' + k(u.out) + ' ответ, ' + k(u.think) + ' размышл.') : '—';
   return '<div class="row"><span>Ключ</span>' + (a.on ? '<span class="ok">● ' + esc(a.key) + '</span>' : '<span class="dim">не задан</span>') + '</div>' +
     (a.on ? '<div class="row"><span>Поиск номеров деталей в интернете</span>' + search + '</div>' +
       '<div class="row"><span>Последний ответ</span><span>' + (a.lastOk ? when(a.lastOk) : '—') + '</span></div>' +
+      '<div class="row"><span>Сегодня</span><span class="dim">' + spent(a.usage && a.usage.today) + '</span></div>' +
+      '<div class="row"><span>Этот месяц</span><span class="dim">' + spent(a.usage && a.usage.month) + (a.usage && a.usage.month ? ' · поисков из 5 000 бесплатных' : '') + '</span></div>' +
       (a.lastError ? '<div class="row"><span>Ошибка</span><span class="bad mono">' + esc(a.lastError) + '</span></div>' : '') : '') +
     '<p class="dim" style="margin:8px 0 12px">VIN — марка, модель, год и двигатель сами; название запчасти — без ошибок; номер детали и её схема. Ключ хранится только на этом компьютере.</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="aikey" type="password" autocomplete="off" placeholder="Ключ Gemini API" onfocus="aiTyping=true" style="flex:1;min-width:220px;font:15px system-ui;padding:9px 12px;border-radius:12px;border:0.5px solid rgba(128,128,128,.4);background:transparent;color:inherit">' +
