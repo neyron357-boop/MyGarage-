@@ -542,7 +542,7 @@ export interface EntryPreset {
   debt?: DebtPick;
   /** A receipt photographed before the sheet (v0.50): attached, and what was read off it filled in. */
   receipt?: File;
-  expense?: { amountFils?: number; vatFils?: number; vendor?: string; note?: string };
+  expense?: { amountFils?: number; vatFils?: number; vendor?: string; note?: string; date?: string };
 }
 
 /**
@@ -596,7 +596,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     setMethod((m) => (m === 'credit' ? 'cash' : m));
     setAmount(preset?.expense?.amountFils);
     setNote(preset?.expense?.note ?? '');
-    setDate(dubaiDate());
+    setDate(preset?.expense?.date ?? dubaiDate());
     setVendor(preset?.expense?.vendor ?? '');
     setVat(preset?.expense?.vatFils);
     setReceipt(preset?.receipt);

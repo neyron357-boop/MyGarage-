@@ -80,8 +80,8 @@ export function useQuickActions(live = false) {
           setRecorded({ id: r.expense.id, others: r.others });
         } else {
           // Fuel, food, another kind of paper: read, but which category is the manager's call — the sheet, filled in, no word.
-          if (r.failed !== 'kind') notifications.show({ color: 'orange', message: t('ai.receiptFailed') });
-          setSheet({ kind: 'out', receipt: file, expense: r.fields ? { amountFils: r.fields.amountFils || undefined, vatFils: r.fields.vatFils || undefined, vendor: r.fields.vendor, note: r.fields.note } : undefined });
+          if (r.failed !== 'kind') notifications.show({ color: 'orange', message: t(r.failed === 'unsure' ? 'ai.receiptCheck' : 'ai.receiptFailed') });
+          setSheet({ kind: 'out', receipt: file, expense: r.fields ? { amountFils: r.fields.amountFils || undefined, vatFils: r.fields.vatFils || undefined, vendor: r.fields.vendor, note: r.fields.note, date: r.fields.date } : undefined });
         }
       })
       .finally(() => setScanning(false));

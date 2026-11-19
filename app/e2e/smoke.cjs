@@ -2602,7 +2602,8 @@ async function launchBrowser() {
     if (await page.locator('.cam').count()) throw new Error('a tap opened the app’s camera');
     await chooser.setFiles(photo);
     await page.locator('[data-ai-scanning]').waitFor({ timeout: 8000 });
-    await page.locator('[data-ai-notice="expense"]').waitFor({ timeout: 30000 });
+    // v0.51: read on the phone first (twice: grey, inked) — this paper has no date, so the AI (played here) reads it.
+    await page.locator('[data-ai-notice="expense"]').waitFor({ timeout: 90000 });
     const dlg = page.getByRole('dialog');
     await dlg.getByText(/GULF STAR AUTO PARTS/).first().waitFor();
     await page.locator('[data-ai-scanning]').waitFor({ state: 'detached' });
@@ -2655,7 +2656,8 @@ async function launchBrowser() {
     await out();
     await shot('40d-receipt-camera');
     await page.getByRole('button', { name: 'Снять фото' }).click();
-    await page.getByText('Чек не прочитан — впишите сумму').waitFor({ timeout: 15000 });
+    // What the phone read (no date on this paper — not proven): the sheet, filled in, to be looked at.
+    await page.getByText(/Чек не прочитан — впишите сумму|Проверьте сумму и дату/).first().waitFor({ timeout: 90000 });
     await page.getByRole('dialog').getByRole('button', { name: /^Записать расход/ }).waitFor();
     await page.getByRole('dialog').getByText('Чек прикреплён ✓').waitFor();
     await shot('40f-receipt-unread');

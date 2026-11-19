@@ -2008,6 +2008,7 @@ export const en: typeof ru = {
     receiptNoJob: 'No job',
     receiptClose: 'Check the job',
     receiptFailed: 'Receipt not read — type the amount',
+    receiptCheck: 'Check the amount and the date',
     receiptSupplierNew: 'new supplier',
     receiptItems_one: '{{count}} line',
     receiptItems_few: '{{count}} lines',

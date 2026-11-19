@@ -61,6 +61,7 @@ export interface ReceiptExpense {
   vendorPhone?: string;
   vendorTrn?: string;
   vendorAddress?: string;
+  vendorEmail?: string;
   /** Parts and a contractor's work are recorded by themselves; anything else waits for the manager's category. */
   kind: ReceiptKind;
   date: string;
@@ -95,13 +96,23 @@ function ymd(y: number, m: number, d: number): string | undefined {
 }
 const daysBefore = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
 
+/** A month's name as OCR may read it: «Oct», «Qct», «0ct», «N0v» — the month within a letter of it, if only one is. */
+function monthOf(word: string): number {
+  const w = word.slice(0, 3).replace(/0/g, 'o').replace(/1/g, 'l');
+  const exact = MONTHS.indexOf(w);
+  if (exact >= 0) return exact + 1;
+  if (w.length < 3) return 0;
+  const close = MONTHS.map((m, i) => [i, [...m].filter((c, k) => c !== w[k]).length] as const).filter(([, d]) => d === 1);
+  return close.length === 1 ? close[0][0] + 1 : 0;
+}
+
 /** The date as printed: "18-Nov-2026", "Nov 18, 2026", "2026-11-18", "18/11/26" (day first, as UAE papers write it). */
 export function printedDate(text: string): string | undefined {
   const t = text.toLowerCase();
-  let m = t.match(/(\d{1,2})(?:st|nd|rd|th)?[\s\-/.,]*([a-z]{3,9})[\s\-/.,']*(\d{2,4})/);
-  if (m && MONTHS.includes(m[2].slice(0, 3))) return ymd(Number(m[3]), MONTHS.indexOf(m[2].slice(0, 3)) + 1, Number(m[1]));
-  m = t.match(/([a-z]{3,9})[\s\-/.]*(\d{1,2})(?:st|nd|rd|th)?[\s,\-/.]+(\d{2,4})/);
-  if (m && MONTHS.includes(m[1].slice(0, 3))) return ymd(Number(m[3]), MONTHS.indexOf(m[1].slice(0, 3)) + 1, Number(m[2]));
+  let m = t.match(/(\d{1,2})(?:st|nd|rd|th)?[\s\-/.,]*([a-z0-9]{3,9})[\s\-/.,']*(\d{2,4})/);
+  if (m && /[a-z]/.test(m[2]) && monthOf(m[2])) return ymd(Number(m[3]), monthOf(m[2]), Number(m[1]));
+  m = t.match(/([a-z][a-z0-9]{2,8})[\s\-/.]*(\d{1,2})(?:st|nd|rd|th)?[\s,\-/.]+(\d{2,4})/);
+  if (m && monthOf(m[1])) return ymd(Number(m[3]), monthOf(m[1]), Number(m[2]));
   m = t.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (m) return ymd(Number(m[1]), Number(m[2]), Number(m[3]));
   m = t.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
@@ -194,6 +205,7 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
     vendorPhone: clean(read.vendorPhone, 30),
     vendorTrn: clean(read.vendorTrn, 20),
     vendorAddress: clean(read.vendorAddress, 120),
+    vendorEmail: clean(read.vendorEmail, 60)?.toLowerCase(),
     kind: receiptKind(read.kind),
     date,
     dateSure,
@@ -233,7 +245,7 @@ export function supplierFromReceipt(fields: ReceiptExpense, make = ''): ReceiptS
     makes: make.trim() ? [make.trim()] : undefined,
     service: fields.kind === 'service' || undefined,
     parts: sold,
-    notes: fields.vendorTrn ? `TRN ${fields.vendorTrn}` : undefined,
+    notes: [fields.vendorTrn ? `TRN ${fields.vendorTrn}` : '', fields.vendorEmail ?? ''].filter(Boolean).join(' · ') || undefined,
   };
 }
 

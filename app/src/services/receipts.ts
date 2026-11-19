@@ -13,7 +13,9 @@ import {
 } from '../domain/receipt';
 import { alreadyInBase, sellerKey } from '../domain/suppliers';
 import type { Expense, OrderItem, Supplier } from '../domain/types';
-import { askAi, notifyAi } from './ai';
+import { mergePapers, readPaper, type KnownSeller, type PaperRead } from '../domain/receiptText';
+import { aiOn, askAi, notifyAi } from './ai';
+import { getSettings } from './settings';
 import { removeEntry } from './entries';
 import { updateItem } from './estimate';
 import { addExpense } from './money';
@@ -55,9 +57,10 @@ export interface ReceiptScan {
   costed: number;
   /**
    * Nothing recorded: the server did not read it (`ai`), the paper has no sum (`amount`), or it is not a parts shop's
-   * or a contractor's paper (`kind`: fuel, food…) — the sheet opens with what was read, the category is the manager's.
+   * or a contractor's paper (`kind`: fuel, food…) — the sheet opens with what was read, the category is the manager's;
+   * read on the phone but not proven, and no AI to read it (`unsure`) — the sheet, filled in, to be looked at.
    */
-  failed?: 'ai' | 'amount' | 'kind';
+  failed?: 'ai' | 'amount' | 'kind' | 'unsure';
 }
 
 /** The picture as the server takes it: a JPEG no longer than 1600 px (a receipt's figures stay legible; a few hundred KB). */
@@ -117,7 +120,11 @@ async function knownSeller(fields: ReceiptExpense): Promise<Supplier | undefined
   if (!supplierFromReceipt(fields)) return undefined;
   const list = await db.suppliers.filter((s) => !s.archivedAt).toArray();
   const key = sellerKey(fields.vendor ?? '');
-  return alreadyInBase(list, { name: fields.vendor, phone: fields.vendorPhone }) ?? (key.length >= 3 ? list.find((s) => sellerKey(s.name) === key) : undefined);
+  const byPaper = list.find((s) => {
+    const k = knownOf(s);
+    return (!!fields.vendorTrn && k.trn === fields.vendorTrn) || (!!fields.vendorEmail && k.email === fields.vendorEmail);
+  });
+  return byPaper ?? alreadyInBase(list, { name: fields.vendor, phone: fields.vendorPhone }) ?? (key.length >= 3 ? list.find((s) => sellerKey(s.name) === key) : undefined);
 }
 
 interface Seller {
@@ -140,16 +147,74 @@ async function sellerOf(fields: ReceiptExpense, found: Supplier | undefined, mak
   return { supplier, added: false, filled: { ...(fill.phone ? { phone: supplier.phone } : {}), ...(fill.address ? { address: supplier.address } : {}) } };
 }
 
+/** A supplier as its papers tell it: the TRN and the e-mail kept in its notes (put there by its first paper), its phone, its name. */
+export function knownOf(s: Supplier): KnownSeller {
+  const notes = s.notes ?? '';
+  return {
+    id: s.id,
+    name: s.name,
+    trn: notes.replace(/(\d)\s(?=\d)/g, '$1').match(/\b(1\d{14})\b/)?.[1],
+    email: notes.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0]?.toLowerCase(),
+    phones: s.phone ? [s.phone] : [],
+  };
+}
+
+/** A look into the reading of a paper (tests, a paper that will not read). */
+export const receiptTrace: { on?: (step: string, data: unknown) => void } = {};
+
+/**
+ * The paper read on the phone (v0.51, the user: «распознавание без ИИ, токены не тратить зря; обучи на реальных
+ * инвойсах»): the OCR's words (services/vinReader.ts , the same engine as the VIN's) read twice — in grey,
+ * then inked black on white at a higher size (faint dot-matrix print) — and the two readings made one
+ * (domain/receiptText.ts : the sum proven by the paper, the date read alike twice). The garage's own name
+ * and TRN are the buyer's; its suppliers are known by their TRN, e-mail, phone, name.
+ */
+async function readOnPhone(file: File): Promise<PaperRead | undefined> {
+  try {
+    const { readDocument } = await import('./vinReader');
+    const [settings, suppliers] = await Promise.all([getSettings(), db.suppliers.filter((x) => !x.archivedAt).toArray()]);
+    const ctx = { garageName: settings.name, garageTrn: settings.trn, known: suppliers.map(knownOf) };
+    const first = await readDocument(file, { prep: 'grey', max: 2000 });
+    if (!first.words.length) return undefined;
+    const a = readPaper(first.words, first.height, ctx, first.skew);
+    receiptTrace.on?.('paper', { prep: 'grey', sure: a.sure, why: a.why });
+    const second = await readDocument(file, { prep: 'ink', max: 2600, angle: first.angle });
+    const b = second.words.length ? readPaper(second.words, second.height, ctx, second.skew) : undefined;
+    if (b) receiptTrace.on?.('paper', { prep: 'ink', sure: b.sure, why: b.why });
+    return mergePapers(a, b);
+  } catch (e) {
+    receiptTrace.on?.('paper-failed', String(e));
+    return undefined;
+  }
+}
+
+/**
+ * How the paper is read: on the phone first — the sum proven and a date, no AI is asked; not, the garage's AI reads
+ * it (one question; its supplier's TRN and e-mail are kept, so the next paper of it reads on the phone); no AI — what
+ * the phone read, to be looked at in the sheet.
+ */
+async function readReceipt(file: File): Promise<{ read?: ReceiptRead; by: 'phone' | 'ai'; sure: boolean }> {
+  const phone = await readOnPhone(file);
+  if (phone?.sure) return { read: phone.read, by: 'phone', sure: true };
+  if (aiOn()) {
+    try {
+      return { read: await askAi<ReceiptRead>('receipt', { image: await picture(file) }, 'receipt', 90_000), by: 'ai', sure: true };
+    } catch {
+      // No server, no key: what the phone read stands — looked at in the sheet.
+    }
+  }
+  return { read: phone?.read, by: 'phone', sure: false };
+}
+
 /** The receipt photographed: read, recorded as an expense, tied to its job and its supplier. */
 export async function scanReceipt(file: File): Promise<ReceiptScan> {
-  let read: ReceiptRead;
-  try {
-    read = await askAi<ReceiptRead>('receipt', { image: await picture(file) }, 'receipt', 90_000);
-  } catch {
-    return { costed: 0, failed: 'ai', others: [] };
-  }
+  const { read, by, sure } = await readReceipt(file);
+  if (!read) return { costed: 0, failed: 'ai', others: [] };
+  receiptTrace.on?.('read', { by, sure });
   const fields = receiptExpense(read);
   if (!fields.ok) return { costed: 0, failed: 'amount', read, fields, others: [] };
+  // Read on the phone but not proven (and no AI to read it): not recorded — the sheet opens with it, to be looked at.
+  if (!sure) return { costed: 0, failed: 'unsure', read, fields, others: [] };
   // Fuel, food, anything but parts or a contractor's work: which category is the manager's call — the sheet, filled in.
   if (fields.kind !== 'parts' && fields.kind !== 'service') return { costed: 0, failed: 'kind', read, fields, others: [] };
   const [jobs, found] = await Promise.all([jobsFor(fields.date), knownSeller(fields)]);

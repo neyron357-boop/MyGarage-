@@ -2009,6 +2009,7 @@ export const ru = {
     receiptNoJob: 'Без заказа',
     receiptClose: 'Проверьте заказ',
     receiptFailed: 'Чек не прочитан — впишите сумму',
+    receiptCheck: 'Проверьте сумму и дату',
     receiptSupplierNew: 'новый поставщик',
     receiptItems_one: '{{count}} позиция',
     receiptItems_few: '{{count}} позиции',

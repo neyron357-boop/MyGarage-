@@ -771,7 +771,7 @@ export async function learnVin(rows: Pieces[], vin: string): Promise<number> {
 /* ---------------- Reading ---------------- */
 
 /** How Tesseract is to take the picture: a sparse page, a line, a raw line (no layout guesses), one word, a block of lines. */
-const MODES = { page: '11', line: '7', raw: '13', word: '8', block: '6' } as const;
+const MODES = { page: '11', line: '7', raw: '13', word: '8', block: '6', auto: '3' } as const;
 
 /**
  * The characters a line is read in: a VIN's own — and O, Q and I, which a VIN never has but a reading sees (v0.25):
@@ -898,6 +898,171 @@ async function readCardNow(blob: Blob): Promise<{ text: string; height: number }
     return linesOf(p)
       .map((l) => ({ text: l.text.trim(), height: l.bbox.y1 - l.bbox.y0 }))
       .filter((l) => l.text);
+  } finally {
+    bmp.close();
+    rest();
+  }
+}
+
+/* ---------------- A whole paper: a supplier's invoice or receipt (v0.51) ---------------- */
+
+/** A word read off a paper, where it stands (px of the picture read, the paper turned the right way up). */
+export interface DocWord {
+  text: string;
+  conf: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+export interface DocPage {
+  words: DocWord[];
+  width: number;
+  height: number;
+  /** How far the photo was turned to read (0, 90, 180, 270). */
+  angle: number;
+  /** How the lines run across the picture (dy per dx, the median of the lines' baselines): a tilted photo. */
+  skew: number;
+}
+/** How the photo is made ready: in grey; its lightest channel (red ink — a form's boxes and its seal — gone); either inked black on white by the light around each point. */
+export type DocPrep = 'grey' | 'value' | 'ink' | 'value-ink' | 'flat';
+
+/**
+ * A paper read whole on the phone (v0.51, the user: «распознавание без ИИ, чтобы токены не тратились»): turned the
+ * right way up — the side that reads the most real words, as a business card (an invoice is often photographed
+ * across) — then read at up to `max` px, every word with its place (the caller puts them into rows: a table's
+ * columns lie apart). One reading at a time on the one engine.
+ */
+export function readDocument(blob: Blob, opts: { max?: number; mode?: 'page' | 'auto' | 'block'; angle?: number; prep?: DocPrep } = {}): Promise<DocPage> {
+  return exclusive(() => readDocumentNow(blob, opts));
+}
+
+/** The paper in one channel: grey, or its lightest (red ink fades into the paper), its contrast stretched. */
+function channel(c: HTMLCanvasElement, value: boolean): HTMLCanvasElement {
+  if (!value) return grey(c);
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  const img = g.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = Math.max(d[i], d[i + 1], d[i + 2]);
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  g.putImageData(img, 0, 0);
+  return grey(c);
+}
+
+/** Ink black, paper white, by the light around each point (a window of about two lines of text). */
+function docInk(src: HTMLCanvasElement, k = 0.88): HTMLCanvasElement {
+  const w = src.width;
+  const h = src.height;
+  const d = src.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, w, h).data;
+  const sum = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += d[(y * w + x) * 4];
+      sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const r = Math.max(10, Math.round(Math.max(w, h) / 60));
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const g = out.getContext('2d', { willReadFrequently: true })!;
+  const img = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r);
+    const y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r);
+      const x1 = Math.min(w, x + r + 1);
+      const area = (y1 - y0) * (x1 - x0);
+      const s = sum[y1 * (w + 1) + x1] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0] + sum[y0 * (w + 1) + x0];
+      const v = d[(y * w + x) * 4] * area < s * k ? 0 : 255;
+      const i = (y * w + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return out;
+}
+
+/**
+ * The paper's ground made even (v0.51: a faint print, grey on pink, a photo's light and shade): each point against the
+ * paper's light around it — the paper white, the ink as dark as it stands out of it, its edges still soft (the
+ * engine reads grey better than black and white).
+ */
+function docFlat(src: HTMLCanvasElement, from = 0.55, span = 0.38): HTMLCanvasElement {
+  const w = src.width;
+  const h = src.height;
+  const g = src.getContext('2d', { willReadFrequently: true })!;
+  const img = g.getImageData(0, 0, w, h);
+  const d = img.data;
+  const sum = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += d[(y * w + x) * 4];
+      sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1] + row;
+    }
+  }
+  const r = Math.max(12, Math.round(Math.max(w, h) / 40));
+  const out = new Uint8ClampedArray(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r);
+    const y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r);
+      const x1 = Math.min(w, x + r + 1);
+      const mean = (sum[y1 * (w + 1) + x1] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0] + sum[y0 * (w + 1) + x0]) / ((y1 - y0) * (x1 - x0));
+      const ratio = d[(y * w + x) * 4] / Math.max(1, mean * 1.04);
+      out[y * w + x] = Math.max(0, Math.min(255, ((ratio - from) / span) * 255));
+    }
+  }
+  for (let i = 0; i < out.length; i++) d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = out[i];
+  g.putImageData(img, 0, 0);
+  return src;
+}
+
+async function readDocumentNow(blob: Blob, { max = 2000, mode = 'page', angle: given, prep = 'grey' }: { max?: number; mode?: 'page' | 'auto' | 'block'; angle?: number; prep?: DocPrep }): Promise<DocPage> {
+  const bmp = await createImageBitmap(blob);
+  try {
+    if (tooSmall(bmp)) return { words: [], width: 0, height: 0, angle: 0, skew: 0 };
+    const w = await engine();
+    let angle = (given ?? 0) as Angle;
+    if (given === undefined) {
+      // Upright or across first (most photos), upside down last; a side that reads plenty is taken at once.
+      let best = -1;
+      for (const a of [0, 90, 270, 180] as Angle[]) {
+        await breathe();
+        const sn = sense(await page(w, grey(draw(bmp, a, 1100)), 'page'));
+        trace('doc-angle', { angle: a, sense: sn });
+        if (sn > best) {
+          best = sn;
+          angle = a;
+        }
+        if (sn >= 120) break;
+      }
+    }
+    await breathe();
+    let c = channel(draw(bmp, angle, max), prep === 'value' || prep === 'value-ink');
+    if (prep === 'ink' || prep === 'value-ink') c = docInk(c);
+    if (prep === 'flat') c = docFlat(c);
+    const p = await page(w, c, mode);
+    const words: DocWord[] = [];
+    const slopes: number[] = [];
+    for (const l of linesOf(p)) {
+      const bl = l.baseline;
+      if (bl && bl.x1 - bl.x0 > 120) slopes.push((bl.y1 - bl.y0) / (bl.x1 - bl.x0));
+      for (const wd of l.words) {
+        const text = wd.text.trim();
+        if (text) words.push({ text, conf: Math.round(wd.confidence), x0: wd.bbox.x0, y0: wd.bbox.y0, x1: wd.bbox.x1, y1: wd.bbox.y1 });
+      }
+    }
+    slopes.sort((x, y) => x - y);
+    const skew = slopes.length ? slopes[Math.floor(slopes.length / 2)] : 0;
+    return { words, width: c.width, height: c.height, angle, skew: Math.abs(skew) < 0.2 ? skew : 0 };
   } finally {
     bmp.close();
     rest();
