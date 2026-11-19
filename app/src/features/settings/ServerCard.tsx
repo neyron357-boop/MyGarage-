@@ -1,8 +1,9 @@
 import { Button, Loader, Modal, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { IconCloud, IconCloudOff, IconPhoto, IconRefresh } from '@tabler/icons-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dayShort, formatDateTime } from '../../domain/dates';
+import { aiStatus } from '../../services/ai';
 import { parseAddress, SyncError } from '../../services/sync/api';
 import { setOffload, useSync } from '../../services/sync/config';
 import { cancelPairing, changeServerAddress, finishPairing, forgetSync, makeMain, pairDevice, syncNow, type Pairing } from '../../services/sync/engine';
@@ -11,6 +12,7 @@ import { haptic } from '../../ui/haptics';
 import { formatBytes } from '../../ui/device';
 import { useLang } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
+import { AiMark } from '../ai/Ai';
 
 /*
  * «Настройки → Данные → Сервер» (v0.40): this device paired with the garage's server on the computer — the address and
@@ -202,6 +204,11 @@ export function ServerCard() {
   const [leaving, setLeaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const [making, setMaking] = useState(false);
+  // The garage's AI (v0.48): on the server or not, and whether it searches the catalogues on the web (a paid plan).
+  const [ai, setAi] = useState<Awaited<ReturnType<typeof aiStatus>>>();
+  useEffect(() => {
+    if (config?.url) void aiStatus().then(setAi);
+  }, [config?.url]);
   // Only what the person must put right is said (v0.42.1): no network, the server starting again — tried again quietly.
   const errors: Record<string, string> = { revoked: t('sync.err.revoked'), main: t('sync.err.main'), update: t('sync.err.update') };
   if (!config)
@@ -248,6 +255,18 @@ export function ServerCard() {
         <FormRow label={t('sync.main')} onClick={mayMain ? () => setMaking(true) : undefined} chevron={mayMain}>
           <Text size="sm" c={isMain ? 'green' : 'dimmed'} data-sync-main>
             {isMain ? t('sync.thisDevice') : (state.main?.name ?? '—')}
+          </Text>
+        </FormRow>
+        <FormRow
+          label={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <AiMark size={20} />
+              {t('ai.status')}
+            </span>
+          }
+        >
+          <Text size="sm" c={!ai?.on ? 'dimmed' : ai.search === 'off' ? 'orange' : 'green'} data-ai-status>
+            {!ai ? '…' : !ai.on ? t('ai.off') : ai.search === 'off' ? t('ai.paid') : 'Gemini'}
           </Text>
         </FormRow>
         <FormRow label={t('sync.photos')}>

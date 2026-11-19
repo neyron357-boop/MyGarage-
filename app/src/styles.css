@@ -6135,29 +6135,297 @@ button.kpi-tab .eyebrow {
   margin-right: 96px;
 }
 
-/* The garage's AI (v0.48): a part number not seen in a catalogue is a candidate — orange, as an unsure plate. */
-.chip.ai-unsure {
-  color: var(--mantine-color-orange-7);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mantine-color-orange-5) 60%, transparent);
+/* ---------- The garage's AI (v0.48) ----------
+   One look for everything the AI does: its mark — a sparkle on its own colours (the system palette, not the accent:
+   the AI is not the manager's own action); at work — the mark twinkles and what it reads breathes a ring of them;
+   what it found — a card that says before → after. Motion: transform and opacity only, off with reduced motion. */
+:root {
+  --ai-a: var(--mantine-color-indigo-5);
+  --ai-b: var(--mantine-color-violet-5);
+  --ai-c: var(--mantine-color-pink-5);
+  --ai-d: var(--mantine-color-orange-4);
+  --ai-grad: linear-gradient(135deg, var(--ai-a) 0%, var(--ai-b) 38%, var(--ai-c) 72%, var(--ai-d) 100%);
+  --ai-ring: conic-gradient(from 210deg, var(--ai-a), var(--ai-b), var(--ai-c), var(--ai-d), var(--ai-a));
 }
-.chip .dim {
-  color: var(--mantine-color-dimmed);
-  font-weight: 400;
+.ai-mark {
+  --s: 22px;
+  width: var(--s);
+  height: var(--s);
+  border-radius: calc(var(--s) * 0.3);
+  background: var(--ai-grad);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  vertical-align: -0.28em;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ai-b) 32%, transparent);
 }
-.ai-spin {
-  animation: ai-spin 1.1s linear infinite;
+.ai-mark svg {
+  width: 64%;
+  height: 64%;
 }
-@keyframes ai-spin {
+.ai-mark[data-busy] svg {
+  animation: ai-twinkle 1.3s var(--ease-ios) infinite;
+}
+@keyframes ai-twinkle {
+  0%,
+  100% {
+    transform: scale(0.8) rotate(0deg);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.06) rotate(22deg);
+    opacity: 1;
+  }
+}
+/* What the AI is reading (the VIN chip): a ring of its colours breathes around it. */
+.ai-ring[data-ai-busy] {
+  position: relative;
+}
+.ai-ring[data-ai-busy]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: var(--ai-ring);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+  animation: ai-breathe 1.1s ease-in-out infinite alternate;
+}
+@keyframes ai-breathe {
+  from {
+    opacity: 0.35;
+  }
   to {
-    transform: rotate(360deg);
+    opacity: 1;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .ai-spin {
-    animation: none;
-  }
+/* The AI's words: its colours on the text (a title, «Найти номер»). */
+.ai-text {
+  background: var(--ai-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
 }
+
+/* Its notice: the glass banner with a hairline of its colours, the mark, a title, what changed. */
+.mantine-Notification-root.ai-toast::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--ai-ring);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.ai-toast-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.ai-toast-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.ai-toast-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+}
+.ai-toast-main {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.ai-toast-was {
+  font-size: 13px;
+  color: var(--mantine-color-dimmed);
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+.ai-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ai-pill {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ai-b) 12%, transparent);
+  color: var(--mantine-color-text);
+}
+.ai-undo {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 6px 0 6px 4px;
+  font: inherit;
+  cursor: pointer;
+  color: var(--mantine-color-cobalt-5);
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+  align-self: center;
+}
+
+/* The part's numbers from the catalogues (the part's sheet): a row a number — the number large, what it is under it,
+   seen in catalogues (green, how many) or not checked (orange); a tap takes it, the globe looks it up on Yandex. */
+.ai-block {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0 4px;
+}
+.ai-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.ai-head .ai-text {
+  font-size: 15px;
+  flex: 1;
+}
+.ai-num {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 0.5px solid var(--app-hairline);
+}
+.ai-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 54px;
+  padding: 6px 4px 6px 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 300ms var(--spring), background-color var(--dur-1) ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-pick:active {
+  transform: scale(0.98);
+  background: var(--app-press);
+  transition-duration: 80ms;
+}
+.ai-num-main {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.ai-num-no {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-rounded);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.ai-num-sub {
+  font-size: 13px;
+  color: var(--mantine-color-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-seen {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--mantine-color-green-7);
+  white-space: nowrap;
+}
+.ai-seen[data-unsure] {
+  color: var(--mantine-color-orange-7);
+}
+.ai-num[data-unsure] .ai-num-no {
+  color: var(--mantine-color-orange-7);
+}
+.ai-skel {
+  height: 44px;
+  border-radius: 12px;
+  margin-top: 6px;
+}
+.ai-find {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-find .ai-text {
+  font-size: 17px;
+}
+
+/* The part's diagram off a catalogue page: a card of its own, the picture on white (diagrams are drawn on white),
+   the site it came from under it. */
 .ai-diagram {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+}
+.ai-diagram-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
+  cursor: zoom-in;
+  aspect-ratio: 16 / 10;
+}
+.ai-diagram-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ai-diagram-site {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-mark[data-busy] svg,
+  .ai-ring[data-ai-busy]::before {
+    animation: none;
+  }
 }

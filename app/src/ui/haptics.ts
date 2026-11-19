@@ -158,6 +158,10 @@ const TAPPABLE = [
   'button.car-shot-img',
   'button.car-shot-x',
   'button.part-thumb',
+  // v0.48.1: the AI's rows — a number to take, «Найти номер», the part's diagram.
+  'button.ai-pick',
+  'button.ai-find',
+  'button.ai-diagram-card',
   'button.job-card-doc',
   'button.kpi-tab',
   'button.suggest',

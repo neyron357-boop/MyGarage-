@@ -1,4 +1,5 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
+import { AiLineWork } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
   IconBuildingStore,
@@ -733,6 +734,8 @@ export function JobPage() {
         <Text span inherit td={i.approvalState === 'declined' ? 'line-through' : undefined} c={i.approvalState === 'declined' ? 'dimmed' : undefined}>
           {itemTitle(i, docLang) || '—'}
           {!!i.mediaIds?.length && i.kind !== 'part' && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
+          {/* The garage's AI looking at the part (its name, its number): its mark twinkles after the name. */}
+          {i.kind === 'part' && <AiLineWork itemId={i.id} />}
         </Text>
       }
       subtitle={dots([

@@ -1,5 +1,5 @@
 import { ActionIcon, Autocomplete, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
-import { IconBuildingFactory2, IconCheck, IconListDetails, IconMinus, IconPlus, IconSparkles, IconX } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconCheck, IconListDetails, IconMinus, IconPlus, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +9,8 @@ import { itemAmounts, itemCostPaid, itemTitle, lineName } from '../../domain/ite
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '../../domain/types';
-import { aiAfterPart, aiFindPart, aiOn } from '../../services/ai';
+import { aiAfterPart } from '../../services/ai';
+import { AiDiagrams, AiPartNumbers, YandexButton } from '../ai/Ai';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
@@ -186,7 +187,6 @@ export function LineSheet({
   const [fresh, setFresh] = useState<{ id: string; file: File; src: string }[]>([]);
   // What the garage's AI found for the part (v0.48), as it comes: read live — the form itself keeps what is typed.
   const live = useScreenLiveQuery(() => (item ? db.items.get(item.id) : undefined), [item?.id]);
-  const [finding, setFinding] = useState(false);
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
   useEffect(() => {
@@ -218,18 +218,6 @@ export function LineSheet({
   useEffect(() => {
     if (opened && live?.partNumber && live.aiFind?.filled === live.partNumber) setPartNumber((n) => n || live.partNumber!);
   }, [opened, live?.partNumber, live?.aiFind?.filled]);
-  const plainNo = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const aiNumbers = live?.aiFind?.numbers ?? [];
-  const findNumber = () =>
-    item &&
-    run(async () => {
-      setFinding(true);
-      try {
-        await aiFindPart(item.id, { again: true });
-      } finally {
-        setFinding(false);
-      }
-    });
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
   /** A suggestion's price as it is typed: with VAT if it was typed with VAT last time. */
   const suggested = (s: Suggestion) => {
@@ -403,37 +391,26 @@ export function LineSheet({
             <div className="ios-row">
               <span className="label">{t('qi.partNo')}</span>
               <div className="value">
-                <TextInput aria-label={t('qi.partNo')} placeholder="—" value={partNumber} onChange={(e) => setPartNumber(e.currentTarget.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false} />
+                <TextInput
+                  aria-label={t('qi.partNo')}
+                  placeholder="—"
+                  value={partNumber}
+                  onChange={(e) => setPartNumber(e.currentTarget.value)}
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  // The number looked up on Yandex (v0.48.1, the user's ask) — a globe by the field once there is one.
+                  rightSection={partNumber.trim() ? <YandexButton number={partNumber} size={30} /> : undefined}
+                  rightSectionPointerEvents="all"
+                  rightSectionWidth={partNumber.trim() ? 40 : undefined}
+                />
               </div>
             </div>
           )}
-          {kind === 'part' && item && (aiNumbers.length > 0 || aiOn()) && (
-            // The numbers the AI found in the catalogues: a tap takes one; not seen on a catalogue page — orange.
-            <div className="ios-row">
-              <div className="chip-row wrap" aria-label={t('ai.find')}>
-                {aiNumbers.map((n) => {
-                  const unsure = live?.aiFind?.search !== 'web' || !n.seen.length;
-                  return (
-                    <button
-                      key={n.number}
-                      type="button"
-                      className={`chip${unsure ? ' ai-unsure' : ''}`}
-                      data-active={plainNo(partNumber) === plainNo(n.number) || undefined}
-                      title={unsure ? t('ai.unsure') : n.seen[0]}
-                      onClick={() => setPartNumber(n.number)}
-                    >
-                      {n.number}
-                      {n.note ? <span className="dim"> · {n.note}</span> : null}
-                    </button>
-                  );
-                })}
-                {aiOn() && (
-                  <button type="button" className="chip" disabled={finding} aria-busy={finding || undefined} onClick={findNumber}>
-                    <IconSparkles size={16} stroke={1.8} aria-hidden className={finding ? 'ai-spin' : undefined} />
-                    {aiNumbers.length ? null : t('ai.find')}
-                  </button>
-                )}
-              </div>
+          {kind === 'part' && item && (
+            // The garage's AI (v0.48): the part's numbers from the catalogues — a tap takes one into «Номер».
+            <div className="ios-row" style={{ display: 'block' }}>
+              <AiPartNumbers itemId={item.id} chosen={partNumber} onPick={setPartNumber} />
             </div>
           )}
           {kind === 'part' && (
@@ -621,15 +598,7 @@ export function LineSheet({
           </div>
         )}
 
-        {kind === 'part' && !!live?.diagramIds?.length && (
-          // The part's diagram off a catalogue page (v0.48): the garage's own — never sent with a quote.
-          <div className="ai-diagram">
-            <Text size="sm" c="dimmed" fw={600}>
-              {t('ai.diagram')}
-            </Text>
-            <PhotoStrip name="diagram" photos={live.diagramIds.map((id) => ({ id }))} addLabel={t('ai.diagram')} />
-          </div>
-        )}
+        {kind === 'part' && item && <AiDiagrams itemId={item.id} />}
         <PhotoStrip
           name="line"
           photos={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}

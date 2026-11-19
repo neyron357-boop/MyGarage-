@@ -1,4 +1,5 @@
 import { ActionIcon, Button, Group, Stack } from '@mantine/core';
+import { useAiWorking } from '../ai/Ai';
 import { IconCamera, IconCameraPlus, IconCar, IconPhoto, IconTrash } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -142,6 +143,8 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
   );
   const edits = useCarPhotoEdits(vehicleId);
   const vinState = useVinState(vehicleId);
+  // The garage's AI reading the VIN (v0.48.1): a ring of its colours breathes round the chip.
+  const aiReading = useAiWorking(`car:${vehicleId}`);
   const sheet = <VinCheckSheet vehicleId={vehicleId} current={{ vin, year }} />;
   // A closed job shows the VIN photo if there is one — not an empty tile asking for it.
   if (hideEmpty && !photo?.id) return sheet;
@@ -150,7 +153,8 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
       {/* A chip among the card's chips: a camera while there is no photo, its round thumbnail once there is. */}
       <button
         type="button"
-        className="chip vin-chip"
+        className="chip vin-chip ai-ring"
+        data-ai-busy={aiReading || undefined}
         data-empty={!photo?.id || undefined}
         data-reading={vinState.reading || undefined}
         data-check={(vinState.check && !vinState.reading && !!photo?.id) || undefined}

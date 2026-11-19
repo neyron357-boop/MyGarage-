@@ -2095,7 +2095,8 @@ async function launchBrowser() {
       window.__aiAsked = [];
       ai.setAiTransport(async (path, body) => {
         window.__aiAsked.push(path);
-        await new Promise((r) => setTimeout(r, 150));
+        // Long enough to see the AI at work: the ring round the VIN chip, the mark on the line.
+        await new Promise((r) => setTimeout(r, path === 'part-find' ? 150 : 1200));
         if (path === 'vin') return { vin: body.vin, make: 'TOYOTA', model: 'Corolla', year: 2009, engine: '1.8L 4-cyl', body: 'sedan', confidence: 0.9 };
         if (path === 'part-name') return { fixed: 'колодки тормозные передние', english: 'FRONT BRAKE PADS', isPart: true, confidence: 0.95 };
         return {
@@ -2116,7 +2117,13 @@ async function launchBrowser() {
       await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
       // A VIN put in the car's card (its own service): the AI reads it — model, year, engine, body; the make typed stays.
       await page.evaluate(async (id) => (await import('/src/services/customers.ts')).updateVehicle(id, { vin: 'JTDBR42E39J016456' }), job.vehicleId);
-      await page.getByText('ИИ: Corolla · 2009 · 1.8L 4-cyl · Седан').first().waitFor();
+      // At work: a ring of the AI's colours round the VIN chip; then its card — the car's values as pills.
+      await front('.vin-chip.ai-ring[data-ai-busy]').waitFor();
+      const carCard = page.locator('[data-ai-notice="car"]');
+      await carCard.filter({ hasText: 'Машина по VIN' }).waitFor();
+      const pills = await carCard.locator('.ai-pill').allTextContents();
+      if (pills.join('|') !== 'Corolla|2009|1.8L 4-cyl|Седан') throw new Error('the car card: ' + pills.join('|'));
+      await front('.vin-chip[data-ai-busy]').waitFor({ state: 'detached' });
       const car = await page.evaluate(async (id) => {
         const v = await (await import('/src/db/db.ts')).db.vehicles.get(id);
         return [v.make, v.model, v.year, v.engine, v.type];
@@ -2128,20 +2135,36 @@ async function launchBrowser() {
       await dlg.getByLabel('Запчасть').fill('колодки тормазные передние');
       await dlg.getByRole('button', { name: 'Сохранить' }).click();
       await dlg.waitFor({ state: 'detached' });
-      await page.getByText('Исправлено: FRONT BRAKE PADS').first().waitFor();
+      // The AI looking at the line: its mark twinkles after the name.
+      await front('.list-row').filter({ hasText: 'КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ' }).locator('.ai-mark[data-busy]').waitFor();
+      // Its card: the name as it is now, the one typed crossed out under it.
+      const nameCard = page.locator('[data-ai-notice="name"]');
+      await nameCard.filter({ hasText: 'Название исправлено' }).waitFor({ timeout: 15000 });
+      if ((await nameCard.locator('.ai-toast-main').textContent()) !== 'FRONT BRAKE PADS' || (await nameCard.locator('.ai-toast-was').textContent()) !== 'КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ')
+        throw new Error('the name card: ' + (await nameCard.textContent()));
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).waitFor();
       // Its number, seen in two catalogues, written by itself; the diagram kept with the line.
-      await page.getByText('Номер: 04465-12610').first().waitFor({ timeout: 20000 });
+      await page.locator('[data-ai-notice="number"]').filter({ hasText: '04465-12610' }).waitFor({ timeout: 20000 });
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
       const no = dlg.getByLabel('Номер', { exact: true });
       if ((await no.inputValue()) !== '04465-12610') throw new Error('the number written by the AI: ' + (await no.inputValue()));
-      const other = dlg.locator('.chip.ai-unsure').filter({ hasText: '04465-02220' });
+      // The catalogues' rows: the proven number taken (✓, green «2»), the other orange; a globe looks each up on Yandex.
+      const rows = dlg.locator('[data-ai-numbers] .ai-num');
+      await rows.first().waitFor();
+      if ((await rows.count()) !== 2) throw new Error('number rows: ' + (await rows.count()));
+      if ((await rows.nth(0).locator('.ai-pick').getAttribute('aria-pressed')) !== 'true' || (await rows.nth(0).locator('.ai-seen').textContent()) !== '2') throw new Error('the proven row: ' + (await rows.nth(0).textContent()));
+      const other = dlg.locator('.ai-num[data-unsure] .ai-pick').filter({ hasText: '04465-02220' });
       await other.waitFor();
-      await dlg.locator('.ai-diagram .strip-tile').waitFor();
+      const yandex = await dlg.locator('a[aria-label="Найти в Яндексе"]').evaluateAll((as) => as.map((a) => [a.getAttribute('href'), a.getAttribute('target')]));
+      if (JSON.stringify(yandex[0]) !== JSON.stringify(['https://yandex.ru/search/?text=04465-12610', '_blank']) || yandex.length !== 3) throw new Error('Yandex: ' + JSON.stringify(yandex));
+      await dlg.locator('[data-ai-diagram] .ai-diagram-card').waitFor();
       await shot('38-ai-part');
+      await dlg.locator('[data-ai-diagram]').scrollIntoViewIfNeeded();
+      await shot('38a-ai-diagram');
       // A candidate (not seen in a catalogue — orange) taken by a tap.
       await other.click();
       if ((await no.inputValue()) !== '04465-02220') throw new Error('the candidate tapped: ' + (await no.inputValue()));
+      if ((await other.getAttribute('aria-pressed')) !== 'true') throw new Error('the candidate is not marked taken');
       await page.locator('.mantine-Modal-close').first().click();
       await dlg.waitFor({ state: 'detached' });
       const line = await page.evaluate(async (id) => {

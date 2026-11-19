@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { nameFix, provenNumber, vinFill, type AiFind, type AiName, type AiVin } from '../domain/ai';
+import { catalogCount, nameFix, provenNumber, vinFill, type AiFind, type AiName, type AiVin } from '../domain/ai';
 import { nowIso } from '../domain/dates';
 import { itemTitle } from '../domain/items';
 import type { OrderItem, Vehicle } from '../domain/types';
@@ -25,18 +25,54 @@ export function setAiTransport(t: Transport | undefined) {
 /** A device paired with the garage's server asks it (the server says «ai off» without a key — quietly nothing). */
 export const aiOn = (): boolean => !!transport || !!syncConfig();
 
-async function ask<T>(path: 'vin' | 'part-name' | 'part-find', body: unknown): Promise<T> {
-  if (transport) return (await transport(path, body)) as T;
-  const cfg = syncConfig();
-  if (!cfg) throw new Error('no server');
-  return callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout: 120_000 });
+/** What the AI is working on now — `car:<vehicleId>`, `name:<itemId>`, `find:<itemId>`: the app shows it at work. */
+const working = new Set<string>();
+const workListeners = new Set<() => void>();
+let workVersion = 0;
+const workChanged = () => {
+  workVersion++;
+  workListeners.forEach((f) => f());
+};
+export const aiWorking = (key: string): boolean => working.has(key);
+export const aiWorkVersion = (): number => workVersion;
+export function subscribeAiWork(fn: () => void): () => void {
+  workListeners.add(fn);
+  return () => void workListeners.delete(fn);
 }
+
+async function ask<T>(path: 'vin' | 'part-name' | 'part-find', body: unknown, key: string): Promise<T> {
+  working.add(key);
+  workChanged();
+  try {
+    if (transport) return (await transport(path, body)) as T;
+    const cfg = syncConfig();
+    if (!cfg) throw new Error('no server');
+    return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout: 120_000 });
+  } finally {
+    working.delete(key);
+    workChanged();
+  }
+}
+
+/** How the garage's AI stands (Настройки → Данные → Сервер): on, and whether it searches the catalogues on the web. */
+export async function aiStatus(): Promise<{ on: boolean; search?: 'on' | 'off' | 'unknown' }> {
+  const cfg = syncConfig();
+  if (!cfg) return { on: false };
+  try {
+    return await callJson<{ on: boolean; search: 'on' | 'off' | 'unknown' }>(cfg, '/api/ai/status', { timeout: 15_000 });
+  } catch {
+    return { on: false };
+  }
+}
+
+/** A part number looked up on Yandex (the button by the number). */
+export const yandexUrl = (number: string): string => `https://yandex.ru/search/?text=${encodeURIComponent(number.trim())}`;
 
 export type CarFill = Partial<Pick<Vehicle, 'make' | 'model' | 'year' | 'engine' | 'type'>>;
 export type AiNotice =
   | { kind: 'car'; vehicleId: string; filled: CarFill; undo: () => Promise<void> }
-  | { kind: 'name'; itemId: string; to: string; undo: () => Promise<void> }
-  | { kind: 'number'; itemId: string; number: string; undo: () => Promise<void> };
+  | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
+  | { kind: 'number'; itemId: string; number: string; catalogs: number; undo: () => Promise<void> };
 
 const listeners = new Set<(n: AiNotice) => void>();
 /** What the AI did by itself (the app's notices show it, with «Отменить»). */
@@ -72,7 +108,7 @@ export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
     const v = await db.vehicles.get(vehicleId);
     const vin = v?.vin?.toUpperCase();
     if (!v || !vin || !isVin(vin) || v.vinAi?.vin === vin) return undefined;
-    const ai = await ask<AiVin>('vin', { vin });
+    const ai = await ask<AiVin>('vin', { vin }, `car:${vehicleId}`);
     // Read again: something may have been typed in the card while the AI was asked.
     const now = await db.vehicles.get(vehicleId);
     if (!now || now.vin?.toUpperCase() !== vin) return undefined;
@@ -119,7 +155,7 @@ export function aiFixPartName(itemId: string): Promise<boolean | undefined> {
     const typed = item?.titleRu || item?.titleEn || '';
     if (!item || item.kind !== 'part' || item.approvalState !== 'draft' || !typed || item.aiName?.from === typed || item.aiName?.to === typed) return false;
     const car = await carOf(item);
-    const r = await ask<AiName>('part-name', { name: typed, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '' });
+    const r = await ask<AiName>('part-name', { name: typed, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '' }, `name:${itemId}`);
     const now = await db.items.get(itemId);
     if (!now || now.approvalState !== 'draft' || (now.titleRu || now.titleEn) !== typed) return false;
     const fix = nameFix(typed, r, !!now.titleEn);
@@ -135,6 +171,7 @@ export function aiFixPartName(itemId: string): Promise<boolean | undefined> {
       notify({
         kind: 'name',
         itemId,
+        from: itemTitle(now, lang),
         to: itemTitle({ ...now, ...patch }, lang),
         undo: async () => {
           const cur = await db.items.get(itemId);
@@ -168,7 +205,7 @@ export function aiFindPart(itemId: string, { again = false }: { again?: boolean 
     const part = item?.titleEn || item?.titleRu || '';
     if (!item || item.kind !== 'part' || !part || (!again && (item.partNumber || item.aiFind?.part === part))) return undefined;
     const car = await carOf(item);
-    const r = await ask<AiFind>('part-find', { part, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '', engine: car?.engine ?? '', vin: car?.vin ?? '' });
+    const r = await ask<AiFind>('part-find', { part, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '', engine: car?.engine ?? '', vin: car?.vin ?? '' }, `find:${itemId}`);
     const now = await db.items.get(itemId);
     if (!now) return undefined;
     const diagrams: string[] = [];
@@ -192,6 +229,7 @@ export function aiFindPart(itemId: string, { again = false }: { again?: boolean 
         kind: 'number',
         itemId,
         number: fill,
+        catalogs: catalogCount(r.numbers.find((n) => n.number === fill)?.seen ?? []),
         undo: async () => {
           const cur = await db.items.get(itemId);
           if (cur?.partNumber === fill) await db.items.update(itemId, { partNumber: undefined });

@@ -1,0 +1,169 @@
+import { ActionIcon, Text } from '@mantine/core';
+import { IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
+import { useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import { db } from '../../db/db';
+import { catalogCount, siteOf } from '../../domain/ai';
+import { aiFindPart, aiOn, aiWorking, aiWorkVersion, subscribeAiWork, yandexUrl } from '../../services/ai';
+import { MediaImage } from '../../ui/components';
+import { useAction, useScreenLiveQuery } from '../../ui/hooks';
+import { PhotoViewer } from '../../ui/PhotoViewer';
+
+/*
+ * How the garage's AI looks (v0.48.1, the user: «улучши дизайн под ИИ, качественно и профессионально»): one mark — a
+ * sparkle on its own colours — wherever it acts; it twinkles while the AI works; what it found is laid out to be read
+ * at a glance and taken with a tap. Styles — «The garage's AI» in styles.css.
+ */
+
+/** The AI is working on one of these (`car:<vehicleId>`, `name:<itemId>`, `find:<itemId>` — services/ai.ts). */
+export function useAiWorking(...keys: string[]): boolean {
+  useSyncExternalStore(subscribeAiWork, aiWorkVersion);
+  return keys.some(aiWorking);
+}
+
+/** The AI's mark: a sparkle on its colours, like an app's icon; `busy` — twinkling, the AI at work. */
+export function AiMark({ size = 22, busy, label }: { size?: number; busy?: boolean; label?: string }) {
+  return (
+    <span className="ai-mark" data-busy={busy || undefined} style={{ '--s': `${size}px` } as CSSProperties} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      <IconSparkles stroke={2.2} />
+    </span>
+  );
+}
+
+/** On a job's line: the AI looking at it (its name, its number) — the mark twinkling after the name. */
+export function AiLineWork({ itemId }: { itemId: string }) {
+  const { t } = useTranslation();
+  const busy = useAiWorking(`name:${itemId}`, `find:${itemId}`);
+  if (!busy) return null;
+  return (
+    <span style={{ marginLeft: 6 }} className="fade-enter">
+      <AiMark size={17} busy label={t('ai.working')} />
+    </span>
+  );
+}
+
+/** A part number looked up on Yandex — a round globe button (opens the browser). */
+export function YandexButton({ number, size = 34 }: { number: string; size?: number }) {
+  const { t } = useTranslation();
+  if (!number.trim()) return null;
+  return (
+    <ActionIcon
+      component="a"
+      href={yandexUrl(number)}
+      target="_blank"
+      rel="noopener noreferrer"
+      variant="light"
+      color="gray"
+      radius="xl"
+      size={size}
+      aria-label={t('ai.yandex')}
+      title={t('ai.yandex')}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <IconWorldSearch size={Math.round(size * 0.53)} stroke={1.8} />
+    </ActionIcon>
+  );
+}
+
+const plain = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * The part's numbers from the catalogues (the part's sheet): while the AI looks — its mark twinkles over two shimmering
+ * rows; then a row a number: the number large, the maker and what it is for under it, seen in how many catalogues
+ * (green) or not checked (orange); a tap takes it into «Номер», the globe looks it up on Yandex, ↻ looks again.
+ */
+export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chosen: string; onPick: (n: string) => void }) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  const live = useScreenLiveQuery(() => db.items.get(itemId), [itemId]);
+  const busy = useAiWorking(`find:${itemId}`, `name:${itemId}`);
+  const on = aiOn();
+  const find = live?.aiFind;
+  if (!live || (!find && !on)) return null;
+  const again = () => run(async () => void (await aiFindPart(itemId, { again: true })));
+  return (
+    <div className="ai-block" aria-busy={busy || undefined} data-ai-numbers>
+      {find || busy ? (
+        <div className="ai-head">
+          <AiMark busy={busy} />
+          <span className="ai-text">{t('ai.catalogs')}</span>
+          {on && !busy && (
+            <ActionIcon variant="subtle" color="gray" radius="xl" size={32} aria-label={t('ai.again')} onClick={again}>
+              <IconRefresh size={18} stroke={1.8} />
+            </ActionIcon>
+          )}
+        </div>
+      ) : (
+        <button type="button" className="ai-find" onClick={again}>
+          <AiMark />
+          <span className="ai-text">{t('ai.find')}</span>
+        </button>
+      )}
+      {busy && !find?.numbers.length && (
+        <>
+          <div className="skeleton ai-skel" />
+          <div className="skeleton ai-skel" style={{ width: '72%' }} />
+        </>
+      )}
+      {find && !busy && !find.numbers.length && (
+        <Text size="sm" c="dimmed" py={6}>
+          {t('ai.none')}
+        </Text>
+      )}
+      {find?.numbers.map((n) => {
+        const count = find.search === 'web' ? catalogCount(n.seen) : 0;
+        const unsure = count === 0;
+        const taken = !!chosen.trim() && plain(chosen) === plain(n.number);
+        return (
+          <div key={n.number} className="ai-num" data-unsure={unsure || undefined}>
+            <button type="button" className="ai-pick" aria-pressed={taken} onClick={() => onPick(n.number)}>
+              {taken ? <IconCircleCheckFilled size={22} color="var(--mantine-color-cobalt-6)" aria-hidden /> : <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />}
+              <span className="ai-num-main">
+                <span className="ai-num-no">{n.number}</span>
+                {(n.brand || n.note) && <span className="ai-num-sub">{[n.brand, n.note].filter(Boolean).join(' · ')}</span>}
+              </span>
+              {unsure ? (
+                <span className="ai-seen" data-unsure title={t('ai.unsure')} aria-label={t('ai.unsure')}>
+                  <IconHelpCircleFilled size={17} aria-hidden />
+                </span>
+              ) : (
+                <span className="ai-seen" title={t('ai.seenIn', { count })} aria-label={t('ai.seenIn', { count })}>
+                  <IconCircleCheckFilled size={15} aria-hidden />
+                  {count}
+                </span>
+              )}
+            </button>
+            <YandexButton number={n.number} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The part's diagram off a catalogue page: a card of its own (the drawing on white, the site under it); a tap — full screen. */
+export function AiDiagrams({ itemId }: { itemId: string }) {
+  const { t } = useTranslation();
+  const [viewing, setViewing] = useState<number | null>(null);
+  const shown = useScreenLiveQuery(async () => {
+    const ids = (await db.items.get(itemId))?.diagramIds ?? [];
+    const media = await db.media.bulkGet(ids);
+    return media.filter((m) => !!m).map((m) => ({ id: m!.id, site: siteOf(m!.name ?? '') }));
+  }, [itemId]);
+  if (!shown?.length) return null;
+  return (
+    <div className="ai-diagram rise-enter" data-ai-diagram>
+      <div className="ai-head">
+        <AiMark size={20} />
+        <span className="ai-text">{t('ai.diagram')}</span>
+      </div>
+      {shown.map((d, i) => (
+        <button key={d.id} type="button" className="ai-diagram-card" aria-label={t('ai.diagram')} onClick={() => setViewing(i)}>
+          <MediaImage id={d.id} card h="100%" w="100%" radius="0" />
+          {d.site && <span className="ai-diagram-site">{d.site}</span>}
+        </button>
+      ))}
+      {viewing !== null && <PhotoViewer items={shown.map((d) => ({ id: d.id, title: t('ai.diagram'), caption: d.site }))} index={Math.min(viewing, shown.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}

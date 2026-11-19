@@ -122,12 +122,18 @@ const host = (url: string) => {
   }
 };
 
+/** How many different catalogues (sites) a number was seen on. */
+export const catalogCount = (seen: string[]): number => new Set(seen.map(host).filter(Boolean)).size;
+
+/** The site a catalogue page is on, as said under a number or a diagram («amayama.com»). */
+export const siteOf = host;
+
 /**
  * A part number the app may write itself: found on the web and seen on the pages of two different catalogues. One page,
  * or the AI's own knowledge, is a candidate shown on the line — taken by a tap.
  */
 export function provenNumber(find: Pick<AiFind, 'search' | 'numbers'>): string | undefined {
   if (find.search !== 'web') return undefined;
-  const sure = find.numbers.filter((n) => new Set(n.seen.map(host).filter(Boolean)).size >= 2);
+  const sure = find.numbers.filter((n) => catalogCount(n.seen) >= 2);
   return sure.length === 1 ? sure[0].number : undefined;
 }
