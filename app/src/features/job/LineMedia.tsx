@@ -14,8 +14,9 @@ import { AiMark } from '../ai/Ai';
  * A line's pictures, all at the top of its sheet (v0.52, the user: «место для всех фотографий, включая результаты ИИ,
  * наверху; все фотографии одного фиксированного оптимального размера, остальное ниже»): one row of tiles of one size —
  * «Фото» first (the camera or the phone's photos), the line's own photos (they go to the customer with the estimate),
- * then what the garage's AI found: photos of the part (samples) and its catalogue diagram, each marked with the AI's
- * sign and a word (they stay in the garage). A tap — all of them full screen, one after another.
+ * then what the garage's AI found: the part's catalogue diagram first (v0.55 — the part's place marked on it), then
+ * photos of the part (samples), each marked with the AI's sign and a word (they stay in the garage). A tap — all of
+ * them full screen, one after another.
  */
 
 type Tile = StripPhoto & { kind: 'own' | 'sample' | 'diagram'; site?: string };
@@ -42,8 +43,9 @@ export function LineMedia({
   }, [sampleIds.join(','), diagramIds.join(',')]);
   const tiles: Tile[] = [
     ...own.map((p) => ({ ...p, kind: 'own' as const })),
-    ...(ai?.samples ?? []).map((s) => ({ id: s.id, kind: 'sample' as const, site: s.site })),
+    // The diagram first, then the sample (v0.55).
     ...(ai?.diagrams ?? []).map((d) => ({ id: d.id, kind: 'diagram' as const, site: d.site })),
+    ...(ai?.samples ?? []).map((s) => ({ id: s.id, kind: 'sample' as const, site: s.site })),
   ];
   const word = (k: Tile['kind']) => (k === 'diagram' ? t('ai.diagram') : k === 'sample' ? t('ai.sample') : '');
   return (

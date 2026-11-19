@@ -35,11 +35,39 @@ export interface AiName {
 export interface AiFind {
   /** `web` — found by Google Search and checked on the pages; `model` — the AI's own knowledge, not checked anywhere; `garage` — the garage's own jobs. */
   search: 'web' | 'model' | 'garage';
-  /** `garage` — on how many of the garage's own lines for this car the number was (v0.49). */
-  numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number }[];
+  /**
+   * `garage` — on how many of the garage's own lines for this car the number was (v0.49). From the maker's open
+   * catalogue, read by the garage's server (v0.55): `fits` — the number is on a diagram of this car's model and years
+   * (of its frame, when that is known); `name` — the maker's own name of the part; `model` — the diagram's model and
+   * years («Yaris NCP91 · 2005–2011»); `replaces` — the older numbers this one stands for (one part).
+   */
+  numbers: FoundNumber[];
   sources?: { url: string; title?: string }[];
-  /** Pictures off the catalogue pages, looked at by the AI: the part's diagram, or a photo of the part (a sample). */
-  images?: { type: string; data: string; source: string; number?: string; kind?: 'diagram' | 'photo' }[];
+  /**
+   * Pictures: the part's factory diagram (v0.55 — from the catalogue, `marks`: where the part's callout is on it, in
+   * the picture's own pixels) first, then a photo of the part (a sample).
+   */
+  images?: { type: string; data: string; source: string; number?: string; kind?: 'diagram' | 'photo'; marks?: PictureMark[]; title?: string }[];
+  /** How far the search had to go (v0.55): 0 — the catalogue alone, 1 — a web search, 2 — with the pages read, 3 — a deep one. */
+  stage?: number;
+}
+export interface FoundNumber {
+  number: string;
+  brand?: string;
+  note?: string;
+  seen: string[];
+  garage?: number;
+  fits?: boolean;
+  name?: string;
+  model?: string;
+  replaces?: string[];
+}
+/** A place on a picture, in its own pixels. */
+export interface PictureMark {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 }
 
 type CarFields = Pick<Vehicle, 'make' | 'model' | 'year' | 'engine' | 'type'>;
@@ -142,13 +170,46 @@ export const catalogCount = (seen: string[]): number => new Set(seen.map(host).f
 export const siteOf = host;
 
 /**
- * A part number the app may write itself: found on the web and seen on the pages of two different catalogues — or on
- * one and used by the garage itself before on this car (v0.49) — and shaped like the maker's numbers (a Toyota number
- * is ten characters: a shape the maker's catalogue would not write is a guess). One page, or the AI's own knowledge, is
- * a candidate shown on the line — taken by a tap.
+ * A part number the app may write itself: on a diagram of this very car in the maker's catalogue (v0.55 — the garage's
+ * server read its page), or found on the web and seen on the pages of two different catalogues — or on one and used by
+ * the garage itself before on this car (v0.49) — and shaped like the maker's numbers (a Toyota number is ten
+ * characters: a shape the maker's catalogue would not write is a guess). Two such — neither (the variants of a part:
+ * a person picks). One page, or the AI's own knowledge, is a candidate shown on the line — taken by a tap.
  */
 export function provenNumber(find: Pick<AiFind, 'search' | 'numbers'>, make = ''): string | undefined {
   if (find.search !== 'web') return undefined;
-  const sure = find.numbers.filter((n) => numberPlausible(make, n.number) !== false && catalogCount(n.seen) + ((n.garage ?? 0) > 0 ? 1 : 0) >= 2);
+  const sure = find.numbers.filter((n) => numberPlausible(make, n.number) !== false && (n.fits === true || catalogCount(n.seen) + ((n.garage ?? 0) > 0 ? 1 : 0) >= 2));
   return sure.length === 1 ? sure[0].number : undefined;
+}
+
+/**
+ * The number written with nobody looking (the AI for every part of a job; the user: «номера добавлять, если они точные;
+ * если вышли сразу несколько — не добавлять»): the proven one, when it is the only one that came — or it is on this
+ * car's diagram in the catalogue and the others are not (v0.55: they are no rivals to it).
+ */
+export function soleNumber(find: Pick<AiFind, 'search' | 'numbers'>, make = ''): string | undefined {
+  const proven = provenNumber(find, make);
+  const own = proven ? find.numbers.find((n) => n.number === proven) : undefined;
+  if (!proven || !own) return undefined;
+  if (own.fits) return proven;
+  return find.numbers.some((n) => n !== own && (n.seen.length > 0 || (n.garage ?? 0) > 0)) ? undefined : proven;
+}
+
+/** A car that can be looked a part up for: its make, or its VIN (v0.55 — a third of the garage's first searches had neither). */
+export const carKnown = (car?: { make?: string; vin?: string }): boolean => !!car?.make?.trim() || isVin((car?.vin ?? '').toUpperCase());
+
+/**
+ * What is bought by its kind and size, not by a catalogue number (v0.55): tyres, oils and other fluids, gas — the AI for
+ * every part of a job passes them by (asked for one by name — «Найти номер» — it still looks).
+ */
+export function boughtBySpec(name: string): boolean {
+  // What the thing is — its head word: the last in English («ENGINE OIL 5W30», «2 FRONT TYRES»), the first in Russian
+  // («масло моторное»); sizes, counts and what is in brackets set aside. «OIL FILTER», «COOLANT HOSE» are parts.
+  const words = name
+    .toUpperCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .split(/[^A-ZА-ЯЁ0-9/]+/)
+    .filter((w) => w && !/\d/.test(w));
+  if (!words.length) return false;
+  return /^(TYRES?|TIRES?|OIL|ATF|COOLANT|ANTIFREEZE|FLUID|GREASE|FREON|REFRIGERANT|GAS)$/.test(words[words.length - 1]) || /^(ШИН[АЫ]|РЕЗИН[АЫУ]|МАСЛО|АНТИФРИЗ|ТОСОЛ|ЖИДКОСТЬ|СМАЗК[АИУ]|ФРЕОН)$/.test(words[0]);
 }

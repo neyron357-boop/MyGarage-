@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { catalogCount, nameFix, provenNumber, vinFill, type AiFind, type AiName, type AiVin } from '../domain/ai';
+import { type AiFind, type AiName, type AiVin, boughtBySpec, carKnown, catalogCount, type FoundNumber, nameFix, provenNumber, soleNumber, vinFill } from '../domain/ai';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { formatNumber, sameNumber } from '../domain/partNumbers';
@@ -96,6 +96,8 @@ export type AiNotice =
   | { kind: 'number'; itemId: string; number: string; catalogs: number; garage: number; undo: () => Promise<void> }
   /** Every part of a job looked at at once (v0.52, `aiAllParts`): how many lines, names put right, numbers written, lines with pictures. */
   | { kind: 'parts'; orderId: string; lines: number; names: number; numbers: number; pictures: number; undo: () => Promise<void> }
+  /** No car to look a part up for (v0.55): its make and model, or its VIN, are asked for — nothing was looked up. */
+  | { kind: 'needCar' }
   /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
   | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; date: string; dateSure: boolean; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
 
@@ -332,7 +334,6 @@ async function keepPictures(now: OrderItem, pics: { diagrams: string[]; samples:
   return { ...(pics.diagrams.length ? { diagramIds: pics.diagrams } : {}), ...(pics.samples.length ? { sampleIds: pics.samples } : {}) };
 }
 
-type FoundNumber = AiFind['numbers'][number];
 
 /** The web's numbers and the garage's own put together: the garage's count on the web's numbers, its other numbers after them. */
 function merged(web: FoundNumber[], mem: Memory, make: string): FoundNumber[] {
@@ -352,6 +353,11 @@ function merged(web: FoundNumber[], mem: Memory, make: string): FoundNumber[] {
  * the garage before — is written itself when the line has none (domain/ai.ts `provenNumber`); the part's diagram and
  * photos of the part are kept with the line (not sent to the customer). Once a line, unless asked again (`again` —
  * ↻ on the line); a guess made without the web is looked up again the next time the line is saved.
+ *
+ * v0.55 (the garage's server: the maker's open catalogue read by the number, a deeper search step by step): a line with
+ * its own number sends it (`number`: the catalogue alone gives its diagram — no AI, no search); ↻ on a line already
+ * looked up asks to dig deeper (`deep`); a car with no make and no VIN is not looked a part up for — «Укажите машину»;
+ * the diagram comes with the part's place on it (`marks`), drawn into the picture kept.
  */
 export function aiFindPart(
   itemId: string,
@@ -366,14 +372,20 @@ export function aiFindPart(
     if (!item || item.kind !== 'part' || !part || (!again && (looked || (item.partNumber && !(pictures && !hasPictures))))) return undefined;
     const car = await carOf(item);
     const carKey = { make: car?.make ?? '', model: car?.model ?? '', year: car?.year, engine: car?.engine };
+    // No car — no part of it to find (v0.55): said once, nothing asked.
+    if (!carKnown(car)) {
+      if (!quiet) notify({ kind: 'needCar' });
+      return undefined;
+    }
     const mem = partsMemory((await priorParts()).filter((p) => p.id !== itemId), carKey, part);
     const write = async (r: Pick<AiFind, 'search' | 'numbers'>, pics: { diagrams: string[]; samples: string[] }, proven: string | undefined) => {
       const now = await db.items.get(itemId);
       if (!now) return;
       // `single` (v0.52, the user: «номера добавлять, если они точные; если вышли сразу несколько — не добавлять»): written
-      // only when it is the one number found (seen in a catalogue or used by the garage).
-      const several = r.numbers.filter((x) => x.seen.length > 0 || (x.garage ?? 0) > 0).length > 1;
-      const fill = proven && !now.partNumber && !(single && several) ? proven : undefined;
+      // only when it stands alone — the one that came, or (v0.55, `soleNumber`) the one on this car's diagram.
+      const others = r.numbers.filter((x) => x.seen.length > 0 || (x.garage ?? 0) > 0).length > 1;
+      const alone = r.search === 'web' ? soleNumber(r, carKey.make) === proven : !others;
+      const fill = proven && !now.partNumber && (!single || alone) ? proven : undefined;
       await db.items.update(itemId, { aiFind: { at: nowIso(), search: r.search, part, numbers: r.numbers, filled: fill }, ...(await keepPictures(now, pics)), ...(fill ? { partNumber: fill } : {}) });
       await refreshPriorPart(itemId);
       if (fill && !quiet) {
@@ -391,18 +403,44 @@ export function aiFindPart(
         });
       }
     };
+    const askFor = { part, make: carKey.make, model: carKey.model, year: carKey.year ?? '', engine: carKey.engine ?? '', vin: car?.vin ?? '', built: car?.vin ? vinBuilt(car.vin) ?? '' : '' };
+    /** The server's pictures kept with the line — all in one write (v0.54); a diagram with the part's place drawn on it (v0.55). */
+    const keep = async (imgs: NonNullable<AiFind['images']>) => {
+      const pics = { diagrams: [] as string[], samples: [] as string[] };
+      const files = await Promise.all(imgs.map((img) => blobOf(img.data, img.type).catch(() => undefined)));
+      const kept = await addWebPictures(
+        imgs.flatMap((img, k) => (files[k] ? [{ ownerType: 'item' as const, ownerId: itemId, slot: img.kind === 'photo' ? 'sample' : 'diagram', file: files[k]!, name: img.source, marks: img.kind === 'photo' ? undefined : img.marks }] : [])),
+      ).catch(() => []);
+      // a picture that would not keep: the numbers still count
+      for (const m of kept) (m.slot === 'sample' ? pics.samples : pics.diagrams).push(m.id);
+      return pics;
+    };
+    /**
+     * The pictures of a number the garage knows already (v0.55): copied from the line that had them — else its diagram
+     * from the maker's catalogue, read by the server for nothing (`catalogOnly`: no AI, no search; no server — none).
+     */
+    const picturesOf = async (number: string, line: PriorPart) => {
+      if (item.diagramIds?.length || item.sampleIds?.length) return { diagrams: [], samples: [] };
+      const copied = await copyPictures(line, itemId);
+      if (copied.diagrams.length || copied.samples.length || !aiOn()) return copied;
+      try {
+        const r = await askAi<AiFind>('part-find', { ...askFor, number, catalogOnly: true }, `find:${itemId}`, 30_000);
+        return await keep(r.images ?? []);
+      } catch {
+        return copied;
+      }
+    };
     // 1. Fitted before on this car: the garage's number, no question.
     if (mem.proven && !again) {
       const numbers: FoundNumber[] = mem.numbers.map((n) => ({ number: n.number, seen: [], garage: n.times }));
-      const pics = item.diagramIds?.length || item.sampleIds?.length ? { diagrams: [], samples: [] } : await copyPictures(mem.numbers[0].from, itemId);
-      await write({ search: 'garage', numbers }, pics, mem.proven);
+      await write({ search: 'garage', numbers }, await picturesOf(mem.proven, mem.numbers[0].from), mem.proven);
       return { search: 'garage', numbers };
     }
     // 2. The web looked at lately for the same part on the same car: that answer again.
     if (mem.web?.web && !again) {
       const numbers = merged(mem.web.web.numbers, mem, carKey.make);
-      const pics = item.diagramIds?.length || item.sampleIds?.length ? { diagrams: [], samples: [] } : await copyPictures(mem.web, itemId);
-      await write({ search: 'web', numbers }, pics, provenNumber({ search: 'web', numbers }, carKey.make));
+      const proven = provenNumber({ search: 'web', numbers }, carKey.make);
+      await write({ search: 'web', numbers }, await picturesOf(proven ?? numbers[0]?.number ?? '', mem.web), proven);
       return { search: 'web', numbers };
     }
     // 3. The AI — or, without it, what the garage used before as candidates.
@@ -412,21 +450,29 @@ export function aiFindPart(
     }
     const r = await askAi<AiFind>(
       'part-find',
-      { part, make: carKey.make, model: carKey.model, year: carKey.year ?? '', engine: carKey.engine ?? '', vin: car?.vin ?? '', built: car?.vin ? vinBuilt(car.vin) ?? '' : '', hints: mem.numbers.slice(0, 3).map((n) => n.number) },
+      {
+        ...askFor,
+        hints: mem.numbers.slice(0, 3).map((n) => n.number),
+        // The line's own number: the catalogue alone may answer (its name, its diagram).
+        ...(item.partNumber?.trim() ? { number: item.partNumber.trim() } : {}),
+        // ↻ on a line already looked up: dig deeper than what was found.
+        ...(again && item.aiFind?.part === part && item.aiFind.search !== 'garage' ? { deep: true } : {}),
+      },
       `find:${itemId}`,
     );
-    // The pictures: the part's diagram and photos of the part (samples), each kept apart from the line's own photos.
-    const pics = { diagrams: [] as string[], samples: [] as string[] };
-    // All of them in one write (v0.54): the job's screen changes once, not once a picture.
-    const imgs = r.images ?? [];
-    const files = await Promise.all(imgs.map((img) => blobOf(img.data, img.type).catch(() => undefined)));
-    const kept = await addWebPictures(
-      imgs.flatMap((img, k) => (files[k] ? [{ ownerType: 'item' as const, ownerId: itemId, slot: img.kind === 'photo' ? 'sample' : 'diagram', file: files[k]!, name: img.source }] : [])),
-    ).catch(() => []);
-    // a picture that would not keep: the numbers still count
-    for (const m of kept) (m.slot === 'sample' ? pics.samples : pics.diagrams).push(m.id);
+    // The pictures: the part's diagram first, then photos of the part (samples), each kept apart from the line's own photos.
+    const pics = await keep(r.images ?? []);
     const numbers = merged(
-      r.numbers.map((n) => ({ number: n.number, brand: n.brand || undefined, note: n.note || undefined, seen: n.seen ?? [] })),
+      r.numbers.map((n) => ({
+        number: n.number,
+        brand: n.brand || undefined,
+        note: n.note || undefined,
+        seen: n.seen ?? [],
+        ...(n.fits ? { fits: true } : {}),
+        ...(n.name ? { name: n.name } : {}),
+        ...(n.model ? { model: n.model } : {}),
+        ...(n.replaces?.length ? { replaces: n.replaces } : {}),
+      })),
       mem,
       carKey.make,
     );
@@ -440,7 +486,7 @@ const allProgress = new Map<string, { done: number; total: number }>();
 export const aiPartsProgress = (orderId: string): { done: number; total: number } | undefined => allProgress.get(orderId);
 
 /** How many parts are looked up side by side (the garage's server and Gemini answer them together). */
-const AT_ONCE = 5;
+const AT_ONCE = 6;
 
 /** A few at a time (the server answers them side by side; a long list is done in minutes, not tens of them). */
 async function inTurns<T>(list: T[], at: number, fn: (x: T) => Promise<void>): Promise<void> {
@@ -473,8 +519,14 @@ export async function aiAllParts(
   const picked = only ? new Set(only) : undefined;
   const items = (await db.items.where('orderId').equals(orderId).toArray())
     .filter((i) => (!picked || picked.has(i.id)) && i.kind === 'part' && i.approvalState !== 'declined' && !i.customerSupplied && !!(i.titleRu || i.titleEn))
+    // Tyres, oils, fluids are bought by their kind and size (v0.55): not looked up — unless picked by hand.
+    .filter((i) => !!picked || !boughtBySpec(i.titleEn || i.titleRu || ''))
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.createdAt.localeCompare(b.createdAt));
   if (!items.length) return undefined;
+  // No car — nothing to look up (v0.55): said once for all of them; the names are still put right.
+  const order = await db.orders.get(orderId);
+  const car = order ? await db.vehicles.get(order.vehicleId) : undefined;
+  if (!carKnown(car)) notify({ kind: 'needCar' });
   const before = new Map(items.map((i) => [i.id, { titleRu: i.titleRu, titleEn: i.titleEn, partNumber: i.partNumber, pics: (i.diagramIds?.length ?? 0) + (i.sampleIds?.length ?? 0) }]));
   working.add(key);
   allProgress.set(orderId, { done: 0, total: items.length });

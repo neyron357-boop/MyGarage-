@@ -619,8 +619,11 @@ export interface OrderItem {
     search: 'web' | 'model' | 'garage';
     /** The name it was looked up by (a new name — looked up again). */
     part?: string;
-    /** `garage` — on how many of the garage's own lines for this car the number was (v0.49). */
-    numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number }[];
+    /**
+     * `garage` — on how many of the garage's own lines for this car the number was (v0.49); `fits`, `name`, `model`,
+     * `replaces` — the maker's catalogue's word on it (v0.55, domain/ai.ts `FoundNumber`).
+     */
+    numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number; fits?: boolean; name?: string; model?: string; replaces?: string[] }[];
     filled?: string;
   };
   /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */

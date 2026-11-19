@@ -280,7 +280,8 @@ describe('every part of a job at once (v0.52)', () => {
     expect(w!.aiFind).toBeUndefined();
     // One card for all of it — no card per line.
     expect(notices.map((n) => n.kind)).toEqual(['parts']);
-    await notices[0].undo();
+    const card = notices[0];
+    if ('undo' in card) await card.undo();
     const back = (await db.items.get(pads.id))!;
     expect([back.titleRu, back.titleEn, back.partNumber]).toEqual(['КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ', undefined, undefined]);
     expect(back.diagramIds).toHaveLength(1);
@@ -336,5 +337,66 @@ describe('the part search only when asked (v0.53)', () => {
     expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part)).toEqual(['OIL FILTER']);
     expect((await db.items.get(pads.id))!.aiFind).toBeUndefined();
     expect((await db.items.get(filter.id))!.diagramIds).toHaveLength(1);
+  });
+});
+
+describe('the maker’s catalogue behind the search (v0.55)', () => {
+  const fits = { search: 'web', stage: 0, numbers: [{ number: '04465-60280', brand: 'Toyota', seen: ['https://www.megazip.net/parts/toyota-0446560280'], fits: true, name: 'Pad Kit, Disc Brake, Front', model: 'Land Cruiser GRJ200 · 2007–2021', replaces: ['04465-60270'] }, { number: '04465-60320', brand: 'Toyota', seen: ['https://partsouq.com/x'] }], images: [] };
+
+  it('the number on this car’s diagram is written with nobody looking, whatever else came; what the catalogue says is kept on the line', async () => {
+    const o = await car('Toyota', 'Land Cruiser');
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    answers['part-find'] = fits;
+    expect(await aiAllParts(o.id)).toMatchObject({ lines: 1, numbers: 1 });
+    const i = (await db.items.get(pads.id))!;
+    expect(i.partNumber).toBe('04465-60280');
+    expect(i.aiFind?.numbers[0]).toMatchObject({ number: '04465-60280', fits: true, name: 'Pad Kit, Disc Brake, Front', model: 'Land Cruiser GRJ200 · 2007–2021', replaces: ['04465-60270'] });
+  });
+
+  it('the line’s own number goes with the question; ↻ on a line looked up asks to dig deeper; nothing is asked without a car', async () => {
+    const o = await car('Toyota', 'Land Cruiser');
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-60280' });
+    answers['part-find'] = fits;
+    await aiFindPart(pads.id, { again: true });
+    expect(asked.filter((a) => a.path === 'part-find').map((a) => [a.body.number, a.body.deep])).toEqual([['04465-60280', undefined]]);
+    await aiFindPart(pads.id, { again: true });
+    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.deep)).toEqual([undefined, true]);
+    // A car with no make and no VIN: «Укажите машину», no question.
+    const bare = await car('', '');
+    const part = await addItem(bare.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
+    asked = [];
+    notices.length = 0;
+    expect(await aiFindPart(part.id, { again: true })).toBeUndefined();
+    expect([asked.length, notices.map((n) => n.kind)]).toEqual([0, ['needCar']]);
+  });
+
+  it('every part of a job: tyres and fluids are passed by; no car — said once, the names still put right, nothing looked up', async () => {
+    const o = await car('Toyota', 'Hiace');
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: '2 FRONT TYRES', qty: 2, unitPriceFils: 0 });
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'ENGINE OIL 5W30', qty: 4, unitPriceFils: 0 });
+    const plug = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'SPARK PLUG', qty: 4, unitPriceFils: 0 });
+    answers['part-find'] = { search: 'web', numbers: [], images: [] };
+    expect(await aiAllParts(o.id)).toMatchObject({ lines: 1 });
+    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part)).toEqual(['SPARK PLUG']);
+    expect((await db.items.get(plug.id))!.aiFind).toBeDefined();
+    const bare = await car('', '');
+    await addItem(bare.id, { kind: 'part', block: 'A', titleRu: 'колодки тормазные передние', qty: 1, unitPriceFils: 0 });
+    asked = [];
+    notices.length = 0;
+    expect(await aiAllParts(bare.id)).toMatchObject({ lines: 1, names: 1, numbers: 0 });
+    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
+    expect(notices.map((n) => n.kind)).toEqual(['needCar', 'parts']);
+  });
+
+  it('a number the garage fitted before, with no pictures to copy: its diagram from the catalogue — the server asked for the catalogue only', async () => {
+    const o = await car('Toyota', 'Land Cruiser');
+    const first = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-60280' });
+    await updateItem(first.id, { procurementStatus: 'received' });
+    const second = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    answers['part-find'] = { search: 'web', numbers: [{ number: '04465-60280', seen: [], fits: true }], images: [{ type: 'image/png', data: btoa('z'.repeat(900)), source: 'https://www.megazip.net/parts/toyota-0446560280', kind: 'diagram', marks: [{ x1: 1, y1: 2, x2: 3, y2: 4 }] }] };
+    await aiFindPart(second.id);
+    expect(asked.filter((a) => a.path === 'part-find').map((a) => [a.body.number, a.body.catalogOnly])).toEqual([['04465-60280', true]]);
+    const i = (await db.items.get(second.id))!;
+    expect([i.partNumber, i.aiFind?.search, i.diagramIds?.length]).toEqual(['04465-60280', 'garage', 1]);
   });
 });

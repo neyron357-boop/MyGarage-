@@ -1,5 +1,5 @@
 import { ActionIcon, Text } from '@mantine/core';
-import { IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
+import { IconChecks, IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
 import { useSyncExternalStore, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
@@ -167,11 +167,19 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
               {taken ? <IconCircleCheckFilled size={22} color="var(--mantine-color-cobalt-6)" aria-hidden /> : <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />}
               <span className="ai-num-main">
                 <span className="ai-num-no">{n.number}</span>
-                {(n.brand || n.note || garage > 0) && (
-                  <span className="ai-num-sub">{[garage > 0 ? t('ai.usedIn', { count: garage }) : '', n.brand, n.note].filter(Boolean).join(' · ')}</span>
+                {/* The maker's catalogue's word (v0.55): its own name of the part, the model and years of its diagram, the
+                    older numbers it stands for. */}
+                {(n.brand || n.note || n.name || n.model || garage > 0) && (
+                  <span className="ai-num-sub">
+                    {[garage > 0 ? t('ai.usedIn', { count: garage }) : '', n.name || n.brand, n.model, n.replaces?.length ? t('ai.replaces', { numbers: n.replaces.join(', ') }) : '', n.note].filter(Boolean).join(' · ')}
+                  </span>
                 )}
               </span>
-              {garage > 0 && count === 0 ? (
+              {n.fits ? (
+                <span className="ai-seen" data-fits title={t('ai.onDiagram')} aria-label={t('ai.onDiagram')}>
+                  <IconChecks size={18} stroke={2.4} aria-hidden />
+                </span>
+              ) : garage > 0 && count === 0 ? (
                 <span className="ai-seen" title={t('ai.usedIn', { count: garage })} aria-label={t('ai.usedIn', { count: garage })}>
                   <IconHistory size={16} stroke={2.2} aria-hidden />
                   {garage}

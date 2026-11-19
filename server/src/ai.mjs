@@ -3,7 +3,11 @@ import dns from 'node:dns/promises';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { catalogSlugs, catalogUrl, readCatalogPage } from './catalog.mjs';
+import { createPartFind, parseFound } from './partfind.mjs';
 import { DIRS, httpError } from './store.mjs';
+
+export { parseFound };
 
 /*
  * The garage's AI (v0.48, the user: «внедри ИИ Gemini»): Google's Gemini, called from this computer only — its key
@@ -34,6 +38,12 @@ import { DIRS, httpError } from './store.mjs';
  * pages read (never with more thinking); pages and pictures fetched together, each with a short limit; the pictures
  * looked at in low resolution (265 tokens a picture instead of 1 098); the light models' small questions with minimal
  * thinking (the stronger ones do not take it — low).
+ *
+ * Deeper, surer, cheaper (v0.55 — partfind.mjs, catalog.mjs): a number is first looked for without a paid search — the
+ * garage's own numbers and the model's own knowledge, each read by this computer in the open catalogue (it exists, it
+ * is that part, it is on this model's diagram in these years) — and the web is asked only when that did not find it:
+ * one search, then with the pages read, then a deep one. The part's factory diagram comes from the catalogue, its
+ * callout's place with it; a photo of the part after. No car — nothing is asked at all.
  */
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -51,7 +61,8 @@ const PAGE_MS = 6_000;
 const FETCH_MS = 8_000;
 const DAY = 24 * 60 * 60_000;
 /** How long an answer serves: a VIN and a name do not change; a number found on the web — a month; a guess — half an hour. */
-const TTL = { vin: 365 * DAY, name: 365 * DAY, web: 30 * DAY, model: 30 * 60_000 };
+const TTL = { vin: 365 * DAY, name: 365 * DAY, web: 30 * DAY, proven: 365 * DAY, model: 30 * 60_000, catalog: 90 * DAY, noPage: 7 * DAY };
+const UA = 'Mozilla/5.0 (MyGarage parts lookup)';
 
 /*
  * The questions, ready-made («заготовки»): short, every word earning its tokens, the facts the app already knows put
@@ -64,19 +75,6 @@ Give make, model (as sold, e.g. "Land Cruiser"), year, engine ("4.0L V6"; "" if 
   name: (name, car) =>
     `Spare part name typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}". It may have typos; it may be English, Russian, or Russian in Latin letters.
 fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS"); isPart: is it a car part or service item; confidence 0..1 for fixed.`,
-  search: (part, car, vin, built, hints) =>
-    `Find the genuine (OEM) part number of "${part}" for exactly this car: ${car || 'unknown'}${vin ? `, VIN ${vin}` : ''}${built ? ` (built in ${built})` : ''}, in the UAE — GCC specification unless the VIN says otherwise.
-Search Google once or twice (catalogues: partsouq.com, amayama.com, megazip.net, 7zap.com, the maker's, dealers' parts shops); every number must come from a search result or a page — not from memory.${hints.length ? `\nThe garage used ${hints.join(', ')} for this part on this car before: confirm or correct.` : ''}
-Answer only with lines like these, nothing else:
-N | number as the catalogue writes it | maker | what tells the variants apart (market, dates, engine, side; replaces …), under 60 characters | page address
-D | address of a catalogue diagram picture showing the part | page address
-P | address of a photo of the part itself | page address
-Nothing found: NONE`,
-  extract: (text) =>
-    `Write this parts-catalogue answer down as JSON, nothing added:
-numbers: each {number (as written), brand, note (variants, market, replaces…, under 80 characters), pages: [addresses where it was seen]}; images: each {url, kind: "diagram" | "photo", page}.
-Answer:
-${text}`,
   receipt: () =>
     `A photo of a supplier's invoice or receipt in the UAE (amounts in AED; VAT 5 %). The garage is the buyer; read the seller's paper exactly as printed.
 Return: isReceipt (an invoice/receipt/bill at all); vendor (the seller's name as printed, not the buyer's); vendorTrn; vendorPhone (a mobile first, "" if none); vendorAddress (a few words, "" if none); kind — "parts" (car parts, accessories, oils, consumables), "service" (a workshop's or contractor's bill for work: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo;
@@ -104,39 +102,6 @@ export function parseJson(text) {
 
 /** A part number as catalogues differ in writing it (04465-33471, 0446533471, 04465 33471): letters and digits. */
 export const plainNumber = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-/** An address in a cell of an answer's line: as is, in a markdown link, in angle brackets or quotes. */
-function addressIn(cell) {
-  const m = String(cell ?? '').match(/https?:\/\/[^\s<>"'`|)\]]+/);
-  return m ? m[0].replace(/[.,;]+$/, '') : '';
-}
-
-/**
- * The search's answer in its lines (v0.54) — «N | number | maker | note | page», «D | picture | page» (a diagram),
- * «P | picture | page» (a photo of the part): read here, no second question to write it down. A model's bullets, bold
- * and numbering around a line are let be.
- */
-export function parseFound(text) {
-  const numbers = [];
-  const images = [];
-  for (const raw of String(text ?? '').split(/\r?\n/)) {
-    const line = raw.replace(/^[\s*•\-–>#]+|\*\*/g, '').replace(/^\d+[.)]\s*/, '').trim();
-    const m = line.match(/^([NDP])\s*[|:]\s*(.*)$/i);
-    if (!m) continue;
-    const cells = m[2].split('|').map((c) => c.trim().replace(/^`+|`+$/g, ''));
-    const tag = m[1].toUpperCase();
-    if (tag === 'N') {
-      const number = cells[0].replace(/^(?:OEM|PN|P\/N)[:#\s]+/i, '').trim();
-      if (plainNumber(number).length < 5) continue;
-      const pages = cells.slice(1).map(addressIn).filter(Boolean);
-      numbers.push({ number, brand: addressIn(cells[1]) ? '' : cells[1] ?? '', note: addressIn(cells[2]) ? '' : cells[2] ?? '', pages });
-    } else {
-      const url = addressIn(cells[0]);
-      if (url) images.push({ url, kind: tag === 'D' ? 'diagram' : 'photo', page: addressIn(cells[1]) });
-    }
-  }
-  return { numbers, images };
-}
 
 /** What came within `ms`: the rest let go (a slow page or picture does not hold the answer up). */
 async function within(promises, ms) {
@@ -415,11 +380,13 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
    * An answer kept: in memory while the server runs, in the store's SQLite for good (a restart, another device — the
    * same answer, no tokens). `ttl` — how long it serves, or how long for this answer (a guess — not long).
    */
-  function cached(k, kind, ttl, make) {
+  function cached(k, kind, ttl, make, { fresh = false } = {}) {
     const life = (r) => (typeof ttl === 'function' ? ttl(r) : ttl);
     const hit = cache.get(k);
-    if (hit && (!('result' in hit) || now() - hit.at < life(hit.result))) return hit.value;
-    if (store?.aiCacheGet) {
+    // Being made right now: the same answer for everyone who asks (also when asked anew).
+    if (hit && !('result' in hit)) return hit.value;
+    if (hit && !fresh && now() - hit.at < life(hit.result)) return hit.value;
+    if (store?.aiCacheGet && !fresh) {
       const row = store.aiCacheGet(k);
       if (row && now() - row.at < life(row.value)) {
         const entry = { at: row.at, result: row.value, value: Promise.resolve(row.value) };
@@ -445,6 +412,55 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     );
     cache.set(k, entry);
     return entry.value;
+  }
+
+  /** What is kept under a key, however old (where a deeper search starts from). */
+  function peek(k) {
+    const hit = cache.get(k);
+    if (hit && 'result' in hit) return hit.result;
+    try {
+      return store?.aiCacheGet?.(k)?.value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The open catalogue is asked a few pages at a time (a long list of parts must not come down on it at once). */
+  let catalogBusy = 0;
+  const catalogQueue = [];
+  async function catalogTurn(fn) {
+    if (catalogBusy >= 4) await new Promise((r) => catalogQueue.push(r));
+    catalogBusy++;
+    try {
+      return await fn();
+    } finally {
+      catalogBusy--;
+      catalogQueue.shift()?.();
+    }
+  }
+
+  /**
+   * A number's page in the open catalogue (catalog.mjs), read by this computer and kept: a quarter of a year (a part's
+   * name and diagrams do not change), «no such number» a week. The car's make first, its sister make after (a Lexus
+   * part under Toyota). None — null; the catalogue not answering — an error (not kept).
+   */
+  async function catalogPage(make, number) {
+    for (const slug of catalogSlugs(make)) {
+      const url = catalogUrl(slug, number);
+      if (!url) continue;
+      const got = await cached(`cat:${slug}-${plainNumber(number)}`, 'catalog', (r) => (r?.none ? TTL.noPage : TTL.catalog), () =>
+        catalogTurn(async () => {
+          if (!(await publicUrl(url, lookup))) return { none: true };
+          const res = await timed(url, { redirect: 'manual', headers: { 'User-Agent': UA, Accept: 'text/html' } }, PAGE_MS);
+          if (res.status === 404 || res.status === 410 || (res.status >= 300 && res.status < 400)) return { none: true };
+          if (!res.ok) throw httpError(502, `catalogue: ${res.status}`);
+          const read = readCatalogPage((await res.text()).slice(0, 2_000_000));
+          return read ? { url, slug, ...read } : { none: true };
+        }),
+      );
+      if (got && !got.none) return got;
+    }
+    return null;
   }
 
   /** The official decoder's facts (it knows the cars sold in the USA best; others — the maker and the year at least). */
@@ -490,7 +506,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     }
   }
 
-  async function image(url, from) {
+  async function image(url, from, least = 6_000) {
     if (!(await publicUrl(url, lookup))) return null;
     try {
       const res = await timed(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Referer: from } }, PAGE_MS);
@@ -498,7 +514,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       if (!res.ok || !/^image\/(jpeg|png|webp|gif)$/.test(type)) return null;
       const buf = Buffer.from(await res.arrayBuffer());
       // Not a pixel or an icon, not a poster (a catalogue drawing is a few hundred KB at most).
-      if (buf.length < 6_000 || buf.length > 1_500_000) return null;
+      if (buf.length < least || buf.length > 1_500_000) return null;
       return { type, data: buf.toString('base64'), source: from, url };
     } catch {
       return null;
@@ -545,24 +561,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     return kept;
   }
 
-  const FIND_SCHEMA = {
-    type: 'object',
-    properties: {
-      numbers: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: { number: { type: 'string' }, brand: { type: 'string' }, note: { type: 'string' }, pages: { type: 'array', items: { type: 'string' } } },
-          required: ['number'],
-        },
-      },
-      images: {
-        type: 'array',
-        items: { type: 'object', properties: { url: { type: 'string' }, kind: { type: 'string' }, page: { type: 'string' } }, required: ['url'] },
-      },
-    },
-    required: ['numbers'],
-  };
+  const findPart = createPartFind({ ask, json, page, image, lookAt, catalogPage, pageText, diagramImages, siteUrl, within, models: FIND_MODELS, fetchMs: FETCH_MS, log });
 
   return {
     on: () => !!key(),
@@ -576,11 +575,11 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       state.lastError = '';
       cache.clear();
     },
-    /** A device asks at most this often (a loop in the app must not spend the garage's quota). */
+    /** A device asks at most this often — 120 a minute (a loop in the app must not spend the garage's quota). */
     allow(deviceId) {
       const t = now();
       const recent = (calls.get(deviceId) ?? []).filter((x) => x > t - 60_000);
-      if (recent.length >= 40) throw httpError(429, 'too many AI questions, wait a minute');
+      if (recent.length >= 120) throw httpError(429, 'too many AI questions, wait a minute');
       recent.push(t);
       calls.set(deviceId, recent);
     },
@@ -667,82 +666,30 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       });
     },
 
-    async partFind({ part, make = '', model = '', year = '', engine = '', vin = '', built = '', hints = [] } = {}) {
+    /**
+     * A part's number, its diagram and a photo of it (partfind.mjs). `number` — the line's own number (typed, or the
+     * garage's): the catalogue alone may answer; `deep` — asked to dig deeper: what is kept is where it starts from, and
+     * is replaced; `catalogOnly` — only the catalogue's word on `number` (its name, its diagram): no AI, nothing paid.
+     * No car (no make, no VIN) — nothing is looked for.
+     */
+    async partFind({ part, make = '', model = '', year = '', engine = '', vin = '', built = '', hints = [], number = '', deep = false, catalogOnly = false } = {}) {
       part = String(part ?? '').trim().slice(0, 160);
       if (!part) throw httpError(400, 'no part');
       vin = VIN_RE.test(String(vin).toUpperCase()) ? String(vin).toUpperCase() : '';
+      make = String(make ?? '').trim();
+      // v0.55: 15 of the garage's first 44 searches were asked with no car — each a paid question that could find nothing.
+      if (!make && !vin) throw httpError(400, 'no car');
       built = String(built || builtWhere(vin)).slice(0, 30);
       hints = (Array.isArray(hints) ? hints : []).map((h) => String(h).trim()).filter(Boolean).slice(0, 3);
+      number = String(number ?? '').trim().toUpperCase().slice(0, 40);
       const car = carLine({ make, model, year, engine });
       // Kept by the car, not the VIN: two cars of one model, year, engine and plant share their numbers.
-      return cached(`find:${part.toLowerCase()}|${car.toLowerCase()}|${built.toLowerCase()}`, 'find', (r) => (r?.search === 'web' ? TTL.web : TTL.model), async () => {
-        // 1. The search, in plain words (a JSON answer keeps the model from searching), Google only, low thinking; nothing
-        //    found — once more with the pages read whole (v0.54: never with more thinking). 2. Its lines read here; a light
-        //    model writes it down as JSON only when they are not there.
-        let said;
-        let search = 'web';
-        const q = P.search(part, car, vin, built, hints);
-        try {
-          said = await ask(q, { kind: 'find', search: true, models: FIND_MODELS, timeout: 60_000 });
-          if (!said.searched || !parseFound(said.text).numbers.length) {
-            const again = await ask(q, { kind: 'find', search: true, read: true, models: FIND_MODELS, timeout: 75_000 });
-            if ((again.searched && parseFound(again.text).numbers.length) || !said.searched) said = again;
-          }
-          if (!said.searched) search = 'model';
-        } catch (e) {
-          if (!e.searchOff) throw e;
-          // No Google Search on this key: what the model knows itself — never taken as found.
-          search = 'model';
-          said = await ask(`${q}\nNo web access: say only what you are sure of.`, { kind: 'find', models: FIND_MODELS, timeout: 60_000 });
-        }
-        let found = { value: parseFound(said.text) };
-        if (!found.value.numbers.length && /[A-Z0-9-]{5,}/i.test(said.text) && /\d{3}/.test(said.text) && !/^\s*NONE\s*$/i.test(said.text))
-          found = await json(P.extract(said.text), FIND_SCHEMA, { kind: 'extract', thinking: 'minimal', timeout: 30_000 });
-        const numbers = (Array.isArray(found.value.numbers) ? found.value.numbers : [])
-          .map((n) => ({ number: String(n.number ?? '').trim().toUpperCase().slice(0, 40), brand: String(n.brand ?? '').trim().slice(0, 40), note: String(n.note ?? '').trim().slice(0, 80), pages: Array.isArray(n.pages) ? n.pages.map(String) : [] }))
-          .filter((n) => plainNumber(n.number).length >= 5)
-          .slice(0, 5);
-        // Seen 1: Google's own reading — the words of the answer that hold the number, backed by search results (their sites).
-        const backedBy = (n) => {
-          const p = plainNumber(n);
-          return said.supports.filter((x) => plainNumber(x.text).includes(p)).flatMap((x) => x.sites.map((site) => siteUrl(site)).filter(Boolean));
-        };
-        // Seen 2: this computer opens the pages named (public addresses only) and finds the number on them.
-        const modelImages = (Array.isArray(found.value.images) ? found.value.images : []).filter((i) => i && typeof i.url === 'string').slice(0, 6);
-        const urls = [...new Set([...numbers.flatMap((n) => n.pages), ...modelImages.map((i) => String(i.page || '')).filter(Boolean), ...said.sources.map((x) => x.url)])].slice(0, 8);
-        // The pictures the model named are fetched while the pages come (v0.54: one after the other took tens of seconds).
-        const named = [];
-        for (const i of modelImages) {
-          try {
-            const url = new URL(i.url, i.page || undefined).toString();
-            if (!named.some((c) => c.url === url)) named.push({ url, from: i.page || '', hint: i.kind });
-          } catch {
-            // not an address
-          }
-        }
-        const early = named.slice(0, 6).map((c) => image(c.url, c.from || c.url).then((img) => (img ? { ...img, hint: c.hint } : null)));
-        const pages = (await within(urls.map(page), FETCH_MS)).filter(Boolean);
-        const out = numbers.map((n) => {
-          const p = plainNumber(n.number);
-          const opened = pages.filter((pg) => plainNumber(pageText(pg.html)).includes(p)).map((pg) => pg.url);
-          return { number: n.number, brand: n.brand, note: n.note, seen: [...new Set([...opened, ...(search === 'web' ? backedBy(n.number) : [])])] };
-        });
-        // Pictures: those the model named, and off the pages that have a number — the likeliest; then a light model looks at
-        // them and keeps only the part's diagram and photos of the part itself.
-        const fromPages = [];
-        for (const pg of pages) {
-          const has = out.filter((n) => n.seen.includes(pg.url)).map((n) => n.number);
-          if (!has.length) continue;
-          for (const c of diagramImages(pg.html, pg.url, has).slice(0, 2))
-            if (!named.some((x) => x.url === c.url) && !fromPages.some((x) => x.url === c.url)) fromPages.push({ url: c.url, from: pg.url });
-        }
-        // All at once, within the limit; the first six that came, in the likeliest order (the model's first).
-        const late = fromPages.slice(0, 6).map((c) => image(c.url, c.from));
-        const got = await within([...early, ...late], FETCH_MS);
-        const fetched = got.filter(Boolean).slice(0, 6);
-        const images = await lookAt(fetched, part, car).catch(() => []);
-        return { part, car, search, numbers: out, sources: said.sources.slice(0, 8), images };
-      });
+      const key = `find3:${part.toLowerCase()}|${car.toLowerCase()}|${built.toLowerCase()}${number ? `|#${plainNumber(number)}` : ''}${catalogOnly ? '|catalog' : ''}`;
+      // A number on this car's diagram, or seen in two places, serves a year; another found on the web — a month; a guess — half an hour.
+      const life = (r) => (r?.search !== 'web' ? TTL.model : (r.numbers ?? []).some((n) => n.fits || (n.seen ?? []).length >= 2) ? TTL.proven : TTL.web);
+      const before = deep ? peek(key) : undefined;
+      if (catalogOnly && !number) throw httpError(400, 'no number');
+      return cached(key, 'find', life, () => findPart({ part, make, model, year, engine, vin, built, hints, number, deep: !!deep, before, car, catalogOnly: !!catalogOnly }), { fresh: !!deep });
     },
   };
 }

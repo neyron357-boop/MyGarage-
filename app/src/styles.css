@@ -6400,6 +6400,10 @@ html.desk .ai-scan-pill {
 .ai-seen[data-unsure] {
   color: var(--mantine-color-orange-7);
 }
+/* On this car's diagram in the maker's catalogue (v0.55): the surest mark — two ticks. */
+.ai-seen[data-fits] {
+  color: var(--mantine-color-green-6);
+}
 .ai-num[data-unsure] .ai-num-no {
   color: var(--mantine-color-orange-7);
 }

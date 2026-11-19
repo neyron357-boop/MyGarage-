@@ -20,9 +20,10 @@ export function PartThumb({ item, editable }: { item: OrderItem; editable: boole
   const { run } = useAction();
   const [viewing, setViewing] = useState<number | null>(null);
   const ids = item.mediaIds ?? [];
-  // No photo of its own (v0.52): what the garage's AI found shows in its place — a photo of the part first, else its
-  // diagram — with the AI's mark (it stays in the garage: the line's own photos are what goes to the customer).
-  const ai = [...(item.sampleIds ?? []), ...(item.diagramIds ?? [])];
+  // No photo of its own (v0.52): what the garage's AI found shows in its place — the part's diagram first (v0.55, the
+  // user: «приоритет по фото — схема детали, потом образец»), else a photo of the part — with the AI's mark (it stays in
+  // the garage: the line's own photos are what goes to the customer).
+  const ai = [...(item.diagramIds ?? []), ...(item.sampleIds ?? [])];
   const shown = ids.length ? ids : ai;
   const pick = usePhotoPick((files) => void run(async () => (await setLinePhotos(item.id, ids, files), haptic('light'))), { multiple: true });
   if (!shown.length && !editable) return null;

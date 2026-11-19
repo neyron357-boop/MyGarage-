@@ -151,20 +151,68 @@ async function drawScaled(bmp: ImageBitmap, max: number, q: number): Promise<Blo
 }
 
 /**
+ * A catalogue's drawing with a part's place marked: each place (in the picture's own pixels — a callout's number on
+ * the drawing) under a translucent yellow, a red line round it; a PNG (a drawing is lines — a JPEG would smear them).
+ */
+async function drawMarks(bmp: ImageBitmap, marks: { x1: number; y1: number; x2: number; y2: number }[]): Promise<Blob | undefined> {
+  const canvas = document.createElement('canvas');
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  const g = canvas.getContext('2d');
+  if (!g) return undefined;
+  // Drawings come with a clear ground: white under them (they are black lines).
+  g.fillStyle = 'rgb(255, 255, 255)';
+  g.fillRect(0, 0, canvas.width, canvas.height);
+  g.drawImage(bmp, 0, 0);
+  const pad = Math.max(4, Math.round(Math.max(bmp.width, bmp.height) / 220));
+  g.lineWidth = Math.max(2, Math.round(Math.max(bmp.width, bmp.height) / 380));
+  g.lineJoin = 'round';
+  // The system's yellow and red (iOS): a marker's ink, not the app's accent.
+  g.fillStyle = 'rgba(255, 204, 0, 0.38)';
+  g.strokeStyle = 'rgb(255, 59, 48)';
+  for (const m of marks.slice(0, 12)) {
+    const x = Math.max(0, Math.min(m.x1, m.x2) - pad);
+    const y = Math.max(0, Math.min(m.y1, m.y2) - pad);
+    const w = Math.min(canvas.width - x, Math.abs(m.x2 - m.x1) + pad * 2);
+    const h = Math.min(canvas.height - y, Math.abs(m.y2 - m.y1) + pad * 2);
+    if (!(w > 0 && h > 0)) continue;
+    g.fillRect(x, y, w, h);
+    g.strokeRect(x, y, w, h);
+  }
+  const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  canvas.width = 0;
+  canvas.height = 0;
+  return out ?? undefined;
+}
+
+/**
  * Pictures off the web (v0.54: the garage's AI's diagrams and photos of parts — measured, kept one by one they held a
  * phone's page up for a second and more): kept as they came (a catalogue's picture is web-sized already — not drawn
  * again at 1920 px), with a 400 px thumbnail and, only when it is large, its card made from the same decoding; all of
  * them in one write — the screens change once, not once a picture.
  */
-export async function addWebPictures(inputs: { ownerType: MediaOwner; ownerId: string; slot: string; file: Blob; name?: string }[]): Promise<Media[]> {
+export async function addWebPictures(
+  inputs: { ownerType: MediaOwner; ownerId: string; slot: string; file: Blob; name?: string; marks?: { x1: number; y1: number; x2: number; y2: number }[] }[],
+): Promise<Media[]> {
   const rows: { media: Media; blob: MediaBlob }[] = [];
   for (const input of inputs) {
+    let file = input.file;
     let thumb: Blob | undefined;
     let card: Blob | undefined;
     if (typeof document !== 'undefined' && typeof createImageBitmap === 'function') {
       try {
-        const bmp = await createImageBitmap(input.file);
+        let bmp = await createImageBitmap(file);
         try {
+          // A diagram with the part's place on it (v0.55): the place is drawn into the picture kept — every view of it,
+          // here and on the other devices, shows where the part is.
+          if (input.marks?.length) {
+            const marked = await drawMarks(bmp, input.marks);
+            if (marked) {
+              file = marked;
+              bmp.close();
+              bmp = await createImageBitmap(marked);
+            }
+          }
           thumb = await drawScaled(bmp, 400, 0.7);
           if (Math.max(bmp.width, bmp.height) * 0.85 > CARD_SIDE) card = await drawScaled(bmp, CARD_SIDE, 0.82);
         } finally {
@@ -180,14 +228,14 @@ export async function addWebPictures(inputs: { ownerType: MediaOwner; ownerId: s
       ownerId: input.ownerId,
       slot: input.slot,
       kind: 'photo',
-      mime: input.file.type || 'application/octet-stream',
-      size: input.file.size,
-      sha256: await sha256Hex(input.file),
+      mime: file.type || 'application/octet-stream',
+      size: file.size,
+      sha256: await sha256Hex(file),
       name: input.name,
       locked: false,
       createdAt: nowIso(),
     };
-    rows.push({ media, blob: { id: media.id, blob: input.file, thumb, ...(card ? { card } : {}) } });
+    rows.push({ media, blob: { id: media.id, blob: file, thumb, ...(card ? { card } : {}) } });
   }
   if (!rows.length) return [];
   await db.transaction('rw', db.media, db.mediaBlobs, async () => {

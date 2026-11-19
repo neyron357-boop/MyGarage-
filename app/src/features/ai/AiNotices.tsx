@@ -73,6 +73,10 @@ export function AiNotices() {
               </span>
             </>
           );
+        } else if (n.kind === 'needCar') {
+          // No car to look a part up for (v0.55): what is missing, in two words — nothing was asked, nothing to undo.
+          title = t('ai.needCar');
+          body = <span className="ai-toast-sub">{t('ai.needCarHint')}</span>;
         } else {
           // From the garage's own jobs (v0.49) — said so: no catalogue was asked.
           title = n.catalogs === 0 && n.garage > 0 ? t('ai.numberGarage') : t('ai.numberTitle');
@@ -94,8 +98,9 @@ export function AiNotices() {
             </span>
           );
         }
-        // The AI has finished with a result: its sound (v0.52) — a long work finished, three notes.
-        chime(n.kind === 'parts' ? 'done' : 'found');
+        // The AI has finished with a result: its sound (v0.52) — a long work finished, three notes. Not a result — no sound.
+        if (n.kind !== 'needCar') chime(n.kind === 'parts' ? 'done' : 'found');
+        const undo = 'undo' in n ? n.undo : undefined;
         notifications.show({
           id,
           className: 'ai-toast',
@@ -107,16 +112,18 @@ export function AiNotices() {
                 <span className="ai-toast-title">{title}</span>
                 {body}
               </span>
-              <button
-                type="button"
-                className="ai-undo mantine-UnstyledButton-root"
-                onClick={() => {
-                  void n.undo();
-                  notifications.hide(id);
-                }}
-              >
-                {t('common.undo')}
-              </button>
+              {undo && (
+                <button
+                  type="button"
+                  className="ai-undo mantine-UnstyledButton-root"
+                  onClick={() => {
+                    void undo();
+                    notifications.hide(id);
+                  }}
+                >
+                  {t('common.undo')}
+                </button>
+              )}
             </span>
           ),
         });

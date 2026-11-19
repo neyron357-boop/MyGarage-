@@ -3442,6 +3442,96 @@ async function launchBrowser() {
       for (const o of await db.orders.where('vehicleId').equals(v).toArray()) await deleteJob(o.id, { withRecords: true });
     }, made.vehicleId);
   });
+  await step('v0.55: the AI’s search by the maker’s catalogue — no car: «Укажите машину», nothing asked; a number on this car’s diagram written itself and marked in the sheet; the diagram first, the part’s place drawn on it', async () => {
+    const dlg = page.getByRole('dialog');
+    const made = await page.evaluate(async () => {
+      const ai = await import('/src/services/ai.ts');
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      // A catalogue's drawing: black lines on white, 300×200.
+      const c = document.createElement('canvas');
+      c.width = 300;
+      c.height = 200;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, 300, 200);
+      g.strokeStyle = '#000';
+      g.strokeRect(100, 60, 120, 90);
+      const drawing = c.toDataURL('image/png').split(',')[1];
+      window.__asked = [];
+      ai.setAiTransport(async (path, body) => {
+        window.__asked.push(path);
+        if (path === 'part-name') return { fixed: body.name, english: body.name, isPart: true, confidence: 0.9 };
+        if (path !== 'part-find') throw new Error('no');
+        return {
+          search: 'web',
+          stage: 0,
+          numbers: [
+            { number: '04465-60280', brand: 'Toyota', seen: ['https://www.megazip.net/parts/toyota-0446560280'], fits: true, name: 'Pad Kit, Disc Brake, Front', model: 'Land Cruiser GRJ200 · 2007–2021', replaces: ['04465-60270'] },
+            { number: '04465-60320', brand: 'Toyota', seen: ['https://partsouq.com/x'], note: 'Prado' },
+          ],
+          images: [{ type: 'image/png', data: drawing, source: 'https://www.megazip.net/parts/toyota-0446560280', kind: 'diagram', marks: [{ x1: 20, y1: 20, x2: 80, y2: 40 }], title: 'Front Disc Brake' }],
+        };
+      });
+      const bare = await checkIn({ plate: { emirate: 'DXB', code: 'W', number: '70551' }, make: '', model: '', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await addItem(bare.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+      const known = await checkIn({ plate: { emirate: 'DXB', code: 'W', number: '70552' }, make: 'Toyota', model: 'Land Cruiser', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await addItem(known.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+      await addItem(known.id, { kind: 'part', block: 'A', titleEn: 'ENGINE OIL 5W30', qty: 4, unitPriceFils: 0 });
+      return { bare: bare.id, known: known.id };
+    });
+    try {
+      // No car: the AI's tile says what is missing — and asks the server nothing about the part.
+      await page.goto(BASE + '#/orders/' + made.bare);
+      await front('[data-ai-parts]').click();
+      await page.locator('[data-ai-notice="needCar"]').filter({ hasText: 'Укажите машину' }).waitFor({ timeout: 15000 });
+      await shot('47a-ai-need-car');
+      if ((await page.evaluate(() => window.__asked.filter((x) => x === 'part-find').length)) !== 0) throw new Error('a part was looked up for no car');
+      // A car: the number on its diagram is written by itself (the other, seen elsewhere, is no rival); the oil is passed by.
+      await page.goto(BASE + '#/orders/' + made.known);
+      await front('[data-ai-parts]').click();
+      await page.locator('[data-ai-notice="parts"]').filter({ hasText: 'ИИ: 1 запчасть' }).waitFor({ timeout: 20000 });
+      const got = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const lines = await db.items.where('orderId').equals(id).toArray();
+        const pads = lines.find((l) => l.titleEn === 'FRONT BRAKE PADS');
+        const oil = lines.find((l) => l.titleEn === 'ENGINE OIL 5W30');
+        // The diagram kept: a PNG with the part's place drawn into it — yellow inside the mark, white away from it.
+        const blob = (await db.mediaBlobs.get(pads.diagramIds[0])).blob;
+        const bmp = await createImageBitmap(blob);
+        const c = document.createElement('canvas');
+        c.width = bmp.width;
+        c.height = bmp.height;
+        const g = c.getContext('2d');
+        g.drawImage(bmp, 0, 0);
+        const at = (x, y) => [...g.getImageData(x, y, 1, 1).data].slice(0, 3);
+        return { number: pads.partNumber, fits: pads.aiFind.numbers[0].fits, oil: !!oil.aiFind, type: blob.type, size: [bmp.width, bmp.height], inMark: at(50, 30), away: at(250, 180), asked: window.__asked.filter((x) => x === 'part-find').length };
+      }, made.known);
+      if (got.number !== '04465-60280' || !got.fits || got.oil || got.asked !== 1) throw new Error('the number on the diagram: ' + JSON.stringify(got));
+      const yellow = got.inMark[0] > 200 && got.inMark[1] > 180 && got.inMark[2] < 200;
+      if (got.type !== 'image/png' || got.size.join() !== '300,200' || !yellow || got.away.join() !== '255,255,255') throw new Error('the mark on the diagram: ' + JSON.stringify(got));
+      // The line's preview is the diagram; its sheet: the diagram first of the AI's pictures, the number's row says the
+      // catalogue's word — two ticks, the maker's name, the model, the number it replaced.
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb[data-ai-preview]').waitFor();
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
+      const row = dlg.locator('[data-ai-numbers] .ai-num').first();
+      await row.locator('.ai-seen[data-fits]').waitFor();
+      const sub = await row.locator('.ai-num-sub').textContent();
+      if (!/Pad Kit, Disc Brake, Front/.test(sub) || !/Land Cruiser GRJ200/.test(sub) || !/вместо 04465-60270/.test(sub)) throw new Error('the catalogue’s word on the number: ' + sub);
+      const kinds = await dlg.locator('[data-line-media] .line-media-tile[data-kind]').evaluateAll((ts) => ts.map((t) => t.dataset.kind));
+      if (kinds[0] !== 'diagram') throw new Error('the diagram is not first: ' + kinds.join());
+      await shot('47b-ai-catalogue');
+      await page.locator('.mantine-Modal-close').first().click();
+      await dlg.waitFor({ state: 'detached' });
+    } finally {
+      await page.evaluate(async (ids) => {
+        const ai = await import('/src/services/ai.ts');
+        ai.setAiTransport(undefined);
+        const { deleteJob } = await import('/src/services/orders.ts');
+        for (const id of Object.values(ids)) await deleteJob(id, { withRecords: true }).catch(() => undefined);
+      }, made);
+    }
+  });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
     await page.goto(BASE + '#/');

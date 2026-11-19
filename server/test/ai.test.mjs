@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { createAi, diagramImages, pageText, parseFound, parseJson, plainNumber, publicUrl } from '../src/ai.mjs';
+import { createAi, diagramImages, pageText, parseJson, plainNumber, publicUrl } from '../src/ai.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-ai-'));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -30,25 +30,6 @@ describe('helpers', () => {
     assert.deepEqual(parseJson('Here it is: {"n":[1,2]} — done'), { n: [1, 2] });
     assert.equal(parseJson('no json'), undefined);
   });
-  it('reads the search’s answer in its lines (v0.54): numbers, diagrams, photos — bullets, bold and links let be; NONE is nothing', () => {
-    const r = parseFound(`Here is what I found:
-* **N | 04465-60280 | Toyota | GCC, from 2015 | https://www.amayama.com/en/part/toyota/0446560280**
-2. N | OEM 04465-60281 | Toyota | replaces 04465-60270 | [amayama](https://amayama.com/p/2), <https://megazip.net/p/3>
-N | 12 | Toyota | too short |
-D | https://cdn.example/diagram.png | https://partsouq.com/x
-- P | \`https://cdn.example/pads.jpg\` | https://rockauto.com/y.
-Part of the answer: not a line.`);
-    assert.deepEqual(r.numbers, [
-      { number: '04465-60280', brand: 'Toyota', note: 'GCC, from 2015', pages: ['https://www.amayama.com/en/part/toyota/0446560280'] },
-      { number: '04465-60281', brand: 'Toyota', note: 'replaces 04465-60270', pages: ['https://amayama.com/p/2'] },
-    ]);
-    assert.deepEqual(r.images, [
-      { url: 'https://cdn.example/diagram.png', kind: 'diagram', page: 'https://partsouq.com/x' },
-      { url: 'https://cdn.example/pads.jpg', kind: 'photo', page: 'https://rockauto.com/y' },
-    ]);
-    assert.deepEqual(parseFound('NONE'), { numbers: [], images: [] });
-  });
-
   it('writes a part number by its letters and digits only', () => {
     assert.equal(plainNumber('04465-33471'), '0446533471');
     assert.equal(plainNumber(' 04465 33471 '), '0446533471');
@@ -110,156 +91,6 @@ describe('the AI', () => {
     assert.match(seen[0].body.contents[0].parts[0].text, /for a 2018 Toyota Camry: "колодки тормазные"/);
   });
 
-  it('a part’s number off the web: the search with Google only, low thinking, its lines read here (v0.54: no second question); the number seen on pages opened here and by Google’s reading; the pictures looked at in low resolution', async () => {
-    const page = (n) => `<html><head><meta property="og:image" content="https://cdn.parts.example/d/${n}.png"></head><body>Toyota Camry front pads ${n}<img src="/x/${n}-photo.jpg" alt="photo"></body></html>`;
-    const asked = [];
-    const { f, seen } = fake([
-      [/generateContent/, (u, init) => {
-        const b = JSON.parse(init.body);
-        asked.push({ model: u.split('/models/')[1].split(':')[0], tools: (b.tools ?? []).map((t) => Object.keys(t)[0]).join('+'), json: b.generationConfig.responseMimeType === 'application/json', thinking: b.generationConfig.thinkingConfig?.thinkingLevel, low: b.generationConfig.mediaResolution, images: b.contents[0].parts.filter((x) => x.inline_data).length, text: b.contents[0].parts[0].text });
-        // The pictures looked at: the first a diagram, the second a photo of the part, the third — the car (not kept).
-        if (b.contents[0].parts.some((x) => x.inline_data)) return answer({ images: [{ index: 1, kind: 'diagram', matches: true }, { index: 2, kind: 'photo', matches: true }, { index: 3, kind: 'other', matches: false }] });
-        if (b.tools) {
-          // The search: plain words (a JSON schema would keep the model from searching), Google's reading with it.
-          assert.ok(b.tools.some((t) => t.google_search));
-          return json({
-            candidates: [{
-              content: { parts: [{ text: 'N | 04465-33471 | Toyota | GCC | https://www.amayama.com/en/part/toyota/0446533471\nN | 04465-06090 | Toyota | North America |\nP | https://cdn.parts.example/car.jpg | https://www.amayama.com/en/part/toyota/0446533471' }] },
-              groundingMetadata: {
-                groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'partsouq.com' } }, { web: { uri: 'http://127.0.0.1:8788/status.json', title: 'x' } }, { web: { uri: 'https://megazip.example/p/1', title: 'megazip' } }],
-                // Google's own reading backs the words with the first number by partsouq.com.
-                groundingSupports: [{ segment: { text: 'N | 04465-33471 | Toyota | GCC' }, groundingChunkIndices: [0] }],
-                webSearchQueries: ['camry 2018 front pads partsouq', '04465-33471'],
-              },
-            }],
-            usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 600, toolUsePromptTokenCount: 1000 },
-          });
-        }
-        throw new Error('a question that should not be asked: ' + b.contents[0].parts[0].text.slice(0, 60));
-      }],
-      [/amayama\.com/, () => new Response(page('04465-33471'), { headers: { 'Content-Type': 'text/html' } })],
-      [/megazip\.example/, () => new Response(page('0446533471'), { headers: { 'Content-Type': 'text/html' } })],
-      [/grounding-api-redirect/, () => new Response('', { status: 302, headers: { location: 'https://partsouq.example/p/9' } })],
-      [/partsouq\.example/, () => new Response('<html>no number here</html>', { headers: { 'Content-Type': 'text/html' } })],
-      [/cdn\.parts\.example|\/x\//, () => png()],
-    ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
-    const u0 = ai.status().usage.today;
-    const r = await ai.partFind({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018, vin: 'JTNB11HK6J3012345', hints: ['04465-33471'] });
-    assert.equal(r.search, 'web');
-    // Seen: the two pages opened here (amayama, megazip) and partsouq.com by Google's reading — three sites.
-    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 3], ['04465-06090', 0]]);
-    assert.ok(r.numbers[0].seen.includes('https://partsouq.com/'));
-    // 1. The strongest model, Google Search only (no pages read whole), plain words, low thinking; where the VIN says the
-    //    car was built and the garage's own number in the question; the answer asked in lines.
-    assert.equal(asked[0].model, 'gemini-3.8-flash');
-    assert.equal(asked[0].tools, 'google_search');
-    assert.ok(!asked[0].json);
-    assert.equal(asked[0].thinking, 'low');
-    assert.match(asked[0].text, /built in Japan/);
-    assert.match(asked[0].text, /garage used 04465-33471/);
-    assert.match(asked[0].text, /once or twice/);
-    // 2. Its lines read here: the only other question — the pictures, a light model, low resolution, minimal thinking.
-    assert.equal(asked.length, 2);
-    const look = asked[1];
-    assert.deepEqual([look.model, look.low, look.thinking, look.tools], ['gemini-3.5-flash-lite', 'MEDIA_RESOLUTION_LOW', 'minimal', '']);
-    assert.ok(look.images >= 3);
-    assert.deepEqual(r.images.map((i) => i.kind), ['diagram', 'photo']);
-    assert.equal(r.images[0].type, 'image/png');
-    // This computer's own page is never opened, whatever a search result says.
-    assert.ok(!seen.some((x) => x.url.startsWith('http://127.0.0.1')));
-    assert.equal(ai.status().search, 'on');
-    // What it spent: two questions, two Google searches, the tokens in (the search results count) and out.
-    const u1 = ai.status().usage.today;
-    assert.deepEqual([u1.questions - u0.questions, u1.searches - u0.searches, u1.in - u0.in, u1.out - u0.out, u1.think - u0.think], [2, 2, 1200, 600, 0]);
-    assert.deepEqual([u1.byKind.find - (u0.byKind.find ?? 0), (u1.byKind.extract ?? 0) - (u0.byKind.extract ?? 0), u1.byKind.look - (u0.byKind.look ?? 0)], [1, 0, 1]);
-  });
-
-  it('a model that answered without searching is a guess: asked once more with the pages read (not with more thinking), then «not checked»', async () => {
-    const asked = [];
-    const { f } = fake([
-      [/generateContent/, (_u, init) => {
-        const b = JSON.parse(init.body);
-        asked.push(b.generationConfig.thinkingConfig?.thinkingLevel + (b.tools ?? []).map((t) => '+' + Object.keys(t)[0]).join(''));
-        // Tools given, none used: no grounding at all — the number came from memory.
-        if (b.tools) return json({ candidates: [{ content: { parts: [{ text: 'N | 04465-33471 | Toyota | | https://www.amayama.com/en/part/toyota/0446533471' }] } }] });
-        return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota', pages: ['https://www.amayama.com/en/part/toyota/0446533471'] }] });
-      }],
-      [/amayama\.com/, () => new Response('<html>Camry pads 04465-33471</html>', { headers: { 'Content-Type': 'text/html' } })],
-    ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
-    const r = await ai.partFind({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018 });
-    assert.deepEqual(asked.slice(0, 2), ['low+google_search', 'low+google_search+url_context']);
-    assert.equal(r.search, 'model');
-    // The page it named was opened and does have the number: that much is seen — nothing more.
-    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 1]]);
-  });
-
-  it('an answer not in its lines is written down as JSON by a light model with minimal thinking; a stronger model asked «minimal» gets «low»', async () => {
-    const asked = [];
-    const { f } = fake([
-      [/generateContent/, (u, init) => {
-        const b = JSON.parse(init.body);
-        const model = u.split('/models/')[1].split(':')[0];
-        asked.push([model, b.generationConfig.thinkingConfig?.thinkingLevel, b.generationConfig.responseMimeType === 'application/json']);
-        if (b.tools) return json({ candidates: [{ content: { parts: [{ text: 'The OEM number is 04465-33471 (Toyota, GCC).' }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://megazip.example/p/1', title: 'megazip.net' } }] } }] });
-        // The light models busy: the stronger one writes it down — with low thinking (it refuses minimal).
-        if (/lite/.test(model)) return json({ error: { message: 'busy' } }, 503);
-        return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota' }] });
-      }],
-      [/megazip\.example/, () => new Response('<html>pads 04465-33471</html>', { headers: { 'Content-Type': 'text/html' } })],
-    ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
-    const r = await ai.partFind({ part: 'REAR PADS', make: 'Toyota', model: 'Camry', year: 2019 });
-    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 1]]);
-    const written = asked.filter((x) => x[2]);
-    assert.deepEqual(written.map((x) => x.slice(0, 2)), [['gemini-3.5-flash-lite', 'minimal'], ['gemini-3.1-flash-lite', 'minimal'], ['gemini-3.5-flash', 'low']]);
-  });
-
-  it('without Google Search on the key (a paid plan’s): what the model knows — not checked anywhere', async () => {
-    const { f } = fake([
-      [/generateContent/, (_u, init) => (JSON.parse(init.body).tools ? json({ error: { message: 'You exceeded your current quota' } }, 429) : answer({ numbers: [{ number: '04465-33471', brand: 'Toyota' }] }))],
-    ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
-    const r = await ai.partFind({ part: 'BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018 });
-    assert.equal(r.search, 'model');
-    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 0]]);
-    assert.equal(r.images.length, 0);
-    assert.equal(ai.status().search, 'off');
-  });
-
-  it('a guess without the web is kept half an hour, a find on the web a month', async () => {
-    let t = 0;
-    let web = false;
-    let calls = 0;
-    const grounded = (text) => json({ candidates: [{ content: { parts: [{ text }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://megazip.example/p/1', title: 'megazip.net' } }] } }] });
-    const { f } = fake([
-      [/generateContent/, (_u, init) => {
-        calls++;
-        const b = JSON.parse(init.body);
-        if (b.tools && !web) return json({ error: { message: 'You exceeded your current quota' } }, 429);
-        if (b.tools) return grounded('OEM 04465-33471 — https://megazip.example/p/1');
-        return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota' }] });
-      }],
-      [/megazip\.example/, () => new Response('<html>pads 04465-33471</html>', { headers: { 'Content-Type': 'text/html' } })],
-    ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, now: () => t });
-    const q = { part: 'BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018 };
-    assert.equal((await ai.partFind(q)).search, 'model');
-    t = 10 * 60_000;
-    assert.equal((await ai.partFind(q)).search, 'model');
-    const before = calls;
-    // The paid plan on: after half an hour the same part goes to the web — and stays a month.
-    web = true;
-    t = 31 * 60_000;
-    assert.equal((await ai.partFind(q)).search, 'web');
-    assert.ok(calls > before);
-    const now = calls;
-    t = 29 * 24 * 60 * 60_000;
-    assert.equal((await ai.partFind(q)).search, 'web');
-    assert.equal(calls, now);
-  });
-
   it('a VIN the official decoder knows whole is not asked of Gemini; the answers are kept in the store for every device and restart', async () => {
     let gemini = 0;
     const rows = new Map();
@@ -310,10 +141,10 @@ describe('the AI', () => {
       await assert.rejects(ai.receipt(bad), /no picture/);
   });
 
-  it('a device may ask 40 times a minute', () => {
+  it('a device may ask 120 times a minute (a long list of parts is asked at once)', () => {
     let t = 0;
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, lookup, now: () => t });
-    for (let i = 0; i < 40; i++) ai.allow('d1');
+    for (let i = 0; i < 120; i++) ai.allow('d1');
     assert.throws(() => ai.allow('d1'), /too many/);
     ai.allow('d2');
     t = 61_000;

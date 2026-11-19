@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editDistance, nameFix, onlyTypos, provenNumber, vinFill } from './ai';
+import { boughtBySpec, carKnown, editDistance, nameFix, onlyTypos, provenNumber, soleNumber, vinFill } from './ai';
 
 const NOW = new Date('2026-11-19T08:00:00Z');
 const VIN = 'JTDBR42E39J016456'; // a Toyota (JT…), model year 2009 (10th: 9)
@@ -65,5 +65,36 @@ describe('a part’s number found by the AI', () => {
     expect(provenNumber({ search: 'model', numbers: [{ number: '04465-33471', seen: seen('a.com', 'b.com') }] })).toBeUndefined();
     // Two proven numbers (two variants): the manager picks.
     expect(provenNumber({ search: 'web', numbers: [{ number: 'A1', seen: seen('a.com', 'b.com') }, { number: 'B2', seen: seen('a.com', 'b.com') }] })).toBeUndefined();
+  });
+});
+
+describe('what the maker’s catalogue says of a number (v0.55)', () => {
+  const seen = (...hosts: string[]) => hosts.map((h) => `https://${h}/p`);
+  it('a number on this car’s diagram is proven by that alone; two such — neither', () => {
+    expect(provenNumber({ search: 'web', numbers: [{ number: '04465-60280', seen: seen('megazip.net'), fits: true }, { number: '04465-60320', seen: seen('megazip.net') }] }, 'Toyota')).toBe('04465-60280');
+    // The variants of a part (left and right, petrol and diesel), each on the diagram: a person picks.
+    expect(provenNumber({ search: 'web', numbers: [{ number: '48068-59135', seen: [], fits: true }, { number: '48069-59125', seen: [], fits: true }] }, 'Toyota')).toBeUndefined();
+    // On the diagram, but not shaped like the maker's numbers: not written.
+    expect(provenNumber({ search: 'web', numbers: [{ number: 'ABC', seen: [], fits: true }] }, 'Toyota')).toBeUndefined();
+    // A guess is a guess, whatever it says.
+    expect(provenNumber({ search: 'model', numbers: [{ number: '04465-60280', seen: [], fits: true }] }, 'Toyota')).toBeUndefined();
+  });
+
+  it('written with nobody looking: the one that came — or the one on this car’s diagram, whatever else came', () => {
+    const fit = { number: '04465-60280', seen: seen('megazip.net'), fits: true };
+    const other = { number: '04465-60320', seen: seen('partsouq.com') };
+    expect(soleNumber({ search: 'web', numbers: [fit, other] }, 'Toyota')).toBe('04465-60280');
+    // Proven by two catalogues only (no diagram of this car): another number seen anywhere is a rival.
+    const two = { number: '04465-33471', seen: seen('amayama.com', 'megazip.net') };
+    expect(soleNumber({ search: 'web', numbers: [two] }, 'Toyota')).toBe('04465-33471');
+    expect(soleNumber({ search: 'web', numbers: [two, { number: '04465-06090', seen: seen('a.com') }] }, 'Toyota')).toBeUndefined();
+    expect(soleNumber({ search: 'web', numbers: [two, { number: '04465-06090', seen: [] }] }, 'Toyota')).toBe('04465-33471');
+    expect(soleNumber({ search: 'web', numbers: [other] }, 'Toyota')).toBeUndefined();
+  });
+
+  it('a car to look a part up for has its make or its VIN; tyres and fluids are bought by their kind, not by a number', () => {
+    expect([carKnown({ make: 'Toyota' }), carKnown({ make: ' ', vin: 'JTDBR42E39J016456' }), carKnown({ make: '', vin: 'short' }), carKnown(undefined)]).toEqual([true, true, false, false]);
+    for (const n of ['2 FRONT TYRES', 'ENGINE OIL 5W30', 'COOLANT', 'SUZUKI 1L ATF (GEAR OIL)', 'BRAKE FLUID', 'AC GAS', 'масло моторное', 'антифриз']) expect([n, boughtBySpec(n)]).toEqual([n, true]);
+    for (const n of ['OIL FILTER', 'OIL PUMP', 'TYRE VALVE SENSOR 433', 'COOLANT HOSE', 'BRAKE FLUID RESERVOIR CAP', 'FRONT BRAKE PADS', 'AIR CLEANER', 'GAS SPRING']) expect([n, boughtBySpec(n)]).toEqual([n, false]);
   });
 });
