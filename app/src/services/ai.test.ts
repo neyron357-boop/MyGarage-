@@ -28,7 +28,10 @@ beforeEach(async () => {
         { number: '04465-12610', brand: 'Toyota', seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] },
         { number: '04465-02220', brand: 'Toyota', seen: [] },
       ],
-      images: [{ type: 'image/png', data: btoa('x'.repeat(9000)), source: 'https://www.amayama.com/p/1', number: '04465-12610' }],
+      images: [
+        { type: 'image/png', data: btoa('x'.repeat(9000)), source: 'https://www.amayama.com/p/1', number: '04465-12610', kind: 'diagram' },
+        { type: 'image/jpeg', data: btoa('y'.repeat(9000)), source: 'https://www.rockauto.com/p/2', kind: 'photo' },
+      ],
     },
   };
   setAiTransport(async (path, body) => {
@@ -124,6 +127,15 @@ describe('the AI looks at a part', () => {
     expect(i.diagramIds).toHaveLength(1);
     expect(i.mediaIds).toBeUndefined();
     expect((await db.media.get(i.diagramIds![0]))?.slot).toBe('diagram');
+    // A photo of the part itself — a sample, kept apart from the diagram and from the line's own photos.
+    expect(i.sampleIds).toHaveLength(1);
+    expect((await db.media.get(i.sampleIds![0]))?.slot).toBe('sample');
+    // Looked up again: the new pictures take the place of the earlier ones.
+    const old = [...i.diagramIds!, ...i.sampleIds!];
+    await aiFindPart(it1.id, { again: true });
+    const j = (await db.items.get(it1.id))!;
+    expect([j.diagramIds!.length, j.sampleIds!.length]).toEqual([1, 1]);
+    for (const id of old) expect(await db.media.get(id)).toBeUndefined();
     // Not looked up again; «Отменить» takes the number off.
     expect(await aiFindPart(it1.id)).toBeUndefined();
     await notices.find((x) => x.kind === 'number')!.undo();

@@ -4,7 +4,7 @@ import { nowIso } from '../domain/dates';
 import { itemTitle } from '../domain/items';
 import type { OrderItem, Vehicle } from '../domain/types';
 import { isVin } from '../domain/vin';
-import { addMedia } from './media';
+import { addMedia, deleteMedia } from './media';
 import { callJson } from './sync/api';
 import { syncConfig } from './sync/config';
 
@@ -208,22 +208,30 @@ export function aiFindPart(itemId: string, { again = false }: { again?: boolean 
     const r = await ask<AiFind>('part-find', { part, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '', engine: car?.engine ?? '', vin: car?.vin ?? '' }, `find:${itemId}`);
     const now = await db.items.get(itemId);
     if (!now) return undefined;
+    // The pictures: the part's diagram and photos of the part (samples), each kept apart from the line's own photos.
     const diagrams: string[] = [];
+    const samples: string[] = [];
     for (const img of r.images ?? []) {
+      const sample = img.kind === 'photo';
       try {
-        diagrams.push((await addMedia({ ownerType: 'item', ownerId: itemId, slot: 'diagram', file: blobOf(img.data, img.type), name: img.source })).id);
+        const id = (await addMedia({ ownerType: 'item', ownerId: itemId, slot: sample ? 'sample' : 'diagram', file: blobOf(img.data, img.type), name: img.source })).id;
+        (sample ? samples : diagrams).push(id);
       } catch {
         // a picture that would not keep: the numbers still count
       }
     }
+    // Looked up again with new pictures: they take the place of the AI's earlier ones (no pile of the same).
+    const replaced = [...(diagrams.length ? now.diagramIds ?? [] : []), ...(samples.length ? now.sampleIds ?? [] : [])];
     const proven = provenNumber(r);
     const fill = proven && !now.partNumber ? proven : undefined;
     const numbers = r.numbers.map((n) => ({ number: n.number, brand: n.brand || undefined, note: n.note || undefined, seen: n.seen ?? [] }));
     await db.items.update(itemId, {
       aiFind: { at: nowIso(), search: r.search, part, numbers, filled: fill },
-      ...(diagrams.length ? { diagramIds: [...(now.diagramIds ?? []), ...diagrams] } : {}),
+      ...(diagrams.length ? { diagramIds: diagrams } : {}),
+      ...(samples.length ? { sampleIds: samples } : {}),
       ...(fill ? { partNumber: fill } : {}),
     });
+    for (const id of replaced) await deleteMedia(id).catch(() => undefined);
     if (fill)
       notify({
         kind: 'number',

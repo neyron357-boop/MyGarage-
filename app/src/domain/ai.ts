@@ -36,7 +36,8 @@ export interface AiFind {
   search: 'web' | 'model';
   numbers: { number: string; brand?: string; note?: string; seen: string[] }[];
   sources?: { url: string; title?: string }[];
-  images?: { type: string; data: string; source: string; number?: string }[];
+  /** Pictures off the catalogue pages, looked at by the AI: the part's diagram, or a photo of the part (a sample). */
+  images?: { type: string; data: string; source: string; number?: string; kind?: 'diagram' | 'photo' }[];
 }
 
 type CarFields = Pick<Vehicle, 'make' | 'model' | 'year' | 'engine' | 'type'>;

@@ -1982,6 +1982,7 @@ export const ru = {
     number: 'Номер: {{number}}',
     find: 'Найти номер',
     diagram: 'Схема',
+    samples: 'Образцы',
     unsure: 'не проверен',
     // v0.48.1: its notices as cards, its rows of numbers, its state in the server's card.
     carTitle: 'Машина по VIN',

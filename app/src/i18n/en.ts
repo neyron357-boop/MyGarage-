@@ -1981,6 +1981,7 @@ export const en: typeof ru = {
     number: 'Part no.: {{number}}',
     find: 'Find part no.',
     diagram: 'Diagram',
+    samples: 'Samples',
     unsure: 'not checked',
     // v0.48.1: its notices as cards, its rows of numbers, its state in the server's card.
     carTitle: 'Car by VIN',

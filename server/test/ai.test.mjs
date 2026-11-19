@@ -91,28 +91,48 @@ describe('the AI', () => {
     assert.match(seen[0].body.contents[0].parts[0].text, /for a 2018 Toyota Camry: "колодки тормазные"/);
   });
 
-  it('a part’s number off the web: the pages it names are opened, the number checked on them, the diagram taken', async () => {
-    const page = (n) => `<html><head><meta property="og:image" content="https://cdn.parts.example/d/${n}.png"></head><body>Toyota Camry front pads ${n}</body></html>`;
+  it('a part’s number off the web: seen on the pages opened here and backed by Google’s reading; the pictures looked at — the diagram and the photo kept', async () => {
+    const page = (n) => `<html><head><meta property="og:image" content="https://cdn.parts.example/d/${n}.png"></head><body>Toyota Camry front pads ${n}<img src="/x/${n}-photo.jpg" alt="photo"></body></html>`;
+    const asked = [];
     const { f, seen } = fake([
-      [/generateContent/, (_u, init) => {
+      [/generateContent/, (u, init) => {
         const b = JSON.parse(init.body);
+        asked.push({ model: u.split('/models/')[1].split(':')[0], tools: !!b.tools, images: b.contents[0].parts.filter((x) => x.inline_data).length });
+        // The pictures looked at: the first a diagram, the second a photo of the part, the third — the car (not kept).
+        if (b.contents[0].parts.some((x) => x.inline_data)) return answer({ images: [{ index: 1, kind: 'diagram', matches: true }, { index: 2, kind: 'photo', matches: true }, { index: 3, kind: 'other', matches: false }] });
         assert.ok(b.tools.some((t) => t.google_search));
-        return answer(
-          { numbers: [{ number: '04465-33471', brand: 'Toyota', pages: ['https://www.amayama.com/en/part/toyota/0446533471'] }, { number: '04465-06090', brand: 'Toyota', pages: [] }] },
-          { groundingMetadata: { groundingChunks: [{ web: { uri: 'https://megazip.example/p/1', title: 'megazip' } }, { web: { uri: 'http://127.0.0.1:8788/status.json', title: 'x' } }] } },
-        );
+        const text = JSON.stringify({ numbers: [{ number: '04465-33471', brand: 'Toyota', pages: ['https://www.amayama.com/en/part/toyota/0446533471'] }, { number: '04465-06090', brand: 'Toyota', pages: [] }], images: [{ url: 'https://cdn.parts.example/car.jpg', kind: 'photo', page: 'https://www.amayama.com/en/part/toyota/0446533471' }] });
+        return json({
+          candidates: [{
+            content: { parts: [{ text }] },
+            groundingMetadata: {
+              groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'partsouq.com' } }, { web: { uri: 'http://127.0.0.1:8788/status.json', title: 'x' } }, { web: { uri: 'https://megazip.example/p/1', title: 'megazip' } }],
+              // Google's own reading backs the words with the first number by partsouq.com.
+              groundingSupports: [{ segment: { text: '"number":"04465-33471"' }, groundingChunkIndices: [0] }],
+            },
+          }],
+        });
       }],
       [/amayama\.com/, () => new Response(page('04465-33471'), { headers: { 'Content-Type': 'text/html' } })],
       [/megazip\.example/, () => new Response(page('0446533471'), { headers: { 'Content-Type': 'text/html' } })],
-      [/cdn\.parts\.example/, () => png()],
+      [/grounding-api-redirect/, () => new Response('', { status: 302, headers: { location: 'https://partsouq.example/p/9' } })],
+      [/partsouq\.example/, () => new Response('<html>no number here</html>', { headers: { 'Content-Type': 'text/html' } })],
+      [/cdn\.parts\.example|\/x\//, () => png()],
     ]);
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
     const r = await ai.partFind({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018, vin: 'JTNB11HK6J3012345' });
     assert.equal(r.search, 'web');
-    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 2], ['04465-06090', 0]]);
-    assert.equal(r.images.length, 1);
+    // Seen: the two pages opened here (amayama, megazip) and partsouq.com by Google's reading — three sites.
+    assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 3], ['04465-06090', 0]]);
+    assert.ok(r.numbers[0].seen.includes('https://partsouq.com/'));
+    // The number is looked up by the strongest model first, with Google Search; the pictures by a light one.
+    assert.equal(asked[0].model, 'gemini-3.8-flash');
+    assert.ok(asked[0].tools);
+    const look = asked.find((x) => x.images);
+    assert.equal(look.model, 'gemini-3.5-flash-lite');
+    assert.ok(look.images >= 3);
+    assert.deepEqual(r.images.map((i) => i.kind), ['diagram', 'photo']);
     assert.equal(r.images[0].type, 'image/png');
-    assert.equal(r.images[0].number, '04465-33471');
     // This computer's own page is never opened, whatever a search result says.
     assert.ok(!seen.some((x) => x.url.startsWith('http://127.0.0.1')));
     assert.equal(ai.status().search, 'on');
@@ -128,6 +148,35 @@ describe('the AI', () => {
     assert.deepEqual(r.numbers.map((n) => [n.number, n.seen.length]), [['04465-33471', 0]]);
     assert.equal(r.images.length, 0);
     assert.equal(ai.status().search, 'off');
+  });
+
+  it('a guess without the web is kept half an hour, a find on the web a week', async () => {
+    let t = 0;
+    let web = false;
+    let calls = 0;
+    const { f } = fake([
+      [/generateContent/, (_u, init) => {
+        calls++;
+        const b = JSON.parse(init.body);
+        if (b.tools && !web) return json({ error: { message: 'You exceeded your current quota' } }, 429);
+        return answer({ numbers: [{ number: '04465-33471', brand: 'Toyota' }] });
+      }],
+    ]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, now: () => t });
+    const q = { part: 'BRAKE PADS', make: 'Toyota', model: 'Camry', year: 2018 };
+    assert.equal((await ai.partFind(q)).search, 'model');
+    t = 10 * 60_000;
+    assert.equal((await ai.partFind(q)).search, 'model');
+    const before = calls;
+    // The paid plan on: after half an hour the same part goes to the web — and stays a week.
+    web = true;
+    t = 31 * 60_000;
+    assert.equal((await ai.partFind(q)).search, 'web');
+    assert.ok(calls > before);
+    const now = calls;
+    t = 6 * 24 * 60 * 60_000;
+    assert.equal((await ai.partFind(q)).search, 'web');
+    assert.equal(calls, now);
   });
 
   it('a device may ask 40 times a minute', () => {

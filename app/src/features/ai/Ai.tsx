@@ -141,29 +141,61 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
   );
 }
 
-/** The part's diagram off a catalogue page: a card of its own (the drawing on white, the site under it); a tap — full screen. */
+/**
+ * What the AI brought off the catalogue pages for the part: its diagram — a card of its own (the drawing on white, the
+ * site under it) — and photos of the part itself, «Образцы», in a row of tiles; a tap — full screen. Kept with the line,
+ * never sent with a quote.
+ */
 export function AiDiagrams({ itemId }: { itemId: string }) {
   const { t } = useTranslation();
-  const [viewing, setViewing] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<{ list: 'diagrams' | 'samples'; i: number } | null>(null);
   const shown = useScreenLiveQuery(async () => {
-    const ids = (await db.items.get(itemId))?.diagramIds ?? [];
-    const media = await db.media.bulkGet(ids);
-    return media.filter((m) => !!m).map((m) => ({ id: m!.id, site: siteOf(m!.name ?? '') }));
+    const item = await db.items.get(itemId);
+    const of = async (ids: string[]) => (await db.media.bulkGet(ids)).filter((m) => !!m).map((m) => ({ id: m!.id, site: siteOf(m!.name ?? '') }));
+    return { diagrams: await of(item?.diagramIds ?? []), samples: await of(item?.sampleIds ?? []) };
   }, [itemId]);
-  if (!shown?.length) return null;
+  if (!shown || (!shown.diagrams.length && !shown.samples.length)) return null;
+  const list = viewing ? shown[viewing.list] : [];
+  const title = viewing?.list === 'samples' ? t('ai.samples') : t('ai.diagram');
   return (
     <div className="ai-diagram rise-enter" data-ai-diagram>
-      <div className="ai-head">
-        <AiMark size={20} />
-        <span className="ai-text">{t('ai.diagram')}</span>
-      </div>
-      {shown.map((d, i) => (
-        <button key={d.id} type="button" className="ai-diagram-card" aria-label={t('ai.diagram')} onClick={() => setViewing(i)}>
-          <MediaImage id={d.id} card h="100%" w="100%" radius="0" />
-          {d.site && <span className="ai-diagram-site">{d.site}</span>}
-        </button>
-      ))}
-      {viewing !== null && <PhotoViewer items={shown.map((d) => ({ id: d.id, title: t('ai.diagram'), caption: d.site }))} index={Math.min(viewing, shown.length - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />}
+      {shown.diagrams.length > 0 && (
+        <>
+          <div className="ai-head">
+            <AiMark size={20} />
+            <span className="ai-text">{t('ai.diagram')}</span>
+          </div>
+          {shown.diagrams.map((d, i) => (
+            <button key={d.id} type="button" className="ai-diagram-card" aria-label={t('ai.diagram')} onClick={() => setViewing({ list: 'diagrams', i })}>
+              <MediaImage id={d.id} card h="100%" w="100%" radius="0" />
+              {d.site && <span className="ai-diagram-site">{d.site}</span>}
+            </button>
+          ))}
+        </>
+      )}
+      {shown.samples.length > 0 && (
+        <>
+          <div className="ai-head">
+            <AiMark size={20} />
+            <span className="ai-text">{t('ai.samples')}</span>
+          </div>
+          <div className="strip-row" data-ai-samples>
+            {shown.samples.map((d, i) => (
+              <button key={d.id} type="button" className="action-tile strip-tile" aria-label={t('ai.samples')} onClick={() => setViewing({ list: 'samples', i })}>
+                <MediaImage id={d.id} h="100%" w="100%" radius="0" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {viewing !== null && list.length > 0 && (
+        <PhotoViewer
+          items={list.map((d) => ({ id: d.id, title, caption: d.site }))}
+          index={Math.min(viewing.i, list.length - 1)}
+          onIndex={(i) => setViewing({ list: viewing.list, i })}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 }

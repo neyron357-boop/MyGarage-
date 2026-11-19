@@ -611,6 +611,8 @@ export interface OrderItem {
   aiFind?: { at: string; search: 'web' | 'model'; /** The name it was looked up by (a new name — looked up again). */ part?: string; numbers: { number: string; brand?: string; note?: string; seen: string[] }[]; filled?: string };
   /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */
   diagramIds?: string[];
+  /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */
+  sampleIds?: string[];
   brand?: string;
   customerSupplied?: boolean;
   supplierId?: string;

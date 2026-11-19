@@ -2105,7 +2105,10 @@ async function launchBrowser() {
             { number: '04465-12610', brand: 'Toyota', seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] },
             { number: '04465-02220', brand: 'Toyota', note: 'GCC', seen: [] },
           ],
-          images: [{ type: 'image/png', data: png, source: 'https://www.amayama.com/p/1', number: '04465-12610' }],
+          images: [
+            { type: 'image/png', data: png, source: 'https://www.amayama.com/p/1', number: '04465-12610', kind: 'diagram' },
+            { type: 'image/png', data: png, source: 'https://www.rockauto.com/p/2', kind: 'photo' },
+          ],
         };
       });
       const { checkIn } = await import('/src/services/orders.ts');
@@ -2158,6 +2161,8 @@ async function launchBrowser() {
       const yandex = await dlg.locator('a[aria-label="Найти в Яндексе"]').evaluateAll((as) => as.map((a) => [a.getAttribute('href'), a.getAttribute('target')]));
       if (JSON.stringify(yandex[0]) !== JSON.stringify(['https://yandex.ru/search/?text=04465-12610', '_blank']) || yandex.length !== 3) throw new Error('Yandex: ' + JSON.stringify(yandex));
       await dlg.locator('[data-ai-diagram] .ai-diagram-card').waitFor();
+      // A photo of the part itself, «Образцы» — a tile of its own under the diagram.
+      await dlg.locator('[data-ai-samples] .strip-tile').waitFor();
       await shot('38-ai-part');
       await dlg.locator('[data-ai-diagram]').scrollIntoViewIfNeeded();
       await shot('38a-ai-diagram');
@@ -2170,9 +2175,9 @@ async function launchBrowser() {
       const line = await page.evaluate(async (id) => {
         const { db } = await import('/src/db/db.ts');
         const i = (await db.items.where('orderId').equals(id).toArray())[0];
-        return { ru: i.titleRu, en: i.titleEn, no: i.partNumber, diagrams: i.diagramIds?.length, photos: i.mediaIds?.length ?? 0, asked: window.__aiAsked };
+        return { ru: i.titleRu, en: i.titleEn, no: i.partNumber, diagrams: i.diagramIds?.length, samples: i.sampleIds?.length, photos: i.mediaIds?.length ?? 0, asked: window.__aiAsked };
       }, job.id);
-      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-name,part-find')
+      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.samples !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-name,part-find')
         throw new Error('the line after the AI: ' + JSON.stringify(line));
     } finally {
       await page.evaluate(async () => (await import('/src/services/ai.ts')).setAiTransport(undefined));
