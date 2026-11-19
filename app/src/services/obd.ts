@@ -2,6 +2,7 @@ import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { actWithoutScan, odometerKm, parseObdReport, type ActObd, type ObdReport, type TextItem } from '../domain/obdReport';
 import type { ObdScan, Vehicle } from '../domain/types';
+import { aiReadVinLater } from './ai';
 import { AppError } from './errors';
 import { addMedia, putBackMedia, takeMedia, type RemovedMedia } from './media';
 import { logEvent } from './orders';
@@ -76,6 +77,8 @@ export async function importObdReport(orderId: string, pdf: Blob, items: TextIte
     }
     await logEvent(orderId, 'obd_imported', { codes: report.codes.map((c) => c.code).join(', '), filled: Object.keys(patch).join(', ') });
   });
+  // The scanner gave the car its VIN: the garage's AI reads what car it is (v0.48), not waited for.
+  if (patch.vin) aiReadVinLater(vehicle.id);
   return { scan, filled: Object.keys(patch) as (keyof Vehicle)[], vinMismatch };
 }
 

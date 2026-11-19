@@ -93,6 +93,11 @@ export interface Vehicle {
   color?: string;
   /** Its body (v0.45): a fleet's reports group the cars by it. */
   type?: VehicleType;
+  /**
+   * The garage's AI read this VIN (v0.48, domain/ai.ts): asked once a VIN — what it filled (only empty fields), and what
+   * they were, for «Отменить».
+   */
+  vinAi?: { vin: string; at: string; filled: ('make' | 'model' | 'year' | 'engine' | 'type')[] };
   customerId: string;
   notes?: string;
   /** "Time for a service" sent (or dismissed) after its last job: it leaves the Today list until the next one. */
@@ -600,6 +605,12 @@ export interface OrderItem {
   mediaIds?: string[];
   // parts
   partNumber?: string;
+  /** The garage's AI looked at the part's name as typed (v0.48): what it was, so it is not asked again; «Отменить» puts it back. */
+  aiName?: { from: string; to?: string; at: string };
+  /** The part's numbers the AI found (v0.48, domain/ai.ts `AiFind`): candidates on the line, a proven one written itself. */
+  aiFind?: { at: string; search: 'web' | 'model'; /** The name it was looked up by (a new name — looked up again). */ part?: string; numbers: { number: string; brand?: string; note?: string; seen: string[] }[]; filled?: string };
+  /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */
+  diagramIds?: string[];
   brand?: string;
   customerSupplied?: boolean;
   supplierId?: string;

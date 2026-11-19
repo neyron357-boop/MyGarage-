@@ -54,6 +54,7 @@ import { useRestoreReport } from './features/settings/RestoreModal';
 import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 // The developer's feedback tool (temporary): removed with src/devtools/feedback and this line and the one below.
 import { FeedbackTool } from './devtools/feedback';
+import { AiNotices } from './features/ai/AiNotices';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
 function AppRoutes({ location }: { location: Location }) {
@@ -398,6 +399,7 @@ function Providers({ children }: { children: React.ReactNode }) {
       <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />
       <Celebration />
       <FeedbackTool />
+      <AiNotices />
       {children}
     </DatesProvider>
   );

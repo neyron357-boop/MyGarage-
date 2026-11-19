@@ -6134,3 +6134,30 @@ button.kpi-tab .eyebrow {
 .job-card[data-doc] .job-card-marks {
   margin-right: 96px;
 }
+
+/* The garage's AI (v0.48): a part number not seen in a catalogue is a candidate — orange, as an unsure plate. */
+.chip.ai-unsure {
+  color: var(--mantine-color-orange-7);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mantine-color-orange-5) 60%, transparent);
+}
+.chip .dim {
+  color: var(--mantine-color-dimmed);
+  font-weight: 400;
+}
+.ai-spin {
+  animation: ai-spin 1.1s linear infinite;
+}
+@keyframes ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-spin {
+    animation: none;
+  }
+}
+.ai-diagram {
+  display: grid;
+  gap: 6px;
+}

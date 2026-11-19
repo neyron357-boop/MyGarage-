@@ -39,6 +39,8 @@ const page = `<!doctype html>
 </div>
 <h2>Доступ из интернета</h2>
 <div class="card" id="tunnel">…</div>
+<h2>ИИ (Gemini)</h2>
+<div class="card" id="ai">…</div>
 <h2>Устройства</h2>
 <div class="card" id="devices">…</div>
 <h2>Где данные</h2>
@@ -65,6 +67,7 @@ async function load() {
   document.getElementById('link').textContent = addr && code ? addr + '#pair=' + code.code : '';
   document.getElementById('folder').textContent = s.dataDir;
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel, s.relay);
+  if (!aiTyping) document.getElementById('ai').innerHTML = aiHtml(s.ai);
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
     '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br>' + (d.live ? '<span class="ok">● на связи сейчас</span>' : '<span class="dim">был на связи: ' + when(d.last_seen) + '</span>') + '</span>' +
     (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
@@ -86,6 +89,26 @@ function tunnelHtml(t, r) {
       : asking ? '<p style="margin:0 0 12px">Сервер станет доступен из интернета через Cloudflare. Данные можно получить только с устройства, подключённого по коду с этого компьютера. Включить?</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="setTunnel(1)">Включить</button><button class="ghost" onclick="askTunnel(false)">Отмена</button></div>'
       : '<button onclick="askTunnel(true)">Включить доступ из интернета</button>');
+}
+// The key is typed or pasted here only: it stays on this computer (Служебное/ai.json), the page shows its last four.
+let aiTyping = false;
+function aiHtml(a) {
+  if (!a) return '<span class="dim">—</span>';
+  const search = a.search === 'on' ? '<span class="ok">● работает</span>' : a.search === 'off' ? '<span class="bad">нужен платный план Gemini</span>' : '<span class="dim">ещё не проверен</span>';
+  return '<div class="row"><span>Ключ</span>' + (a.on ? '<span class="ok">● ' + esc(a.key) + '</span>' : '<span class="dim">не задан</span>') + '</div>' +
+    (a.on ? '<div class="row"><span>Поиск номеров деталей в интернете</span>' + search + '</div>' +
+      '<div class="row"><span>Последний ответ</span><span>' + (a.lastOk ? when(a.lastOk) : '—') + '</span></div>' +
+      (a.lastError ? '<div class="row"><span>Ошибка</span><span class="bad mono">' + esc(a.lastError) + '</span></div>' : '') : '') +
+    '<p class="dim" style="margin:8px 0 12px">VIN — марка, модель, год и двигатель сами; название запчасти — без ошибок; номер детали и её схема. Ключ хранится только на этом компьютере.</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="aikey" type="password" autocomplete="off" placeholder="Ключ Gemini API" onfocus="aiTyping=true" style="flex:1;min-width:220px;font:15px system-ui;padding:9px 12px;border-radius:12px;border:0.5px solid rgba(128,128,128,.4);background:transparent;color:inherit">' +
+    '<button onclick="saveKey()">' + (a.on ? 'Заменить ключ' : 'Сохранить ключ') + '</button></div>';
+}
+async function saveKey() {
+  const v = document.getElementById('aikey').value.trim();
+  if (!v) return;
+  await fetch('ai-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: v }) });
+  aiTyping = false;
+  load();
 }
 function askTunnel(v) { asking = v; load(); }
 function askRevoke(id) { revoking = id; load(); }
@@ -111,7 +134,7 @@ async function copyLink() {
 load(); setInterval(load, 5000);
 </script></body></html>`;
 
-export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay }) {
+export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai }) {
   return async function admin(req, res) {
     const url = new URL(req.url, 'http://local');
     const json = (body) => {
@@ -136,6 +159,7 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
         lastBackup: store.metaGet('lastBackup'),
         tunnel: { available: !!tunnel && !!config.tunnelExe && tunnel.available(), on: !!tunnel?.on(), url: tunnel?.url() ?? '' },
         relay: relay?.status() ?? null,
+        ai: ai?.status() ?? null,
         ...store.counts(),
       });
     }
@@ -167,6 +191,18 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
       const rev = store.push(null, Array.isArray(changes) ? changes : [], { server: true });
       events?.changed(rev, null);
       return json({ ok: true, rev, n: Array.isArray(changes) ? changes.length : 0 });
+    }
+    // The AI's key (v0.48): typed on this computer's page only — the page and the key never leave this computer.
+    if (req.method === 'POST' && url.pathname === '/ai-key' && ai) {
+      let body = '';
+      for await (const c of req) body += c;
+      const key = String(JSON.parse(body || '{}').key ?? '').trim();
+      if (!/^[A-Za-z0-9._-]{20,200}$/.test(key)) {
+        res.writeHead(400);
+        return res.end();
+      }
+      ai.setKey(key);
+      return json({ ok: true, ai: ai.status() });
     }
     if (req.method === 'POST' && url.pathname === '/revoke') {
       store.revoke(url.searchParams.get('id') || '');

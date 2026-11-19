@@ -1,6 +1,7 @@
 import type { Line, Page, Worker as OcrWorker } from 'tesseract.js';
 import { db } from '../db/db';
 import type { Vehicle } from '../domain/types';
+import { aiReadVinLater } from './ai';
 import { fitCode39Row, readBarcodeRow, runsOf, vinOfBarcode } from '../domain/barcode';
 import { FONT_SAMPLES } from '../domain/vinGlyphBook';
 import { keep, opened, piecesOf, readPieces, spacedOut, unkeep, unlike, type KeptSample, type Pieces, type Sample } from '../domain/vinGlyphs';
@@ -1509,6 +1510,8 @@ export async function readCarVin(vehicleId: string): Promise<CarVinRead> {
     else if (vehicle.year !== pick.year) differs.year = pick.year;
   }
   if (Object.keys(patch).length) await db.vehicles.update(vehicleId, patch);
+  // A VIN read off the photo and written: the garage's AI reads what car it is (v0.48), not waited for.
+  if (patch.vin) aiReadVinLater(vehicleId);
   return { ...pick, photos, filled: Object.keys(patch) as ('vin' | 'year')[], before, differs, crop: pick.vin ? crops[pick.vin] : undefined };
 }
 
@@ -1525,6 +1528,7 @@ async function learnOff(photos: string[], vin: string): Promise<void> {
 export async function setCarVin(vehicleId: string, values: Pick<Vehicle, 'vin' | 'year'>, opts: { learn?: boolean } = {}): Promise<void> {
   const vin = values.vin?.trim().toUpperCase() || undefined;
   await db.vehicles.update(vehicleId, { vin, year: values.year });
+  if (vin) aiReadVinLater(vehicleId);
   if (opts.learn && vin) {
     const plate = await vinPhotoOf(vehicleId);
     const mulkiya = await mulkiyaOf(vehicleId);

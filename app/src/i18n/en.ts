@@ -1974,4 +1974,13 @@ export const en: typeof ru = {
     offline: 'Works without internet',
     offlineText: 'All screens and PDFs work offline. Internet is needed only for WhatsApp/Telegram.',
   },
+  /** The garage's AI (v0.48): what it did by itself, said once. */
+  ai: {
+    car: 'AI: {{what}}',
+    name: 'Corrected: {{to}}',
+    number: 'Part no.: {{number}}',
+    find: 'Find part no.',
+    diagram: 'Diagram',
+    unsure: 'not checked',
+  },
 };

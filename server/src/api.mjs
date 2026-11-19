@@ -16,6 +16,8 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/sync/events                — a stream: told at once when other devices' changes are kept (v0.41.2)
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/forget                     — this device leaves (its key no longer works)
+ *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
+ *        /api/ai/part-find {part, make, model, year, engine, vin} — the garage's AI (v0.48, ai.mjs)
  *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
  *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
@@ -116,7 +118,7 @@ export function createPairing() {
   };
 }
 
-export function createApi({ store, config, pairing, log, onSeen, events, cards, relay }) {
+export function createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai }) {
   return async function api(req, res) {
     const origin = req.headers.origin;
     const allowed = origin && config.origins.includes(origin);
@@ -186,6 +188,19 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         events?.changed(r.rev, device.id);
         log(`main device: ${device.name} (${device.id}); ${r.removed} records it did not have deleted`);
         return send(res, 200, { ok: true, ...r });
+      }
+
+      // The garage's AI (v0.48, ai.mjs): this computer asks Gemini with its own key — the device never has the key.
+      if (parts[0] === 'api' && parts[1] === 'ai' && parts.length === 3) {
+        if (!ai?.on()) throw httpError(503, 'ai off');
+        if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
+        if (req.method === 'POST') {
+          const body = await readJson(req, 16 * 1024);
+          ai.allow(device.id);
+          if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
+          if (parts[2] === 'part-name') return send(res, 200, await ai.partName(body));
+          if (parts[2] === 'part-find') return send(res, 200, await ai.partFind(body));
+        }
       }
 
       if (req.method === 'POST' && url.pathname === '/api/forget') {

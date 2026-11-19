@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { createAdmin } from './admin.mjs';
+import { createAi } from './ai.mjs';
 import { createApi, createPairing } from './api.mjs';
 import { createCards } from './cards.mjs';
 import { createEvents } from './events.mjs';
@@ -37,6 +38,8 @@ const events = createEvents();
 const cards = createCards({ store, dataDir: config.dataDir, log });
 // The address, sealed, where the devices find it after it changes (a reboot gives the tunnel a new one).
 const relay = createRelay({ store, base: config.relayUrl, log });
+// The garage's AI (v0.48): Gemini with the key kept on this computer (Служебное/ai.json).
+const ai = createAi({ dataDir: config.dataDir, log });
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
@@ -82,7 +85,7 @@ function backupNow() {
   }
 }
 
-const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay }));
+const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai }));
 // Streams stay open (events): no idle cut-off on this side.
 api.keepAliveTimeout = 65_000;
 api.requestTimeout = 0;
@@ -93,7 +96,7 @@ api.listen(config.port, config.host, () => {
   // A permanent address (Docker and Tailscale, or given): the devices have it from the start.
   if (config.publicUrl) relay?.publish(config.publicUrl);
 });
-const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay }));
+const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();

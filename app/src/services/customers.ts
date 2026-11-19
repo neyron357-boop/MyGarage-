@@ -1,4 +1,5 @@
 import { db, uid } from '../db/db';
+import { aiReadVinLater } from './ai';
 import { nowIso } from '../domain/dates';
 import { normalizePhone } from '../domain/phone';
 import { canonicalMake, canonicalModel } from '../domain/carCatalog';
@@ -76,6 +77,8 @@ export async function updateVehicle(id: string, patch: Partial<VehicleInput>): P
   }
   if (patch.vin !== undefined) out.vin = patch.vin.toUpperCase().replace(/\s/g, '') || undefined;
   await db.vehicles.update(id, out);
+  // A VIN put in the card: the garage's AI reads it (v0.48) — what is empty in the card filled, not waited for.
+  if (out.vin) aiReadVinLater(id);
 }
 
 export async function changeVehicleOwner(vehicleId: string, customerId: string): Promise<void> {

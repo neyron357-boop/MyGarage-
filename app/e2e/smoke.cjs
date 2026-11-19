@@ -2071,6 +2071,90 @@ async function launchBrowser() {
     await line.locator('.mantine-Modal-close').click();
     await line.waitFor({ state: 'detached' });
   });
+  await step('v0.48: the AI — a VIN fills the car, a part’s name put right, its number and diagram found', async () => {
+    // The garage's server is played here (services/ai setAiTransport): what Gemini would answer, after a while.
+    const job = await page.evaluate(async () => {
+      const ai = await import('/src/services/ai.ts');
+      const c = document.createElement('canvas');
+      c.width = 480;
+      c.height = 320;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, 480, 320);
+      g.strokeStyle = '#123';
+      g.lineWidth = 3;
+      for (let i = 0; i < 14; i++) {
+        g.beginPath();
+        g.arc(240, 150, 12 + i * 9, 0, 6);
+        g.stroke();
+      }
+      g.fillStyle = '#000';
+      g.font = '24px sans-serif';
+      g.fillText('04465-12610', 170, 305);
+      const png = c.toDataURL('image/png').split(',')[1];
+      window.__aiAsked = [];
+      ai.setAiTransport(async (path, body) => {
+        window.__aiAsked.push(path);
+        await new Promise((r) => setTimeout(r, 150));
+        if (path === 'vin') return { vin: body.vin, make: 'TOYOTA', model: 'Corolla', year: 2009, engine: '1.8L 4-cyl', body: 'sedan', confidence: 0.9 };
+        if (path === 'part-name') return { fixed: 'колодки тормозные передние', english: 'FRONT BRAKE PADS', isPart: true, confidence: 0.95 };
+        return {
+          search: 'web',
+          numbers: [
+            { number: '04465-12610', brand: 'Toyota', seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] },
+            { number: '04465-02220', brand: 'Toyota', note: 'GCC', seen: [] },
+          ],
+          images: [{ type: 'image/png', data: png, source: 'https://www.amayama.com/p/1', number: '04465-12610' }],
+        };
+      });
+      const { checkIn } = await import('/src/services/orders.ts');
+      const o = await checkIn({ plate: { emirate: 'DXB', code: 'Y', number: '48151' }, make: 'Toyota', model: '', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      return { id: o.id, vehicleId: o.vehicleId };
+    });
+    try {
+      await page.goto(BASE + '#/orders/' + job.id);
+      await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
+      // A VIN put in the car's card (its own service): the AI reads it — model, year, engine, body; the make typed stays.
+      await page.evaluate(async (id) => (await import('/src/services/customers.ts')).updateVehicle(id, { vin: 'JTDBR42E39J016456' }), job.vehicleId);
+      await page.getByText('ИИ: Corolla · 2009 · 1.8L 4-cyl · Седан').first().waitFor();
+      const car = await page.evaluate(async (id) => {
+        const v = await (await import('/src/db/db.ts')).db.vehicles.get(id);
+        return [v.make, v.model, v.year, v.engine, v.type];
+      }, job.vehicleId);
+      if (JSON.stringify(car) !== JSON.stringify(['Toyota', 'Corolla', 2009, '1.8L 4-cyl', 'sedan'])) throw new Error('the car from its VIN: ' + JSON.stringify(car));
+      // A part typed with mistakes: saved as typed, then put right by itself — and its English name for the documents.
+      const dlg = page.getByRole('dialog');
+      await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
+      await dlg.getByLabel('Запчасть').fill('колодки тормазные передние');
+      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await dlg.waitFor({ state: 'detached' });
+      await page.getByText('Исправлено: FRONT BRAKE PADS').first().waitFor();
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).waitFor();
+      // Its number, seen in two catalogues, written by itself; the diagram kept with the line.
+      await page.getByText('Номер: 04465-12610').first().waitFor({ timeout: 20000 });
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
+      const no = dlg.getByLabel('Номер', { exact: true });
+      if ((await no.inputValue()) !== '04465-12610') throw new Error('the number written by the AI: ' + (await no.inputValue()));
+      const other = dlg.locator('.chip.ai-unsure').filter({ hasText: '04465-02220' });
+      await other.waitFor();
+      await dlg.locator('.ai-diagram .strip-tile').waitFor();
+      await shot('38-ai-part');
+      // A candidate (not seen in a catalogue — orange) taken by a tap.
+      await other.click();
+      if ((await no.inputValue()) !== '04465-02220') throw new Error('the candidate tapped: ' + (await no.inputValue()));
+      await page.locator('.mantine-Modal-close').first().click();
+      await dlg.waitFor({ state: 'detached' });
+      const line = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const i = (await db.items.where('orderId').equals(id).toArray())[0];
+        return { ru: i.titleRu, en: i.titleEn, no: i.partNumber, diagrams: i.diagramIds?.length, photos: i.mediaIds?.length ?? 0, asked: window.__aiAsked };
+      }, job.id);
+      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-name,part-find')
+        throw new Error('the line after the AI: ' + JSON.stringify(line));
+    } finally {
+      await page.evaluate(async () => (await import('/src/services/ai.ts')).setAiTransport(undefined));
+    }
+  });
   await step('a customer added after the invoice: on it and in its PDF', async () => {
     // The car came with no name, the invoice went out and its PDF was given; the customer is typed on the job
     // afterwards. The invoice itself never changes — what it left blank is the job's customer now.

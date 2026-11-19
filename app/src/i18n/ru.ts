@@ -1975,4 +1975,13 @@ export const ru = {
     offline: 'Работает без интернета',
     offlineText: 'Все экраны и PDF работают офлайн. Интернет нужен только для WhatsApp/Telegram.',
   },
+  /** The garage's AI (v0.48): what it did by itself, said once. */
+  ai: {
+    car: 'ИИ: {{what}}',
+    name: 'Исправлено: {{to}}',
+    number: 'Номер: {{number}}',
+    find: 'Найти номер',
+    diagram: 'Схема',
+    unsure: 'не проверен',
+  },
 };
