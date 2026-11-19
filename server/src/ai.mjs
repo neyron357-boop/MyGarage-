@@ -438,6 +438,7 @@ Return:
           required: ['numbers'],
         };
         const question = `You are the parts specialist of a car repair garage in the UAE. Find the genuine (OEM) part number of "${part}" for exactly this car: ${car || 'unknown'}${vin ? `, VIN ${vin}` : ''}.
+The car is in the United Arab Emirates — a GCC-specification car unless its VIN says otherwise: when the number differs by market or production plant, give the GCC / general-market one first and name the market in its note.
 Search the open online parts catalogues by the VIN, or by the model, year and engine: the maker's electronic parts catalogues, partsouq.com, amayama.com, megazip.net, 7zap.com, rockauto.com, dealers' parts shops. Open the pages and read them.
 Return:
 - numbers: each OEM number exactly as the catalogue writes it; brand (the maker); note — what tells the variants apart (side, engine, "with sensor", production dates; when the catalogue says a number was replaced, give the new one and write "replaces <old number>"); pages — the addresses of the catalogue pages where you saw this number for this car.
@@ -493,12 +494,10 @@ Return numbers (number, brand, note), only those you are sure of; an empty list 
           if (!has.length) continue;
           for (const c of diagramImages(pg.html, pg.url, has).slice(0, 3)) add(c.url, pg.url);
         }
-        const fetched = [];
-        for (const c of candidates.slice(0, 10)) {
-          if (fetched.length >= 6) break;
-          const img = await image(c.url, c.from || c.url);
-          if (img && img.data.length <= 4_000_000) fetched.push({ ...img, hint: c.hint });
-        }
+        // Fetched all at once (one by one took tens of seconds — the phone's tunnel cuts a request at about 100 s); the
+        // first six that came, in the likeliest order.
+        const got = await Promise.all(candidates.slice(0, 10).map((c) => image(c.url, c.from || c.url).then((img) => (img && img.data.length <= 4_000_000 ? { ...img, hint: c.hint } : null))));
+        const fetched = got.filter(Boolean).slice(0, 6);
         const images = await lookAt(fetched, part, car).catch(() => []);
         return { part, car, search, numbers: out, sources: found.sources.slice(0, 8), images };
       });

@@ -142,6 +142,19 @@ describe('the AI looks at a part', () => {
     expect((await db.items.get(it1.id))!.partNumber).toBeUndefined();
   });
 
+  it('a guess made without the web is looked up again; a find on the web is not', async () => {
+    const o = await car('Toyota', 'Corolla');
+    answers['part-find'] = { search: 'model', numbers: [{ number: '04465-02220', seen: [] }], images: [] };
+    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    await aiFindPart(it1.id);
+    // The paid plan on since: the same line, saved again, goes to the catalogues.
+    answers['part-find'] = { search: 'web', numbers: [{ number: '04465-02220', seen: ['https://a.com/1', 'https://b.com/2'] }], images: [] };
+    await aiFindPart(it1.id);
+    expect((await db.items.get(it1.id))!.aiFind?.search).toBe('web');
+    expect(await aiFindPart(it1.id)).toBeUndefined();
+    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(2);
+  });
+
   it('a number not proven is only offered; a new name is looked up again', async () => {
     const o = await car('Toyota', 'Corolla');
     answers['part-find'] = { search: 'model', numbers: [{ number: '04465-02220', seen: [] }], images: [] };

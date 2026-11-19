@@ -5,7 +5,7 @@ import { itemTitle } from '../domain/items';
 import type { OrderItem, Vehicle } from '../domain/types';
 import { isVin } from '../domain/vin';
 import { addMedia, deleteMedia } from './media';
-import { callJson } from './sync/api';
+import { callJson, SyncError } from './sync/api';
 import { syncConfig } from './sync/config';
 
 /*
@@ -47,7 +47,17 @@ async function ask<T>(path: 'vin' | 'part-name' | 'part-find', body: unknown, ke
     if (transport) return (await transport(path, body)) as T;
     const cfg = syncConfig();
     if (!cfg) throw new Error('no server');
-    return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout: 120_000 });
+    // A part's number takes the server up to a minute and a half (the web, the pages, the pictures), and the phone's tunnel
+    // cuts a request at about 100 s: asked again, the server hands over the same search, still going or done (v0.48.3).
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout: 110_000 });
+      } catch (e) {
+        const status = e instanceof SyncError ? e.status : -1;
+        if (path !== 'part-find' || attempt >= 3 || !(status === 0 || status >= 500)) throw e;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
   } finally {
     working.delete(key);
     workChanged();
@@ -196,14 +206,16 @@ const blobOf = (data: string, type: string) => {
  * The part's number looked up by the AI in the open catalogues: the numbers found go on the line as candidates (a tap
  * takes one), a number seen in two catalogues is written itself when the line has none (domain/ai.ts
  * `provenNumber`); the part's diagram, when a catalogue page had one, is kept with the line (not sent to the customer).
- * Once a line, unless asked again (`again` — the ✦ on the line).
+ * Once a line, unless asked again (`again` — the ✦ on the line); a guess made without the web (no paid plan then) is
+ * looked up again the next time the line is saved (v0.48.3).
  */
 export function aiFindPart(itemId: string, { again = false }: { again?: boolean } = {}): Promise<AiFind | undefined> {
   return once(`find:${itemId}`, async () => {
     if (!aiOn()) return undefined;
     const item = await db.items.get(itemId);
     const part = item?.titleEn || item?.titleRu || '';
-    if (!item || item.kind !== 'part' || !part || (!again && (item.partNumber || item.aiFind?.part === part))) return undefined;
+    const looked = item?.aiFind?.part === part && item.aiFind.search === 'web';
+    if (!item || item.kind !== 'part' || !part || (!again && (item.partNumber || looked))) return undefined;
     const car = await carOf(item);
     const r = await ask<AiFind>('part-find', { part, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '', engine: car?.engine ?? '', vin: car?.vin ?? '' }, `find:${itemId}`);
     const now = await db.items.get(itemId);
