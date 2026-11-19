@@ -136,6 +136,67 @@ export async function addMedia(input: AddMediaInput): Promise<Media> {
   return media;
 }
 
+/** A picture drawn at most `max` px on its long side, as a JPEG (one decoded bitmap serves several sizes). */
+async function drawScaled(bmp: ImageBitmap, max: number, q: number): Promise<Blob> {
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const out = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', q));
+  // Safari keeps a canvas's memory until it is emptied.
+  canvas.width = 0;
+  canvas.height = 0;
+  return out;
+}
+
+/**
+ * Pictures off the web (v0.54: the garage's AI's diagrams and photos of parts — measured, kept one by one they held a
+ * phone's page up for a second and more): kept as they came (a catalogue's picture is web-sized already — not drawn
+ * again at 1920 px), with a 400 px thumbnail and, only when it is large, its card made from the same decoding; all of
+ * them in one write — the screens change once, not once a picture.
+ */
+export async function addWebPictures(inputs: { ownerType: MediaOwner; ownerId: string; slot: string; file: Blob; name?: string }[]): Promise<Media[]> {
+  const rows: { media: Media; blob: MediaBlob }[] = [];
+  for (const input of inputs) {
+    let thumb: Blob | undefined;
+    let card: Blob | undefined;
+    if (typeof document !== 'undefined' && typeof createImageBitmap === 'function') {
+      try {
+        const bmp = await createImageBitmap(input.file);
+        try {
+          thumb = await drawScaled(bmp, 400, 0.7);
+          if (Math.max(bmp.width, bmp.height) * 0.85 > CARD_SIDE) card = await drawScaled(bmp, CARD_SIDE, 0.82);
+        } finally {
+          bmp.close();
+        }
+      } catch {
+        // kept without a thumbnail when the browser cannot read it
+      }
+    }
+    const media: Media = {
+      id: uid(),
+      ownerType: input.ownerType,
+      ownerId: input.ownerId,
+      slot: input.slot,
+      kind: 'photo',
+      mime: input.file.type || 'application/octet-stream',
+      size: input.file.size,
+      sha256: await sha256Hex(input.file),
+      name: input.name,
+      locked: false,
+      createdAt: nowIso(),
+    };
+    rows.push({ media, blob: { id: media.id, blob: input.file, thumb, ...(card ? { card } : {}) } });
+  }
+  if (!rows.length) return [];
+  await db.transaction('rw', db.media, db.mediaBlobs, async () => {
+    await db.media.bulkAdd(rows.map((r) => r.media));
+    await db.mediaBlobs.bulkAdd(rows.map((r) => r.blob));
+  });
+  return rows.map((r) => r.media);
+}
+
 export async function deleteMedia(id: string): Promise<void> {
   await db.transaction('rw', db.media, db.mediaBlobs, async () => {
     await db.media.delete(id); // throws ImmutableError when locked

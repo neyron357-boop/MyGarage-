@@ -80,7 +80,8 @@ const DAY = 24 * 60 * 60_000;
 export function partsMemory(prior: PriorPart[], car: CarKey, name: string, now = new Date(), webDays = 30): Memory {
   const key = partKey(name);
   if (!key) return { numbers: [] };
-  const mine = prior.filter((p) => partKey(p.name) === key && sameCar(p.car, car)).sort((a, b) => b.at.localeCompare(a.at));
+  // The car first (v0.54): a line of another car is not read through the dictionary at all.
+  const mine = prior.filter((p) => sameCar(p.car, car) && partKey(p.name) === key).sort((a, b) => b.at.localeCompare(a.at));
   const numbers: MemoryNumber[] = [];
   for (const p of mine) {
     if (!p.number?.trim()) continue;

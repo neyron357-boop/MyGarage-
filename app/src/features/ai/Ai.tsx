@@ -41,10 +41,6 @@ export function AiLineWork({ itemId }: { itemId: string }) {
 }
 
 /**
- * Under a job's lines (v0.52): the AI for every part at once — its mark on a narrow tile, twinkling while it works,
- * how many lines are done under it. Only where the garage's AI is.
- */
-/**
  * In the job's picking bar (v0.53, the user: «выбрать несколько деталей и запустить по ним поиск ИИ»): the AI for the parts
  * picked — names, then each one's number, diagram and photos, as the tile under the lines does for all of them; the
  * picking ends at once (the lines show the AI at work, the tile under them how far it has got).
@@ -73,6 +69,10 @@ export function AiPickedButton({ orderId, itemIds, onStart }: { orderId: string;
   );
 }
 
+/**
+ * Under a job's lines (v0.52): the AI for every part at once — its mark on a narrow tile, twinkling while it works,
+ * how many lines are done under it. Only where the garage's AI is.
+ */
 export function AiPartsTile({ orderId }: { orderId: string }) {
   const { t } = useTranslation();
   useSyncExternalStore(subscribeAiWork, aiWorkVersion);

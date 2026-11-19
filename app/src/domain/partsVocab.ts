@@ -353,6 +353,13 @@ export function matchPartName(typed: string): PartNameMatch {
 
 /** The dictionary's English name of a part, for matching one line with another («колодки передние» and «FRONT BRAKE PADS» are one part). */
 export function partKey(name: string): string {
+  // Kept by the name (v0.54): the parts memory asks it of every line of every job on every search — the same names.
+  const hit = keys.get(name);
+  if (hit !== undefined) return hit;
   const m = matchPartName(name);
-  return (m.english || m.fixed).replace(/\s+(LH|RH|KIT|SET)$/g, '').trim();
+  const key = (m.english || m.fixed).replace(/\s+(LH|RH|KIT|SET)$/g, '').trim();
+  if (keys.size >= 5000) keys.clear();
+  keys.set(name, key);
+  return key;
 }
+const keys = new Map<string, string>();

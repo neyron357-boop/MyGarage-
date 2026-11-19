@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { aiAfterPart, aiAllParts, aiFindPart, aiFixPartName, aiReadVin, aiWorking, onAiNotice, setAiTransport, type AiNotice } from './ai';
+import { aiAfterPart, aiAllParts, aiFindPart, aiFixPartName, aiReadVin, aiWorking, forgetPriorParts, onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { updateVehicle } from './customers';
 import { addItem, updateItem } from './estimate';
 import { addMedia } from './media';
@@ -18,6 +18,8 @@ beforeEach(async () => {
   db.close();
   setDb(new GarageDB('test-' + uid()));
   await ensureSeed();
+  // A new garage each test: the parts memory of the last one forgotten.
+  forgetPriorParts();
   asked = [];
   notices.length = 0;
   answers = {

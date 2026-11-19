@@ -55,7 +55,7 @@ export function LineMedia({
         </button>
         {tiles.map((p, i) => (
           <button key={p.id} type="button" className="line-media-tile" data-kind={p.kind} aria-label={word(p.kind) || t('photos.add')} onClick={() => setViewing(i)}>
-            {p.src ? <img src={p.src} alt="" /> : <MediaImage id={p.id} card={p.kind !== 'own'} h="100%" w="100%" radius="0" />}
+            {p.src ? <img src={p.src} alt="" /> : <MediaImage id={p.id} h="100%" w="100%" radius="0" />}
             {p.kind !== 'own' && (
               <span className="line-media-ai">
                 <AiMark size={16} />

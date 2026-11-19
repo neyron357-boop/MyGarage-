@@ -25,6 +25,15 @@ import { DIRS, httpError } from './store.mjs';
  * with low thinking cost 831 tokens against 22 000 with the default, the same number); what each call spent is counted
  * (`usage`, shown on this computer's page). What the app takes as true is decided in the app (domain/ai.ts): this
  * only says what was found and where.
+ *
+ * Faster and cheaper (v0.54, the user: «сделай процесс поиска ИИ намного быстрее; оптимизируй расход токенов»): measured on
+ * the real Gemini, a part took ~29 s, 3 questions, 6–9 Google searches (each paid) and 5–8 thousand tokens. Now: the
+ * search with Google only (the pages it opened whole — `url_context` — cost seconds and thousands of tokens; this
+ * computer opens them itself), «one or two searches»; its answer in lines this computer reads itself (no second question
+ * to write it down as JSON — only when the lines are not there); asked again only when nothing was found, then with the
+ * pages read (never with more thinking); pages and pictures fetched together, each with a short limit; the pictures
+ * looked at in low resolution (265 tokens a picture instead of 1 098); the light models' small questions with minimal
+ * thinking (the stronger ones do not take it — low).
  */
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -37,6 +46,9 @@ const LOOK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3
 /** A receipt: every digit counts (the date under a stamp, a total) — the stronger model reads it, the light ones if it does not answer. */
 const RECEIPT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
+/** A page or a picture: this long at most a step (v0.54 — 12–15 s held a part up); all of them together — `FETCH_MS`. */
+const PAGE_MS = 6_000;
+const FETCH_MS = 8_000;
 const DAY = 24 * 60 * 60_000;
 /** How long an answer serves: a VIN and a name do not change; a number found on the web — a month; a guess — half an hour. */
 const TTL = { vin: 365 * DAY, name: 365 * DAY, web: 30 * DAY, model: 30 * 60_000 };
@@ -54,8 +66,12 @@ Give make, model (as sold, e.g. "Land Cruiser"), year, engine ("4.0L V6"; "" if 
 fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS"); isPart: is it a car part or service item; confidence 0..1 for fixed.`,
   search: (part, car, vin, built, hints) =>
     `Find the genuine (OEM) part number of "${part}" for exactly this car: ${car || 'unknown'}${vin ? `, VIN ${vin}` : ''}${built ? ` (built in ${built})` : ''}, in the UAE — GCC specification unless the VIN says otherwise.
-Use Google Search now and open catalogue pages (partsouq.com, amayama.com, megazip.net, 7zap.com, the maker's catalogue, dealers' parts shops): every number must come from a search result or an opened page — do not answer from memory.${hints.length ? `\nThe garage used ${hints.join(', ')} for this part on this car before: confirm or correct.` : ''}
-For each number: the number as the catalogue writes it, the maker, what tells the variants apart (market, production dates, engine, side), the exact page address where you saw it; a replaced number — the new one and what it replaces. Also addresses of the catalogue diagram picture showing the part and of a photo of the part, if a page has them. Answer as a compact list in plain text.`,
+Search Google once or twice (catalogues: partsouq.com, amayama.com, megazip.net, 7zap.com, the maker's, dealers' parts shops); every number must come from a search result or a page — not from memory.${hints.length ? `\nThe garage used ${hints.join(', ')} for this part on this car before: confirm or correct.` : ''}
+Answer only with lines like these, nothing else:
+N | number as the catalogue writes it | maker | what tells the variants apart (market, dates, engine, side; replaces …), under 60 characters | page address
+D | address of a catalogue diagram picture showing the part | page address
+P | address of a photo of the part itself | page address
+Nothing found: NONE`,
   extract: (text) =>
     `Write this parts-catalogue answer down as JSON, nothing added:
 numbers: each {number (as written), brand, note (variants, market, replaces…, under 80 characters), pages: [addresses where it was seen]}; images: each {url, kind: "diagram" | "photo", page}.
@@ -88,6 +104,51 @@ export function parseJson(text) {
 
 /** A part number as catalogues differ in writing it (04465-33471, 0446533471, 04465 33471): letters and digits. */
 export const plainNumber = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** An address in a cell of an answer's line: as is, in a markdown link, in angle brackets or quotes. */
+function addressIn(cell) {
+  const m = String(cell ?? '').match(/https?:\/\/[^\s<>"'`|)\]]+/);
+  return m ? m[0].replace(/[.,;]+$/, '') : '';
+}
+
+/**
+ * The search's answer in its lines (v0.54) — «N | number | maker | note | page», «D | picture | page» (a diagram),
+ * «P | picture | page» (a photo of the part): read here, no second question to write it down. A model's bullets, bold
+ * and numbering around a line are let be.
+ */
+export function parseFound(text) {
+  const numbers = [];
+  const images = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.replace(/^[\s*•\-–>#]+|\*\*/g, '').replace(/^\d+[.)]\s*/, '').trim();
+    const m = line.match(/^([NDP])\s*[|:]\s*(.*)$/i);
+    if (!m) continue;
+    const cells = m[2].split('|').map((c) => c.trim().replace(/^`+|`+$/g, ''));
+    const tag = m[1].toUpperCase();
+    if (tag === 'N') {
+      const number = cells[0].replace(/^(?:OEM|PN|P\/N)[:#\s]+/i, '').trim();
+      if (plainNumber(number).length < 5) continue;
+      const pages = cells.slice(1).map(addressIn).filter(Boolean);
+      numbers.push({ number, brand: addressIn(cells[1]) ? '' : cells[1] ?? '', note: addressIn(cells[2]) ? '' : cells[2] ?? '', pages });
+    } else {
+      const url = addressIn(cells[0]);
+      if (url) images.push({ url, kind: tag === 'D' ? 'diagram' : 'photo', page: addressIn(cells[1]) });
+    }
+  }
+  return { numbers, images };
+}
+
+/** What came within `ms`: the rest let go (a slow page or picture does not hold the answer up). */
+async function within(promises, ms) {
+  const out = new Array(promises.length).fill(null);
+  let timer;
+  await Promise.race([
+    Promise.all(promises.map((p, i) => p.then((v) => (out[i] = v), () => null))),
+    new Promise((r) => (timer = setTimeout(r, ms))),
+  ]);
+  clearTimeout(timer);
+  return out;
+}
 
 /** Where a VIN says the car was built — its first characters (the same model built in Japan and in the USA takes different numbers). */
 export function builtWhere(vin) {
@@ -278,24 +339,28 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
    * finds (plain words then: a JSON schema keeps Gemini 3 from searching); `schema` — the answer as that JSON; `images` —
    * pictures to look at (inline); `models` — which, in turn; `thinking` — how much ("low" unless there is a reason).
    */
-  async function ask(text, { kind = 'other', schema, search = false, images = [], models: list, timeout = 25_000, thinking = 'low' } = {}) {
+  async function ask(text, { kind = 'other', schema, search = false, read = false, images = [], lowImages = false, models: list, timeout = 25_000, thinking = 'low' } = {}) {
     if (!key()) throw httpError(503, 'ai off');
-    const body = {
+    // `read` — the pages Google finds read whole (url_context: seconds and thousands of tokens a page — only when a
+    // search alone found nothing, v0.54); `lowImages` — pictures in low resolution (a quarter of the tokens: enough to
+    // tell a drawing from a photo); thinking «minimal» — the light models only (the stronger ones refuse it: «low»).
+    const bodyFor = (model) => ({
       // Each picture under its own label («Picture 1:»…): the answer names them by it.
       contents: [{ parts: [{ text }, ...images.flatMap((i, k) => [{ text: `Picture ${k + 1}:` }, { inline_data: { mime_type: i.type, data: i.data } }])] }],
-      ...(search ? { tools: [{ google_search: {} }, { url_context: {} }] } : {}),
+      ...(search ? { tools: read ? [{ google_search: {} }, { url_context: {} }] : [{ google_search: {} }] } : {}),
       generationConfig: {
         temperature: 0,
         maxOutputTokens: search ? 4096 : 2048,
-        thinkingConfig: { thinkingLevel: thinking },
+        thinkingConfig: { thinkingLevel: thinking === 'minimal' && !/lite/.test(model) ? 'low' : thinking },
+        ...(lowImages && images.length ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
         ...(schema && !search ? { responseMimeType: 'application/json', responseJsonSchema: schema } : {}),
       },
-    };
+    });
     let last;
     for (const model of order(list)) {
       let res;
       try {
-        res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(body) }, timeout);
+        res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model)) }, timeout);
       } catch (e) {
         last = httpError(504, `gemini ${model}: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
         cooling.set(model, now() + COOL);
@@ -410,12 +475,12 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
   async function page(url) {
     if (!(await publicUrl(url, lookup))) return null;
     try {
-      let res = await timed(url, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Accept: 'text/html' } }, 12_000);
+      let res = await timed(url, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Accept: 'text/html' } }, PAGE_MS);
       // Search results come as Google's redirect addresses: followed one step at a time, each checked.
       for (let hop = 0; hop < 4 && res.status >= 300 && res.status < 400 && res.headers.get('location'); hop++) {
         url = new URL(res.headers.get('location'), url).toString();
         if (!(await publicUrl(url, lookup))) return null;
-        res = await timed(url, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Accept: 'text/html' } }, 12_000);
+        res = await timed(url, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Accept: 'text/html' } }, PAGE_MS);
       }
       if (!res.ok || !/html|text/i.test(res.headers.get('content-type') || '')) return null;
       const html = (await res.text()).slice(0, 3_000_000);
@@ -428,7 +493,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
   async function image(url, from) {
     if (!(await publicUrl(url, lookup))) return null;
     try {
-      const res = await timed(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Referer: from } }, 15_000);
+      const res = await timed(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MyGarage parts lookup)', Referer: from } }, PAGE_MS);
       const type = (res.headers.get('content-type') || '').split(';')[0].trim();
       if (!res.ok || !/^image\/(jpeg|png|webp|gif)$/.test(type)) return null;
       const buf = Buffer.from(await res.arrayBuffer());
@@ -456,14 +521,15 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
 
   /**
    * The pictures found, looked at by a light model: the part's diagram (a catalogue drawing showing it) and photos of
-   * the part itself are kept — two diagrams and three photos at most; logos, the car, other parts, banners go.
+   * the part itself are kept — a diagram and two photos at most (v0.54: what the phone fetches, decodes and keeps — five
+   * were too many); logos, the car, other parts, banners go. Looked at in low resolution, with minimal thinking.
    */
   async function lookAt(imgs, part, car) {
     if (!imgs.length) return [];
     const { value } = await json(
       P.look(imgs.length, part, car),
       { type: 'object', properties: { images: { type: 'array', items: { type: 'object', properties: { index: { type: 'integer' }, kind: { type: 'string' }, matches: { type: 'boolean' } }, required: ['index', 'kind', 'matches'] } } }, required: ['images'] },
-      { kind: 'look', images: imgs, models: LOOK_MODELS, timeout: 45_000 },
+      { kind: 'look', images: imgs, lowImages: true, thinking: 'minimal', models: LOOK_MODELS, timeout: 30_000 },
     );
     const said = Array.isArray(value.images) ? value.images : [];
     // Asked to count from 1, a model may still count from 0 (seen 19/11/2026): read either way.
@@ -473,7 +539,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       const img = imgs[Number(v.index) - base];
       const kind = v.kind === 'diagram' || v.kind === 'photo' ? v.kind : '';
       if (!img || !kind || v.matches !== true || kept.some((k) => k.url === img.url)) continue;
-      if (kept.filter((k) => k.kind === kind).length >= (kind === 'diagram' ? 2 : 3)) continue;
+      if (kept.filter((k) => k.kind === kind).length >= (kind === 'diagram' ? 1 : 2)) continue;
       kept.push({ type: img.type, data: img.data, source: img.source, url: img.url, kind });
     }
     return kept;
@@ -532,7 +598,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
           type: 'object',
           properties: { make: { type: 'string' }, model: { type: 'string' }, year: { type: 'integer' }, engine: { type: 'string' }, body: { type: 'string' }, confidence: { type: 'number' } },
           required: ['make', 'model', 'confidence'],
-        }, { kind: 'vin' });
+        }, { kind: 'vin', thinking: 'minimal' });
         // `by` — which Gemini answered (`model` is the car's).
         return { vin, ...value, facts, built, by: model };
       });
@@ -596,7 +662,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
           type: 'object',
           properties: { fixed: { type: 'string' }, english: { type: 'string' }, isPart: { type: 'boolean' }, confidence: { type: 'number' } },
           required: ['fixed', 'english', 'isPart', 'confidence'],
-        }, { kind: 'name' });
+        }, { kind: 'name', thinking: 'minimal' });
         return { name, ...value };
       });
     },
@@ -610,24 +676,28 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       const car = carLine({ make, model, year, engine });
       // Kept by the car, not the VIN: two cars of one model, year, engine and plant share their numbers.
       return cached(`find:${part.toLowerCase()}|${car.toLowerCase()}|${built.toLowerCase()}`, 'find', (r) => (r?.search === 'web' ? TTL.web : TTL.model), async () => {
-        // 1. The search, in plain words (a JSON answer keeps the model from searching); low thinking, then medium when
-        //    low found nothing. 2. The answer written down as JSON by a light model.
+        // 1. The search, in plain words (a JSON answer keeps the model from searching), Google only, low thinking; nothing
+        //    found — once more with the pages read whole (v0.54: never with more thinking). 2. Its lines read here; a light
+        //    model writes it down as JSON only when they are not there.
         let said;
         let search = 'web';
+        const q = P.search(part, car, vin, built, hints);
         try {
-          said = await ask(P.search(part, car, vin, built, hints), { kind: 'find', search: true, models: FIND_MODELS, timeout: 75_000 });
-          if (!said.searched || !/\d{4}/.test(said.text)) {
-            const again = await ask(P.search(part, car, vin, built, hints), { kind: 'find', search: true, models: FIND_MODELS, timeout: 90_000, thinking: 'medium' });
-            if (again.searched || !said.searched) said = again;
+          said = await ask(q, { kind: 'find', search: true, models: FIND_MODELS, timeout: 60_000 });
+          if (!said.searched || !parseFound(said.text).numbers.length) {
+            const again = await ask(q, { kind: 'find', search: true, read: true, models: FIND_MODELS, timeout: 75_000 });
+            if ((again.searched && parseFound(again.text).numbers.length) || !said.searched) said = again;
           }
           if (!said.searched) search = 'model';
         } catch (e) {
           if (!e.searchOff) throw e;
           // No Google Search on this key: what the model knows itself — never taken as found.
           search = 'model';
-          said = await ask(`${P.search(part, car, vin, built, hints)}\nNo web access: say only what you are sure of.`, { kind: 'find', models: FIND_MODELS, timeout: 60_000 });
+          said = await ask(`${q}\nNo web access: say only what you are sure of.`, { kind: 'find', models: FIND_MODELS, timeout: 60_000 });
         }
-        const found = await json(P.extract(said.text), FIND_SCHEMA, { kind: 'extract', timeout: 30_000 });
+        let found = { value: parseFound(said.text) };
+        if (!found.value.numbers.length && /[A-Z0-9-]{5,}/i.test(said.text) && /\d{3}/.test(said.text) && !/^\s*NONE\s*$/i.test(said.text))
+          found = await json(P.extract(said.text), FIND_SCHEMA, { kind: 'extract', thinking: 'minimal', timeout: 30_000 });
         const numbers = (Array.isArray(found.value.numbers) ? found.value.numbers : [])
           .map((n) => ({ number: String(n.number ?? '').trim().toUpperCase().slice(0, 40), brand: String(n.brand ?? '').trim().slice(0, 40), note: String(n.note ?? '').trim().slice(0, 80), pages: Array.isArray(n.pages) ? n.pages.map(String) : [] }))
           .filter((n) => plainNumber(n.number).length >= 5)
@@ -639,8 +709,19 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         };
         // Seen 2: this computer opens the pages named (public addresses only) and finds the number on them.
         const modelImages = (Array.isArray(found.value.images) ? found.value.images : []).filter((i) => i && typeof i.url === 'string').slice(0, 6);
-        const urls = [...new Set([...numbers.flatMap((n) => n.pages), ...modelImages.map((i) => String(i.page || '')).filter(Boolean), ...said.sources.map((x) => x.url)])].slice(0, 10);
-        const pages = (await Promise.all(urls.map(page))).filter(Boolean);
+        const urls = [...new Set([...numbers.flatMap((n) => n.pages), ...modelImages.map((i) => String(i.page || '')).filter(Boolean), ...said.sources.map((x) => x.url)])].slice(0, 8);
+        // The pictures the model named are fetched while the pages come (v0.54: one after the other took tens of seconds).
+        const named = [];
+        for (const i of modelImages) {
+          try {
+            const url = new URL(i.url, i.page || undefined).toString();
+            if (!named.some((c) => c.url === url)) named.push({ url, from: i.page || '', hint: i.kind });
+          } catch {
+            // not an address
+          }
+        }
+        const early = named.slice(0, 6).map((c) => image(c.url, c.from || c.url).then((img) => (img ? { ...img, hint: c.hint } : null)));
+        const pages = (await within(urls.map(page), FETCH_MS)).filter(Boolean);
         const out = numbers.map((n) => {
           const p = plainNumber(n.number);
           const opened = pages.filter((pg) => plainNumber(pageText(pg.html)).includes(p)).map((pg) => pg.url);
@@ -648,25 +729,16 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         });
         // Pictures: those the model named, and off the pages that have a number — the likeliest; then a light model looks at
         // them and keeps only the part's diagram and photos of the part itself.
-        const candidates = [];
-        const add = (url, from, hint) => {
-          if (url && !candidates.some((c) => c.url === url)) candidates.push({ url, from, hint });
-        };
-        for (const i of modelImages) {
-          try {
-            add(new URL(i.url, i.page || undefined).toString(), i.page || '', i.kind);
-          } catch {
-            // not an address
-          }
-        }
+        const fromPages = [];
         for (const pg of pages) {
           const has = out.filter((n) => n.seen.includes(pg.url)).map((n) => n.number);
           if (!has.length) continue;
-          for (const c of diagramImages(pg.html, pg.url, has).slice(0, 3)) add(c.url, pg.url);
+          for (const c of diagramImages(pg.html, pg.url, has).slice(0, 2))
+            if (!named.some((x) => x.url === c.url) && !fromPages.some((x) => x.url === c.url)) fromPages.push({ url: c.url, from: pg.url });
         }
-        // Fetched all at once (one by one took tens of seconds — the phone's tunnel cuts a request at about 100 s); the
-        // first six that came, in the likeliest order.
-        const got = await Promise.all(candidates.slice(0, 10).map((c) => image(c.url, c.from || c.url).then((img) => (img ? { ...img, hint: c.hint } : null))));
+        // All at once, within the limit; the first six that came, in the likeliest order (the model's first).
+        const late = fromPages.slice(0, 6).map((c) => image(c.url, c.from));
+        const got = await within([...early, ...late], FETCH_MS);
         const fetched = got.filter(Boolean).slice(0, 6);
         const images = await lookAt(fetched, part, car).catch(() => []);
         return { part, car, search, numbers: out, sources: said.sources.slice(0, 8), images };

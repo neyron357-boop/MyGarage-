@@ -5,9 +5,9 @@ import { itemTitle, lineName } from '../domain/items';
 import { formatNumber, sameNumber } from '../domain/partNumbers';
 import { partsMemory, type Memory, type PriorPart } from '../domain/partsMemory';
 import { matchPartName } from '../domain/partsVocab';
-import type { OrderItem, Vehicle } from '../domain/types';
+import type { Order, OrderItem, Vehicle } from '../domain/types';
 import { isVin, vinBuilt } from '../domain/vin';
-import { addMedia, deleteMedia, mediaBlob } from './media';
+import { addWebPictures, deleteMedia, mediaBlob } from './media';
 import { callJson, SyncError } from './sync/api';
 import { syncConfig } from './sync/config';
 
@@ -239,48 +239,68 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
   });
 }
 
-const blobOf = (data: string, type: string) => {
-  const bin = atob(data);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type });
-};
+/** A picture the server sent (base64) as a file — by the browser's own decoder (v0.54: a JS loop over a few hundred KB a picture held the page up). */
+async function blobOf(data: string, type: string): Promise<Blob> {
+  const U8 = Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array };
+  if (typeof U8.fromBase64 === 'function') return new Blob([U8.fromBase64(data) as BlobPart], { type });
+  return (await fetch(`data:${type};base64,${data}`)).blob();
+}
 
 /*
  * The garage's own part lines with a number or a search (every job), as the memory reads them — read once and kept
- * half a minute (a job's lines are saved one after another).
+ * half a minute (a job's lines are saved one after another); a line this device's search wrote is put into it in place
+ * (v0.54: read whole again after every search, every part of a long list scanned every line of every job).
  */
 let priorCache: { at: number; lines: PriorPart[] } | undefined;
+const remembered = (i: OrderItem) => i.kind === 'part' && !!(i.partNumber?.trim() || i.aiFind?.numbers.length);
+function priorLine(i: OrderItem, o: Order | undefined, v: Vehicle | undefined): PriorPart | undefined {
+  if (!o || !v) return undefined;
+  return {
+    id: i.id,
+    jobId: o.id,
+    jobNo: o.number,
+    at: i.createdAt,
+    name: i.titleEn || i.titleRu || '',
+    number: i.partNumber,
+    fitted: i.done || i.procurementStatus === 'received' || i.procurementStatus === 'installed',
+    car: { make: v.make, model: v.model, year: v.year, engine: v.engine },
+    web: i.aiFind?.search === 'web' && i.aiFind.numbers.length ? { at: i.aiFind.at, numbers: i.aiFind.numbers } : undefined,
+    diagramIds: i.diagramIds,
+    sampleIds: i.sampleIds,
+  };
+}
+let priorRead: Promise<PriorPart[]> | undefined;
 async function priorParts(): Promise<PriorPart[]> {
   if (priorCache && Date.now() - priorCache.at < 30_000) return priorCache.lines;
-  const items = await db.items.filter((i) => i.kind === 'part' && !!(i.partNumber?.trim() || i.aiFind?.numbers.length)).toArray();
-  const orders = new Map((await db.orders.bulkGet([...new Set(items.map((i) => i.orderId))])).filter((o) => !!o).map((o) => [o!.id, o!]));
-  const vehicles = new Map((await db.vehicles.bulkGet([...new Set([...orders.values()].map((o) => o.vehicleId))])).filter((v) => !!v).map((v) => [v!.id, v!]));
-  const lines: PriorPart[] = [];
-  for (const i of items) {
-    const o = orders.get(i.orderId);
-    const v = o && vehicles.get(o.vehicleId);
-    if (!o || !v) continue;
-    lines.push({
-      id: i.id,
-      jobId: o.id,
-      jobNo: o.number,
-      at: i.createdAt,
-      name: i.titleEn || i.titleRu || '',
-      number: i.partNumber,
-      fitted: i.done || i.procurementStatus === 'received' || i.procurementStatus === 'installed',
-      car: { make: v.make, model: v.model, year: v.year, engine: v.engine },
-      web: i.aiFind?.search === 'web' && i.aiFind.numbers.length ? { at: i.aiFind.at, numbers: i.aiFind.numbers } : undefined,
-      diagramIds: i.diagramIds,
-      sampleIds: i.sampleIds,
-    });
-  }
-  priorCache = { at: Date.now(), lines };
-  return lines;
+  // Five parts asking at once read it once.
+  priorRead ??= (async () => {
+    const items = await db.items.filter(remembered).toArray();
+    const orders = new Map((await db.orders.bulkGet([...new Set(items.map((i) => i.orderId))])).filter((o) => !!o).map((o) => [o!.id, o!]));
+    const vehicles = new Map((await db.vehicles.bulkGet([...new Set([...orders.values()].map((o) => o.vehicleId))])).filter((v) => !!v).map((v) => [v!.id, v!]));
+    const lines: PriorPart[] = [];
+    for (const i of items) {
+      const o = orders.get(i.orderId);
+      const line = priorLine(i, o, o && vehicles.get(o.vehicleId));
+      if (line) lines.push(line);
+    }
+    priorCache = { at: Date.now(), lines };
+    return lines;
+  })().finally(() => (priorRead = undefined));
+  return priorRead;
 }
 /** The memory reads the lines again next time (a line of this device changed them). */
 export function forgetPriorParts() {
   priorCache = undefined;
+}
+/** One line the search wrote, put into the memory in place (the rest of it stays as read). */
+async function refreshPriorPart(itemId: string): Promise<void> {
+  if (!priorCache) return;
+  const i = await db.items.get(itemId);
+  const o = i ? await db.orders.get(i.orderId) : undefined;
+  const v = o ? await db.vehicles.get(o.vehicleId) : undefined;
+  const line = i && remembered(i) ? priorLine(i, o, v) : undefined;
+  if (!priorCache) return;
+  priorCache = { at: priorCache.at, lines: [...priorCache.lines.filter((l) => l.id !== itemId), ...(line ? [line] : [])] };
 }
 
 /** The pictures of another line (the AI's diagram and samples) copied onto this one. */
@@ -295,7 +315,8 @@ async function copyPictures(from: PriorPart, itemId: string): Promise<{ diagrams
         const m = await db.media.get(id);
         const blob = await mediaBlob(id);
         if (!m || !blob) continue;
-        list.push((await addMedia({ ownerType: 'item', ownerId: itemId, slot: m.slot, file: blob, name: m.name, compress: false })).id);
+        // With its thumbnail (v0.54: copied without one, the line's preview decoded the whole picture).
+        list.push(...(await addWebPictures([{ ownerType: 'item', ownerId: itemId, slot: m.slot, file: blob, name: m.name }])).map((x) => x.id));
       } catch {
         // a picture that would not copy: the numbers still count
       }
@@ -354,7 +375,7 @@ export function aiFindPart(
       const several = r.numbers.filter((x) => x.seen.length > 0 || (x.garage ?? 0) > 0).length > 1;
       const fill = proven && !now.partNumber && !(single && several) ? proven : undefined;
       await db.items.update(itemId, { aiFind: { at: nowIso(), search: r.search, part, numbers: r.numbers, filled: fill }, ...(await keepPictures(now, pics)), ...(fill ? { partNumber: fill } : {}) });
-      forgetPriorParts();
+      await refreshPriorPart(itemId);
       if (fill && !quiet) {
         const n = r.numbers.find((x) => sameNumber(x.number, fill));
         notify({
@@ -396,15 +417,14 @@ export function aiFindPart(
     );
     // The pictures: the part's diagram and photos of the part (samples), each kept apart from the line's own photos.
     const pics = { diagrams: [] as string[], samples: [] as string[] };
-    for (const img of r.images ?? []) {
-      const sample = img.kind === 'photo';
-      try {
-        const id = (await addMedia({ ownerType: 'item', ownerId: itemId, slot: sample ? 'sample' : 'diagram', file: blobOf(img.data, img.type), name: img.source })).id;
-        (sample ? pics.samples : pics.diagrams).push(id);
-      } catch {
-        // a picture that would not keep: the numbers still count
-      }
-    }
+    // All of them in one write (v0.54): the job's screen changes once, not once a picture.
+    const imgs = r.images ?? [];
+    const files = await Promise.all(imgs.map((img) => blobOf(img.data, img.type).catch(() => undefined)));
+    const kept = await addWebPictures(
+      imgs.flatMap((img, k) => (files[k] ? [{ ownerType: 'item' as const, ownerId: itemId, slot: img.kind === 'photo' ? 'sample' : 'diagram', file: files[k]!, name: img.source }] : [])),
+    ).catch(() => []);
+    // a picture that would not keep: the numbers still count
+    for (const m of kept) (m.slot === 'sample' ? pics.samples : pics.diagrams).push(m.id);
     const numbers = merged(
       r.numbers.map((n) => ({ number: n.number, brand: n.brand || undefined, note: n.note || undefined, seen: n.seen ?? [] })),
       mem,
@@ -418,6 +438,9 @@ export function aiFindPart(
 /** How far every part of a job has got (v0.52): lines done of all. */
 const allProgress = new Map<string, { done: number; total: number }>();
 export const aiPartsProgress = (orderId: string): { done: number; total: number } | undefined => allProgress.get(orderId);
+
+/** How many parts are looked up side by side (the garage's server and Gemini answer them together). */
+const AT_ONCE = 5;
 
 /** A few at a time (the server answers them side by side; a long list is done in minutes, not tens of them). */
 async function inTurns<T>(list: T[], at: number, fn: (x: T) => Promise<void>): Promise<void> {
@@ -435,8 +458,8 @@ async function inTurns<T>(list: T[], at: number, fn: (x: T) => Promise<void>): P
 /**
  * Every part of a job at once (v0.52, the user: «одна кнопка — ИИ исправляет все названия, потом ищет на всех схемы и
  * фото и загружает прямо в превью позиции детали; номера добавлять, если они точные, если вышли сразу несколько — не
- * добавлять»): first every name put right (the dictionary answers most of them without the AI), then each part's number,
- * diagram and photos looked up — the garage's own jobs first, the web after — three at a time; a number written only
+ * добавлять»): each part's name put right first (the dictionary answers most of them without the AI), then its number,
+ * diagram and photos looked up — the garage's own jobs first, the web after — five parts at a time; a number written only
  * when it is proven and the only one found; the pictures go on the line (its preview shows them). Each line shows the AI
  * at work; at the end one card says what was done (and the AI's sound) — «Отменить» brings the names and numbers back.
  */
@@ -460,11 +483,11 @@ export async function aiAllParts(
   let numbers = 0;
   let pictures = 0;
   try {
-    await inTurns(items, 3, async (i) => {
-      if (await aiFixPartName(i.id, { quiet: true })) names++;
-    });
-    await inTurns(items, 3, async (i) => {
+    // Each part from its name straight to its search, five at a time (v0.54, «намного быстрее»: all the names first, then
+    // all the searches, kept the first search waiting for the last name; three at a time — a long list in rounds).
+    await inTurns(items, AT_ONCE, async (i) => {
       try {
+        if (await aiFixPartName(i.id, { quiet: true })) names++;
         await aiFindPart(i.id, { quiet: true, single: true, pictures: true });
       } finally {
         const now = await db.items.get(i.id);

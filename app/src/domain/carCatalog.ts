@@ -111,11 +111,22 @@ export const CAR_MAKES: string[] = Object.keys(CAR_CATALOG).sort((a, b) => a.loc
 
 const key = (s: string) => s.toLowerCase().replace(/[\s\-_.]/g, '');
 
+/** Each spelling's key → the catalogue's spelling, the first of a key (v0.54: looked up, not scanned — the parts memory
+ *  asks it of every line of every job on every search). */
+const index = (list: string[]) => {
+  const out = new Map<string, string>();
+  for (const x of list) if (!out.has(key(x))) out.set(key(x), x);
+  return out;
+};
+let makeIndex: Map<string, string> | undefined;
+const modelIndex = new Map<string, Map<string, string>>();
+
 /** The catalogue spelling of a make typed in any case ("mercedes benz" → "Mercedes-Benz"), or the text as typed. */
 export function canonicalMake(input: string): string {
   const k = key(input);
   if (!k) return '';
-  return CAR_MAKES.find((m) => key(m) === k) ?? input.trim();
+  makeIndex ??= index(CAR_MAKES);
+  return makeIndex.get(k) ?? input.trim();
 }
 
 /** Models of a make from the catalogue (empty for an unknown make). */
@@ -128,5 +139,8 @@ export function modelsFor(make: string): string[] {
 export function canonicalModel(make: string, input: string): string {
   const k = key(input);
   if (!k) return '';
-  return modelsFor(make).find((m) => key(m) === k) ?? input.trim();
+  const m = canonicalMake(make);
+  let models = modelIndex.get(m);
+  if (!models) modelIndex.set(m, (models = index(CAR_CATALOG[m] ?? [])));
+  return models.get(k) ?? input.trim();
 }
