@@ -8,6 +8,7 @@ import {
   IconChevronDown,
   IconClockDollar,
   IconCreditCard,
+  IconFileText,
   IconPlus,
   IconReceipt2,
   IconSearch,
@@ -21,8 +22,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
-import { dubaiDate, formatDate } from '../../domain/dates';
-import { allocate } from '../../domain/debts';
+import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
+import { debtQueue, historyKey, spread } from '../../domain/debts';
 import { incomeCategoryName, KEPT_INCOME, renamedIn } from '../../domain/incomeCategories';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
@@ -309,6 +310,7 @@ export interface DebtPick {
  */
 function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChange: (v: DebtPick) => void; amountFils: number }) {
   const { t } = useTranslation();
+  const lang = useLang();
   const debtors = useLiveQuery(loadDebtors, []);
   const picked = useLiveQuery(async () => (value.customerId ? (await db.customers.get(value.customerId)) ?? null : null), [value.customerId]);
   const [q, setQ] = useState('');
@@ -331,8 +333,9 @@ function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChang
   if (value.customerId) {
     const debtor = debtors?.find((d) => d.customer.id === value.customerId);
     const jobs = debtor ? debtor.cars.flatMap((c) => c.jobs) : [];
-    const plan = allocate(amountFils, jobs.map((j) => ({ orderId: j.order.id, dueFils: j.dueFils, since: j.since })), value.orderId);
-    const got = new Map(plan.parts.map((p) => [p.orderId, p.amountFils]));
+    // Spread as the payment will be: the jobs and (v0.47) the invoices from before the app, the oldest first.
+    const plan = spread(amountFils, debtQueue(jobs, debtor ? debtor.history.flatMap((m) => m.dues) : []), value.orderId);
+    const got = new Map(plan.parts.map((p) => [p.key, p.amountFils]));
     const c = debtor?.customer ?? picked ?? undefined;
     return (
       <Stack gap={8} className="debt-pick">
@@ -360,6 +363,27 @@ function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChang
             <IconX size={18} />
           </ActionIcon>
         </Group>
+        {/* The invoices from before the app, a month a row, on top: they are paid first (the oldest first — not picked). */}
+        {debtor?.history.map((m) => {
+          const part = m.dues.reduce((a, d) => a + (got.get(historyKey(d.invoiceId)) ?? 0), 0);
+          return (
+            <Group key={m.month} justify="space-between" wrap="nowrap" gap="sm" className="choice-card" data-debt-month={m.month}>
+              <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                <IconFileText size={18} stroke={1.8} color="var(--mantine-color-grape-6)" aria-hidden />
+                <Text size="sm" fw={600} lineClamp={1}>
+                  {monthLong(m.month, lang)}
+                  <Text span inherit fw={400} c="dimmed">
+                    {` · ${t('history.count', { count: m.dues.length })}`}
+                  </Text>
+                </Text>
+              </Group>
+              <Stack gap={0} align="flex-end" style={{ flexShrink: 0 }}>
+                <Money fils={m.dueFils} size="sm" />
+                {part > 0 && <Money fils={-part} size="xs" c="green.7" />}
+              </Stack>
+            </Group>
+          );
+        })}
         {jobs.map((j) => {
           const part = got.get(j.order.id) ?? 0;
           return (

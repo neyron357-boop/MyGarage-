@@ -6,6 +6,7 @@ import { liveLines } from '../domain/flow';
 import { itemAmounts, itemTitle, lineName } from '../domain/items';
 import { formatPhone } from '../domain/phone';
 import { formatPlate } from '../domain/plates';
+import { historySince } from '../domain/debts';
 import { loadDebtors } from '../services/debts';
 import { getSettings } from '../services/settings';
 import { renderDoc } from './documents';
@@ -16,15 +17,17 @@ import { aed, Ar, AR_LABEL, BiLine, BlockLabel, COLOR, GarageFooter, GarageHeade
  * job still owed is a block — its date, invoice, car and plate, what was done (the invoice's lines), its total, what
  * was paid and what is due — and under them all the one sum the customer owes. A tax invoice is never issued twice
  * or merged: each block names its invoice (the files are the archive beside it). In English with Arabic labels, as
- * the garage's documents are.
+ * the garage's documents are. v0.47: the invoices from before the app still owing — a row each (number, day, car, what
+ * is paid and due), their lines in the customer's monthly reports.
  */
 
 const AR = { count: 'عدد الفواتير', statement: 'كشف حساب', paid: 'المدفوع', due: 'المستحق', totalDue: 'إجمالي المستحق', vehicle: 'المركبة' };
 
 interface Block {
+  key: string;
   date: string;
-  invoice: string;
-  job: number;
+  /** "INV-2026-351 · Job #351"; one from before the app — "Job ID 107", "Invoice 224". */
+  title: string;
   car: string;
   plate: string;
   lines: { name: string; qty: number; total: number }[];
@@ -49,9 +52,9 @@ export async function renderStatement(customerId: string): Promise<Blob> {
             .map((i) => ({ name: itemTitle(i, 'en'), qty: i.qty, total: itemAmounts(i).gross }));
       const totalFils = inv ? inv.totalFils : lines.reduce((s, l) => s + l.total, 0);
       blocks.push({
+        key: j.order.id,
         date: inv ? inv.issuedAt : j.since,
-        invoice: inv?.number ?? '—',
-        job: j.order.number,
+        title: `${inv?.number ?? '—'} · Job #${j.order.number}`,
         car: [car.vehicle.make, car.vehicle.model].filter(Boolean).join(' '),
         plate: formatPlate(car.vehicle.plate, 'en'),
         lines,
@@ -60,6 +63,22 @@ export async function renderStatement(customerId: string): Promise<Blob> {
         dueFils: j.dueFils,
       });
     }
+  const dues = debtor.history.flatMap((m) => m.dues);
+  const cars = new Map((await db.vehicles.bulkGet([...new Set(dues.map((d) => d.vehicleId))])).filter((v) => !!v).map((v) => [v!.id, v!]));
+  for (const d of dues) {
+    const car = cars.get(d.vehicleId);
+    blocks.push({
+      key: d.invoiceId,
+      date: historySince(d.date),
+      title: `${d.numberKind === 'job' ? 'Job ID' : 'Invoice'} ${d.number}`,
+      car: car ? [car.make, car.model].filter(Boolean).join(' ') : '',
+      plate: d.plate,
+      lines: [],
+      totalFils: d.totalFils,
+      paidFils: d.totalFils - d.dueFils,
+      dueFils: d.dueFils,
+    });
+  }
   blocks.sort((a, b) => a.date.localeCompare(b.date));
   const c = debtor.customer;
   const total = blocks.reduce((s, b) => s + b.totalFils, 0);
@@ -92,13 +111,11 @@ export async function renderStatement(customerId: string): Promise<Blob> {
           <Text style={[cell, { width: 74, textAlign: 'right', fontWeight: 'bold' }]}>Due</Text>
         </View>
         {blocks.map((b) => (
-          <View key={`${b.job}`} wrap={false} style={{ borderBottomWidth: 0.6, borderColor: COLOR.boxRule, paddingVertical: 4, paddingHorizontal: 4 }}>
+          <View key={b.key} wrap={false} style={{ borderBottomWidth: 0.6, borderColor: COLOR.boxRule, paddingVertical: 4, paddingHorizontal: 4 }}>
             <View style={{ flexDirection: 'row' }}>
               <Text style={[cell, { width: 58 }]}>{formatDate(dubaiDate(b.date))}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={[cell, { fontWeight: 'bold' }]}>
-                  {b.invoice} · Job #{b.job}
-                </Text>
+                <Text style={[cell, { fontWeight: 'bold' }]}>{b.title}</Text>
                 <Text style={[cell, { color: COLOR.label }]}>{[b.car, b.plate].filter(Boolean).join(' · ')}</Text>
               </View>
               <Text style={[cell, { width: 70, textAlign: 'right' }]}>{aed(b.totalFils)}</Text>

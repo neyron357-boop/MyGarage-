@@ -208,6 +208,12 @@ export function monthRange(month: string): [string, string] {
   return [`${month}-01`, `${month}-${String(last).padStart(2, '0')}`];
 }
 
+/** "Май 2026", "May 2026" — a month "YYYY-MM" in words. */
+export function monthLong(month: string, lang: Lang): string {
+  const name = fmt(lang, 'mon', { month: 'long' }).format(new Date(`${month}-15T12:00:00.000Z`));
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${month.slice(0, 4)}`;
+}
+
 export function inRange(day: string, from: string, to: string): boolean {
   return day >= from && day <= to;
 }

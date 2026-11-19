@@ -9,6 +9,7 @@ import { db } from '../../db/db';
 import { formatDate } from '../../domain/dates';
 import { activeInvoice } from '../../domain/invoice';
 import { formatPhone } from '../../domain/phone';
+import { loadHistoryDebts } from '../../services/debts';
 import { bundleAmountDue, loadOrderBundle } from '../../services/orders';
 import { ContactTiles, EmptyState, Field, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, Section, PersonAvatar } from '../../ui/components';
 import { LinkedMoney } from '../money/MoneyEntry';
@@ -36,6 +37,8 @@ export function CustomerPage() {
       if (['delivered', 'closed'].includes(b.order.stage)) debt += Math.max(0, bundleAmountDue(b));
       spent += activeInvoice(b.invoices)?.totalFils ?? 0;
     }
+    // v0.47: and what its invoices from before the app still owe (the same sum as on its card in «Долги»).
+    debt += ((await loadHistoryDebts(c.id))[0]?.dues ?? []).reduce((a, d) => a + d.dueFils, 0);
     return { c, cars, orders, debt, spent, vehicles: new Map(cars.map((v) => [v.id, v])) };
   }, [id]);
   if (data === undefined) return <PageSkeleton variant="detail" />;

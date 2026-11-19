@@ -1,11 +1,11 @@
 import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
+import { IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileText, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dubaiDate, formatDate } from '../../domain/dates';
+import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
 import type { Debtor } from '../../domain/debts';
 import { creditEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
@@ -49,6 +49,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
   const today = dubaiDate();
   const name = customerName(d.customer) || t('customer.noName');
   const jobs = d.cars.reduce((n, c) => n + c.jobs.length, 0);
+  const before = d.history.reduce((n, m) => n + m.dues.length, 0);
   const late = d.cars.some((c) => c.jobs.some((j) => !!j.dueDate && j.dueDate < today));
   const statement = () => run(async () => openPdf(await statementPdf(d.customer.id)));
   const archive = () => run(async () => shareOrDownload(await debtInvoicesZip(d.customer.id)));
@@ -62,7 +63,14 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
             {name}
           </Text>
         }
-        subtitle={[d.customer.phone ? formatPhone(d.customer.phone) : '', t('debt.cars', { count: d.cars.length }), t('debt.jobs', { count: jobs })].filter(Boolean).join(' · ')}
+        subtitle={[
+          d.customer.phone ? formatPhone(d.customer.phone) : '',
+          d.cars.length ? t('debt.cars', { count: d.cars.length }) : '',
+          jobs ? t('debt.jobs', { count: jobs }) : '',
+          before ? t('history.count', { count: before }) : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')}
         right={
           <Group gap={6} wrap="nowrap" aria-expanded={open}>
             <Money fils={d.totalFils} c="red" fw={750} roll />
@@ -97,6 +105,22 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           );
         }),
       )}
+      {/* The invoices from before the app (v0.47): a month a row — its statement — what is still owed on it. */}
+      {d.history.map((m) => (
+        <ListRow
+          key={m.month}
+          chevron
+          onClick={() => navigate(`/customers/${d.customer.id}`)}
+          left={
+            <span className="row-icon" style={tint('grape')} aria-hidden>
+              <IconFileText size={19} stroke={2} />
+            </span>
+          }
+          title={monthLong(m.month, lang)}
+          subtitle={t('history.count', { count: m.dues.length })}
+          right={<Money fils={m.dueFils} size="sm" roll />}
+        />
+      ))}
       <div className="debt-actions">
         <button type="button" className="action-tile" onClick={() => onPay(d.customer.id)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
@@ -110,12 +134,15 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           </span>
           <span>{t('debt.statement')}</span>
         </button>
-        <button type="button" className="action-tile" disabled={busy} onClick={() => void archive()}>
-          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-cobalt-6)' } as React.CSSProperties}>
-            <IconFileZip size={21} stroke={1.9} aria-hidden />
-          </span>
-          <span>{t('debt.zip')}</span>
-        </button>
+        {/* The invoices of this app's jobs (those from before it are in the customer's monthly reports). */}
+        {jobs > 0 && (
+          <button type="button" className="action-tile" disabled={busy} onClick={() => void archive()}>
+            <span className="tile-icon" style={{ '--c': 'var(--mantine-color-cobalt-6)' } as React.CSSProperties}>
+              <IconFileZip size={21} stroke={1.9} aria-hidden />
+            </span>
+            <span>{t('debt.zip')}</span>
+          </button>
+        )}
         <button type="button" className="action-tile" onClick={() => navigate(`/customers/${d.customer.id}`)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-indigo-6)' } as React.CSSProperties}>
             <IconUser size={21} stroke={1.9} aria-hidden />

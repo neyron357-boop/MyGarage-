@@ -921,6 +921,11 @@ export interface Income {
   createdAt: string;
   /** Entered by mistake: cancelled (a cash entry is reversed in the cash book, nothing is deleted). */
   voidedAt?: string;
+  /**
+   * v0.47 — a «debt payment» set, in part, against the customer's invoices from before the app (`historyInvoices`):
+   * which got what. Its jobs' parts are their payments (`payment.incomeId`); what neither took is money in with no debt.
+   */
+  historyParts?: { invoiceId: string; amountFils: number }[];
 }
 
 export interface CashClosing {

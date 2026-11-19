@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { computeReport } from '../domain/reports';
-import { addDebtPayment, companyDebtOf, loadCompanyDebts, loadDebtJobs, loadDebtors, payCredit } from './debts';
+import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit } from './debts';
+import { removeEntry, restoreEntry } from './entries';
 import { voidCreditPayment, voidExpense, voidIncome } from './legacyVoid';
 import { addItem } from './estimate';
 import { approveAll, leaveOnDebt } from './flow';
@@ -196,5 +197,71 @@ describe('the garage on credit', () => {
     // With nothing paid it can be cancelled itself.
     await voidExpense(e.id);
     expect(await loadCompanyDebts()).toEqual([]);
+  });
+});
+
+describe('the invoices from before the app among a customer\u2019s debts (v0.47)', () => {
+  /** A company with two invoices from before the app (May 300, June 200) and a job of this app owing 600. */
+  async function company() {
+    await setOpeningBalances(100_000, 0);
+    const job = await invoicedJob(600);
+    await leaveOnDebt(job.id, { amountFils: 60_000, dueDate: '2026-12-01', signature: signature() });
+    const customerId = job.customerId;
+    const hist = (id: string, date: string, totalFils: number) => ({ id, customerId, vehicleId: job.vehicleId, orderId: undefined, template: 'B', numberKind: 'job', number: id, date, plateRaw: 'W 1', plate: 'W-1', vehicleText: 'Toyota Camry', lines: [], netFils: totalFils, vatFils: 0, totalFils, source: { file: 'x.pdf', sha256: 'x', page: 1 }, importedAt: '' });
+    await db.historyInvoices.bulkPut([hist('hi-may', '2026-05-02', 30_000), hist('hi-jun', '2026-06-03', 20_000)] as never);
+    return { job, customerId };
+  }
+
+  it('they are its debt, the oldest first: a debt payment of 400 pays May and half of June, not the job; deleted — owed again; «Отменить» — paid again', async () => {
+    const { job, customerId } = await company();
+    const card = async () => (await loadDebtors()).find((d) => d.customer.id === customerId)!;
+    expect((await card()).totalFils).toBe(110_000);
+    expect((await card()).history.map((m) => [m.month, m.dueFils])).toEqual([
+      ['2026-05', 30_000],
+      ['2026-06', 20_000],
+    ]);
+    const before = (await cash()).box;
+    const { income, parts, historyParts, restFils } = await addDebtPayment({ amountFils: 40_000, method: 'cash', customerId });
+    expect(parts).toEqual([]);
+    expect(historyParts).toEqual([
+      { invoiceId: 'hi-may', amountFils: 30_000 },
+      { invoiceId: 'hi-jun', amountFils: 10_000 },
+    ]);
+    expect(restFils).toBe(0);
+    // One movement of money, the whole sum; the job still owes all of it.
+    expect((await cash()).box).toBe(before + 40_000);
+    expect(await due(job.id)).toBe(60_000);
+    expect((await card()).totalFils).toBe(70_000);
+    expect((await card()).history.map((m) => [m.month, m.dueFils])).toEqual([['2026-06', 10_000]]);
+    expect(await debtPaymentHistory(income.id)).toEqual([
+      { month: '2026-05', invoices: 1, amountFils: 30_000 },
+      { month: '2026-06', invoices: 1, amountFils: 10_000 },
+    ]);
+    // In the owner's report the part set against them is money in of its own (they were never revenue here).
+    const [orders, invoices, items, expenses, payments, closings, incomes] = await Promise.all([db.orders.toArray(), db.invoices.toArray(), db.items.toArray(), db.expenses.toArray(), db.payments.toArray(), db.cashClosings.toArray(), db.incomes.toArray()]);
+    expect(computeReport({ from: '2000-01-01', to: '2100-01-01', orders, invoices, items, expenses, payments, closings, incomes }).otherIncome).toBe(40_000);
+    // The rest of a payment past them goes to the job.
+    const second = await addDebtPayment({ amountFils: 30_000, method: 'card', customerId });
+    expect(second.historyParts).toEqual([{ invoiceId: 'hi-jun', amountFils: 10_000 }]);
+    expect(second.parts).toEqual([{ orderId: job.id, amountFils: 20_000 }]);
+    expect((await card()).totalFils).toBe(40_000);
+    // The first payment deleted: May and June owe again; brought back — paid again.
+    const removed = await removeEntry({ source: 'income', id: income.id });
+    expect((await card()).totalFils).toBe(80_000);
+    expect((await loadHistoryDebts(customerId))[0].dues.map((d) => [d.invoiceId, d.dueFils])).toEqual([
+      ['hi-may', 30_000],
+      ['hi-jun', 10_000],
+    ]);
+    await restoreEntry(removed);
+    expect((await card()).totalFils).toBe(40_000);
+    expect((await cash()).box).toBe(before + 40_000);
+  });
+
+  it('a customer who owes only them is a card of its own; paid in full it is gone', async () => {
+    const { job, customerId } = await company();
+    await addDebtPayment({ amountFils: 60_000, method: 'cash', customerId, orderId: job.id });
+    expect((await loadDebtors()).find((d) => d.customer.id === customerId)).toMatchObject({ totalFils: 50_000, cars: [] });
+    await addDebtPayment({ amountFils: 50_000, method: 'transfer', customerId });
+    expect((await loadDebtors()).find((d) => d.customer.id === customerId)).toBeUndefined();
   });
 });

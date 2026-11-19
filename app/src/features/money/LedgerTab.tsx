@@ -5,11 +5,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dayHeading, formatDate, monthKey, monthRange } from '../../domain/dates';
+import { dayHeading, formatDate, monthKey, monthLong, monthRange } from '../../domain/dates';
 import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory } from '../../domain/types';
-import { companyDebtOf, debtPaymentParts } from '../../services/debts';
+import { companyDebtOf, debtPaymentHistory, debtPaymentParts } from '../../services/debts';
 import { removeEntry, restoreEntry, updateEntry, type EntryPatch } from '../../services/entries';
 import { loadLedger, setOpeningBalances, updateExpense, updateIncome, type Links } from '../../services/ledger';
 import { proofIndex } from '../../services/proofs';
@@ -76,19 +76,20 @@ function OpeningSheet({ opened, onClose, cash, card, cashLocked }: { opened: boo
   );
 }
 
-/** A debt payment: the jobs it went to, with what each got, and what no debt took. */
+/** A debt payment: the jobs it went to, with what each got, the invoices from before the app (v0.47), what no debt took. */
 function DebtParts({ entry }: { entry: LedgerEntry }) {
   const { t } = useTranslation();
+  const lang = useLang();
   const navigate = useNavigate();
   const data = useLiveQuery(async () => {
-    const parts = await debtPaymentParts(entry.id);
+    const [parts, months] = await Promise.all([debtPaymentParts(entry.id), debtPaymentHistory(entry.id)]);
     const orders = await db.orders.bulkGet(parts.map((p) => p.orderId));
     const vehicles = await db.vehicles.bulkGet(orders.map((o) => o?.vehicleId ?? ''));
     const customer = entry.customerId ? await db.customers.get(entry.customerId) : undefined;
-    return { parts: parts.map((p, i) => ({ ...p, order: orders[i], vehicle: vehicles[i] })), customer };
+    return { parts: parts.map((p, i) => ({ ...p, order: orders[i], vehicle: vehicles[i] })), months, customer };
   }, [entry.id, entry.customerId]);
   if (!data) return null;
-  const rest = entry.amountFils - data.parts.reduce((s, p) => s + p.amountFils, 0);
+  const rest = entry.amountFils - data.parts.reduce((s, p) => s + p.amountFils, 0) - data.months.reduce((s, m) => s + m.amountFils, 0);
   const who = data.customer ? (data.customer.type === 'company' && data.customer.companyName ? data.customer.companyName : data.customer.name) || t('customer.noName') : '';
   return (
     <Box>
@@ -102,6 +103,16 @@ function DebtParts({ entry }: { entry: LedgerEntry }) {
             title={p.order ? `№${p.order.number}` : ''}
             subtitle={p.vehicle && <PlateLine plate={p.vehicle.plate}>{[p.vehicle.make, p.vehicle.model].filter(Boolean).join(' ')}</PlateLine>}
             right={<Money fils={p.amountFils} size="sm" />}
+          />
+        ))}
+        {data.months.map((m) => (
+          <ListRow
+            key={m.month}
+            chevron={!!data.customer}
+            onClick={data.customer ? () => navigate(`/customers/${data.customer!.id}`) : undefined}
+            title={m.month ? monthLong(m.month, lang) : ''}
+            subtitle={t('history.count', { count: m.invoices })}
+            right={<Money fils={m.amountFils} size="sm" />}
           />
         ))}
         {rest > 0 && <ListRow title={t('debt.rest')} right={<Money fils={rest} size="sm" c="dimmed" />} />}

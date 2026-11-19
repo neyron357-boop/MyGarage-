@@ -2636,11 +2636,13 @@ async function launchBrowser() {
       for (const inv of await db.invoices.toArray()) {
         const order = await db.orders.get(inv.orderId);
         if (!order || inv.type === 'credit_note' || inv.status !== 'issued') continue;
-        const at = invoicePaidAt(inv, await db.invoices.where('orderId').equals(order.id).toArray(), await db.payments.where('orderId').equals(order.id).toArray(), order);
+        const pays = await db.payments.where('orderId').equals(order.id).toArray();
+        const at = invoicePaidAt(inv, await db.invoices.where('orderId').equals(order.id).toArray(), pays, order);
         const key = at ? 'paid' : 'owed';
-        if (out[key]) continue;
+        // A paid one with its payments (one paid to the owner has none — its money is not here to delete and bring back).
+        if (out[key] && !(key === 'paid' && !out.paid.payments && pays.length)) continue;
         const text = (await pdfTextItems((await invoicePdf(inv.id)).blob)).map((t) => t.str ?? t.text ?? '').join(' ');
-        out[key] = { order: order.id, number: inv.number, stamped: /\bP\s?A\s?I\s?D\b/.test(text) };
+        out[key] = { order: order.id, number: inv.number, stamped: /\bP\s?A\s?I\s?D\b/.test(text), payments: pays.length };
       }
       return out;
     });
@@ -2653,6 +2655,12 @@ async function launchBrowser() {
     const sheet = page.getByRole('dialog').filter({ hasText: 'с документами' });
     await sheet.getByText(paid.paid.number).waitFor();
     await shot('44b-delete-with-invoice');
+    const counts = async () =>
+      page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        return [await db.invoices.where('orderId').equals(id).count(), await db.payments.where('orderId').equals(id).count()];
+      }, paid.paid.order);
+    const had = await counts();
     await sheet.getByRole('button', { name: 'Удалить всё' }).click();
     await page.getByText(/удалён/).first().waitFor();
     const gone = await page.evaluate(async (id) => {
@@ -2661,23 +2669,20 @@ async function launchBrowser() {
     }, paid.paid.order);
     if (gone[0] || gone[1] || gone[2]) throw new Error('not deleted whole: ' + JSON.stringify(gone.slice(1)));
     await page.getByRole('button', { name: 'Отменить' }).first().click();
-    // The job and its documents come back in one go, its money right after them (restoreJob, then restoreEntry): wait
-    // for the money too — read the moment the job is back, the payments may not be there yet.
+    // The job and its documents come back in one go, its money right after them (restoreJob, then restoreEntry): all of
+    // what it had — read the moment the job is back, the payments may not be there yet.
     await page
       .waitForFunction(
-        async (id) => {
+        async ({ id, had }) => {
           const { db } = await import('/src/db/db.ts');
-          return !!(await db.orders.get(id)) && (await db.payments.where('orderId').equals(id).count()) > 0;
+          return !!(await db.orders.get(id)) && (await db.invoices.where('orderId').equals(id).count()) === had[0] && (await db.payments.where('orderId').equals(id).count()) === had[1];
         },
-        paid.paid.order,
+        { id: paid.paid.order, had },
         { timeout: 15000 },
       )
       .catch(() => undefined);
-    const back = await page.evaluate(async (id) => {
-      const { db } = await import('/src/db/db.ts');
-      return [await db.invoices.where('orderId').equals(id).count(), await db.payments.where('orderId').equals(id).count()];
-    }, paid.paid.order);
-    if (!back[0] || !back[1]) throw new Error('Undo did not bring it back: ' + JSON.stringify(back));
+    const back = await counts();
+    if (!had[0] || JSON.stringify(back) !== JSON.stringify(had)) throw new Error(`Undo did not bring it back: ${JSON.stringify(back)} of ${JSON.stringify(had)}`);
   });
   await step('v0.43: a company’s driver — typed at check-in; offered at once on its other car, one tap; his phone changed on a job (the job before keeps the old one); the company’s drivers with their jobs; still there after a reload', async () => {
     const ids = await page.evaluate(async () => {
@@ -2951,6 +2956,31 @@ async function launchBrowser() {
       return (await db.serviceMap.toArray()).map((e) => [e.id, e.serviceId, e.by]);
     });
     if (JSON.stringify(mapped) !== JSON.stringify([['MAGIC SMOKE REMOVAL', 'svc-labour', 'hand']])) throw new Error(`mapped: ${JSON.stringify(mapped)}`);
+  });
+  await step('v0.47: the invoices from before the app are the company’s debt — «Деньги → Долги»: its card, a month a row; a debt payment pays the oldest first', async () => {
+    const id = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      return (await db.customers.toArray()).find((x) => x.name === 'ACME TEST CONTRACTING LLC').id;
+    });
+    const owes = (text) => [...document.querySelectorAll('.debt-card')].some((c) => c.textContent.includes('ACME TEST CONTRACTING LLC') && c.textContent.includes(text));
+    await page.goto(BASE + '#/money?tab=debts');
+    // Its two May invoices (231.00 and 105.00) — no job of this app — are what it owes.
+    await page.waitForFunction(owes, '336', { timeout: 30000 });
+    const card = page.locator('.debt-card').filter({ hasText: 'ACME TEST CONTRACTING LLC' });
+    await card.getByText('ACME TEST CONTRACTING LLC').click();
+    await card.getByText('Май 2026').waitFor();
+    await shot('49a-debts-history');
+    // A debt payment of 231: the oldest invoice is paid; 105 is left.
+    await page.evaluate(async (customerId) => {
+      const { addDebtPayment } = await import('/src/services/debts.ts');
+      await addDebtPayment({ amountFils: 23100, method: 'cash', customerId });
+    }, id);
+    await page.waitForFunction(owes, '105', { timeout: 15000 });
+    const left = await page.evaluate(async (customerId) => {
+      const { loadHistoryDebts } = await import('/src/services/debts.ts');
+      return (await loadHistoryDebts(customerId))[0].dues.map((d) => [d.number, d.dueFils]);
+    }, id);
+    if (JSON.stringify(left) !== JSON.stringify([['302', 10500]])) throw new Error(`left: ${JSON.stringify(left)}`);
   });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));

@@ -1,6 +1,6 @@
 import { db, nextNumber, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
-import { allocate, creditLeft, groupDebts, isCustomerDebt, orderDue, type DebtJob, type DebtShare, type Debtor } from '../domain/debts';
+import { creditLeft, debtQueue, groupDebts, historyDues, historyKeyOf, isCustomerDebt, orderDue, spread, type DebtJob, type DebtShare, type Debtor, type HistoryDue } from '../domain/debts';
 import { activeInvoice, amountDue, formatDocNumber } from '../domain/invoice';
 import type { CreditPayment, Customer, Expense, Income, Invoice, Order, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
 import { AppError } from './errors';
@@ -15,6 +15,10 @@ import { logEvent } from './orders';
  * "Money → Debts", counted as the job itself counts it (domain/debts.ts). A debt is paid on the job (its payment
  * sheet) or at once for the customer: "Debt payment" — one income, so one movement of money, spread over the
  * customer's jobs as their payments.
+ *
+ * v0.47: a customer's invoices from before the app are its debt as well (a company's monthly statements): each owes its
+ * total until «debt payments» cover it — the oldest first, so they go before every job of this app; the part a payment
+ * sets against them is kept in the income itself (`historyParts`) and goes with it when it is deleted or brought back.
  *
  * The garage: an expense taken on credit — counted once, as an expense; what is paid towards it moves money when
  * it is paid, by the way it is paid.
@@ -89,9 +93,26 @@ export async function loadDebtJobs(customerId?: string): Promise<DebtJob[]> {
   });
 }
 
-/** The debts as one card per customer, whoever owes most first. */
+/** The invoices from before the app still owing (v0.47), of one customer or of every one that has them. */
+export async function loadHistoryDebts(customerId?: string): Promise<{ customer: Customer; dues: HistoryDue[] }[]> {
+  const invoices = customerId ? await db.historyInvoices.where('customerId').equals(customerId).toArray() : await db.historyInvoices.toArray();
+  if (!invoices.length) return [];
+  const ids = [...new Set(invoices.map((i) => i.customerId))];
+  const [customers, incomes] = await Promise.all([db.customers.bulkGet(ids), db.incomes.where('customerId').anyOf(ids).toArray()]);
+  return customers.flatMap((c) => {
+    if (!c) return [];
+    const dues = historyDues(
+      invoices.filter((i) => i.customerId === c.id),
+      incomes.filter((i) => i.customerId === c.id),
+    );
+    return dues.length ? [{ customer: c, dues }] : [];
+  });
+}
+
+/** The debts as one card per customer, whoever owes most first (with the invoices from before the app, v0.47). */
 export async function loadDebtors(): Promise<Debtor[]> {
-  return groupDebts(await loadDebtJobs());
+  const [jobs, history] = await Promise.all([loadDebtJobs(), loadHistoryDebts()]);
+  return groupDebts(jobs, history);
 }
 
 export interface DebtPaymentInput {
@@ -109,21 +130,24 @@ const receiptYear = () => Number(dubaiDate().slice(0, 4));
 
 /**
  * Money received towards a customer's debts: any sum, a part of a debt too. One income — one movement of money
- * (cash: the cash box grows by the whole sum) — spread over the customer's jobs, the oldest first or the job picked
- * first; each job gets a payment of its own that carries the income's id (a receipt, the journal, the job closed
- * when nothing is due any more). What is not owed by anyone — no customer picked, or more than they owe — stays
- * in the income as money in with no debt to it.
+ * (cash: the cash box grows by the whole sum) — spread over the customer's debts, the oldest first or the job picked
+ * first: each job gets a payment of its own that carries the income's id (a receipt, the journal, the job closed
+ * when nothing is due any more); an invoice from before the app (v0.47) — its part in the income (`historyParts`).
+ * What is not owed by anyone — no customer picked, or more than they owe — stays in the income as money in with no
+ * debt to it.
  */
-export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income: Income; parts: DebtShare[]; restFils: number }> {
+export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income: Income; parts: DebtShare[]; historyParts: { invoiceId: string; amountFils: number }[]; restFils: number }> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
   const customer = input.customerId ? await db.customers.get(input.customerId) : undefined;
   if (input.customerId && !customer) throw new AppError('err.notFound');
-  const debts = customer ? await loadDebtJobs(customer.id) : [];
-  const { parts, restFils } = allocate(
-    input.amountFils,
-    debts.map((d) => ({ orderId: d.order.id, dueFils: d.dueFils, since: d.since })),
-    input.orderId,
-  );
+  const [debts, history] = customer ? await Promise.all([loadDebtJobs(customer.id), loadHistoryDebts(customer.id)]) : [[], []];
+  const spent = spread(input.amountFils, debtQueue(debts, history[0]?.dues ?? []), input.orderId);
+  const restFils = spent.restFils;
+  const parts: DebtShare[] = spent.parts.filter((p) => !historyKeyOf(p.key)).map((p) => ({ orderId: p.key, amountFils: p.amountFils }));
+  const historyParts = spent.parts.flatMap((p) => {
+    const invoiceId = historyKeyOf(p.key);
+    return invoiceId ? [{ invoiceId, amountFils: p.amountFils }] : [];
+  });
   const now = nowIso();
   const date = input.date ?? dubaiDate();
   // Typed for an earlier day: the jobs' payments stand on that day too (noon in Dubai).
@@ -138,6 +162,7 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
     customerId: customer?.id,
     note: input.note?.trim() || undefined,
     createdAt: now,
+    ...(historyParts.length ? { historyParts } : {}),
   };
   const movementId = uid();
   await db.transaction('rw', [db.incomes, db.cashMovements, db.payments, db.counters, db.events], async () => {
@@ -166,7 +191,7 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
   // Taken on a day already counted: the cash into that day's closing; its jobs' card payments in that day's card total.
   if (date !== dubaiDate(now)) await placeInDay(date, now, income.method === 'cash' ? movementId : undefined);
   for (const part of parts) await settleIfPaid(part.orderId);
-  return { income, parts, restFils };
+  return { income, parts, historyParts, restFils };
 }
 
 /** The jobs a "debt payment" went to, with what each got (a cancelled one — nothing). */
@@ -174,6 +199,21 @@ export async function debtPaymentParts(incomeId: string): Promise<DebtShare[]> {
   const by = new Map<string, number>();
   for (const p of await db.payments.where('incomeId').equals(incomeId).toArray()) by.set(p.orderId, (by.get(p.orderId) ?? 0) + (p.kind === 'refund' ? -p.amountFils : p.amountFils));
   return [...by.entries()].filter(([, amountFils]) => amountFils > 0).map(([orderId, amountFils]) => ({ orderId, amountFils }));
+}
+
+/** The invoices from before the app a «debt payment» went to (v0.47), by month: how many, how much. */
+export async function debtPaymentHistory(incomeId: string): Promise<{ month: string; invoices: number; amountFils: number }[]> {
+  const parts = (await db.incomes.get(incomeId))?.historyParts ?? [];
+  if (!parts.length) return [];
+  const invoices = await db.historyInvoices.bulkGet(parts.map((p) => p.invoiceId));
+  const by = new Map<string, { month: string; invoices: number; amountFils: number }>();
+  parts.forEach((p, i) => {
+    const month = invoices[i]?.date.slice(0, 7) ?? '';
+    const m = by.get(month) ?? by.set(month, { month, invoices: 0, amountFils: 0 }).get(month)!;
+    m.invoices++;
+    m.amountFils += p.amountFils;
+  });
+  return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
 }
 
 /* ---------------- The garage's own debts: expenses taken on credit ---------------- */

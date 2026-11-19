@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, creditLeft, groupDebts, isCustomerDebt, orderDue, type DebtJob } from './debts';
-import type { Customer, Invoice, Order, OrderItem, Payment, Vehicle } from './types';
+import { allocate, creditLeft, debtQueue, groupDebts, historyDues, historyKey, isCustomerDebt, orderDue, spread, type DebtJob } from './debts';
+import type { Customer, HistoryInvoice, Income, Invoice, Order, OrderItem, Payment, Vehicle } from './types';
 
 const customer = (id: string, name: string) => ({ id, name, type: 'individual' }) as Customer;
 const car = (id: string) => ({ id, make: 'Toyota', model: id }) as Vehicle;
@@ -76,5 +76,48 @@ describe('an expense taken on credit', () => {
     expect(creditLeft({ amountFils: 100_000 }, [])).toBe(100_000);
     expect(creditLeft({ amountFils: 100_000 }, [{ amountFils: 30_000 }])).toBe(70_000);
     expect(creditLeft({ amountFils: 100_000 }, [{ amountFils: 30_000 }, { amountFils: 70_000 }])).toBe(0);
+  });
+});
+
+describe('the invoices from before the app as a debt (v0.47)', () => {
+  const acme = { id: 'acme', name: '', companyName: 'ACME', type: 'company' } as Customer;
+  const hist = (id: string, date: string, totalFils: number): HistoryInvoice => ({ id, customerId: 'acme', vehicleId: 'v1', date, number: id, numberKind: 'job', plate: 'W-1', totalFils }) as HistoryInvoice;
+  const pays = (parts: [string, number][], more: Partial<Income> = {}) => ({ category: 'debt', historyParts: parts.map(([invoiceId, amountFils]) => ({ invoiceId, amountFils })), ...more }) as Income;
+  const invoices = [hist('may-1', '2026-05-02', 30_000), hist('jun-1', '2026-06-03', 20_000), hist('may-2', '2026-05-20', 10_000)];
+
+  it('each owes its total less what debt payments set against it; a cancelled payment does not count', () => {
+    const dues = historyDues(invoices, [pays([['may-1', 30_000], ['may-2', 4_000]]), pays([['jun-1', 20_000]], { voidedAt: 'x' }), { category: 'sale' } as Income]);
+    expect(dues.map((d) => [d.invoiceId, d.dueFils])).toEqual([
+      ['may-2', 6_000],
+      ['jun-1', 20_000],
+    ]);
+  });
+
+  it('one queue with the jobs: the oldest first — the invoices from before the app go before every job — or the job picked first', () => {
+    const job1 = job(7, acme, car('hiace'), 50_000, '2026-11-12T10:00:00.000Z');
+    const dues = historyDues(invoices, []);
+    expect(spread(45_000, debtQueue([job1], dues)).parts).toEqual([
+      { key: historyKey('may-1'), amountFils: 30_000 },
+      { key: historyKey('may-2'), amountFils: 10_000 },
+      { key: historyKey('jun-1'), amountFils: 5_000 },
+    ]);
+    expect(spread(60_000, debtQueue([job1], dues), 'o7')).toEqual({ parts: [{ key: 'o7', amountFils: 50_000 }, { key: historyKey('may-1'), amountFils: 10_000 }], restFils: 0 });
+    // More than all of it: the rest is money in with no debt.
+    expect(spread(120_000, debtQueue([job1], dues)).restFils).toBe(10_000);
+    // The jobs' own spread is as it was.
+    expect(allocate(20_000, [{ orderId: 'o7', dueFils: 50_000, since: '2026-11-12' }])).toEqual({ parts: [{ orderId: 'o7', amountFils: 20_000 }], restFils: 0 });
+  });
+
+  it('on the customer’s card: a month a row, oldest first, with what it still owes; with the jobs, one total', () => {
+    const dues = historyDues(invoices, [pays([['may-1', 30_000]])]);
+    const [only] = groupDebts([], [{ customer: acme, dues }]);
+    expect(only).toMatchObject({ totalFils: 30_000, cars: [] });
+    expect(only.history.map((m) => [m.month, m.dues.length, m.dueFils])).toEqual([
+      ['2026-05', 1, 10_000],
+      ['2026-06', 1, 20_000],
+    ]);
+    const [both] = groupDebts([job(7, acme, car('hiace'), 50_000, '2026-11-12')], [{ customer: acme, dues }]);
+    expect(both.totalFils).toBe(80_000);
+    expect(both.cars).toHaveLength(1);
   });
 });
