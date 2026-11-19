@@ -2,6 +2,8 @@ import { notifications } from '@mantine/notifications';
 import { IconCircleCheckFilled, IconHistory } from '@tabler/icons-react';
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { formatAed } from '../../domain/money';
+import { useLang } from '../../ui/hooks';
 import { onAiNotice, type AiNotice } from '../../services/ai';
 import { AiMark } from './Ai';
 
@@ -13,6 +15,7 @@ import { AiMark } from './Ai';
  */
 export function AiNotices() {
   const { t } = useTranslation();
+  const lang = useLang();
   useEffect(
     () =>
       onAiNotice((n: AiNotice) => {
@@ -37,6 +40,17 @@ export function AiNotices() {
             <>
               <span className="ai-toast-main">{n.to}</span>
               {n.from !== n.to && <span className="ai-toast-was">{n.from}</span>}
+            </>
+          );
+        } else if (n.kind === 'expense') {
+          // A receipt recorded as an expense (v0.50): the sum and the seller, the job it went to (or none — a tap away in the sheet).
+          title = n.close ? t('ai.receiptClose') : t('ai.receiptTitle');
+          body = (
+            <>
+              <span className="ai-toast-main">{[formatAed(n.amountFils, lang), n.vendor].filter(Boolean).join(' · ')}</span>
+              <span className="ai-toast-sub">
+                {[n.job ? `№${n.job.number}${n.job.car ? ` · ${n.job.car}` : ''}` : t('ai.receiptNoJob'), n.supplier?.added ? t('ai.receiptSupplierNew') : '', t('ai.receiptItems', { count: n.items })].filter(Boolean).join(' · ')}
+              </span>
             </>
           );
         } else {
@@ -85,7 +99,7 @@ export function AiNotices() {
           ),
         });
       }),
-    [t],
+    [t, lang],
   );
   return null;
 }

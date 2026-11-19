@@ -6268,6 +6268,31 @@ button.kpi-tab .eyebrow {
   background: color-mix(in srgb, var(--ai-b) 12%, transparent);
   color: var(--mantine-color-text);
 }
+.ai-toast-sub {
+  font-size: 13px;
+  color: var(--mantine-color-dimmed);
+  overflow-wrap: anywhere;
+}
+/* A receipt being read on the server (v0.50): a glass pill above the tab bar, the AI's mark twinkling in it. */
+.ai-scan-pill {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  transform: translateX(-50%);
+  z-index: 180;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 10px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+html.desk .ai-scan-pill {
+  bottom: 24px;
+}
 .ai-undo {
   appearance: none;
   border: 0;

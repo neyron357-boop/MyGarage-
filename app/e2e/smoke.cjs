@@ -2497,6 +2497,149 @@ async function launchBrowser() {
     await page.locator('[data-quick="note"]').click();
     await page.waitForURL(/#\/notes/);
   });
+  await step('v0.50: «Расход» in the quick actions is the receipt’s camera — the paper read on the garage’s server, the expense recorded with the photo and tied to the job its parts are for; not read — the plain sheet, the photo attached', async () => {
+    await page.goto(BASE + '#/');
+    await page.waitForTimeout(500);
+    // A part that one open job alone has on its lines (by the dictionary's key, as the guess compares), with no purchase
+    // price yet: the receipt names it — the expense must go to that job, and the line gets its price off the paper.
+    const target = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { partKey } = await import('/src/domain/partsVocab.ts');
+      const orders = await db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
+      const items = await db.items.where('orderId').anyOf(orders.map((o) => o.id)).toArray();
+      const byKey = new Map();
+      for (const i of items) {
+        if (i.kind !== 'part' || i.approvalState === 'declined' || !(i.titleEn || i.titleRu)) continue;
+        const k = partKey(i.titleEn || i.titleRu);
+        byKey.set(k, [...(byKey.get(k) ?? []), i]);
+      }
+      const own = [...byKey.values()].filter((list) => list.length === 1).map(([it]) => it);
+      const it = own.find((x) => !x.costPriceFils && !x.partNumber) ?? own[0];
+      if (!it) return null;
+      const o = orders.find((x) => x.id === it.orderId);
+      return { name: it.titleEn || it.titleRu, orderId: o.id, number: o.number, itemId: it.id, cost: it.costPriceFils ?? null, pv: it.purchaseVatFils ?? null, pn: it.partNumber ?? null, supplierId: it.supplierId ?? null };
+    });
+    if (!target) throw new Error('no open job with a part of its own');
+    // The test's camera films a receipt (a canvas); the garage's server is played: Gemini's reading of it, after a moment.
+    await page.evaluate(async ({ name }) => {
+      const c = document.createElement('canvas');
+      c.width = 1200;
+      c.height = 1600;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, c.width, c.height);
+      g.fillStyle = '#111';
+      g.font = 'bold 48px Arial';
+      g.fillText('GULF STAR AUTO PARTS', 80, 140);
+      g.font = '38px Arial';
+      g.fillText('TAX INVOICE A-1042', 80, 230);
+      g.fillText('Tel 050 442 1190 · Al Quoz Ind. Area 3', 80, 290);
+      g.fillText(name + '   1   35.00', 80, 380);
+      g.fillText('VAT 5%   1.75', 80, 470);
+      g.font = 'bold 44px Arial';
+      g.fillText('TOTAL   36.75', 80, 580);
+      let n = 0;
+      const paint = () => ((g.fillStyle = n++ % 2 ? '#fff' : '#fefefe'), g.fillRect(0, c.height - 2, 2, 2));
+      const timer = setInterval(paint, 80);
+      const stream = c.captureStream(15);
+      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      window.__e2eCamera = { done: () => (clearInterval(timer), (navigator.mediaDevices.getUserMedia = real)) };
+      navigator.mediaDevices.getUserMedia = async () => stream.clone();
+      const ai = await import('/src/services/ai.ts');
+      window.__e2eReceipt = { asked: [], fail: false };
+      ai.setAiTransport(async (path, body) => {
+        window.__e2eReceipt.asked.push({ path, type: body.image?.type, size: body.image?.data?.length ?? 0 });
+        await new Promise((r) => setTimeout(r, 900));
+        if (path !== 'receipt') throw new Error('not here');
+        if (window.__e2eReceipt.fail) throw new Error('ai off');
+        return { isReceipt: true, kind: 'parts', vendor: 'GULF STAR AUTO PARTS', vendorPhone: '050 442 1190', vendorAddress: 'Al Quoz Ind. Area 3', vendorTrn: '100234567800003', invoiceNo: 'A-1042', date: '', items: [{ name, partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: 35, vat: 1.75, total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 };
+      });
+    }, target);
+    const plusBox = await page.locator('.tab-plus').boundingBox();
+    const cx = plusBox.x + plusBox.width / 2;
+    const cy = plusBox.y + plusBox.height / 2;
+    const out = async () => {
+      await page.mouse.click(cx, cy, { button: 'right' });
+      await page.locator('.quick-layer[data-mode="sticky"]').waitFor();
+      await page.locator('[data-quick="out"]').click();
+      await page.locator('.cam[data-phase="live"]').waitFor({ timeout: 8000 });
+    };
+    // «Расход»: the camera at once, live; the shutter — the paper goes to the server (the pill says it is being read),
+    // the expense is recorded and said (its card), its sheet opens: the job it went to, the sum, the photo — a tap each.
+    await out();
+    await shot('40d-receipt-camera');
+    await page.getByRole('button', { name: 'Снять фото' }).click();
+    await page.locator('.cam').waitFor({ state: 'detached' });
+    await page.locator('[data-ai-scanning]').waitFor({ timeout: 8000 });
+    await page.locator('[data-ai-notice="expense"]').waitFor({ timeout: 30000 });
+    const dlg = page.getByRole('dialog');
+    await dlg.getByText(/GULF STAR AUTO PARTS/).first().waitFor();
+    await page.locator('[data-ai-scanning]').waitFor({ state: 'detached' });
+    const text = await dlg.innerText();
+    if (!/36/.test(text)) throw new Error('the sheet shows ' + text.replace(/\s+/g, ' ').slice(0, 120));
+    await shot('40e-receipt-recorded');
+    const got = await page.evaluate(async ({ itemId, orderId }) => {
+      const { db } = await import('/src/db/db.ts');
+      const e = (await db.expenses.toArray()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      const cat = await db.expenseCategories.get(e.categoryId);
+      const it = await db.items.get(itemId);
+      return {
+        id: e.id,
+        amount: e.amountFils,
+        vat: e.vatFils,
+        vendor: e.vendor,
+        method: e.method,
+        code: cat?.code,
+        job: e.orderId === orderId,
+        media: (await db.media.where('ownerId').equals(e.id).toArray()).map((m) => m.slot),
+        moves: await db.cashMovements.filter((m) => m.expenseId === e.id).count(),
+        cost: it.costPriceFils ?? null,
+        pv: it.purchaseVatFils ?? null,
+        pn: (it.partNumber ?? '').replace(/\W/g, ''),
+        lineSupplier: it.supplierId ?? null,
+        // The seller, added to the base off the paper (v0.50.1): its phone as the app keeps numbers, the car's make.
+        suppliers: (await db.suppliers.filter((x) => x.name === 'GULF STAR AUTO PARTS').toArray()).map((x) => ({ id: x.id, phone: x.phone, address: x.address, makes: x.makes, notes: x.notes })),
+        asked: window.__e2eReceipt.asked,
+      };
+    }, target);
+    if (got.suppliers.length !== 1 || got.suppliers[0].phone !== '+971504421190' || got.suppliers[0].address !== 'Al Quoz Ind. Area 3' || got.suppliers[0].notes !== 'TRN 100234567800003') throw new Error('the supplier: ' + JSON.stringify(got.suppliers));
+    if (target.supplierId === null && got.lineSupplier !== got.suppliers[0].id) throw new Error('the line’s supplier: ' + got.lineSupplier);
+    if (got.amount !== 3675 || got.vat !== 175 || got.vendor !== 'GULF STAR AUTO PARTS' || got.method !== 'cash' || got.code !== 'parts' || !got.job || got.media.join() !== 'receipt' || got.moves !== 1)
+      throw new Error('the expense: ' + JSON.stringify(got));
+    if (target.cost === null && (got.cost !== 3500 || got.pv !== 175)) throw new Error('the line’s price off the paper: ' + JSON.stringify(got));
+    if (target.pn === null && got.pn !== '90915YZZE1') throw new Error('the line’s number off the paper: ' + got.pn);
+    if (got.asked.length !== 1 || got.asked[0].path !== 'receipt' || got.asked[0].type !== 'image/jpeg' || got.asked[0].size < 1000) throw new Error('asked: ' + JSON.stringify(got.asked));
+    // «Отменить» on the card: the expense goes, its movement and photo with it; the line keeps its price (put back here).
+    await page.locator('[data-ai-notice="expense"]').getByRole('button', { name: 'Отменить' }).click();
+    await dlg.waitFor({ state: 'detached', timeout: 5000 }).catch(() => closeModal());
+    const after = await page.evaluate(async ({ id, itemId, cost, pv, pn, supplierId }) => {
+      const { db } = await import('/src/db/db.ts');
+      await db.items.update(itemId, { costPriceFils: cost ?? undefined, purchaseVatFils: pv ?? undefined, partNumber: pn ?? undefined, supplierId: supplierId ?? undefined });
+      return { expense: !!(await db.expenses.get(id)), media: await db.media.where('ownerId').equals(id).count(), moves: await db.cashMovements.filter((m) => m.expenseId === id).count(), suppliers: await db.suppliers.filter((x) => x.name === 'GULF STAR AUTO PARTS').count() };
+    }, { ...target, id: got.id });
+    if (after.expense || after.media || after.moves || after.suppliers) throw new Error('«Отменить» left ' + JSON.stringify(after));
+    // Not read (no server, an unreadable paper): the plain expense sheet, the photo already on it — the sum is typed.
+    await page.evaluate(() => (window.__e2eReceipt.fail = true));
+    await out();
+    await page.getByRole('button', { name: 'Снять фото' }).click();
+    await page.getByText('Чек не прочитан — впишите сумму').waitFor({ timeout: 15000 });
+    await page.getByRole('dialog').getByRole('button', { name: /^Записать расход/ }).waitFor();
+    await page.getByRole('dialog').getByText('Чек прикреплён ✓').waitFor();
+    await shot('40f-receipt-unread');
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    // The camera's × — the expense sheet without a paper.
+    await out();
+    await page.locator('.cam').getByRole('button', { name: 'Закрыть' }).click();
+    await page.locator('.cam').waitFor({ state: 'detached' });
+    await page.getByRole('dialog').getByRole('button', { name: /^Записать расход/ }).waitFor();
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.evaluate(async () => {
+      window.__e2eCamera.done();
+      (await import('/src/services/ai.ts')).setAiTransport(undefined);
+    });
+  });
   await step('v0.29: a part’s photo beside its name; parts picked set at once (supplier, state); the job’s picture for the owner', async () => {
     const job = await page.evaluate(async () => {
       const { db } = await import('/src/db/db.ts');

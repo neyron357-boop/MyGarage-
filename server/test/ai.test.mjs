@@ -243,6 +243,30 @@ describe('the AI', () => {
     assert.equal(gemini, 1);
   });
 
+  it('a receipt photographed (v0.50): a light model reads it with the picture, the sums come as numbers; the same picture is not asked twice; no picture — 400', async () => {
+    const { f, seen } = fake([
+      [/gemini-3\.5-flash-lite/, () => answer({ isReceipt: true, kind: 'parts', vendor: 'AL QUOZ AUTO PARTS', vendorPhone: '050 442 1190', invoiceNo: 'A-1042', date: '2026-11-18', items: [{ name: 'OIL FILTER', partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: '35', vat: '1.75', total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 })],
+    ]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
+    const image = { type: 'image/jpeg', data: 'x'.repeat(5000) };
+    const r = await ai.receipt({ image });
+    assert.deepEqual([r.vendor, r.vendorPhone, r.kind, r.subtotal, r.vat, r.total, r.items[0].partNumber, r.by], ['AL QUOZ AUTO PARTS', '050 442 1190', 'parts', 35, 1.75, 36.75, '90915-YZZE1', 'gemini-3.5-flash-lite']);
+    const ask = seen.find((x) => /gemini-3\.5-flash-lite/.test(x.url));
+    const pic = ask.body.contents[0].parts.find((p) => p.inline_data);
+    assert.deepEqual(pic.inline_data, { mime_type: 'image/jpeg', data: image.data });
+    assert.equal(ask.body.generationConfig.responseMimeType, 'application/json');
+    assert.equal(ask.body.generationConfig.thinkingConfig.thinkingLevel, 'low');
+    // The paper's kind is asked (parts, a contractor's work, fuel, food, other), with the seller's phone and address.
+    const schema = ask.body.generationConfig.responseJsonSchema;
+    assert.deepEqual(schema.properties.kind.enum, ['parts', 'service', 'fuel', 'food', 'other']);
+    assert.ok(schema.required.includes('kind') && schema.properties.vendorPhone && schema.properties.vendorAddress);
+    // The same paper photographed again (or asked by another device) — the reading kept, no second question.
+    await ai.receipt({ image });
+    assert.equal(seen.filter((x) => /generateContent/.test(x.url)).length, 1);
+    for (const bad of [{ image: { type: 'image/gif', data: 'x'.repeat(5000) } }, { image: { type: 'image/jpeg', data: 'x' } }, {}])
+      await assert.rejects(ai.receipt(bad), /no picture/);
+  });
+
   it('a device may ask 40 times a minute', () => {
     let t = 0;
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, lookup, now: () => t });
@@ -265,7 +289,7 @@ describe('the AI through the API', () => {
     const pairing = createPairing();
     let on = false;
     const asked = [];
-    const ai = { on: () => on, status: () => ({ on }), allow: () => {}, vin: async (v) => (asked.push(v), { make: 'Toyota', model: 'Camry' }), partName: async () => ({}), partFind: async () => ({}) };
+    const ai = { on: () => on, status: () => ({ on }), allow: () => {}, vin: async (v) => (asked.push(v), { make: 'Toyota', model: 'Camry' }), partName: async () => ({}), partFind: async () => ({}), receipt: async (b) => ({ got: b.image.data.length }) };
     const server = createServer(createApi({ store, config: loadConfig({ DATA_DIR: d }), pairing, log: () => {}, ai }));
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -280,6 +304,12 @@ describe('the AI through the API', () => {
       assert.equal(r.status, 200);
       assert.deepEqual(await r.json(), { make: 'Toyota', model: 'Camry' });
       assert.deepEqual(asked, ['JTNB11HK6J3012345']);
+      // A receipt's picture is a big body (up to 8 MB, v0.50); any other question is a few lines — 16 KB.
+      const post = (p, body) => fetch(`${base}/api/ai/${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body });
+      const rr = await post('receipt', JSON.stringify({ image: { type: 'image/jpeg', data: 'x'.repeat(200_000) } }));
+      assert.equal(rr.status, 200);
+      assert.deepEqual(await rr.json(), { got: 200_000 });
+      assert.equal((await post('vin', JSON.stringify({ vin: 'x'.repeat(20_000) }))).status, 413);
     } finally {
       server.close();
       store.close();

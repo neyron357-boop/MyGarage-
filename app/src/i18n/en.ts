@@ -1996,6 +1996,18 @@ export const en: typeof ru = {
     seenIn_few: 'In {{count}} catalogues',
     seenIn_many: 'In {{count}} catalogues',
     seenIn_other: 'In {{count}} catalogues',
+    // v0.50: a supplier's receipt scanned into an expense.
+    receiptCamera: 'Expense receipt',
+    receiptReading: 'Reading the receipt…',
+    receiptTitle: 'Expense recorded',
+    receiptNoJob: 'No job',
+    receiptClose: 'Check the job',
+    receiptFailed: 'Receipt not read — type the amount',
+    receiptSupplierNew: 'new supplier',
+    receiptItems_one: '{{count}} line',
+    receiptItems_few: '{{count}} lines',
+    receiptItems_many: '{{count}} lines',
+    receiptItems_other: '{{count}} lines',
     // v0.49: the garage's own jobs answer before the AI.
     ownJobs: 'Own jobs',
     numberGarage: 'Part number from own jobs',

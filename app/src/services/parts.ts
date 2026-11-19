@@ -177,7 +177,7 @@ export async function payOutsource(itemId: string, method: PayMethod): Promise<v
 }
 
 /** The money book's category for contractors (added on installs from before it existed). */
-async function subcontractCategory(): Promise<string> {
+export async function subcontractCategory(): Promise<string> {
   const had = await db.expenseCategories.where('code').equals('subcontract').first();
   if (had) return had.id;
   const id = uid();

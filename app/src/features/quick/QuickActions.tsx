@@ -11,6 +11,13 @@ import { PlateScan, type ScanTally } from './PlateScan';
 import { SheetFor } from '../../ui/lazy';
 import { EntrySheet, type EntryPreset } from '../money/MoneyEntry';
 import { holdCarShot } from '../orders/carShot';
+import { EntryDetails } from '../money/LedgerTab';
+import { AiMark } from '../ai/Ai';
+import { useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { scanReceipt } from '../../services/receipts';
+import { expenseEntry } from '../../domain/ledger';
+import { db } from '../../db/db';
+import { notifications } from '@mantine/notifications';
 
 /*
  * Quick actions of «＋» (v0.28): a tap is a new job, as always; a press held, or a swipe up from it, brings the actions
@@ -42,8 +49,12 @@ export function useQuickActions(live = false) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const camera = useRef<HTMLInputElement>(null);
+  const receiptInput = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
-  const [cam, setCam] = useState(false);
+  const [cam, setCam] = useState<false | 'plate' | 'receipt'>(false);
+  // A receipt being read on the server (v0.50): a pill says so; the expense's sheet opens once it is recorded.
+  const [scanning, setScanning] = useState(false);
+  const [recorded, setRecorded] = useState<string | null>(null);
   // What the camera read off its frames while it was aimed (v0.33): the plate goes with the photo when they agreed.
   const seen = useRef<ScanTally | undefined>(undefined);
   /** The car's photo into "New job" (with the plate the frames agreed on: it is in the job's form at once). */
@@ -54,11 +65,36 @@ export function useQuickActions(live = false) {
     const plate = t?.stable ? { emirate: t.emirate, code: t.code, number: t.number, sure: true, codeSure: t.codeFrames >= 2, box: t.box } : undefined;
     navigate(`/orders/new?photo=${holdCarShot(file, plate)}`);
   };
+  /**
+   * A supplier's receipt photographed (v0.50): read on the garage's server, recorded as an expense in «Запчасти» with
+   * the photo, tied to the job its parts are for — and its sheet opens for a look (the job, the sum, the way: a tap
+   * each). Not read (no server, an unreadable paper) — the plain expense sheet, the photo already attached.
+   */
+  const receipt = (file: File) => {
+    setCam(false);
+    setScanning(true);
+    void scanReceipt(file)
+      .then((r) => {
+        if (r.expense) {
+          haptic('success');
+          setRecorded(r.expense.id);
+        } else {
+          // Fuel, food, another kind of paper: read, but which category is the manager's call — the sheet, filled in, no word.
+          if (r.failed !== 'kind') notifications.show({ color: 'orange', message: t('ai.receiptFailed') });
+          setSheet({ kind: 'out', receipt: file, expense: r.fields ? { amountFils: r.fields.amountFils || undefined, vatFils: r.fields.vatFils || undefined, vendor: r.fields.vendor, note: r.fields.note } : undefined });
+        }
+      })
+      .finally(() => setScanning(false));
+  };
   const run = (k: QuickKey) => {
     if (k === 'photo') {
-      if (live && liveCameraAvailable()) setCam(true);
+      if (live && liveCameraAvailable()) setCam('plate');
       else camera.current?.click();
-    } else if (k === 'in' || k === 'out') setSheet({ kind: k });
+    } else if (k === 'out') {
+      // «Расход» is the receipt's camera first (v0.50); its × — the sheet to type one without a paper.
+      if (live && liveCameraAvailable()) setCam('receipt');
+      else receiptInput.current?.click();
+    } else if (k === 'in') setSheet({ kind: k });
     else navigate('/notes');
   };
   const picked = (e: ChangeEvent<HTMLInputElement>) => {
@@ -66,10 +102,16 @@ export function useQuickActions(live = false) {
     e.currentTarget.value = '';
     if (file) shot(file);
   };
+  const pickedReceipt = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (file) receipt(file);
+  };
   const nodes = (
     <>
       <input ref={camera} type="file" accept="image/*" capture="environment" hidden data-quick-camera onChange={picked} />
-      {cam && (
+      <input ref={receiptInput} type="file" accept="image/*" capture="environment" hidden data-quick-receipt onChange={pickedReceipt} />
+      {cam === 'plate' && (
         <LiveCamera
           label={t('quick.photo')}
           onShot={shot}
@@ -77,10 +119,38 @@ export function useQuickActions(live = false) {
           overlay={(video, live, shoot) => <PlateScan video={video} live={live} onTally={(x) => (seen.current = x)} onTap={shoot} />}
         />
       )}
+      {cam === 'receipt' && <LiveCamera label={t('ai.receiptCamera')} onShot={receipt} onClose={() => (setCam(false), setSheet({ kind: 'out' }))} />}
+      {scanning && (
+        <div className="ai-scan-pill glass" role="status" data-ai-scanning>
+          <AiMark size={20} busy />
+          <span>{t('ai.receiptReading')}</span>
+        </div>
+      )}
       <SheetFor value={sheet}>{(s, o) => <EntrySheet opened={o} onClose={() => setSheet(null)} preset={s} />}</SheetFor>
+      <SheetFor value={recorded}>{(id, o) => <RecordedExpense id={id} opened={o} onClose={() => setRecorded(null)} />}</SheetFor>
     </>
   );
   return { run, nodes };
+}
+
+/** The expense just recorded off a receipt, in its own sheet (the book's — the job, the category, the sum, the photo). */
+function RecordedExpense({ id, opened, onClose }: { id: string; opened: boolean; onClose: () => void }) {
+  const lang = useLang();
+  const data = useScreenLiveQuery(async () => {
+    const [expense, cats] = await Promise.all([db.expenses.get(id), db.expenseCategories.toArray()]);
+    return { expense, cats };
+  }, [id]);
+  // Taken back («Отменить» on the card) while its sheet is up: the sheet goes (a live read keeps its last value, so «gone» is a value).
+  const gone = !!data && !data.expense;
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (gone) close.current();
+  }, [gone]);
+  const expense = data?.expense;
+  if (!data || !expense) return null;
+  const cat = data.cats.find((c) => c.id === expense.categoryId);
+  return <EntryDetails entry={{ ...expenseEntry(expense), cashAfter: 0, cardAfter: 0 }} label={cat ? (lang === 'ru' ? cat.nameRu : cat.nameEn) : ''} onClose={onClose} cats={data.cats} opened={opened} />;
 }
 
 /** A press held this long brings the actions up. */

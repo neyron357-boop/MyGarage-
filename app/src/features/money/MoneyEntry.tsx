@@ -540,6 +540,9 @@ export interface EntryPreset {
   link?: Links;
   /** Money in as a "debt payment" (of this customer, this job first). */
   debt?: DebtPick;
+  /** A receipt photographed before the sheet (v0.50): attached, and what was read off it filled in. */
+  receipt?: File;
+  expense?: { amountFils?: number; vatFils?: number; vendor?: string; note?: string };
 }
 
 /**
@@ -591,14 +594,14 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     if (preset?.debt) setIncomeCat('debt');
     // The sheet opens on real money; "on credit" is picked each time it is meant.
     setMethod((m) => (m === 'credit' ? 'cash' : m));
-    setAmount(undefined);
-    setNote('');
+    setAmount(preset?.expense?.amountFils);
+    setNote(preset?.expense?.note ?? '');
     setDate(dubaiDate());
-    setVendor('');
-    setVat(undefined);
-    setReceipt(undefined);
+    setVendor(preset?.expense?.vendor ?? '');
+    setVat(preset?.expense?.vatFils);
+    setReceipt(preset?.receipt);
     setOver('');
-    setMore(false);
+    setMore(!!preset?.expense?.vendor || !!preset?.expense?.vatFils);
   }, [opened, preset]);
   useEffect(() => {
     if (!expenseCat && cats?.length) setExpenseCat(cats.find((c) => c.code === 'parts')?.id ?? cats[0].id);

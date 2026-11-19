@@ -17,7 +17,7 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/forget                     — this device leaves (its key no longer works)
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
- *        /api/ai/part-find {part, make, model, year, engine, vin} — the garage's AI (v0.48, ai.mjs)
+ *        /api/ai/part-find {part, make, model, year, engine, vin}, /api/ai/receipt {image} — the garage's AI (v0.48, ai.mjs)
  *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
  *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
@@ -195,9 +195,11 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         if (!ai?.on()) throw httpError(503, 'ai off');
         if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
         if (req.method === 'POST') {
-          const body = await readJson(req, 16 * 1024);
+          // A receipt comes as a picture (v0.50): up to 8 MB; the other questions are a few lines.
+          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : 16 * 1024);
           ai.allow(device.id);
           if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
+          if (parts[2] === 'receipt') return send(res, 200, await ai.receipt(body));
           if (parts[2] === 'part-name') return send(res, 200, await ai.partName(body));
           if (parts[2] === 'part-find') return send(res, 200, await ai.partFind(body));
         }

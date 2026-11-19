@@ -24,7 +24,8 @@ import { syncConfig } from './sync/config';
  * to the server, and with what the garage knows (its own numbers as hints, where the VIN says the car was built).
  */
 
-type Transport = (path: 'vin' | 'part-name' | 'part-find', body: unknown) => Promise<unknown>;
+export type AiPath = 'vin' | 'part-name' | 'part-find' | 'receipt';
+type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
 export function setAiTransport(t: Transport | undefined) {
@@ -49,7 +50,8 @@ export function subscribeAiWork(fn: () => void): () => void {
   return () => void workListeners.delete(fn);
 }
 
-async function ask<T>(path: 'vin' | 'part-name' | 'part-find', body: unknown, key: string): Promise<T> {
+/** One question to the garage's server (the receipts' service asks too). */
+export async function askAi<T>(path: AiPath, body: unknown, key: string, timeout = 110_000): Promise<T> {
   working.add(key);
   workChanged();
   try {
@@ -60,7 +62,7 @@ async function ask<T>(path: 'vin' | 'part-name' | 'part-find', body: unknown, ke
     // cuts a request at about 100 s: asked again, the server hands over the same search, still going or done (v0.48.3).
     for (let attempt = 1; ; attempt++) {
       try {
-        return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout: 110_000 });
+        return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout });
       } catch (e) {
         const status = e instanceof SyncError ? e.status : -1;
         if (path !== 'part-find' || attempt >= 3 || !(status === 0 || status >= 500)) throw e;
@@ -91,7 +93,9 @@ export type CarFill = Partial<Pick<Vehicle, 'make' | 'model' | 'year' | 'engine'
 export type AiNotice =
   | { kind: 'car'; vehicleId: string; filled: CarFill; undo: () => Promise<void> }
   | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
-  | { kind: 'number'; itemId: string; number: string; catalogs: number; garage: number; undo: () => Promise<void> };
+  | { kind: 'number'; itemId: string; number: string; catalogs: number; garage: number; undo: () => Promise<void> }
+  /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
+  | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
 
 const listeners = new Set<(n: AiNotice) => void>();
 /** What the AI did by itself (the app's notices show it, with «Отменить»). */
@@ -100,6 +104,8 @@ export function onAiNotice(fn: (n: AiNotice) => void): () => void {
   return () => void listeners.delete(fn);
 }
 const notify = (n: AiNotice) => listeners.forEach((f) => f(n));
+/** Said by another service of the AI's (the receipts'). */
+export const notifyAi = notify;
 
 /** One question at a time about one car or one line. */
 const asking = new Set<string>();
@@ -132,7 +138,7 @@ export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
       await db.vehicles.update(vehicleId, { vinAi: { vin, at: nowIso(), filled: [] } });
       return {};
     }
-    const ai = await ask<AiVin>('vin', { vin }, `car:${vehicleId}`);
+    const ai = await askAi<AiVin>('vin', { vin }, `car:${vehicleId}`);
     // Read again: something may have been typed in the card while the AI was asked.
     const now = await db.vehicles.get(vehicleId);
     if (!now || now.vin?.toUpperCase() !== vin) return undefined;
@@ -201,7 +207,7 @@ export function aiFixPartName(itemId: string): Promise<boolean | undefined> {
     if (!fix) {
       if (!aiOn()) return false;
       const car = await carOf(item);
-      const r = await ask<AiName>('part-name', { name: typed, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '' }, `name:${itemId}`);
+      const r = await askAi<AiName>('part-name', { name: typed, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '' }, `name:${itemId}`);
       fix = nameFix(typed, r, !!item.titleEn);
     }
     const now = await db.items.get(itemId);
@@ -373,7 +379,7 @@ export function aiFindPart(itemId: string, { again = false }: { again?: boolean 
       if (mem.numbers.length) await write({ search: 'garage', numbers: mem.numbers.map((n) => ({ number: n.number, seen: [], garage: n.times })) }, { diagrams: [], samples: [] }, undefined);
       return undefined;
     }
-    const r = await ask<AiFind>(
+    const r = await askAi<AiFind>(
       'part-find',
       { part, make: carKey.make, model: carKey.model, year: carKey.year ?? '', engine: carKey.engine ?? '', vin: car?.vin ?? '', built: car?.vin ? vinBuilt(car.vin) ?? '' : '', hints: mem.numbers.slice(0, 3).map((n) => n.number) },
       `find:${itemId}`,

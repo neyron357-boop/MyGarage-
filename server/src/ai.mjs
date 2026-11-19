@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import dns from 'node:dns/promises';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -58,6 +59,10 @@ For each number: the number as the catalogue writes it, the maker, what tells th
 numbers: each {number (as written), brand, note (variants, market, replaces…, under 80 characters), pages: [addresses where it was seen]}; images: each {url, kind: "diagram" | "photo", page}.
 Answer:
 ${text}`,
+  receipt: () =>
+    `A photo of a supplier's invoice or receipt from a car parts shop in the UAE (amounts in AED; VAT 5 %). Read it exactly as printed.
+Return: isReceipt (is it an invoice/receipt/bill at all); vendor (the seller's name as printed); vendorTrn; vendorPhone (the seller's phone as printed, a mobile first, "" if none); vendorAddress (the seller's address in a few words, "" if none); kind — "parts" (car parts, accessories, oils and consumables from a parts shop), "service" (a workshop's or contractor's bill for work done: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo; date (YYYY-MM-DD, "" if none); items — each {name (as printed, English or Russian), partNumber ("" if none), qty, unitPrice, total} (line totals as printed); subtotal (before VAT, "" if not printed); vat (the VAT amount as printed, 0 if the paper says none, "" if not printed); total (the amount paid / grand total incl. VAT); paymentMethod ("cash", "card", "transfer", "credit" when the paper says unpaid / credit / due, "" if not said); carText (car model, plate or VIN written on the paper, "" if none); confidence 0..1.
+Numbers as numbers; never invent a value the paper does not show.`,
   look: (n, part, car) =>
     `${n} pictures from parts-catalogue pages for "${part}"${car ? ` of a ${car}` : ''}, each under its label «Picture N:» (N 1…${n}); answer with index = N.
 For each: kind — "diagram" (catalogue/exploded drawing showing this part), "photo" (a photograph of this kind of part itself; not the car, not a box only) or "other" (logos, banners, the car, other parts); matches — is it really "${part}".`,
@@ -525,6 +530,46 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         }, { kind: 'vin' });
         // `by` — which Gemini answered (`model` is the car's).
         return { vin, ...value, facts, built, by: model };
+      });
+    },
+
+    /**
+     * A supplier's receipt read off its photo (v0.50): the seller, the lines, the sums, the total paid. A light model
+     * looks at the picture once; the same picture (its bytes' hash) is never read twice.
+     */
+    async receipt({ image } = {}) {
+      const type = String(image?.type ?? '');
+      const data = String(image?.data ?? '');
+      if (!/^image\/(jpeg|png|webp)$/.test(type) || data.length < 1000 || data.length > 8_000_000) throw httpError(400, 'no picture');
+      const hash = createHash('sha256').update(data).digest('hex');
+      return cached(`receipt:2:${hash}`, 'receipt', TTL.vin, async () => {
+        const { value, model } = await json(
+          P.receipt(),
+          {
+            type: 'object',
+            properties: {
+              isReceipt: { type: 'boolean' },
+              vendor: { type: 'string' },
+              vendorTrn: { type: 'string' },
+              vendorPhone: { type: 'string' },
+              vendorAddress: { type: 'string' },
+              kind: { type: 'string', enum: ['parts', 'service', 'fuel', 'food', 'other'] },
+              invoiceNo: { type: 'string' },
+              date: { type: 'string' },
+              items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, partNumber: { type: 'string' }, qty: { type: 'number' }, unitPrice: { type: 'number' }, total: { type: 'number' } }, required: ['name'] } },
+              subtotal: { type: 'string' },
+              vat: { type: 'string' },
+              total: { type: 'number' },
+              paymentMethod: { type: 'string' },
+              carText: { type: 'string' },
+              confidence: { type: 'number' },
+            },
+            required: ['isReceipt', 'kind', 'items', 'total', 'confidence'],
+          },
+          { kind: 'receipt', images: [{ type, data }], models: LOOK_MODELS, timeout: 60_000 },
+        );
+        const num = (x) => (x === '' || x === null || x === undefined || Number.isNaN(Number(x)) ? undefined : Number(x));
+        return { ...value, subtotal: num(value.subtotal), vat: num(value.vat), total: num(value.total), by: model };
       });
     },
 
