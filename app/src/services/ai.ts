@@ -440,11 +440,16 @@ async function inTurns<T>(list: T[], at: number, fn: (x: T) => Promise<void>): P
  * when it is proven and the only one found; the pictures go on the line (its preview shows them). Each line shows the AI
  * at work; at the end one card says what was done (and the AI's sound) — «Отменить» brings the names and numbers back.
  */
-export async function aiAllParts(orderId: string): Promise<{ lines: number; names: number; numbers: number; pictures: number } | undefined> {
+export async function aiAllParts(
+  orderId: string,
+  { only }: { only?: string[] } = {},
+): Promise<{ lines: number; names: number; numbers: number; pictures: number } | undefined> {
   const key = `all:${orderId}`;
   if (working.has(key)) return undefined;
+  // `only` (v0.53, the user: «выбрать несколько деталей и запустить по ним поиск ИИ»): the parts picked on the job.
+  const picked = only ? new Set(only) : undefined;
   const items = (await db.items.where('orderId').equals(orderId).toArray())
-    .filter((i) => i.kind === 'part' && i.approvalState !== 'declined' && !i.customerSupplied && !!(i.titleRu || i.titleEn))
+    .filter((i) => (!picked || picked.has(i.id)) && i.kind === 'part' && i.approvalState !== 'declined' && !i.customerSupplied && !!(i.titleRu || i.titleEn))
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.createdAt.localeCompare(b.createdAt));
   if (!items.length) return undefined;
   const before = new Map(items.map((i) => [i.id, { titleRu: i.titleRu, titleEn: i.titleEn, partNumber: i.partNumber, pics: (i.diagramIds?.length ?? 0) + (i.sampleIds?.length ?? 0) }]));
@@ -502,10 +507,11 @@ export async function aiAllParts(orderId: string): Promise<{ lines: number; name
   return { lines: items.length, names, numbers, pictures };
 }
 
-/** A part line saved: its name looked at, then its number looked up — not waited for. */
+/**
+ * A part line saved: its name looked at — not waited for. Its number, diagram and photos are looked up only when asked
+ * (v0.53, the user: «чтобы ИИ сам сразу не начинал поиск детали, пока не нажму кнопку; сразу можно исправлять названия»):
+ * «Найти номер» in its sheet, the parts picked on the job, or the AI's tile under the lines.
+ */
 export function aiAfterPart(itemId: string) {
-  void (async () => {
-    await aiFixPartName(itemId);
-    await aiFindPart(itemId);
-  })();
+  void aiFixPartName(itemId);
 }

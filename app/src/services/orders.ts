@@ -1,7 +1,8 @@
 import { db, purge, purgeJournal, uid } from '../db/db';
 import { setJobDriver, type DriverDraft } from './drivers';
 import { mechanicsOf, toggled } from '../domain/crew';
-import { hoursBetween, nowIso } from '../domain/dates';
+import { dubaiDate, hoursBetween, nowIso, onDubaiDay } from '../domain/dates';
+import { atDay, jobMoment, lastJobDay } from '../domain/jobDay';
 import { whatJobHolds, whyJobStays, type DeleteBlock } from '../domain/deletion';
 import { orderDue } from '../domain/debts';
 import { byPosition } from '../domain/items';
@@ -49,6 +50,8 @@ export interface NewOrderInput {
   bookedFor?: string;
   arrivedNow: boolean;
   warrantyOfOrderId?: string;
+  /** The day the car came, when it is typed in later (v0.53): YYYY-MM-DD, not after today; none — now. */
+  day?: string;
 }
 
 /**
@@ -72,8 +75,13 @@ async function nextOrderNumber(): Promise<number> {
 export async function createOrder(input: NewOrderInput): Promise<Order> {
   const customer = await db.customers.get(input.customerId);
   if (!customer) throw new AppError('err.notFound');
+  const typed = nowIso();
+  const today = dubaiDate(typed);
+  if (input.day && input.day > today) throw new AppError('err.futureDate');
+  // Typed in after the fact (v0.53): the car came on that day, at the time it is typed.
+  const past = !!input.day && input.day < today && input.arrivedNow;
   return db.transaction('rw', db.orders, db.counters, db.events, async () => {
-    const now = nowIso();
+    const now = past ? atDay(input.day, typed) : typed;
     const order: Order = {
       id: uid(),
       number: await nextOrderNumber(),
@@ -86,9 +94,10 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       bookedFor: input.bookedFor,
       arrivedAt: input.arrivedNow ? now : undefined,
       warrantyOfOrderId: input.warrantyOfOrderId,
+      ...(past ? { backdated: true } : {}),
       stageChangedAt: now,
       createdAt: now,
-      updatedAt: now,
+      updatedAt: typed,
     };
     await db.orders.add(order);
     await logEvent(order.id, 'created', { stage: order.stage, warrantyOf: input.warrantyOfOrderId });
@@ -112,6 +121,8 @@ export interface CheckInInput {
   bookedFor?: string;
   /** Who brought the car (v0.43, a company's driver): picked from the list or typed — none when both are empty. */
   driver?: DriverDraft;
+  /** The day the car came, for a job typed in later (v0.53). */
+  day?: string;
 }
 
 /**
@@ -141,7 +152,7 @@ export async function checkIn(input: CheckInInput): Promise<Order> {
     if (!customer.name && input.name.trim()) fill.name = input.name;
     if (!customer.phone && input.phone.trim()) fill.phone = input.phone;
     if (fill.name !== undefined || fill.phone !== undefined) await updateCustomer(customer.id, fill);
-    const order = await createOrder({ customerId: customer.id, vehicleId: vehicle.id, complaint: input.complaint, arrivedNow: input.arrivedNow, bookedFor: input.bookedFor });
+    const order = await createOrder({ customerId: customer.id, vehicleId: vehicle.id, complaint: input.complaint, arrivedNow: input.arrivedNow, bookedFor: input.bookedFor, day: input.day });
     const dr = input.driver;
     if (!dr || (!dr.id && !dr.name.trim() && !dr.phone.trim())) return order;
     const d = await setJobDriver(order.id, dr);
@@ -409,8 +420,11 @@ export async function changeStage(orderId: string, to: Stage, reason?: string): 
   if (!check.ok) throw new AppError(check.reason);
   const backward = isBackward(from, to);
   if (backward && !reason?.trim()) throw new AppError('stageErr.reasonRequired');
-  const now = nowIso();
-  const patch: Partial<Order> = { stage: to, stageChangedAt: now, updatedAt: now };
+  const typed = nowIso();
+  // A job typed in after the fact (v0.53): its steps are stamped with its own last moment (the car's day, its invoice,
+  // its payments) — the archive, the reports and the car's history put it on the day it was.
+  const now = jobMoment(b, typed);
+  const patch: Partial<Order> = { stage: to, stageChangedAt: now, updatedAt: typed };
   const stamp = STAMP[to];
   if (stamp && !b.order[stamp]) (patch as Record<string, unknown>)[stamp] = now;
   if (to === 'cancelled') {
@@ -449,6 +463,30 @@ export async function updateOrder(orderId: string, patch: Partial<Pick<Order, 'c
   await db.transaction('rw', db.orders, db.events, async () => {
     await db.orders.update(orderId, { ...patch, updatedAt: nowIso() });
     await logEvent(orderId, 'updated', { fields: Object.keys(patch) });
+  });
+}
+
+/**
+ * The day of a job (v0.53, «…» → «День»): the car came that day — a day before today makes it a job typed in after the
+ * fact (`backdated`), today makes it an ordinary one again. Not after today, nor after its first invoice or payment
+ * (those keep their days); its steps already stamped keep theirs.
+ */
+export async function setJobDay(orderId: string, day: string): Promise<void> {
+  await db.transaction('rw', [db.orders, db.invoices, db.payments, db.events], async () => {
+    const order = await db.orders.get(orderId);
+    if (!order) throw new AppError('err.notFound');
+    const [invoices, payments] = await Promise.all([db.invoices.where('orderId').equals(orderId).toArray(), db.payments.where('orderId').equals(orderId).toArray()]);
+    const now = nowIso();
+    const today = dubaiDate(now);
+    if (day > today) throw new AppError('err.futureDate');
+    if (day > lastJobDay(invoices, payments, today)) throw new AppError('err.afterJobDocs');
+    const moved = (at: string) => onDubaiDay(at, day);
+    const patch: Partial<Order> = { createdAt: moved(order.createdAt), backdated: day < today ? true : undefined, updatedAt: now };
+    if (order.arrivedAt) patch.arrivedAt = moved(order.arrivedAt);
+    // Not stamped yet with anything of its own: the step it is on starts that day too.
+    if (order.stageChangedAt < patch.createdAt! || dubaiDate(order.stageChangedAt) === dubaiDate(order.createdAt)) patch.stageChangedAt = patch.createdAt;
+    await db.orders.update(orderId, patch);
+    await logEvent(orderId, 'updated', { fields: ['day'], day });
   });
 }
 

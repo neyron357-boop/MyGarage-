@@ -44,6 +44,35 @@ export function AiLineWork({ itemId }: { itemId: string }) {
  * Under a job's lines (v0.52): the AI for every part at once — its mark on a narrow tile, twinkling while it works,
  * how many lines are done under it. Only where the garage's AI is.
  */
+/**
+ * In the job's picking bar (v0.53, the user: «выбрать несколько деталей и запустить по ним поиск ИИ»): the AI for the parts
+ * picked — names, then each one's number, diagram and photos, as the tile under the lines does for all of them; the
+ * picking ends at once (the lines show the AI at work, the tile under them how far it has got).
+ */
+export function AiPickedButton({ orderId, itemIds, onStart }: { orderId: string; itemIds: string[]; onStart?: () => void }) {
+  const { t } = useTranslation();
+  useSyncExternalStore(subscribeAiWork, aiWorkVersion);
+  if (!aiOn() || !itemIds.length) return null;
+  const busy = aiWorking(`all:${orderId}`);
+  return (
+    <ActionIcon
+      size={44}
+      radius="xl"
+      variant="default"
+      aria-label={t('ai.pickedParts')}
+      data-ai-picked
+      disabled={busy}
+      onClick={() => {
+        void aiAllParts(orderId, { only: itemIds });
+        onStart?.();
+      }}
+      style={{ flex: '0 0 auto' }}
+    >
+      <AiMark size={22} busy={busy} />
+    </ActionIcon>
+  );
+}
+
 export function AiPartsTile({ orderId }: { orderId: string }) {
   const { t } = useTranslation();
   useSyncExternalStore(subscribeAiWork, aiWorkVersion);

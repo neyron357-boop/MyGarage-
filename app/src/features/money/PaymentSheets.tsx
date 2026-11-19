@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addDays, dubaiDate, nowIso } from '../../domain/dates';
 import { liveLines } from '../../domain/flow';
+import { activeInvoice } from '../../domain/invoice';
+import { paymentDayFor } from '../../domain/jobDay';
 import { itemAmounts } from '../../domain/items';
 import { formatAed } from '../../domain/money';
 import { canCloseUnpaid } from '../../domain/stages';
@@ -56,7 +58,8 @@ export function PaymentModal({ b, opened, onClose, kind: initialKind }: { b: Ord
   );
   const [reference, setReference] = useState('');
   // The day it was paid: today, or an earlier one (v0.23 — a payment typed in a day late).
-  const [date, setDate] = useState(dubaiDate());
+  // A job typed in later (v0.53): its invoice's day.
+  const [date, setDate] = useState(() => paymentDayFor(b.order, activeInvoice(b.invoices) ?? undefined));
   const [dueDate, setDueDate] = useState(dubaiDate(addDays(nowIso(), 7)));
   const [owner, setOwner] = useState(true);
   const sig = useRef<SignatureHandle>(null);

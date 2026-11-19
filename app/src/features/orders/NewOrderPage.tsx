@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { CAR_MAKES, canonicalMake, canonicalModel, modelsFor, POPULAR_MAKES } from '../../domain/carCatalog';
-import { nowIso } from '../../domain/dates';
+import { dubaiDate, nowIso } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { EMIRATES } from '../../domain/plates';
 import { quickList } from '../../domain/quickLists';
@@ -24,7 +24,7 @@ import { DocImportButton } from './DocImport';
 import { FormRow, PageHeader, PlateText, RowGroup, StickyBar } from '../../ui/components';
 import { CarThumb } from '../job/CarCover';
 import { PrevVisit } from '../job/PrevVisit';
-import { DateTimeField } from '../../ui/DateFields';
+import { DateTimeField, DayPill } from '../../ui/DateFields';
 import { typedOnly, useAction, useLang, usePhone, useSettings } from '../../ui/hooks';
 import { DeskSplit } from '../../ui/desk';
 
@@ -273,6 +273,8 @@ export function NewOrderPage() {
   const [complaint, setComplaint] = useState('');
   const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();
+  // The day the car came (v0.53): today — or an earlier day, for a job forgotten and typed in later.
+  const [day, setDay] = useState(() => dubaiDate());
 
   // The car's photo (v0.28): brought by «＋» → «Фото номера», or taken here. The plate is read off it; what was typed into
   // the plate meanwhile is not overwritten.
@@ -347,8 +349,10 @@ export function NewOrderPage() {
   const match = found?.match;
   const byNumber = found?.byNumber ?? [];
   const suggestions = useLiveQuery(() => (picked || pickedCustomer ? [] : suggestCustomers(phone, name)), [picked, pickedCustomer, phone, name]) ?? [];
-  // A plate already in the base (no job open on it) is that car: taken by itself, with its photo and owner.
-  const auto = !picked && match && !match.activeOrder ? match : undefined;
+  // A plate already in the base is that car: taken by itself, with its photo and owner. A car with a job open on it too
+  // (v0.53, the user: «разреши добавить одному и тому же авто и клиенту два разных заказа»): «Принять» makes a second
+  // job; the open one is a tap away under it.
+  const auto = !picked && match ? match : undefined;
   const known = picked ?? auto;
   const owner = known?.owner ?? pickedCustomer;
 
@@ -361,7 +365,7 @@ export function NewOrderPage() {
   const submit = (target: 'job' | 'book') =>
     run(async () => {
       // Typed fast and tapped at once: the lookup may not have caught up with the plate — it is looked up here too.
-      const fresh = lookup === plate ? known : await findVehicleForCheckIn(plate).then((m) => (m && !m.activeOrder ? m : undefined));
+      const fresh = lookup === plate ? known : await findVehicleForCheckIn(plate);
       const car = picked ?? fresh;
       const company = (car?.owner ?? pickedCustomer)?.type === 'company';
       const o = await checkIn({
@@ -377,6 +381,7 @@ export function NewOrderPage() {
         arrivedNow: target !== 'book',
         bookedFor: target === 'book' ? bookedFor : undefined,
         driver: company ? driver : undefined,
+        day: target === 'book' ? undefined : day,
       });
       if (!picked) rememberEmirate(plate.emirate);
       // The photo is the car's main photo now (a fresh one of a car in the base takes the place of the old).
@@ -461,7 +466,7 @@ export function NewOrderPage() {
                         </Box>
                       </Group>
                       {/* It comes again (v0.44): its last visit — when, its mileage then, what was done — as on the job's card. */}
-                      {settings && <PrevVisit order={{ id: '', vehicleId: auto.vehicle.id, createdAt: openedAt }} settings={settings} lang={lang} />}
+                      {settings && !auto.activeOrder && <PrevVisit order={{ id: '', vehicleId: auto.vehicle.id, createdAt: openedAt }} settings={settings} lang={lang} />}
                     </Box>
                   )}
                   {match?.activeOrder && (
@@ -493,7 +498,7 @@ export function NewOrderPage() {
                           key={c.vehicle.id}
                           type="button"
                           className="suggest rise-enter"
-                          onClick={() => (c.activeOrder ? navigate(`/orders/${c.activeOrder.id}`) : setPicked(c))}
+                          onClick={() => setPicked(c)}
                         >
                           <CarThumb vehicleId={c.vehicle.id} size={44} />
                           <Box style={{ flex: 1, minWidth: 0 }}>
@@ -508,7 +513,7 @@ export function NewOrderPage() {
                             </Text>
                           </Box>
                           <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
-                            {c.activeOrder ? t('newOrder.openOrder') : t('newOrder.useThis')}
+                            {t('newOrder.useThis')}
                           </Text>
                         </button>
                       ))}
@@ -596,6 +601,12 @@ export function NewOrderPage() {
               )}
 
               <RowGroup>
+                {/* The day the car came (v0.53): an earlier one — the job is on that day (its invoice too). */}
+                {!later && (
+                  <FormRow label={t('newOrder.day')}>
+                    <DayPill value={day} onChange={setDay} label={t('newOrder.day')} />
+                  </FormRow>
+                )}
                 <FormRow label={t('newOrder.bookLater')}>
                   <Switch checked={later} onChange={(e) => setLater(e.currentTarget.checked)} aria-label={t('newOrder.bookLater')} />
                 </FormRow>

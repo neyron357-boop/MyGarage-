@@ -62,7 +62,7 @@ export function DateField({ label, value, onChange, description, required, maxDa
  * An operation's day as a pill (v0.23): a tap opens the calendar (on the phone — a sheet), the day picked is saved at
  * once. Today and yesterday by word; no day after today.
  */
-export function DayPill({ value, onChange, label }: { value: string; onChange: (day: string) => void; label?: string }) {
+export function DayPill({ value, onChange, label, min, max }: { value: string; onChange: (day: string) => void; label?: string; min?: string; max?: string }) {
   const { t } = useTranslation();
   const dropdownType = useDropdown();
   const today = dubaiDate();
@@ -75,7 +75,8 @@ export function DayPill({ value, onChange, label }: { value: string; onChange: (
         if (d && toDay(d) !== value) onChange(toDay(d));
       }}
       valueFormatter={() => word}
-      maxDate={fromDay(today) ?? undefined}
+      maxDate={fromDay(max && max < today ? max : today) ?? undefined}
+      minDate={min ? (fromDay(min) ?? undefined) : undefined}
       dropdownType={dropdownType}
       variant="unstyled"
       leftSection={<IconCalendar size={17} stroke={2} />}

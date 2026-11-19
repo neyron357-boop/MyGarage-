@@ -329,6 +329,11 @@ export interface Order {
   docLanguage: Lang;
   bookedFor?: string;
   arrivedAt?: string;
+  /**
+   * Typed in after the fact (v0.53): the job is on the day it was — `arrivedAt` and `createdAt` on that day; its
+   * invoice is offered on it, its steps are stamped with its own moments (`domain/jobDay.ts`).
+   */
+  backdated?: boolean;
   readyAt?: string;
   deliveredAt?: string;
   closedAt?: string;

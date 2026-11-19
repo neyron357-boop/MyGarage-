@@ -1,8 +1,9 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
-import { AiLineWork, AiPartsTile } from '../ai/Ai';
+import { AiLineWork, AiPartsTile, AiPickedButton } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
   IconBuildingStore,
+  IconCalendar,
   IconCar,
   IconCash,
   IconCashOff,
@@ -45,7 +46,7 @@ import {
   IconUserX,
   type Icon,
 } from '@tabler/icons-react';
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Children, Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -96,6 +97,9 @@ import { DeleteJobModal } from '../orders/DeleteJob';
 import { CarCover, MulkiyaTile, VinTile } from './CarCover';
 import { useSendVersion } from './sendVersion';
 import { DueChip, DueSheet } from './Due';
+import { JobDayChip, JobDaySheet } from './JobDay';
+import { invoiceDayFor, jobDay } from '../../domain/jobDay';
+import { DayPill } from '../../ui/DateFields';
 import { DriverLine, DriverSheet } from './Driver';
 import { OdometerChip } from './Odometer';
 import { JobCardChip } from './JobCard';
@@ -152,6 +156,7 @@ const TILE_COLOR: Record<string, string> = {
   driver: 'violet',
   scanner: 'cyan',
   due: 'yellow',
+  day: 'indigo',
   invoice: 'grape',
   quote: 'grape',
   select: 'teal',
@@ -174,6 +179,27 @@ function AddBar({ onAdd, flush, children }: { onAdd: (kind: LineKind) => void; f
   const { t } = useTranslation();
   // On a PC each says its key (1 · 2 · 3 — useDeskHotkeys below).
   const desk = useDesk();
+  // Three extras or more on a phone (v0.53 — the AI's tile made four): a row of their own under the three, or the
+  // three's words broke in the middle («Запч асть»).
+  const extras = Children.toArray(children).filter(Boolean).length;
+  const split = !desk && extras >= 3;
+  const adds = ADD_KINDS.map(({ kind, icon: I, color, label }) => (
+    <button key={kind} type="button" className="action-tile add-btn" onClick={() => onAdd(kind)}>
+      <span className="tile-icon" style={{ '--c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}>
+        <I size={18} stroke={2.1} aria-hidden />
+      </span>
+      <span>{t(label)}</span>
+    </button>
+  ));
+  if (split)
+    return (
+      <>
+        <div className="add-row" data-flush={flush || undefined}>
+          {adds}
+        </div>
+        <div className="add-row add-extras">{children}</div>
+      </>
+    );
   return (
     <div className="add-row" data-flush={flush || undefined}>
       {ADD_KINDS.map(({ kind, icon: I, color, label }, n) => (
@@ -526,6 +552,9 @@ export function JobPage() {
   const [send, setSend] = useState<SendRequest | null>(null);
   const [mechanicOpen, setMechanicOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
+  const [dayOpen, setDayOpen] = useState(false);
+  // The invoice's day at «Готово» (v0.53): today — the job's own day for a job typed in later.
+  const [invDay, setInvDay] = useState('');
   // Who brought the car (v0.43): a company's driver, picked in one tap.
   const [driverOpen, setDriverOpen] = useState(false);
   // The profit is the manager's: hidden (blurred) until tapped, in case the customer sees the screen.
@@ -845,6 +874,8 @@ export function JobPage() {
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
   // When the car was promised: rarely needed (the user's call, v0.17.3) — a tile here; once set, its chip on the card.
   if (open && phase !== 'booked') tiles.push({ key: 'due', icon: IconClock, onClick: () => setDueOpen(true) });
+  // The day the car came (v0.53): a job typed in later is put on the day it was.
+  if (open && phase !== 'booked') tiles.push({ key: 'day', icon: IconCalendar, onClick: () => setDayOpen(true) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
@@ -888,14 +919,14 @@ export function JobPage() {
     );
   else if (phase === 'work')
     bar = (
-      <Button fullWidth color="green" loading={busy} leftSection={<IconChecks size={20} />} onClick={() => setFinish(true)}>
+      <Button fullWidth color="green" loading={busy} leftSection={<IconChecks size={20} />} onClick={() => (setInvDay(invoiceDayFor(b.order)), setFinish(true))}>
         {t('job.done')} · {formatAed(sum.gross)}
       </Button>
     );
   else if (reissue)
     // Gone on credit, the invoice changed: the new one — the debt is then what it leaves.
     bar = (
-      <Button fullWidth color="green" loading={busy} disabled={unpriced.length > 0 || !lines.length} leftSection={<IconChecks size={20} />} onClick={() => setFinish(true)}>
+      <Button fullWidth color="green" loading={busy} disabled={unpriced.length > 0 || !lines.length} leftSection={<IconChecks size={20} />} onClick={() => (setInvDay(invoiceDayFor(b.order)), setFinish(true))}>
         {t('job.done')} · {formatAed(sum.gross)}
       </Button>
     );
@@ -974,15 +1005,26 @@ export function JobPage() {
             <IconTruckDelivery size={21} stroke={1.9} />
           </ActionIcon>
         )}
+        {/* The AI for the picked parts (v0.53): names, numbers, diagrams and photos — the picking ends, the lines show it at work. */}
+        <AiPickedButton
+          orderId={oid}
+          itemIds={pickedParts.map((i) => i.id)}
+          onStart={() => {
+            haptic('light');
+            setPicked(null);
+          }}
+        />
         <Button
           color="red"
           loading={busy}
           disabled={!pickedLines.length}
           leftSection={<IconTrash size={18} />}
           onClick={() => (pickedLines.some((i) => i.approvalState !== 'draft') ? setConfirmPicked(true) : void removePicked())}
+          aria-label={t('job.removeN', { n: pickedLines.length })}
           style={{ flex: 1 }}
         >
-          {t('job.removeN', { n: pickedLines.length })}
+          {/* Beside the parts' two buttons (v0.53) the words did not fit a phone: its symbol and the number. */}
+          {pickedParts.length > 0 && phone ? pickedLines.length : t('job.removeN', { n: pickedLines.length })}
         </Button>
       </Group>
     );
@@ -1043,6 +1085,7 @@ export function JobPage() {
       {/* One flow of chips: when the car was promised, who does the job (one or several — each chip on or
           off by itself), the car's VIN photo. Wrapping, not scrolling — every chip stays in sight, one tap away. */}
       <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>
+        <JobDayChip job={b} />
         {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
         {open &&
           mechanics.map((m) => (
@@ -1287,6 +1330,7 @@ export function JobPage() {
         )}
       </LazySheet>
       <DueSheet order={b.order} lang={lang} opened={dueOpen} onClose={() => setDueOpen(false)} />
+      <JobDaySheet job={b} opened={dayOpen} onClose={() => setDayOpen(false)} />
       <DriverSheet order={b.order} opened={driverOpen} onClose={() => setDriverOpen(false)} />
       <LazySheet opened={mechanicOpen}>
         {(o) => (
@@ -1323,7 +1367,7 @@ export function JobPage() {
         confirmLabel={t('invoice.issue')}
         onConfirm={() =>
           run(async () => {
-            await quickInvoice(oid);
+            await quickInvoice(oid, { day: invDay || undefined });
             haptic('success');
             scrollToTop();
             return true;
@@ -1331,9 +1375,13 @@ export function JobPage() {
         }
       >
         <Text size="sm">{t('invoice.confirmText')}</Text>
-        <Text mt="sm" fw={700} fz={20}>
-          <Money fils={sum.gross} display />
-        </Text>
+        <Group mt="sm" justify="space-between" wrap="nowrap" gap="sm">
+          <Text fw={700} fz={20}>
+            <Money fils={sum.gross} display />
+          </Text>
+          {/* Its day (v0.53): today, or an earlier one — not before the job's own. */}
+          {invDay && <DayPill value={invDay} min={jobDay(b.order)} onChange={setInvDay} label={t('invoice.day')} />}
+        </Group>
       </ConfirmModal>
       <ConfirmModal
         opened={!!amend}

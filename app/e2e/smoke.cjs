@@ -2142,18 +2142,26 @@ async function launchBrowser() {
       await dlg.getByLabel('Запчасть').fill('колодки тормазные передние');
       await dlg.getByRole('button', { name: 'Сохранить' }).click();
       await dlg.waitFor({ state: 'detached' });
-      // The name is put right by the dictionary at once; the AI looking up the number: its mark twinkles after the name.
-      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.ai-mark[data-busy]').waitFor();
       // Its card: the name as it is now, the one typed crossed out under it.
       const nameCard = page.locator('[data-ai-notice="name"]');
       await nameCard.filter({ hasText: 'Название исправлено' }).waitFor({ timeout: 15000 });
       if ((await nameCard.locator('.ai-toast-main').textContent()) !== 'FRONT BRAKE PADS' || (await nameCard.locator('.ai-toast-was').textContent()) !== 'КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ')
         throw new Error('the name card: ' + (await nameCard.textContent()));
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).waitFor();
-      // Its number, seen in two catalogues, written by itself; the diagram kept with the line.
-      await page.locator('[data-ai-notice="number"]').filter({ hasText: '04465-12610' }).waitFor({ timeout: 20000 });
+      // v0.53: the number is not looked up by itself — only the name was put right.
+      await page.waitForTimeout(1500);
+      const quiet = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const i = (await db.items.where('orderId').equals(id).toArray())[0];
+        return { no: i.partNumber, find: !!i.aiFind, asked: window.__aiAsked.join() };
+      }, job.id);
+      if (quiet.no || quiet.find || quiet.asked !== 'vin') throw new Error('the AI looked the part up by itself: ' + JSON.stringify(quiet));
+      // «Найти номер» in its sheet: the number seen in two catalogues written by itself; the diagram kept with the line.
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
+      await dlg.locator('[data-ai-numbers] .ai-find').click();
+      await page.locator('[data-ai-notice="number"]').filter({ hasText: '04465-12610' }).waitFor({ timeout: 20000 });
       const no = dlg.getByLabel('Номер', { exact: true });
+      await page.waitForFunction(() => document.querySelector('[role="dialog"] input[aria-label="Номер"]')?.value === '04465-12610', null, { timeout: 5000 }).catch(() => undefined);
       if ((await no.inputValue()) !== '04465-12610') throw new Error('the number written by the AI: ' + (await no.inputValue()));
       // The catalogues' rows: the proven number taken (✓, green «2»), the other orange; a globe looks each up on Yandex.
       const rows = dlg.locator('[data-ai-numbers] .ai-num');
@@ -2192,12 +2200,18 @@ async function launchBrowser() {
       await dlg.getByLabel('Запчасть').fill('Front brake pads');
       await dlg.getByRole('button', { name: 'Сохранить' }).click();
       await dlg.waitFor({ state: 'detached' });
-      // Answered from memory in the background: waited for on the record itself (the first line's card may still be up).
-      await page.waitForFunction(async (id) => {
-        const { db } = await import('/src/db/db.ts');
-        const lines = await db.items.where('orderId').equals(id).toArray();
-        return lines.length === 2 && lines.every((l) => !!l.aiFind);
-      }, job.id, { timeout: 15000 });
+      // v0.53: picked on the job («…» → «Править», a tap) and given to the AI from the picking bar.
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).nth(1).waitFor();
+      await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Править' }).click();
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).nth(1).click();
+      await shot('38c-ai-picked');
+      await page.locator('[data-ai-picked]').click();
+      // The picking ends at once; the AI's tile under the lines works.
+      await page.locator('[data-ai-picked]').waitFor({ state: 'detached' });
+      // Answered from memory: the picked run's one card says it is done (a page function's promise is not waited for by
+      // waitForFunction — the record is read once the card is up).
+      await page.locator('[data-ai-notice="parts"]').filter({ hasText: 'ИИ: 1 запчасть' }).waitFor({ timeout: 20000 });
       const again = await page.evaluate(async (id) => {
         const { db } = await import('/src/db/db.ts');
         const lines = (await db.items.where('orderId').equals(id).toArray()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -2224,13 +2238,13 @@ async function launchBrowser() {
       }, job.id);
       await front('.list-row').filter({ hasText: 'OIL FILTER' }).waitFor();
       await front('[data-ai-parts]').click();
-      await page.locator('[data-ai-notice="parts"]').waitFor({ timeout: 30000 });
+      await page.locator('[data-ai-notice="parts"]').filter({ hasText: 'ИИ: 2 запчасти' }).waitFor({ timeout: 30000 });
       await shot('38b-ai-all-parts');
       const all = await page.evaluate(async (id) => {
         const { db } = await import('/src/db/db.ts');
         const lines = await db.items.where('orderId').equals(id).toArray();
         const f = lines.find((l) => l.titleEn === 'OIL FILTER');
-        return { looked: !!f?.aiFind, pics: (f?.diagramIds?.length ?? 0) + (f?.sampleIds?.length ?? 0), osc: window.__osc, text: document.querySelector('[data-ai-notice="parts"]')?.textContent };
+        return { looked: !!f?.aiFind, pics: (f?.diagramIds?.length ?? 0) + (f?.sampleIds?.length ?? 0), osc: window.__osc, text: [...document.querySelectorAll('[data-ai-notice="parts"]')].map((n) => n.textContent).join(' | ') };
       }, job.id);
       if (!all.looked || !all.pics || !/ИИ: 2 запчасти/.test(all.text ?? '')) throw new Error('every part: ' + JSON.stringify(all));
       if (all.osc < 3) throw new Error('the AI made no sound: ' + all.osc);
@@ -3371,6 +3385,62 @@ async function launchBrowser() {
       return (await loadHistoryDebts(customerId))[0].dues.map((d) => [d.number, d.dueFils]);
     }, id);
     if (JSON.stringify(left) !== JSON.stringify([['302', 10500]])) throw new Error(`left: ${JSON.stringify(left)}`);
+  });
+  await step('v0.53: a job typed in after the fact — «День» in «Новый заказ», its chip, «Готово» on that day; a car in work takes a second job', async () => {
+    const dlg = page.getByRole('dialog');
+    const today = await page.evaluate(async () => (await import('/src/domain/dates.ts')).dubaiDate());
+    const dubaiDay = (iso) => new Date(new Date(iso).getTime() + 4 * 3600000).toISOString().slice(0, 10);
+    // Yesterday in this month's calendar (on the 1st — the 1st: the job is an ordinary one then).
+    const day = Math.max(1, Number(today.slice(8)) - 1);
+    const back = `${today.slice(0, 8)}${String(day).padStart(2, '0')}`;
+    const earlier = back < today;
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Код').fill('Q');
+    await page.getByLabel('Номер').pressSequentially('55443', { delay: 12 });
+    await front('button.day-pill-input').click();
+    await page.locator('button.mantine-DatePickerInput-day:not([data-outside])').filter({ hasText: new RegExp(`^${day}$`) }).first().click();
+    if (earlier) await front('button.day-pill-input').filter({ hasText: 'Вчера' }).waitFor();
+    await shot('46a-new-order-day');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    const made = await page.evaluate(async () => {
+      const o = await (await import('/src/db/db.ts')).db.orders.get(location.hash.split('/')[2].split('?')[0]);
+      return { id: o.id, vehicleId: o.vehicleId, backdated: o.backdated, day: o.arrivedAt };
+    });
+    if (earlier && (!made.backdated || dubaiDay(made.day) !== back)) throw new Error('the job typed in later: ' + JSON.stringify(made));
+    // Its day — a chip on the card.
+    if (earlier) await front('.day-chip').filter({ hasText: 'Вчера' }).waitFor();
+    // «Готово» offers its own day for the invoice.
+    await page.evaluate(async (id) => (await import('/src/services/estimate.ts')).addItem(id, { kind: 'labor', block: 'A', titleEn: 'Gearbox oil change', qty: 1, unitPriceFils: 20000 }), made.id);
+    await page.getByRole('button', { name: 'Согласен' }).click();
+    await page.getByRole('button', { name: /^Готово/ }).click();
+    await dlg.locator('button.day-pill-input').filter({ hasText: earlier ? 'Вчера' : 'Сегодня' }).waitFor();
+    await shot('46b-invoice-day');
+    await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
+    await dlg.waitFor({ state: 'detached' });
+    const inv = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.invoices.where('orderId').equals(id).first())?.issuedAt, made.id);
+    if (!inv || dubaiDay(inv) !== back) throw new Error('the invoice of the job typed in later: ' + inv);
+    // The payment sheet offers the invoice's day.
+    await page.getByRole('button', { name: /^Оплата/ }).first().click();
+    await dlg.locator('button.day-pill-input').filter({ hasText: earlier ? 'Вчера' : 'Сегодня' }).waitFor();
+    await page.keyboard.press('Escape');
+    await dlg.waitFor({ state: 'detached' });
+    // The same car again: «Принять» makes a second job (the open one a tap away).
+    await page.goto(BASE + '#/orders/new');
+    await page.getByLabel('Код').fill('Q');
+    await page.getByLabel('Номер').pressSequentially('55443', { delay: 12 });
+    await page.getByText(/Уже в работе: заказ №/).waitFor();
+    await shot('46c-second-job');
+    await page.getByRole('button', { name: 'Принять' }).click();
+    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    const two = await page.evaluate(async (v) => (await (await import('/src/db/db.ts')).db.orders.where('vehicleId').equals(v).toArray()).length, made.vehicleId);
+    if (two !== 2) throw new Error('a second job for the car in work: ' + two);
+    // Out of the scenario's way: both jobs gone.
+    await page.evaluate(async (v) => {
+      const { db } = await import('/src/db/db.ts');
+      const { deleteJob } = await import('/src/services/orders.ts');
+      for (const o of await db.orders.where('vehicleId').equals(v).toArray()) await deleteJob(o.id, { withRecords: true });
+    }, made.vehicleId);
   });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));

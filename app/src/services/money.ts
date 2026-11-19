@@ -1,6 +1,7 @@
 import { db, nextNumber, uid } from '../db/db';
 import { cashTotals } from '../domain/cash';
 import { dubaiDate, monthKey, nowIso, onDubaiDay } from '../domain/dates';
+import { atDay, jobDay } from '../domain/jobDay';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, jobDocNumber, paidNet } from '../domain/invoice';
 import { formatAed } from '../domain/money';
@@ -81,7 +82,7 @@ export async function settleIfPaid(orderId: string) {
  * (a version and decisions are still recorded), marked done — bought parts as received — and the
  * invoice is issued. The job moves to "ready": it waits only for payment and pickup.
  */
-export async function quickInvoice(orderId: string): Promise<Invoice> {
+export async function quickInvoice(orderId: string, { day }: { day?: string } = {}): Promise<Invoice> {
   const drafts = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => i.approvalState === 'draft');
   if (drafts.length) {
     const v = await sendVersion(orderId, { via: 'in_person' });
@@ -98,16 +99,24 @@ export async function quickInvoice(orderId: string): Promise<Invoice> {
     }
     if (!i.done) await setDone(i.id, true);
   }
-  const inv = await issueInvoice(orderId);
+  const inv = await issueInvoice(orderId, undefined, { day });
   await tryStage(orderId, 'ready');
   // Issued again for a car gone on credit (v0.34): paid already in full — the debt is settled, the job closes.
   await settleIfPaid(orderId);
   return inv;
 }
 
-export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 'credit_note'>): Promise<Invoice> {
+/**
+ * `day` (v0.53): the invoice issued on an earlier day — a job typed in after the fact; not after today, not before the
+ * job's own day. Its number takes that day's year.
+ */
+export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 'credit_note'>, { day }: { day?: string } = {}): Promise<Invoice> {
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
+  const typed = nowIso();
+  if (day && day > dubaiDate(typed)) throw new AppError('err.futureDate');
+  if (day && day < jobDay(b.order)) throw new AppError('err.beforeJobDay');
+  const issuedAt = atDay(day, typed);
   if (activeInvoice(b.invoices)) throw new AppError('err.invoiceExists');
   const lines = invoiceLines(b.items, 'en');
   if (lines.length === 0) throw new AppError('err.nothingToInvoice');
@@ -119,10 +128,10 @@ export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 
     // (the garage's server renames it — invoices never change here).
     const inv: Invoice = {
       id: uid(),
-      number: jobDocNumber('INV', year(), b.order.number),
+      number: jobDocNumber('INV', Number(dubaiDate(issuedAt).slice(0, 4)), b.order.number),
       type: invType,
       orderId,
-      issuedAt: nowIso(),
+      issuedAt,
       seller: { name: s.name, nameAr: s.nameAr, address: s.address, addressAr: s.addressAr, trn: s.trn, phone: s.phone, email: s.email },
       buyer: {
         name: c.type === 'company' && c.companyName ? c.companyName : c.name,
