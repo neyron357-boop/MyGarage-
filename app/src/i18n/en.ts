@@ -1142,6 +1142,8 @@ export const en: typeof ru = {
     client: 'Customer',
     carPhoto: 'Car photo',
     copyLines: 'Copy the parts',
+    /** The copy's tile, under its symbol (v0.57). */
+    copyWord: 'Copy',
     copiedLines: 'Parts copied',
     vinPhoto: 'VIN photo',
     vinTake: 'Take the VIN',
@@ -2013,6 +2015,8 @@ export const en: typeof ru = {
     seenIn_many: 'In {{count}} catalogues',
     seenIn_other: 'In {{count}} catalogues',
     // v0.50: a supplier's receipt scanned into an expense.
+    /** Under the AI's symbol on its tile (v0.57). */
+    tileWord: 'AI',
     sample: 'Sample',
     allParts: 'AI: every part',
     pickedParts: 'AI: the parts picked',

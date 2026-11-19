@@ -44,7 +44,14 @@ async function launch() {
   const front = (sel) => page.locator(`.screen[data-role="top"] ${sel}`);
   const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1, radiusX: 3, radiusY: 3, force: 1 })) });
   const center = async (loc) => {
-    const b = await loc.boundingBox();
+    // The car's chips are one row that scrolls sideways on a phone (v0.57): a chip past the screen's edge is brought in
+    // first, as a finger would (one already in sight is left where it is).
+    let b = await loc.boundingBox();
+    if (b && (b.x < 0 || b.x + b.width > 390)) {
+      await loc.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(150);
+      b = await loc.boundingBox();
+    }
     return [b.x + b.width / 2, b.y + b.height / 2];
   };
   // Which pickers a gesture opened, in order: 'camera' (capture) or 'photos'.
@@ -289,6 +296,10 @@ async function launch() {
     const on = () => chips.and(page.locator('[data-active="true"]')).filter({ hasText: 'Finger Spares' }).count();
     await chip.waitFor();
     await page.waitForTimeout(600);
+    // The sheet has grown (the AI's rows, its pictures on top): the suppliers lie under its sticky «Сохранить» — a finger
+    // scrolls them up first (a tap there pressed «Сохранить» and closed the sheet: failing since before v0.57).
+    await chip.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(300);
     await tap(chip);
     await chips.and(page.locator('[data-active="true"]')).filter({ hasText: 'Finger Spares' }).waitFor();
     await hold(chip);

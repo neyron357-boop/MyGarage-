@@ -110,7 +110,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
         ...press.handlers,
         onTouchStart: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchStart(e), sw.handlers.onTouchStart(e)),
         onTouchMove: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchMove(e), sw.handlers.onTouchMove(e)),
-        onTouchEnd: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchEnd(e), sw.handlers.onTouchEnd()),
+        onTouchEnd: (e: React.TouchEvent<HTMLElement>) => (press.handlers.onTouchEnd(e), sw.handlers.onTouchEnd(e)),
         onTouchCancel: () => (press.handlers.onTouchCancel(), sw.handlers.onTouchCancel()),
       }
     : press.handlers;
@@ -217,7 +217,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
           {!dated && dueChip}
           {rowAmount > 0 && (
             <span className="job-mini-amount">
-              <Money fils={rowAmount} fw={650} />
+              <Money fils={rowAmount} fw={600} />
             </span>
           )}
         </span>

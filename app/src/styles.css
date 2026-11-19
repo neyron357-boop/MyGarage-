@@ -1,48 +1,29 @@
 /* ---------- Base ---------- */
 :root {
   /* Motion: UIKit's curves. `--ease-ios` for anything that slides (screens, sheets), `--spring` for
-     things that settle (buttons, chips, tab icons), `--ease-out` for fades. Short — a tool, not a show. */
+     things that settle (buttons, chips, tab icons), `--ease-out` for fades. Short — a tool, not a show.
+     v0.57 (the Apple audit): `--spring` is critically damped — a press let go, a chip, a menu settle without passing
+     their place (it went 16 % past it): a bounce belongs only to what a finger threw (ui/fling.ts, ui/tabBar.tsx).
+     Durations only from the five steps below. */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
-  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --spring: cubic-bezier(0.22, 1, 0.36, 1);
+  /* A press goes in. */
+  --dur-0: 80ms;
   --dur-1: 120ms;
   --dur-2: 200ms;
   --dur-3: 300ms;
+  /* What moves far or changes much (a sheet, the step's colours). */
+  --dur-4: 420ms;
   /* Screen gutter: 16 pt on a phone, like iOS; wider on a PC. */
   --page-pad: 16px;
 }
 /* A real spring where the browser can draw one (Safari 17.2+, Chrome 113+). */
 @supports (animation-timing-function: linear(0, 1)) {
   :root {
-    --spring: linear(
-      0,
-      0.009,
-      0.035 2.1%,
-      0.141 4.4%,
-      0.281 6.7%,
-      0.723 12.9%,
-      0.938 16.7%,
-      1.017,
-      1.077,
-      1.121,
-      1.149 24.3%,
-      1.159,
-      1.163,
-      1.161,
-      1.154 29.9%,
-      1.129 32.8%,
-      1.051 39.6%,
-      1.017 43.1%,
-      0.991,
-      0.977 51%,
-      0.974 53.8%,
-      0.975 57.1%,
-      0.997 69.8%,
-      1.003 76.9%,
-      1.004 83.8%,
-      1
-    );
+    /* Apple's damping 1: x(t) = 1 − (1 + ωt)·e^(−ωt), sampled — no overshoot. */
+    --spring: linear(0, 0.079, 0.236, 0.403, 0.551, 0.671, 0.764, 0.833, 0.883, 0.919, 0.944, 0.962, 0.974, 0.983, 0.988, 0.992, 0.995, 0.997, 0.998, 0.999, 1);
   }
 }
 @media (min-width: 48em) {
@@ -199,15 +180,15 @@ a {
 /* Buttons press like native ones: a quick squeeze, a springy release. */
 .mantine-Button-root,
 .mantine-ActionIcon-root {
-  transition: transform 360ms var(--spring), background-color var(--dur-1) ease, color var(--dur-1) ease, opacity var(--dur-1) ease, border-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease, color var(--dur-1) ease, opacity var(--dur-1) ease, border-color var(--dur-1) ease;
 }
 .mantine-Button-root:active:not([data-disabled]):not([data-loading]) {
   transform: scale(0.97);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 .mantine-ActionIcon-root:active:not([data-disabled]):not([data-loading]) {
-  transform: scale(0.9);
-  transition-duration: 80ms;
+  transform: scale(0.92);
+  transition-duration: var(--dur-0);
 }
 .mantine-Button-root[data-variant='subtle']:active:not([data-disabled]),
 .mantine-ActionIcon-root[data-variant='subtle']:active:not([data-disabled]),
@@ -241,7 +222,7 @@ a {
   box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--button-bg, var(--mantine-primary-color-filled)) 80%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 .mantine-Button-root[data-variant='filled'] {
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 /* Segmented control: a grey capsule track, a white capsule sliding on a spring (iOS 26). */
@@ -251,7 +232,7 @@ a {
 .mantine-SegmentedControl-indicator {
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
   transition-timing-function: var(--spring);
-  transition-duration: 420ms;
+  transition-duration: var(--dur-4);
 }
 /* No hairlines between the segments: the capsules carry the shape. */
 .mantine-SegmentedControl-control::before {
@@ -270,7 +251,7 @@ a {
 /* Switch: the track moves on the iOS curve. */
 .mantine-Switch-track,
 .mantine-Switch-thumb {
-  transition-duration: 260ms;
+  transition-duration: var(--dur-3);
   transition-timing-function: var(--ease-ios);
 }
 .mantine-Switch-track {
@@ -292,13 +273,13 @@ a {
   border-radius: 50%;
   background: var(--app-fill);
   color: var(--app-label-2);
-  transition: transform 300ms var(--spring), background-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
 }
 .mantine-CloseButton-root:active,
 .mantine-Modal-close:active {
-  transform: scale(0.9);
+  transform: scale(0.92);
   background: var(--app-press);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 /* Banners and context menus are glass, like the notifications and menus of iOS 26. */
 .mantine-Notification-root {
@@ -479,7 +460,7 @@ a {
   background:
     radial-gradient(95% 72% at 4% 0%, color-mix(in srgb, var(--glow) var(--glow-a), transparent) 0%, transparent 72%),
     radial-gradient(75% 60% at 100% 0%, color-mix(in srgb, var(--glow-2) var(--glow-b), transparent) 0%, transparent 70%);
-  transition: --glow 560ms var(--ease-out), --glow-2 560ms var(--ease-out);
+  transition: --glow var(--dur-4) var(--ease-out), --glow-2 var(--dur-4) var(--ease-out);
 }
 /* Phone: the glow stays at the top of the screen when the list is pulled past its top (the iPhone's rubber
    band) — the title and the groups come down over it, as in a system app, and no bare strip with a hard edge
@@ -711,7 +692,7 @@ html.kb .screen:has(> .screen-bottom > .sticky-bar) {
   display: flex;
   gap: 8px;
   height: var(--app-bottom-h);
-  transition: transform 420ms var(--ease-ios), opacity 260ms ease;
+  transition: transform var(--dur-4) var(--ease-ios), opacity var(--dur-3) ease;
 }
 .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='false']) > .tab-bar-wrap,
 html.kb .tab-bar-wrap {
@@ -739,7 +720,7 @@ html.kb .tab-bar-wrap {
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-  padding: 1px 7px 1px 6px;
+  padding: 1px 8px 1px 6px;
   border-radius: 999px;
   font-size: 13px;
   font-weight: 700;
@@ -762,13 +743,13 @@ html.kb .tab-bar-wrap {
   color: var(--mantine-color-gray-5);
   cursor: pointer;
   position: relative;
-  transition: transform 80ms var(--spring);
+  transition: transform var(--dur-0) var(--spring);
 }
 .star-btn[data-on] {
   color: var(--mantine-color-yellow-6);
 }
 .star-btn:active {
-  transform: scale(0.86);
+  transform: scale(0.92);
 }
 .supplier-stats {
   display: flex;
@@ -849,7 +830,7 @@ html.kb .tab-bar-wrap {
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.18), 0 2px 6px rgb(0 0 0 / 0.08);
   scale: 1.03;
   border-radius: 14px;
-  transition: scale 160ms var(--spring), box-shadow 160ms ease, border-radius 160ms ease;
+  transition: scale var(--dur-2) var(--spring), box-shadow var(--dur-2) ease, border-radius var(--dur-2) ease;
   cursor: grabbing;
 }
 .sort-lift .sort-grip {
@@ -925,7 +906,7 @@ html.kb .tab-bar-wrap {
   animation: mg-from-left var(--dur-3) var(--ease-out) both;
 }
 .pop-in {
-  animation: mg-pop 320ms var(--ease-out) both;
+  animation: mg-pop var(--dur-3) var(--ease-out) both;
 }
 /* Staggered list entrance (first items only, so long lists do not wait). */
 .stagger > * {
@@ -950,7 +931,7 @@ html.kb .tab-bar-wrap {
 /* ---------- Loading skeletons ---------- */
 /* Appear only if loading takes longer than a blink, so fast screens do not flicker. */
 .skeleton-page {
-  animation: mg-fade-in var(--dur-2) ease 180ms both;
+  animation: mg-fade-in var(--dur-2) ease var(--dur-2) both;
 }
 .skeleton {
   border-radius: var(--mantine-radius-md);
@@ -996,7 +977,7 @@ html.kb .tab-bar-wrap {
 /* A whole card that is a button: it gives under the finger and springs back. */
 .tap {
   cursor: pointer;
-  transition: transform 360ms var(--spring), background-color var(--dur-1) ease, opacity var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease, opacity var(--dur-1) ease;
   -webkit-user-select: none;
   user-select: none;
   /* A long press opens the card's actions (JobCard), not the iPhone's callout. */
@@ -1008,8 +989,8 @@ html.kb .tab-bar-wrap {
   }
 }
 .tap:active {
-  transform: scale(0.975);
-  transition-duration: 80ms;
+  transform: scale(0.97);
+  transition-duration: var(--dur-0);
 }
 .tap:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -1044,11 +1025,11 @@ html.kb .tab-bar-wrap {
   letter-spacing: -0.01em;
   line-height: 36px;
   white-space: nowrap;
-  transition: transform 340ms var(--spring);
+  transition: transform var(--dur-3) var(--spring);
 }
 .day-pill button.day-pill-input:active {
-  transform: scale(0.94);
-  transition-duration: 80ms;
+  transform: scale(0.95);
+  transition-duration: var(--dur-0);
 }
 .day-pill .day-pill-icon {
   width: 34px;
@@ -1060,7 +1041,7 @@ html.kb .tab-bar-wrap {
 .display {
   font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 /* Small secondary label above a value (sentence case, like iOS). */
@@ -1081,7 +1062,7 @@ html.kb .tab-bar-wrap {
 /* Above the large title: the day on the board, the job's number — small, bold, in the accent. */
 .page-eyebrow {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.3;
   letter-spacing: -0.01em;
   color: var(--mantine-color-cobalt-6);
@@ -1114,7 +1095,7 @@ html.kb .tab-bar-wrap {
   min-width: 22px;
   height: 22px;
   margin-left: 6px;
-  padding: 0 7px;
+  padding: 0 8px;
   border-radius: 999px;
   vertical-align: 1px;
   font-size: 13px;
@@ -1127,7 +1108,7 @@ html.kb .tab-bar-wrap {
 .group-note {
   font-size: 13px;
   color: var(--app-label-2);
-  margin: 7px 16px 0;
+  margin: 8px 16px 0;
   line-height: 1.4;
 }
 
@@ -1149,7 +1130,7 @@ html.kb .tab-bar-wrap {
   font-family: var(--font-rounded);
   font-size: 40px !important;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   text-align: center;
   padding-inline: 48px !important;
   border-radius: 20px;
@@ -1178,7 +1159,7 @@ html.kb .tab-bar-wrap {
 .money.display {
   font-family: var(--font-rounded);
   font-weight: 700;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
 }
 .money.display .cur {
   font-family: var(--mantine-font-family);
@@ -1310,13 +1291,13 @@ html.kb .tab-bar-wrap {
 .stage-track {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  gap: 3px;
+  gap: 4px;
 }
 .stage-track span {
   height: 4px;
   border-radius: 2px;
   background: var(--app-fill);
-  transition: background-color 400ms var(--ease-out);
+  transition: background-color var(--dur-4) var(--ease-out);
 }
 .stage-track span.done {
   background: var(--mantine-color-cobalt-6);
@@ -1366,7 +1347,7 @@ html.kb .tab-bar-wrap {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 11px 0;
+  padding: 12px 0;
 }
 /* The hairline between rows is inset to the text, so an icon column reads as one piece. */
 .list-row + .list-row > .body::before {
@@ -1379,7 +1360,7 @@ html.kb .tab-bar-wrap {
 }
 .list-row.clickable {
   cursor: pointer;
-  transition: background-color 240ms ease;
+  transition: background-color var(--dur-3) ease;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -1404,7 +1385,7 @@ html.kb .tab-bar-wrap {
   letter-spacing: -0.01em;
 }
 .list-row .subtitle {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.35;
   color: var(--app-label-2);
   margin-top: 2px;
@@ -1473,8 +1454,8 @@ html.kb .tab-bar-wrap {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 19px;
-  font-weight: 750;
+  font-size: 20px;
+  font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
@@ -1487,7 +1468,7 @@ html.kb .tab-bar-wrap {
   overflow-wrap: anywhere;
 }
 .garage-sub {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   letter-spacing: 0;
   color: var(--app-label-2);
@@ -1554,13 +1535,13 @@ html.kb .tab-bar-wrap {
   align-items: center;
   gap: 6px;
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 600;
 }
 /* Where the cash started: a small pill (the card is the button that opens it). */
 .money-card-start {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   padding: 4px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
@@ -1601,7 +1582,7 @@ html.kb .tab-bar-wrap {
 .money-card-purse-name {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   margin-bottom: 4px;
   font-size: 12px;
   font-weight: 600;
@@ -1621,7 +1602,7 @@ html.kb .tab-bar-wrap {
   font-variant-numeric: tabular-nums;
 }
 .money-card-out {
-  font-size: 14px;
+  font-size: 15px;
   opacity: 0.8;
 }
 .money-card-purse .money .cur {
@@ -1648,14 +1629,14 @@ html.kb .tab-bar-wrap {
   background: var(--c);
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  transition: transform 340ms var(--spring), box-shadow var(--dur-2) ease;
+  transition: transform var(--dur-3) var(--spring), box-shadow var(--dur-2) ease;
 }
 .accent-swatch[data-active] {
   box-shadow: 0 0 0 3px var(--app-card), 0 0 0 5px var(--c);
 }
 .accent-swatch:active {
-  transform: scale(0.88);
-  transition-duration: 80ms;
+  transform: scale(0.92);
+  transition-duration: var(--dur-0);
 }
 .accent-swatch:focus-visible {
   outline: 2px solid var(--c);
@@ -1707,7 +1688,7 @@ html.kb .tab-bar-wrap {
   padding: 6px 8px;
   border-radius: 16px;
   text-align: left;
-  transition: background-color 240ms ease;
+  transition: background-color var(--dur-3) ease;
 }
 .customer-line:active {
   background: var(--app-press);
@@ -1729,7 +1710,7 @@ html.kb .tab-bar-wrap {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   min-height: 58px;
   border-radius: 16px;
   background: var(--app-fill);
@@ -1738,7 +1719,7 @@ html.kb .tab-bar-wrap {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
-  transition: transform 340ms var(--spring), background-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -1746,7 +1727,7 @@ html.kb .tab-bar-wrap {
 .contact-tile:active {
   transform: scale(0.95);
   background: var(--app-press);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 .contact-tile:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -1767,7 +1748,7 @@ html.kb .tab-bar-wrap {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   min-height: 92px;
   padding: 12px 6px 10px;
   border: 0;
@@ -1782,7 +1763,7 @@ html.kb .tab-bar-wrap {
   text-decoration: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 240ms var(--spring), background-color 240ms ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-3) ease;
 }
 .action-tile > span {
   max-width: 100%;
@@ -1803,7 +1784,7 @@ html.kb .tab-bar-wrap {
 .action-tile:active {
   transform: scale(0.95);
   background: var(--app-press);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 .action-tile:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -1929,9 +1910,9 @@ html.kb .tab-bar-wrap {
   display: flex;
   width: calc(100% + 2 * var(--mantine-spacing-md));
   margin: calc(var(--mantine-spacing-md) * -1) calc(var(--mantine-spacing-md) * -1) var(--mantine-spacing-md);
-  /* Wide and not too tall: the job's lines still come into sight on a phone. */
-  aspect-ratio: 2 / 1;
-  max-height: 220px;
+  /* Wide and not too tall: the job's lines come into sight on a phone (v0.57: 5 : 2, it was 2 : 1). */
+  aspect-ratio: 5 / 2;
+  max-height: 200px;
   padding: 0;
   overflow: hidden;
   border-radius: var(--radius-group) var(--radius-group) 0 0;
@@ -1951,7 +1932,7 @@ html.kb .tab-bar-wrap {
   color: var(--mantine-color-cobalt-6);
 }
 .job-cover:active {
-  transform: scale(0.985);
+  transform: scale(0.98);
 }
 /* Swipe a row (ui/swipe.ts), like the iPhone's lists: the row's content slides with the finger, the
    action under it grows from its edge — the trailing one from the right, the leading one from the left.
@@ -1961,7 +1942,7 @@ html.kb .tab-bar-wrap {
 }
 .swipe-row > :not(.swipe-action) {
   transform: translateX(var(--swipe, 0px));
-  transition: transform 340ms var(--ease-ios);
+  transition: transform var(--dur-3) var(--ease-ios);
 }
 .swipe-row[data-swiping] > :not(.swipe-action) {
   transition: none;
@@ -1975,7 +1956,7 @@ html.kb .tab-bar-wrap {
   display: flex;
   justify-content: flex-end;
   overflow: hidden;
-  transition: width 340ms var(--ease-ios);
+  transition: width var(--dur-3) var(--ease-ios);
 }
 .swipe-action.lead {
   right: auto;
@@ -1994,7 +1975,7 @@ html.kb .tab-bar-wrap {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   border: 0;
   padding: 0 12px;
   background: transparent;
@@ -2006,7 +1987,7 @@ html.kb .tab-bar-wrap {
   -webkit-tap-highlight-color: transparent;
 }
 .swipe-btn > svg {
-  transition: transform 260ms var(--spring);
+  transition: transform var(--dur-3) var(--spring);
 }
 .swipe-row[data-past] .swipe-btn > svg {
   transform: scale(1.28);
@@ -2051,7 +2032,7 @@ html.kb .tab-bar-wrap {
   display: inline-flex;
 }
 .mulkiya-thumbs > .vin-thumb + .vin-thumb {
-  margin-left: -11px;
+  margin-left: -12px;
   box-shadow: 0 0 0 2px var(--app-card);
 }
 /* The VIN read off the photos (features/job/VinRead.tsx): while it reads, a band of light runs down the chips'
@@ -2134,11 +2115,11 @@ html.kb .tab-bar-wrap {
   border-radius: 6px;
   background: var(--app-fill);
   font-family: var(--mantine-font-family-monospace);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
 }
 .vin-boxes > span[data-gap] {
-  margin-left: 5px;
+  margin-left: 4px;
 }
 .vin-boxes > span[data-doubt] {
   background: var(--mantine-color-orange-light);
@@ -2169,7 +2150,7 @@ html.kb .tab-bar-wrap {
 .strip-tile[data-held],
 .add-side[data-held] {
   --held: 1.08;
-  animation: photo-held 260ms var(--spring) forwards;
+  animation: photo-held var(--dur-3) var(--spring) forwards;
 }
 /* Held long enough on a chip (v0.21): a ring of the accent around it — seen past the thumb — "let go: the photos". */
 .chip.vin-chip[data-held],
@@ -2182,7 +2163,7 @@ html.kb .tab-bar-wrap {
 }
 .job-cover[data-held] {
   --held: 1.02;
-  animation: photo-held 260ms var(--spring) forwards;
+  animation: photo-held var(--dur-3) var(--spring) forwards;
 }
 @keyframes photo-held {
   to {
@@ -2261,11 +2242,11 @@ html.kb .tab-bar-wrap {
   color: var(--mantine-color-white);
   font: inherit;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   cursor: pointer;
-  transition: opacity 140ms ease;
+  transition: opacity var(--dur-1) ease;
   will-change: transform;
 }
 .jc-pin[data-picked] {
@@ -2296,8 +2277,8 @@ html.kb .tab-bar-wrap {
   height: 32px;
   border-radius: 50%;
   color: var(--mantine-color-white);
-  font-size: 14px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .jc-dot.sm {
@@ -2317,7 +2298,7 @@ html.kb .tab-bar-wrap {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding-left: 7px;
+  padding-left: 8px;
 }
 /* ---------- Pull to refresh (ui/pullRefresh.tsx): the iPhone's spinner ---------- */
 /* Twelve spokes round a point under the navigation bar: they appear one by one as the page comes down,
@@ -2433,7 +2414,7 @@ html.kb .tab-bar-wrap {
   z-index: 2;
   background: var(--app-press);
   opacity: 0;
-  transition: opacity 240ms ease;
+  transition: opacity var(--dur-3) ease;
   pointer-events: none;
 }
 .job-card-open:active::after {
@@ -2462,12 +2443,20 @@ html.kb .tab-bar-wrap {
   height: 100% !important;
   background: transparent;
 }
+/* v0.57 (the Apple audit — white words stood at 3.6 : 1 over a pale sky): the shade under the name, the work line
+   and the money is dark enough for 4.5 : 1 over the palest photo (white words over rgb 255 under 55 % black and
+   more), and it reaches the top of a two-line name. */
 .job-card-shade {
   position: absolute;
   inset: 0;
   background:
     linear-gradient(180deg, rgb(0 0 0 / 0.26) 0%, rgb(0 0 0 / 0) 30%),
-    linear-gradient(0deg, rgb(0 0 0 / 0.8) 0%, rgb(0 0 0 / 0.55) 36%, rgb(0 0 0 / 0.18) 58%, rgb(0 0 0 / 0) 74%);
+    linear-gradient(0deg, rgb(0 0 0 / 0.84) 0%, rgb(0 0 0 / 0.68) 30%, rgb(0 0 0 / 0.52) 50%, rgb(0 0 0 / 0.2) 66%, rgb(0 0 0 / 0) 80%);
+}
+/* In the dark the photos are dimmed a little, as the iPhone dims pictures: a pale car is not the brightest thing on a
+   black screen. */
+[data-mantine-color-scheme='dark'] .job-card[data-photo] .job-card-open img {
+  filter: brightness(0.86);
 }
 .job-card-top {
   position: absolute;
@@ -2482,14 +2471,14 @@ html.kb .tab-bar-wrap {
 .job-card-step {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   height: 28px;
-  padding: 0 11px 0 9px;
+  padding: 0 12px 0 8px;
   border-radius: 999px;
   background: var(--c-deep);
   color: #fff;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
   box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--c-deep) 70%, #000);
@@ -2514,14 +2503,14 @@ html.kb .tab-bar-wrap {
   right: 14px;
   bottom: 12px;
   display: grid;
-  gap: 7px;
+  gap: 8px;
   color: #fff;
 }
 .job-card[data-photo] .job-card-name {
   font-size: 20px;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   text-shadow: 0 1px 10px rgb(0 0 0 / 0.35);
 }
 .job-card-meta {
@@ -2532,7 +2521,7 @@ html.kb .tab-bar-wrap {
 }
 .job-card-meta .job-card-amount {
   margin-inline-start: auto;
-  font-size: 18px;
+  font-size: 17px;
   text-shadow: 0 1px 8px rgb(0 0 0 / 0.35);
 }
 .job-card[data-photo] .job-card-amount .money .frac {
@@ -2574,7 +2563,7 @@ html.kb .tab-bar-wrap {
 .job-card-due {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   height: 24px;
   padding: 0 8px;
   border-radius: 999px;
@@ -2677,12 +2666,12 @@ html.kb .tab-bar-wrap {
   align-items: center;
   gap: 4px;
   height: 22px;
-  padding: 0 9px 0 7px;
+  padding: 0 8px 0 8px;
   border-radius: 999px;
   background: var(--c-soft);
   color: var(--c-ink);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -2734,10 +2723,10 @@ html.kb .tab-bar-wrap {
   align-items: center;
   gap: 4px;
   height: 22px;
-  padding: 0 9px 0 7px;
+  padding: 0 8px 0 8px;
   border-radius: 999px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -2822,7 +2811,7 @@ html.kb .tab-bar-wrap {
   justify-content: space-between;
   gap: 12px;
   min-height: 40px;
-  padding: 9px 0;
+  padding: 8px 0;
   font-size: 16px;
 }
 .kv-row > span:first-child {
@@ -2862,7 +2851,7 @@ html.kb .tab-bar-wrap {
   letter-spacing: -0.01em;
 }
 .tip-body {
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 15px;
   line-height: 1.38;
   color: var(--app-label-2);
@@ -2913,7 +2902,7 @@ html.kb .tab-bar-wrap {
   font-weight: 700;
   font-size: 28px;
   line-height: 1.1;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 .kpi .value .money .cur {
@@ -2992,12 +2981,12 @@ html.kb .tab-bar-wrap {
   opacity: 0;
 }
 .scroll-tabs[data-ready='true'] .scroll-tabs-pill {
-  transition: transform 320ms var(--ease-ios), width 320ms var(--ease-ios), opacity var(--dur-2) ease, background-color 320ms var(--ease-ios);
+  transition: transform var(--dur-3) var(--ease-ios), width var(--dur-3) var(--ease-ios), opacity var(--dur-2) ease, background-color var(--dur-3) var(--ease-ios);
 }
 /* A tab with a colour (a job's step): its symbol in that colour; chosen, white on the colour. */
 .scroll-tabs button .tab-icon {
   flex-shrink: 0;
-  margin-left: -3px;
+  margin-left: -4px;
   color: var(--c);
   transition: color var(--dur-2) var(--ease-out);
 }
@@ -3024,20 +3013,20 @@ html.kb .tab-bar-wrap {
   font-weight: 600;
   font-size: 15px;
   letter-spacing: -0.01em;
-  padding: 7px 14px;
+  padding: 8px 14px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   min-height: 36px;
-  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), transform 340ms var(--spring);
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), transform var(--dur-3) var(--spring);
   -webkit-user-select: none;
   user-select: none;
 }
 .scroll-tabs button:active {
   transform: scale(0.95);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 .scroll-tabs button:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -3066,6 +3055,40 @@ html.kb .tab-bar-wrap {
 .scroll-tabs button[data-active='true'] .count {
   background: color-mix(in srgb, var(--app-pill-text) 22%, transparent);
   color: inherit;
+}
+/* Two views of one thing (the job, its notes — ScrollTabs `segmented`, v0.57): the iPhone's segmented control, not
+   the capsules of the board's steps — a grey track across the screen, equal parts, the chosen one white and lifted.
+   The PC has its own (desk.css). */
+html:not(.desk) .scroll-tabs[data-segmented] {
+  gap: 0;
+  margin-inline: 0;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--app-fill);
+  overflow: hidden;
+}
+html:not(.desk) .scroll-tabs[data-segmented] button,
+html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--mantine-color-text);
+}
+html:not(.desk) .scroll-tabs[data-segmented] .scroll-tabs-pill,
+html:not(.desk) .scroll-tabs[data-segmented]:not([data-ready='true']) button[data-active='true'] {
+  background: var(--app-card) !important;
+  box-shadow: 0 3px 8px rgb(0 0 0 / 0.12), 0 3px 1px rgb(0 0 0 / 0.04);
+}
+html:not(.desk)[data-mantine-color-scheme='dark'] .scroll-tabs[data-segmented] .scroll-tabs-pill,
+html:not(.desk)[data-mantine-color-scheme='dark'] .scroll-tabs[data-segmented]:not([data-ready='true']) button[data-active='true'] {
+  background: #636366 !important;
+}
+html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] .count {
+  background: var(--app-fill);
+  color: var(--app-label-2);
 }
 
 /* ---------- Navigation bar + large title (every screen) ---------- */
@@ -3125,7 +3148,7 @@ html.kb .tab-bar-wrap {
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
-  transition: transform 340ms var(--spring), background-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
 }
 .screen-nav .nav-bar .mantine-Button-root {
   height: 44px;
@@ -3144,8 +3167,8 @@ html.kb .tab-bar-wrap {
   box-shadow: 0 6px 18px color-mix(in srgb, var(--button-bg, var(--mantine-primary-color-filled)) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 .screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root):active:not(:disabled) {
-  transform: scale(0.9);
-  transition-duration: 80ms;
+  transform: scale(0.92);
+  transition-duration: var(--dur-0);
 }
 .screen-nav .nav-bar :is(.mantine-ActionIcon-root, .nav-glass, .mantine-Button-root):active:not(:disabled) {
   opacity: 1;
@@ -3216,7 +3239,7 @@ html.kb .tab-bar-wrap {
   min-height: 34px;
   font-size: 15px;
   border-radius: 999px;
-  padding-inline: 13px;
+  padding-inline: 12px;
 }
 .nav-bar .mantine-Button-root[data-variant='subtle'] {
   padding-inline: 6px;
@@ -3289,7 +3312,8 @@ html.kb .tab-bar-wrap {
   font-family: var(--font-display);
   font-size: 34px;
   font-weight: 800;
-  letter-spacing: -0.032em;
+  /* v0.57: no tighter than the face itself — at −0.032 em the heavy letters touched («Мастерская»). */
+  letter-spacing: 0;
   line-height: 1.12;
   margin: 0;
   text-wrap: balance;
@@ -3298,7 +3322,7 @@ html.kb .tab-bar-wrap {
 }
 @media (min-width: 48em) {
   .large-title {
-    font-size: 30px;
+    font-size: 28px;
   }
 }
 
@@ -3315,6 +3339,11 @@ html.kb .tab-bar-wrap {
   gap: 12px;
   min-height: 52px;
   padding: 4px 16px;
+}
+/* A row whose content has nothing to show (the AI's numbers for a part not looked up yet) is not a blank 52 pt gap in
+   its group (v0.57, found in the Apple audit) — and the line under it does not count it. */
+.ios-row:empty {
+  display: none;
 }
 .ios-row + .ios-row::before {
   content: '';
@@ -3362,7 +3391,7 @@ html.kb .tab-bar-wrap {
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
-  transition: background-color 240ms ease;
+  transition: background-color var(--dur-3) ease;
 }
 .ios-row.clickable:active {
   background: var(--app-press);
@@ -3400,13 +3429,13 @@ html.kb .tab-bar-wrap {
   color: var(--mantine-color-text);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color var(--dur-1) ease, color var(--dur-1) ease, transform 340ms var(--spring);
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease, transform var(--dur-3) var(--spring);
   -webkit-user-select: none;
   user-select: none;
 }
 .chip:active {
-  transform: scale(0.94);
-  transition-duration: 80ms;
+  transform: scale(0.95);
+  transition-duration: var(--dur-0);
 }
 .chip[data-active='true'] {
   background: var(--chip-on, var(--mantine-color-cobalt-6));
@@ -3414,7 +3443,7 @@ html.kb .tab-bar-wrap {
 }
 /* A symbol in a chip (filters): in its own colour while off, white on the chip's colour when on. */
 .chip > svg:first-child {
-  margin: 0 5px 0 -3px;
+  margin: 0 4px 0 -4px;
   vertical-align: -3px;
   color: var(--chip-ink, currentColor);
   transition: color var(--dur-1) ease;
@@ -3449,7 +3478,7 @@ html.kb .tab-bar-wrap {
   text-overflow: ellipsis;
 }
 .line-sum-value {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
   font-family: var(--font-rounded);
   font-variant-numeric: tabular-nums;
@@ -3459,7 +3488,7 @@ html.kb .tab-bar-wrap {
   font-size: 12px;
   font-weight: 600;
   color: var(--mantine-color-dimmed);
-  margin-left: 3px;
+  margin-left: 4px;
 }
 .line-sum-cell[data-tone='good'] .line-sum-value {
   color: var(--mantine-color-green-7);
@@ -3490,7 +3519,7 @@ html.kb .tab-bar-wrap {
 }
 .chip.chip-supplier > svg:first-child {
   flex-shrink: 0;
-  margin: 0 5px 0 -3px;
+  margin: 0 4px 0 -4px;
 }
 .chip-supplier .chip-name {
   min-width: 0;
@@ -3546,7 +3575,7 @@ html.kb .tab-bar-wrap {
 .month-field-input {
   text-align: center;
   font-size: 17px !important;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.01em;
   text-transform: capitalize;
   cursor: pointer;
@@ -3576,11 +3605,11 @@ html.kb .tab-bar-wrap {
   border-radius: 18px;
   background: color-mix(in srgb, var(--mantine-color-cobalt-6) 9%, var(--app-card));
   cursor: pointer;
-  transition: transform 340ms var(--spring), background-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
 }
 .suggest:active {
   transform: scale(0.98);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 
 /* ---------- Search field (iOS search bar) ---------- */
@@ -3647,7 +3676,7 @@ html.kb .tab-bar-wrap {
   background: var(--app-label-3);
   color: var(--app-card);
   cursor: pointer;
-  animation: mg-pop 260ms var(--ease-out) both;
+  animation: mg-pop var(--dur-3) var(--ease-out) both;
 }
 .search-clear:active {
   opacity: 0.6;
@@ -3781,12 +3810,12 @@ html.kb .tab-bar-wrap {
 .tab-bar button[data-href] svg {
   width: 26px;
   height: 26px;
-  transition: transform 200ms var(--ease-out);
+  transition: transform var(--dur-2) var(--ease-out);
 }
 /* Press feedback: subtle and quick (Emil Kowalski: 0.95–0.98, 100–160 ms); no bounce back — no force. */
 .tab-bar button[data-href]:active svg {
   transform: scale(0.95);
-  transition-duration: 120ms;
+  transition-duration: var(--dur-1);
 }
 .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-6);
@@ -3828,15 +3857,15 @@ html.kb .tab-bar-wrap {
   box-shadow: 0 8px 24px color-mix(in srgb, var(--mantine-color-cobalt-6) 32%, transparent), 0 1px 4px rgba(0, 0, 0, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 0 0 0.5px rgba(255, 255, 255, 0.22);
   cursor: pointer;
-  transition: transform 380ms var(--spring);
+  transition: transform var(--dur-3) var(--spring);
 }
 [data-mantine-color-scheme='dark'] .tab-plus {
   background: color-mix(in srgb, var(--mantine-color-cobalt-5) 92%, transparent);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 0.5px rgba(255, 255, 255, 0.18);
 }
 .tab-plus:active {
-  transform: scale(0.88);
-  transition-duration: 80ms;
+  transform: scale(0.92);
+  transition-duration: var(--dur-0);
 }
 .tab-plus:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -3853,7 +3882,7 @@ html.kb .tab-bar-wrap {
   user-select: none;
 }
 .tab-plus > svg {
-  transition: transform 320ms var(--spring);
+  transition: transform var(--dur-3) var(--spring);
 }
 .tab-plus[data-open] > svg {
   transform: rotate(45deg);
@@ -3888,7 +3917,7 @@ html.kb .tab-bar-wrap {
   align-items: center;
   gap: 12px;
   height: 54px;
-  padding: 0 9px 0 20px;
+  padding: 0 8px 0 20px;
   border: 0;
   border-radius: 999px;
   color: var(--mantine-color-text);
@@ -3899,9 +3928,9 @@ html.kb .tab-bar-wrap {
   cursor: pointer;
   transform-origin: 100% 100%;
   /* Only before it starts (backwards): once up, the slide onto it may scale it. */
-  animation: mg-quick-in 380ms var(--spring) backwards;
+  animation: mg-quick-in var(--dur-3) var(--spring) backwards;
   animation-delay: calc(var(--i, 0) * 30ms);
-  transition: transform 160ms var(--spring), background-color 120ms ease;
+  transition: transform var(--dur-2) var(--spring), background-color var(--dur-1) ease;
   -webkit-tap-highlight-color: transparent;
 }
 .quick-item .row-icon {
@@ -3914,12 +3943,12 @@ html.kb .tab-bar-wrap {
   background: color-mix(in srgb, var(--mantine-color-cobalt-6) 18%, var(--glass-bg));
 }
 .quick-item:active {
-  transform: scale(0.96);
-  transition-duration: 80ms;
+  transform: scale(0.95);
+  transition-duration: var(--dur-0);
 }
 @keyframes mg-quick-in {
   from {
-    transform: translate3d(0, 18px, 0) scale(0.55);
+    transform: translate3d(0, 12px, 0) scale(0.86);
   }
   to {
     transform: none;
@@ -3947,7 +3976,7 @@ html.kb .tab-bar-wrap {
 }
 .car-shot-img[data-held] {
   transform: scale(0.98);
-  transition: transform 160ms var(--spring);
+  transition: transform var(--dur-2) var(--spring);
 }
 .car-shot-frame {
   position: relative;
@@ -3965,7 +3994,7 @@ html.kb .tab-bar-wrap {
   position: absolute;
   border-radius: 6px;
   box-shadow: 0 0 0 2.5px var(--mantine-color-green-5), 0 0 0 9999px rgba(0, 0, 0, 0.28);
-  animation: mg-pop 320ms var(--ease-out) both;
+  animation: mg-pop var(--dur-3) var(--ease-out) both;
 }
 .car-shot[data-state='check'] .car-shot-box {
   box-shadow: 0 0 0 2.5px var(--mantine-color-orange-5), 0 0 0 9999px rgba(0, 0, 0, 0.28);
@@ -4122,7 +4151,7 @@ html.kb .screen-bottom > .sticky-bar {
   transition: transform var(--dur-1) var(--ease-out), background-color var(--dur-2) ease, color var(--dur-2) ease;
 }
 .cam-icon:active {
-  transform: scale(0.9);
+  transform: scale(0.92);
 }
 .cam-icon[data-on='true'] {
   background: #ffd60a;
@@ -4205,7 +4234,7 @@ html.kb .screen-bottom > .sticky-bar {
   inset: 0;
   background: #fff;
   pointer-events: none;
-  animation: cam-flash 240ms ease-out both;
+  animation: cam-flash var(--dur-3) ease-out both;
 }
 .cam-center {
   position: absolute;
@@ -4255,7 +4284,7 @@ html.kb .screen-bottom > .sticky-bar {
   position: relative;
   width: 78px;
   height: 78px;
-  padding: 5px;
+  padding: 4px;
   border-radius: 50%;
   border: 4px solid #fff;
   background: transparent;
@@ -4268,10 +4297,10 @@ html.kb .screen-bottom > .sticky-bar {
   height: 100%;
   border-radius: 50%;
   background: #fff;
-  transition: transform 80ms var(--ease-out);
+  transition: transform var(--dur-0) var(--ease-out);
 }
 .cam-shutter:active span {
-  transform: scale(0.88);
+  transform: scale(0.92);
 }
 .cam-shutter:disabled {
   opacity: 0.4;
@@ -4290,7 +4319,7 @@ html.kb .screen-bottom > .sticky-bar {
   border: 2.5px solid var(--mantine-color-orange-5);
   border-radius: 10px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.12);
-  transition: left 160ms var(--ease-out), top 160ms var(--ease-out), width 160ms var(--ease-out), height 160ms var(--ease-out), border-color var(--dur-2) ease;
+  transition: left var(--dur-2) var(--ease-out), top var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out), height var(--dur-2) var(--ease-out), border-color var(--dur-2) ease;
 }
 .plate-scan[data-state='stable'] .plate-scan-ring {
   border-color: var(--mantine-color-green-5);
@@ -4327,7 +4356,7 @@ html.kb .screen-bottom > .sticky-bar {
   border-radius: 50%;
   color: #fff;
   background: var(--mantine-color-green-6);
-  animation: mg-pop 320ms var(--ease-out) both;
+  animation: mg-pop var(--dur-3) var(--ease-out) both;
 }
 .plate-scan-looking {
   display: inline-flex;
@@ -4512,13 +4541,13 @@ html.kb .screen-bottom > .sticky-bar {
   font: inherit;
   color: inherit;
   width: 100%;
-  transition: box-shadow var(--dur-2) var(--ease-out), transform 340ms var(--spring), background-color var(--dur-2) ease;
+  transition: box-shadow var(--dur-2) var(--ease-out), transform var(--dur-3) var(--spring), background-color var(--dur-2) ease;
   -webkit-user-select: none;
   user-select: none;
 }
 .choice-card:active:not(:disabled) {
   transform: scale(0.98);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 .choice-card:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -4655,13 +4684,13 @@ html.kb .screen-bottom > .sticky-bar {
   display: block;
 }
 .success-mark .circle {
-  animation: mg-pop 360ms var(--ease-out) both;
+  animation: mg-pop var(--dur-3) var(--ease-out) both;
   transform-origin: 50% 50%;
 }
 .success-mark .tick {
   stroke-dasharray: 40;
   stroke-dashoffset: 40;
-  animation: mg-draw 360ms var(--ease-out) 220ms forwards;
+  animation: mg-draw var(--dur-3) var(--ease-out) 220ms forwards;
 }
 
 /* ---------- Desktop board ---------- */
@@ -4736,7 +4765,7 @@ html.kb .screen-bottom > .sticky-bar {
   transition: transform var(--dur-1) var(--ease-out), opacity var(--dur-1) ease;
 }
 .stage-btn:active {
-  transform: scale(0.96);
+  transform: scale(0.95);
 }
 .stage-btn:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
@@ -4754,7 +4783,7 @@ html.kb .screen-bottom > .sticky-bar {
 }
 .bar-grow {
   transform-origin: left center;
-  animation: mg-bar 520ms var(--ease-out) both;
+  animation: mg-bar var(--dur-4) var(--ease-out) both;
 }
 
 /* Horizontal scrollers: fade the side where more content is hidden */
@@ -4815,7 +4844,7 @@ html.kb .screen-bottom > .sticky-bar {
 .due-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
 }
 .due-chip[data-state='empty'] {
   color: var(--app-label-2);
@@ -4835,7 +4864,7 @@ html.kb .screen-bottom > .sticky-bar {
 .row-due {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   white-space: nowrap;
 }
 .row-due > svg {
@@ -4865,7 +4894,7 @@ html.kb .screen-bottom > .sticky-bar {
 }
 .add-row > .action-tile {
   min-height: 66px;
-  padding: 9px 4px 8px;
+  padding: 8px 4px 8px;
   gap: 4px;
   border-radius: 18px;
   background: var(--app-card);
@@ -4896,7 +4925,28 @@ html.kb .screen-bottom > .sticky-bar {
 }
 .add-row.add-extras > .add-extra {
   flex: 1 1 0;
-  min-height: 50px;
+  min-height: 62px;
+}
+/* An extra says its word only in a row of its own, as wide as the tiles above (v0.57); beside them it is too narrow. */
+.add-extra-word {
+  color: var(--mantine-color-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.add-row:not(.add-extras) > .add-extra > .add-extra-word {
+  display: none;
+}
+/* A mechanic is a person, not a paper (v0.57): the initials beside the name, grey while off the job. */
+.chip.mechanic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 6px;
+}
+.chip.mechanic-chip[data-active='true'] .person-avatar {
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9);
 }
 @media (min-width: 600px) {
   .add-row > .action-tile {
@@ -4960,7 +5010,7 @@ html.kb .screen-bottom > .sticky-bar {
 .notes-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 .notes-empty {
   flex: 1;
@@ -4993,7 +5043,7 @@ html.kb .screen-bottom > .sticky-bar {
 }
 .note-bubble {
   max-width: 100%;
-  padding: 7px 12px 6px;
+  padding: 8px 12px 6px;
   border-radius: 20px;
   background: var(--mantine-color-cobalt-filled);
   color: var(--mantine-color-white);
@@ -5015,7 +5065,7 @@ html.kb .screen-bottom > .sticky-bar {
 /* The time sits in the bubble's last line, as in a messenger. */
 .note-bubble .note-time {
   float: right;
-  margin: 7px 0 -3px 10px;
+  margin: 8px 0 -4px 10px;
   font-size: 11px;
   line-height: 1.2;
   opacity: 0.72;
@@ -5064,7 +5114,7 @@ html.kb .screen-bottom > .sticky-bar {
   position: absolute;
   right: 8px;
   bottom: 8px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.45);
   color: var(--mantine-color-white);
@@ -5100,17 +5150,17 @@ html.kb .screen-bottom > .sticky-bar {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  padding-left: 3px;
+  padding-left: 4px;
   color: #fff;
   background: rgba(0, 0, 0, 0.42);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
-  transition: transform 340ms var(--spring);
+  transition: transform var(--dur-3) var(--spring);
 }
 .note-video:active .note-video-play {
-  transform: scale(0.9);
-  transition-duration: 80ms;
+  transform: scale(0.92);
+  transition-duration: var(--dur-0);
 }
 .note-video-len {
   position: absolute;
@@ -5119,7 +5169,7 @@ html.kb .screen-bottom > .sticky-bar {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
@@ -5214,11 +5264,11 @@ html.kb .screen-bottom > .sticky-bar {
   backdrop-filter: blur(12px);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16) inset;
   cursor: pointer;
-  transition: opacity var(--dur-2) ease, transform 340ms var(--spring);
+  transition: opacity var(--dur-2) ease, transform var(--dur-3) var(--spring);
 }
 .vp-big:active {
-  transform: scale(0.9);
-  transition-duration: 80ms;
+  transform: scale(0.92);
+  transition-duration: var(--dur-0);
 }
 /* Playing, the big button leaves the picture clear (the bars' own ▶ stays). */
 .vp[data-playing] .vp-big {
@@ -5264,7 +5314,7 @@ html.kb .screen-bottom > .sticky-bar {
   left: 0;
   width: 14px;
   height: 14px;
-  margin: -7px 0 0 -7px;
+  margin: -8px 0 0 -8px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
@@ -5343,7 +5393,7 @@ html.kb .screen-bottom > .sticky-bar {
   top: 50%;
   width: 14px;
   height: 14px;
-  margin-top: -7px;
+  margin-top: -8px;
   border-radius: 50%;
   background: var(--mantine-color-white);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.28);
@@ -5351,10 +5401,10 @@ html.kb .screen-bottom > .sticky-bar {
 }
 /* Playing: the place glides between the player's ticks (four a second). Under the finger it follows at once. */
 .voice-wave[data-playing] .voice-played {
-  transition: clip-path 250ms linear;
+  transition: clip-path var(--dur-3) linear;
 }
 .voice-wave[data-playing] .voice-dot-rail {
-  transition: transform 250ms linear;
+  transition: transform var(--dur-3) linear;
 }
 .voice-wave[data-drag] .voice-dot {
   transform: scale(1.3);
@@ -5376,7 +5426,7 @@ html.kb .screen-bottom > .sticky-bar {
   position: relative;
   min-width: 36px;
   height: 26px;
-  padding: 0 7px;
+  padding: 0 8px;
   border: 0;
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.24);
@@ -5428,7 +5478,7 @@ html.kb .screen-bottom > .sticky-bar {
   place-items: center;
   width: 30px;
   height: 30px;
-  margin-top: -15px;
+  margin-top: -16px;
   border-radius: 50%;
   background: var(--app-card);
   color: var(--mantine-color-cobalt-6);
@@ -5443,14 +5493,14 @@ html.kb .screen-bottom > .sticky-bar {
   align-items: center;
   gap: 8px;
   max-width: 100%;
-  margin: 1px -5px 6px;
+  margin: 1px -4px 6px;
   padding: 6px 10px;
   border: 0;
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.2);
   color: inherit;
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.25;
   text-align: left;
   cursor: pointer;
@@ -5538,7 +5588,7 @@ html.kb .screen-bottom > .sticky-bar {
   align-items: center;
   gap: 10px;
   min-height: 44px;
-  padding: 5px 6px 5px 14px;
+  padding: 4px 6px 4px 14px;
   border-radius: 22px;
 }
 .notes-reply-arrow {
@@ -5590,7 +5640,7 @@ html.kb .screen-bottom > .sticky-bar {
   --input-bd-focus: transparent !important;
 }
 .notes-field .mantine-Textarea-input {
-  padding: 11px 0;
+  padding: 12px 0;
 }
 .rec-dot {
   width: 12px;
@@ -5719,7 +5769,9 @@ html.kb .screen-bottom > .sticky-bar {
   height: 4px;
   border-radius: 2px;
   background: var(--app-fill);
-  transition: background-color 420ms var(--ease-out), flex-grow 520ms var(--spring);
+  /* v0.57: the fill runs (colour); the width of the step's segment is set at once — a layout animated frame by
+     frame (flex-grow) is what Apple's and Emil's rules keep off the screen. */
+  transition: background-color var(--dur-4) var(--ease-out);
 }
 .phase-track > span[data-on] {
   background: var(--phase);
@@ -5743,7 +5795,7 @@ html.kb .screen-bottom > .sticky-bar {
   }
 }
 .bar-swap {
-  animation: mg-bar-swap 420ms var(--spring);
+  animation: mg-bar-swap var(--dur-4) var(--spring);
 }
 /* A moment done (ui/components Celebration): a glass disc with a tick, in for a second. */
 .celebration {
@@ -5825,14 +5877,14 @@ html.kb .screen-bottom > .sticky-bar {
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
-  transition: transform 360ms var(--spring), background-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
 }
 [data-mantine-color-scheme='dark'] .today-card {
   --wash: 24%;
 }
 .today-card:active {
-  transform: scale(0.96);
-  transition-duration: 80ms;
+  transform: scale(0.98);
+  transition-duration: var(--dur-0);
 }
 .today-strip > .today-card:only-child {
   width: 100%;
@@ -5859,7 +5911,7 @@ html.kb .screen-bottom > .sticky-bar {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  padding-top: 5px;
+  padding-top: 4px;
   font-size: 15px;
   font-weight: 600;
   line-height: 1.25;
@@ -5895,7 +5947,7 @@ html.kb .screen-bottom > .sticky-bar {
   flex-shrink: 0;
 }
 .list-row .title {
-  transition: color 320ms ease;
+  transition: color var(--dur-3) ease;
 }
 /* A signed check-in act's job card: only looked at. */
 .jc-signed {
@@ -5943,7 +5995,7 @@ html.kb .screen-bottom > .sticky-bar {
   -webkit-user-select: none;
   user-select: none;
   touch-action: manipulation;
-  transition: transform 160ms var(--spring);
+  transition: transform var(--dur-2) var(--spring);
 }
 .part-thumb[data-empty] {
   background: transparent;
@@ -5985,7 +6037,7 @@ button.kpi-tab {
   font: inherit;
   color: inherit;
   cursor: pointer;
-  transition: box-shadow var(--dur-1) ease, transform 160ms var(--spring);
+  transition: box-shadow var(--dur-1) ease, transform var(--dur-2) var(--spring);
   -webkit-tap-highlight-color: transparent;
 }
 button.kpi-tab:active {
@@ -6005,7 +6057,7 @@ button.kpi-tab .eyebrow {
   min-height: calc(100dvh - 420px);
 }
 .debt-fold {
-  transition: transform 260ms var(--ease-ios);
+  transition: transform var(--dur-3) var(--ease-ios);
 }
 .debt-card.is-open .debt-fold {
   transform: rotate(180deg);
@@ -6044,11 +6096,11 @@ button.kpi-tab .eyebrow {
   right: -4px;
   min-width: 19px;
   height: 19px;
-  padding: 0 5px;
+  padding: 0 4px;
   border-radius: 10px;
   background: var(--mantine-color-cobalt-6);
   color: #fff;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 19px;
   text-align: center;
@@ -6073,7 +6125,7 @@ button.kpi-tab .eyebrow {
   background: color-mix(in srgb, var(--c) 9%, var(--app-card));
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 160ms var(--spring);
+  transition: transform var(--dur-2) var(--spring);
 }
 .today-note:active {
   transform: scale(0.98);
@@ -6099,10 +6151,10 @@ button.kpi-tab .eyebrow {
 .job-card-what {
   display: block;
   margin-top: 1px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.3;
-  color: rgba(255, 255, 255, 0.86);
+  color: rgba(255, 255, 255, 0.94);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6110,7 +6162,7 @@ button.kpi-tab .eyebrow {
 }
 .job-mini-what {
   display: block;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--app-label-2);
   white-space: nowrap;
   overflow: hidden;
@@ -6123,21 +6175,21 @@ button.kpi-tab .eyebrow {
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   height: 30px;
-  padding: 0 11px 0 9px;
+  padding: 0 12px 0 8px;
   border: 0;
   border-radius: 999px;
   color: var(--mantine-color-text);
   font: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 160ms var(--spring);
+  transition: transform var(--dur-2) var(--spring);
 }
 .job-card-doc:active {
-  transform: scale(0.94);
+  transform: scale(0.95);
 }
 .job-card[data-doc] .job-card-marks {
   margin-right: 96px;
@@ -6253,7 +6305,7 @@ button.kpi-tab .eyebrow {
 }
 .ai-toast-main {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -6284,7 +6336,7 @@ button.kpi-tab .eyebrow {
 /* What the AI read but is not sure of (v0.50.2: a receipt's day with a digit under a stamp). */
 .ai-unsure {
   color: var(--mantine-color-orange-text, var(--mantine-color-orange-6));
-  font-weight: 650;
+  font-weight: 600;
 }
 /* A receipt being read on the server (v0.50): a glass pill above the tab bar, the AI's mark twinkling in it. */
 .ai-scan-pill {
@@ -6315,7 +6367,7 @@ html.desk .ai-scan-pill {
   cursor: pointer;
   color: var(--mantine-color-cobalt-5);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 15px;
   white-space: nowrap;
   align-self: center;
 }
@@ -6358,13 +6410,13 @@ html.desk .ai-scan-pill {
   text-align: left;
   font: inherit;
   cursor: pointer;
-  transition: transform 300ms var(--spring), background-color var(--dur-1) ease;
+  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
   -webkit-tap-highlight-color: transparent;
 }
 .ai-pick:active {
   transform: scale(0.98);
   background: var(--app-press);
-  transition-duration: 80ms;
+  transition-duration: var(--dur-0);
 }
 .ai-num-main {
   display: grid;
@@ -6391,9 +6443,9 @@ html.desk .ai-scan-pill {
 .ai-seen {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--mantine-color-green-7);
   white-space: nowrap;
 }
@@ -6459,7 +6511,8 @@ html.desk .ai-scan-pill {
   border: 0;
   border-radius: 18px;
   overflow: hidden;
-  background: var(--app-group);
+  /* v0.57: --app-group never existed — the «Фото» tile had no ground and looked like a hole in the sheet. */
+  background: var(--app-card);
   scroll-snap-align: start;
   transition: transform var(--dur-1) var(--spring);
 }
@@ -6494,7 +6547,14 @@ html.desk .ai-scan-pill {
   color: var(--mantine-color-cobalt-6);
   font-size: 13px;
   font-weight: 600;
-  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 9%, var(--app-group));
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 9%, var(--app-card));
+}
+/* In the dark the sheet is the card colour itself: its tiles one step lighter. */
+[data-mantine-color-scheme='dark'] .line-media-tile {
+  background: var(--app-soft);
+}
+[data-mantine-color-scheme='dark'] .line-media-add {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-5) 14%, var(--app-soft));
 }
 .line-media-ai {
   position: absolute;
@@ -6504,12 +6564,12 @@ html.desk .ai-scan-pill {
   align-items: center;
   gap: 4px;
   max-width: calc(100% - 12px);
-  padding: 2px 7px 2px 3px;
+  padding: 2px 8px 2px 4px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6542,10 +6602,48 @@ html.desk .ai-scan-pill {
 .day-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: color-mix(in srgb, var(--mantine-color-indigo-6) 14%, transparent);
   color: var(--mantine-color-indigo-8);
 }
 [data-mantine-color-scheme='dark'] .day-chip {
   color: var(--mantine-color-indigo-4);
+}
+
+/* ---------- Reduce Transparency and Increase Contrast (v0.57, the Apple audit) ----------
+   The iPhone's own switches (Accessibility → Display & Text Size): with less transparency the glass turns solid — no
+   blur anywhere, the bars and the floating buttons opaque; with more contrast the hairlines, the secondary words and
+   the glass's edge get stronger. (Only Reduce Motion was followed before.) Mantine writes the colour tokens on
+   :root[data-mantine-color-scheme] — these win by one more element. */
+@media (prefers-reduced-transparency: reduce) {
+  *,
+  *::before,
+  *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  html:root[data-mantine-color-scheme] {
+    --glass-bg: var(--app-card);
+    --glass-bg-strong: var(--app-card);
+    --app-bar: var(--app-canvas);
+  }
+  html.desk .desk-bar::before {
+    background: var(--app-canvas);
+  }
+}
+@media (prefers-contrast: more) {
+  html:root[data-mantine-color-scheme='light'] {
+    --app-hairline: rgba(60, 60, 67, 0.45);
+    --app-label-2: rgba(60, 60, 67, 0.82);
+    --app-label-3: rgba(60, 60, 67, 0.55);
+    --glass-bg: var(--app-card);
+    --glass-edge: rgba(0, 0, 0, 0.28);
+  }
+  html:root[data-mantine-color-scheme='dark'] {
+    --app-hairline: rgba(235, 235, 245, 0.45);
+    --app-label-2: rgba(235, 235, 245, 0.82);
+    --app-label-3: rgba(235, 235, 245, 0.55);
+    --glass-bg: var(--app-card);
+    --glass-edge: rgba(255, 255, 255, 0.3);
+  }
 }

@@ -167,7 +167,7 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
                     {v && <PlateText plate={v.plate} size="xs" />}
                   </span>
                   {task.kind === 'debt' && task.amountFils ? (
-                    <Money fils={task.amountFils} c="red.7" fw={650} />
+                    <Money fils={task.amountFils} c="red.7" fw={600} />
                   ) : isCustomer(task) ? (
                     <ActionIcon variant="subtle" color="gray" size={30} radius="xl" aria-label={t('today.notNeeded')} onClick={(e) => (e.stopPropagation(), void dismiss(task))}>
                       <IconX size={16} />

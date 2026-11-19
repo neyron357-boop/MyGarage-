@@ -205,7 +205,7 @@ function DeskArchive({ jobs, byHand, covers, onBack }: { jobs: Job[]; byHand: Se
     { key: 'plate', label: t('desk.col.plate'), cell: (j) => <PlateText plate={j.b.vehicle.plate} size="xs" />, width: 150 },
     { key: 'customer', label: t('desk.col.customer'), cell: (j) => <span className="dt-clip">{who(j)}</span>, sort: who },
     { key: 'step', label: t('desk.col.step'), cell: (j) => <PhaseTag phase={j.phase} />, sort: (j) => t(`job.phase.${j.phase}`), width: 150 },
-    { key: 'amount', label: t('desk.col.amount'), cell: (j) => (amount(j) > 0 ? <Money fils={amount(j)} fw={650} /> : null), sort: amount, desc: true, align: 'right', nowrap: true, width: 150 },
+    { key: 'amount', label: t('desk.col.amount'), cell: (j) => (amount(j) > 0 ? <Money fils={amount(j)} fw={600} /> : null), sort: amount, desc: true, align: 'right', nowrap: true, width: 150 },
     {
       key: 'back',
       label: '',

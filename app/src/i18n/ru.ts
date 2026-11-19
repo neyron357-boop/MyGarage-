@@ -1142,6 +1142,8 @@ export const ru = {
     client: 'Клиент',
     carPhoto: 'Фото машины',
     copyLines: 'Скопировать запчасти',
+    /** The copy's tile, under its symbol (v0.57). */
+    copyWord: 'Копия',
     copiedLines: 'Запчасти скопированы',
     vinPhoto: 'Фото VIN',
     vinTake: 'Снять VIN',
@@ -2014,6 +2016,8 @@ export const ru = {
     seenIn_many: 'Есть в {{count}} каталогах',
     seenIn_other: 'Есть в {{count}} каталогах',
     // v0.50: a supplier's receipt scanned into an expense.
+    /** Under the AI's symbol on its tile (v0.57). */
+    tileWord: 'ИИ',
     sample: 'Образец',
     allParts: 'ИИ: все запчасти',
     pickedParts: 'ИИ: выбранные запчасти',

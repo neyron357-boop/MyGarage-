@@ -1,6 +1,7 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavigationType, UNSAFE_LocationContext as LocationContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
+import { project, springEase, Velocity } from './fling';
 import { layers } from './historyLayer';
 import { stepMainTab, watchMainSwipe } from './mainSwipe';
 
@@ -543,11 +544,11 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
     let id = -1;
     let x0 = 0;
     let y0 = 0;
-    let t0 = 0;
     let dx = 0;
     let lock: 'h' | 'v' | null = null;
     let topEl: HTMLElement | null = null;
     let prevEl: HTMLElement | null = null;
+    const speed = new Velocity();
     const width = () => root.clientWidth || window.innerWidth;
     const finger = (e: TouchEvent) => Array.from(e.changedTouches).find((t) => t.identifier === id);
     const reset = () => {
@@ -582,9 +583,9 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
       id = t.identifier;
       x0 = t.clientX;
       y0 = t.clientY;
-      t0 = e.timeStamp;
       dx = 0;
       lock = null;
+      speed.reset(t.clientX, e.timeStamp);
     };
     const move = (e: TouchEvent) => {
       if (id === -1) return;
@@ -611,6 +612,7 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
         topEl.classList.add('moving');
       }
       if (e.cancelable) e.preventDefault();
+      speed.add(t.clientX, e.timeStamp);
       dx = Math.max(0, mx);
       place(dx / width());
     };
@@ -624,16 +626,20 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
       lock = null;
       const w = width();
       const p = dx / w;
-      const speed = dx / Math.max(1, e.timeStamp - t0);
+      // v0.57 (the Apple audit): the finger's speed as it lifts (not the whole drag's average), and where it was
+      // taking the screen — past half of it, Back; a finger already going back, the screen stays. The screens go on
+      // at that speed: one critically damped spring for both (and the dim), on the compositor (ui/fling.ts).
+      const v = e.type === 'touchcancel' ? 0 : speed.now(e.timeStamp);
       const tEl = topEl;
       const pEl = prevEl;
-      const commit = e.type !== 'touchcancel' && (p > 0.33 || (speed > 0.5 && p > 0.05));
-      const ms = Math.max(160, Math.round(PUSH_MS * (commit ? 1 - p : p)));
+      const commit = e.type !== 'touchcancel' && v > -0.1 && (dx + project(v)) / w > 0.5;
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const { easing, ms } = reduced ? { easing: EASE, ms: 160 } : springEase(dx, commit ? w : 0, v, 0.38, EASE);
       if (commit) {
         void Promise.all([
-          slide(tEl, `translate3d(${Math.round(p * w)}px,0,0)`, 'translate3d(100%,0,0)', ms),
-          slide(pEl, `translate3d(${Math.round(PARALLAX * w * (1 - p))}px,0,0)`, 'none', ms),
-          fade(dimOf(pEl), 1 - p, 0, ms),
+          slide(tEl, `translate3d(${Math.round(p * w)}px,0,0)`, 'translate3d(100%,0,0)', ms, easing),
+          slide(pEl, `translate3d(${Math.round(PARALLAX * w * (1 - p))}px,0,0)`, 'none', ms, easing),
+          fade(dimOf(pEl), 1 - p, 0, ms, easing),
         ]).then(() => {
           // The screens are already where going back leaves them; the history catches up.
           tEl.style.transform = 'translate3d(100%,0,0)';
@@ -652,9 +658,9 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
         });
       } else {
         void Promise.all([
-          slide(tEl, `translate3d(${Math.round(p * w)}px,0,0)`, 'none', ms),
-          slide(pEl, `translate3d(${Math.round(PARALLAX * w * (1 - p))}px,0,0)`, `translate3d(${PARALLAX * w}px,0,0)`, ms),
-          fade(dimOf(pEl), 1 - p, 1, ms),
+          slide(tEl, `translate3d(${Math.round(p * w)}px,0,0)`, 'none', ms, easing),
+          slide(pEl, `translate3d(${Math.round(PARALLAX * w * (1 - p))}px,0,0)`, `translate3d(${PARALLAX * w}px,0,0)`, ms, easing),
+          fade(dimOf(pEl), 1 - p, 1, ms, easing),
         ]).then(() => {
           topEl = tEl;
           prevEl = pEl;

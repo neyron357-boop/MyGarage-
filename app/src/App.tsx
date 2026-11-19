@@ -205,7 +205,7 @@ function SideNav() {
           <UnstyledButton className="desk-side-btn desk-side-cash" onClick={() => navigate('/money?tab=cash')}>
             <IconCash size={18} stroke={1.9} aria-hidden />
             <span>{t('board.cash')}</span>
-            <Money fils={cash.expected} fw={650} />
+            <Money fils={cash.expected} fw={600} />
           </UnstyledButton>
         )}
         <AppearanceButton />

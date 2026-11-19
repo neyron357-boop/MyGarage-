@@ -1,5 +1,6 @@
 import type { Icon } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type CSSProperties, type TouchEvent } from 'react';
+import { project, rubber, Velocity } from './fling';
 import { haptic } from './haptics';
 
 /** What a swipe on a row does: the button it uncovers (icon, one word, colour) and its action. */
@@ -70,6 +71,7 @@ export function useSwipeRow(
   const row = useRef<HTMLElement | null>(null);
   const start = useRef<{ x: number; y: number; base: number; w: number; axis?: 'x' | 'y'; past?: boolean; from?: 'left' | 'right' } | null>(null);
   const swiped = useRef(false);
+  const speed = useRef(new Velocity());
   const live = useRef(spec);
   live.current = spec;
   const follow = (v: number) => {
@@ -113,6 +115,7 @@ export function useSwipeRow(
       }
       row.current = e.currentTarget;
       start.current = { x: t.clientX, y: t.clientY, base: off.current, w: e.currentTarget.offsetWidth, from };
+      speed.current.reset(t.clientX, e.timeStamp);
     },
     onTouchMove: (e: TouchEvent<HTMLElement>) => {
       const s = start.current;
@@ -130,11 +133,13 @@ export function useSwipeRow(
         }
       }
       if (s.axis !== 'x') return;
+      speed.current.add(t.clientX, e.timeStamp);
       let v = s.base + mx;
-      // Only the sides that have an action move; the other way the row resists like a rubber band.
-      if (v < 0 && !live.current.trailing) v = v * 0.12;
-      if (v > 0 && !live.current.leading) v = v * 0.12;
-      if (Math.abs(v) > s.w) v = Math.sign(v) * (s.w + (Math.abs(v) - s.w) * 0.25);
+      // Only the sides that have an action move; the other way, and past the row's width, it gives way less and
+      // less (UIScrollView's rubber band, v0.57 — it was a fixed share of the finger).
+      if (v < 0 && !live.current.trailing) v = rubber(v, 48);
+      if (v > 0 && !live.current.leading) v = rubber(v, 48);
+      if (Math.abs(v) > s.w) v = Math.sign(v) * (s.w + rubber(Math.abs(v) - s.w, s.w / 2));
       swiped.current = true;
       if (!dragging) row.current?.setAttribute('data-swiping', 'true');
       setDragging(true);
@@ -147,7 +152,7 @@ export function useSwipeRow(
       }
       follow(v);
     },
-    onTouchEnd: () => {
+    onTouchEnd: (e?: TouchEvent<HTMLElement>) => {
       const s = start.current;
       start.current = null;
       if (!s || s.axis !== 'x') return;
@@ -155,10 +160,17 @@ export function useSwipeRow(
       const v = off.current;
       const side = sideOf(v);
       if (!side) return setDx(0);
-      if (side.full !== false && Math.abs(v) > s.w * 0.5) commit(Math.sign(v) * s.w);
+      // Where the finger was taking the row (v0.57, the Apple audit): a flick opens the button from a short way, a
+      // finger already going back shuts it. The action itself still needs the row past half — or a flick from a
+      // quarter of it that would carry it past three quarters.
+      const fling = speed.current.now(e?.timeStamp ?? performance.now());
+      const ahead = v + project(fling, 0.99);
+      const back = Math.sign(fling) === -Math.sign(v) && Math.abs(fling) > 0.1;
+      const far = Math.abs(v) > s.w * 0.5 || (Math.abs(v) > s.w * 0.25 && Math.abs(ahead) > s.w * 0.75 && Math.sign(ahead) === Math.sign(v));
+      if (side.full !== false && far && !back) commit(Math.sign(v) * s.w);
       else {
         setPast(false);
-        setDx(Math.abs(v) > actionWidth / 2 ? Math.sign(v) * actionWidth : 0);
+        setDx(!back && Math.abs(ahead) > actionWidth / 2 && Math.sign(ahead) === Math.sign(v) ? Math.sign(v) * actionWidth : 0);
       }
     },
     onTouchCancel: () => {

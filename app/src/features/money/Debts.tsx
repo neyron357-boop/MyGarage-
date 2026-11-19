@@ -60,7 +60,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
         onClick={() => setOpen((o) => !o)}
         left={<PersonAvatar name={name} company={d.customer.type === 'company'} />}
         title={
-          <Text span inherit fw={650} lineClamp={1}>
+          <Text span inherit fw={600} lineClamp={1}>
             {name}
           </Text>
         }
@@ -74,7 +74,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           .join(' · ')}
         right={
           <Group gap={6} wrap="nowrap" aria-expanded={open}>
-            <Money fils={d.totalFils} c="red" fw={750} roll />
+            <Money fils={d.totalFils} c="red" fw={700} roll />
             {late && <span className="debt-late-dot" title={t('debt.overdue')} />}
             <IconChevronDown size={18} className="debt-fold" color="var(--app-label-3)" aria-hidden />
           </Group>
@@ -223,14 +223,14 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay }: {
         onClick={() => setOpen((o) => !o)}
         left={<PersonAvatar name={c.name} company />}
         title={
-          <Text span inherit fw={650} lineClamp={2}>
+          <Text span inherit fw={600} lineClamp={2}>
             {c.name}
           </Text>
         }
         subtitle={[phone ? formatPhone(phone) : '', t('debt.credits', { count: c.credits.length }), formatDate(c.credits[0].expense.date)].filter(Boolean).join(' · ')}
         right={
           <Group gap={6} wrap="nowrap" aria-expanded={open}>
-            <Money fils={c.leftFils} c="orange.7" fw={750} roll />
+            <Money fils={c.leftFils} c="orange.7" fw={700} roll />
             <IconChevronDown size={18} className="debt-fold" color="var(--app-label-3)" aria-hidden />
           </Group>
         }

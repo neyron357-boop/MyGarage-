@@ -18,7 +18,7 @@ export function VersionCard({ v, b }: { v: EstimateVersion; b: OrderBundle }) {
       <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
         <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
           <ThemeIcon radius="xl" size={36} variant="light" color={v.number === 1 ? 'cobalt' : 'orange'} style={{ flexShrink: 0 }}>
-            <Text fw={800} size="sm" className="display">
+            <Text fw={700} size="sm" className="display">
               v{v.number}
             </Text>
           </ThemeIcon>

@@ -74,7 +74,7 @@ import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { bundleAmountDue, changeStage, toggleMechanic, updateOrder, type OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
-import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, StickyBar, undoToast } from '../../ui/components';
+import { ConfirmModal, EmptyState, List, ListRow, Money, MoneyInput, PageHeader, PageSkeleton, PersonAvatar, PlateText, ScrollTabs, StickyBar, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
@@ -221,11 +221,15 @@ function AddBar({ onAdd, flush, children }: { onAdd: (kind: LineKind) => void; f
   );
 }
 
-/** A narrow tile beside them: its symbol only (the name for screen readers). */
-function AddExtra({ icon: I, label, onClick }: { icon: Icon; label: string; onClick: () => void }) {
+/**
+ * A narrow tile beside them: its symbol only (the name for screen readers). In a row of their own (a phone, three or
+ * more) the extras are tiles as wide as the three above — and, as those, say their word under the symbol (v0.57).
+ */
+function AddExtra({ icon: I, label, word, onClick }: { icon: Icon; label: string; word: string; onClick: () => void }) {
   return (
     <button type="button" className="action-tile add-extra" aria-label={label} onClick={onClick}>
       <I size={21} stroke={1.9} aria-hidden />
+      <span className="add-extra-word">{word}</span>
     </button>
   );
 }
@@ -325,6 +329,8 @@ function MechanicChip({ name, on, onToggle, onTask }: { name: string; on: boolea
   const press = useLongPress(onTask);
   return (
     <button type="button" className="chip mechanic-chip" data-active={on} aria-pressed={on} {...press.handlers} onClick={() => !press.consumeClick() && onToggle()}>
+      {/* A person, not a paper (v0.57): the initials as the contacts show them — grey while off the job. */}
+      <PersonAvatar name={name} size={24} muted={!on} />
       {name}
     </button>
   );
@@ -1083,26 +1089,28 @@ export function JobPage() {
       )}
       <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
       <ObdLine orderId={b.order.id} scans={b.order.obdScans ?? []} open={open} />
-      {/* One flow of chips: when the car was promised, who does the job (one or several — each chip on or
-          off by itself), the car's VIN photo. Wrapping, not scrolling — every chip stays in sight, one tap away. */}
-      <div className="chip-row wrap job-foot" aria-label={t('order.mechanic')}>
+      {/* One flow of chips: when the car was promised, the car's own papers (VIN, Mulkiya, Job card, the mileage),
+          who does the job (one or several — each chip on or off by itself), its suppliers. On a phone one row that
+          scrolls sideways (v0.57, the Apple audit: in three rows they pushed the job's lines below the screen) — the
+          papers first, they are taken as the car comes in; on a PC, beside the lines, they wrap. */}
+      <div className={phone ? 'chip-row job-foot' : 'chip-row wrap job-foot'} aria-label={t('order.mechanic')}>
         <JobDayChip job={b} />
         {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
+        <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
+        <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
+        <JobCardChip orderId={oid} open={open} />
+        {/* The car's mileage on this visit (v0.44): the odometer's photo, read on the phone. */}
+        <OdometerChip order={b.order} open={open} />
         {open &&
           mechanics.map((m) => (
             <MechanicChip key={m.id} name={m.name} on={crew.includes(m.id)} onToggle={() => void run(() => toggleMechanic(oid, m.id))} onTask={() => setMechanicOpen(true)} />
           ))}
-        <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
-        <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
-        <JobCardChip orderId={oid} open={open} />
         {open && (
           <button type="button" className="chip vin-chip" data-empty aria-label={t('suppliers.forJob')} onClick={() => navigate(`/orders/${oid}/suppliers`)}>
             <IconTruck size={17} stroke={1.9} aria-hidden />
             <span>{t('suppliers.forJob')}</span>
           </button>
         )}
-        {/* The car's mileage on this visit (v0.44): the odometer's photo, read on the phone. */}
-        <OdometerChip order={b.order} open={open} />
       </div>
     </Box>
   );
@@ -1116,6 +1124,7 @@ export function JobPage() {
         value={tab}
         onChange={pickTab}
         mb="0"
+        segmented
         items={[
           { value: 'main', label: t('job.tab.main') },
           { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
@@ -1165,8 +1174,8 @@ export function JobPage() {
           // Something forgotten or to change after the invoice: the same tiles, the invoice is redone. "%" — a
           // discount on the invoice out (a credit note and a new invoice at once), while money is due.
           <AddBar onAdd={(kind) => setAmend({ then: () => setSheet({ kind }) })}>
-            {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
-            <AddExtra icon={IconPencil} label={t('job.amend')} onClick={() => setAmend({})} />
+            {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+            <AddExtra icon={IconPencil} label={t('job.amend')} word={t('job.amend')} onClick={() => setAmend({})} />
           </AddBar>
         )}
         <Box mt="lg">
@@ -1208,17 +1217,17 @@ export function JobPage() {
         {editable && phase !== 'booked' && (
           // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
           <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
-            {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
-            {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
+            {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+            {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} word={t('job.copyWord')} onClick={() => void copyLines()} />}
             {/* The AI for every part at once (v0.52): names, numbers, diagrams and photos. */}
             {parts.length > 0 && <AiPartsTile orderId={oid} />}
-            {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
+            {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} word={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
           </AddBar>
         )}
         {editable && phase === 'booked' && lines.length > 0 && (
           // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one.
           <div className="add-row">
-            <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />
+            <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />
           </div>
         )}
         {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (

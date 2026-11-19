@@ -595,6 +595,7 @@ const check = (name, ok, detail) => {
   const sheetBtn = (name) => page.locator('.mantine-Modal-content button').filter({ hasText: name }).last();
   const sheetUp = () => page.evaluate(() => [...document.querySelectorAll('.mantine-Modal-content')].some((m) => m.getBoundingClientRect().top < innerHeight - 20));
   const twoTaps = async (loc, gap) => {
+    await loc.scrollIntoViewIfNeeded();
     const b = await loc.boundingBox();
     const x = b.x + b.width / 2;
     const y = b.y + b.height / 2;

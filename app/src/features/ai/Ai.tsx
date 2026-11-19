@@ -82,7 +82,7 @@ export function AiPartsTile({ orderId }: { orderId: string }) {
   return (
     <button type="button" className="action-tile add-extra ai-parts-tile" aria-label={t('ai.allParts')} aria-busy={busy || undefined} data-ai-parts={busy ? 'busy' : ''} disabled={busy} onClick={() => void aiAllParts(orderId)}>
       <AiMark size={24} busy={busy} />
-      {busy && p && <span className="ai-parts-n tnum">{p.done}/{p.total}</span>}
+      {busy && p ? <span className="ai-parts-n tnum">{p.done}/{p.total}</span> : <span className="add-extra-word">{t('ai.tileWord')}</span>}
     </button>
   );
 }

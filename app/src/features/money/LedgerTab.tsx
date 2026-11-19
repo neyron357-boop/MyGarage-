@@ -422,7 +422,7 @@ export function LedgerTab() {
       nowrap: true,
       width: 136,
       // As a bank shows it: money in green with a plus, money out with a minus.
-      cell: (e) => <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />,
+      cell: (e) => <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={600} signed />,
     },
     {
       key: 'cash',
@@ -560,7 +560,7 @@ export function LedgerTab() {
           return (
             <Box key={day}>
               <Group justify="space-between" px={4} mb={6} wrap="nowrap">
-                <Text size="sm" fw={650} c="dimmed" className="day-head">
+                <Text size="sm" fw={600} c="dimmed" className="day-head">
                   {head.word ? t(`common.${head.word}`) : head.text}
                 </Text>
                 <Text size="xs" fw={600} c={net >= 0 ? 'green.7' : 'dimmed'} className="tnum">
@@ -616,7 +616,7 @@ export function LedgerTab() {
                       right={
                         <Stack gap={0} align="flex-end">
                           {/* As a bank shows it: money in green with a plus, money out in the text's colour with a minus. */}
-                          <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={650} signed />
+                          <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={600} signed />
                           <Text size="10px" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
                             {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')}
                           </Text>

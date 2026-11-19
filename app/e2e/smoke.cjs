@@ -484,6 +484,8 @@ async function launchBrowser() {
     await shot('30a2-vin-empty');
     // v0.21: on the empty VIN and Mulkiya chips a hold opens the phone's photos — only them (no camera after it).
     const holdOn = async (loc) => {
+      // The car's chips are one row that scrolls sideways on a phone (v0.57): a finger brings the chip in first.
+      await loc.scrollIntoViewIfNeeded();
       const box = await loc.boundingBox();
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       const [fc] = await Promise.all([
@@ -512,6 +514,7 @@ async function launchBrowser() {
     await fromPhotos.setFiles([]);
     // A hold (a mouse held down here) chooses from the photos too: the press's length decides, not which event
     // ends it (the iPhone may take a long press over and end it with a click — v0.17.2).
+    await page.getByRole('button', { name: 'Фото VIN' }).scrollIntoViewIfNeeded();
     const vinBox = await page.getByRole('button', { name: 'Фото VIN' }).boundingBox();
     await page.mouse.move(vinBox.x + vinBox.width / 2, vinBox.y + vinBox.height / 2);
     const [held] = await Promise.all([
@@ -1463,8 +1466,9 @@ async function launchBrowser() {
     await page.locator('.list-row', { hasText: 'Прибыль' }).click();
     await page.locator('.profit-amount[data-shown="true"]').getByText('319,50').waitFor();
     // Two mechanics on the job (v0.17.2): each chip on by itself; the task goes to both.
-    const crewChips = front('.job-foot button.chip:not(.due-chip):not(.vin-chip)');
-    const names = await crewChips.allTextContents();
+    const crewChips = front('.job-foot button.mechanic-chip');
+    // The name only: the chip shows the mechanic's initials beside it (v0.57).
+    const names = await crewChips.evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !(n instanceof Element && n.classList.contains('person-avatar'))).map((n) => n.textContent).join('').trim()));
     await crewChips.nth(0).click();
     await crewChips.nth(1).click();
     await front('.job-foot button.chip[aria-pressed="true"]').nth(1).waitFor();

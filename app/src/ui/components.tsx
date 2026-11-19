@@ -615,7 +615,7 @@ export function ListRow({
     ? {
         onTouchStart: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchStart?.(e), sw.handlers.onTouchStart(e)),
         onTouchMove: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchMove?.(e), sw.handlers.onTouchMove(e)),
-        onTouchEnd: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchEnd?.(e), sw.handlers.onTouchEnd()),
+        onTouchEnd: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchEnd?.(e), sw.handlers.onTouchEnd(e)),
         onTouchCancel: (e: React.TouchEvent<HTMLDivElement>) => (h?.onTouchCancel?.(e), sw.handlers.onTouchCancel()),
       }
     : undefined;
@@ -808,7 +808,7 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Icon; 
         </span>
       )}
       {title && (
-        <Text fw={750} fz={19} lh={1.25} style={{ letterSpacing: '-0.02em' }}>
+        <Text fw={700} fz={20} lh={1.25}>
           {title}
         </Text>
       )}
@@ -937,6 +937,7 @@ export function ScrollTabs({
   items,
   mb = 'md',
   onHold,
+  segmented,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -944,6 +945,11 @@ export function ScrollTabs({
   mb?: string;
   /** A long press on a tab (right click on a PC) — the board opens its «Вид» there; the tap after it is not a tap. */
   onHold?: () => void;
+  /**
+   * Two or three views of one thing (the job and its notes): the iPhone's segmented control — a grey track, the
+   * chosen one white, the parts equal (v0.57). Without it, a row of capsules (the board's steps, the money's pages).
+   */
+  segmented?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const pill = useRef<HTMLSpanElement>(null);
@@ -986,7 +992,7 @@ export function ScrollTabs({
     return () => ro.disconnect();
   }, [value, order]);
   return (
-    <Box mb={mb} className="scroll-tabs" role="tablist" ref={ref} {...(onHold ? hold.handlers : {})}>
+    <Box mb={mb} className="scroll-tabs" role="tablist" ref={ref} data-segmented={segmented || undefined} {...(onHold ? hold.handlers : {})}>
       <span className="scroll-tabs-pill" ref={pill} aria-hidden />
       {items.map((it) => (
         <button
