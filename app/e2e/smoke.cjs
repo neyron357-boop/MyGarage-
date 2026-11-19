@@ -675,9 +675,9 @@ async function launchBrowser() {
     await dlg.getByText('Заказано', { exact: true }).click();
     // A photo on the line (the part): picked in the sheet, saved with it; any photo can be shared or saved.
     await dlg.locator('input[data-photo-input="line"]').setInputFiles({ name: 'part.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
-    await dlg.locator('.strip-tile img').first().waitFor();
+    await dlg.locator('[data-line-media] .line-media-tile[data-kind="own"] img').first().waitFor();
     await shot('31-line-photo');
-    await dlg.locator('.strip-tile img').first().click();
+    await dlg.locator('[data-line-media] .line-media-tile[data-kind="own"]').first().click();
     await page.locator('.viewer').getByRole('button', { name: /Поделиться|Сохранить/ }).waitFor();
     await page.locator('.viewer button').first().click();
     await page.locator('.viewer').waitFor({ state: 'detached' });
@@ -2164,12 +2164,15 @@ async function launchBrowser() {
       await other.waitFor();
       const yandex = await dlg.locator('a[aria-label="Найти в Яндексе"]').evaluateAll((as) => as.map((a) => [a.getAttribute('href'), a.getAttribute('target')]));
       if (JSON.stringify(yandex[0]) !== JSON.stringify(['https://yandex.ru/search/?text=04465-12610', '_blank']) || yandex.length !== 3) throw new Error('Yandex: ' + JSON.stringify(yandex));
-      await dlg.locator('[data-ai-diagram] .ai-diagram-card').waitFor();
-      // A photo of the part itself, «Образцы» — a tile of its own under the diagram.
-      await dlg.locator('[data-ai-samples] .strip-tile').waitFor();
+      // v0.52: every picture on top of the sheet, one row of one size — the AI's sample and diagram marked as its.
+      await dlg.locator('[data-line-media] .line-media-tile[data-kind="diagram"] .line-media-ai').waitFor();
+      await dlg.locator('[data-line-media] .line-media-tile[data-kind="sample"] .line-media-ai').waitFor();
+      const sizes = await dlg.locator('[data-line-media] .line-media-tile').evaluateAll((ts) => [...new Set(ts.map((t) => `${Math.round(t.getBoundingClientRect().width)}x${Math.round(t.getBoundingClientRect().height)}`))]);
+      if (sizes.length !== 1) throw new Error('the pictures are not of one size: ' + sizes.join(' '));
+      const media = await dlg.locator('[data-line-media]').boundingBox();
+      const name = await dlg.getByLabel('Запчасть').boundingBox();
+      if (!media || !name || media.y > name.y) throw new Error('the pictures are not on top of the sheet');
       await shot('38-ai-part');
-      await dlg.locator('[data-ai-diagram]').scrollIntoViewIfNeeded();
-      await shot('38a-ai-diagram');
       // A candidate (not seen in a catalogue — orange) taken by a tap.
       await other.click();
       if ((await no.inputValue()) !== '04465-02220') throw new Error('the candidate tapped: ' + (await no.inputValue()));
@@ -2206,6 +2209,38 @@ async function launchBrowser() {
       // The job goes on with one line of the kind (the steps after pick parts by their names).
       await page.evaluate(async (id) => void (await (await import('/src/services/estimate.ts')).removeItem(id)), again.id);
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).nth(1).waitFor({ state: 'detached' });
+      // v0.52: the line's preview shows what the AI found (no photo of its own) — with the AI's mark.
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb[data-ai-preview] .part-thumb-ai').waitFor();
+      // Every part at once: a second part typed, the AI's tile under the lines — the card says what was done, and sounds.
+      await page.evaluate(async (id) => {
+        const { addItem } = await import('/src/services/estimate.ts');
+        await addItem(id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
+        window.__osc = 0;
+        const make = AudioContext.prototype.createOscillator;
+        AudioContext.prototype.createOscillator = function () {
+          window.__osc++;
+          return make.call(this);
+        };
+      }, job.id);
+      await front('.list-row').filter({ hasText: 'OIL FILTER' }).waitFor();
+      await front('[data-ai-parts]').click();
+      await page.locator('[data-ai-notice="parts"]').waitFor({ timeout: 30000 });
+      await shot('38b-ai-all-parts');
+      const all = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const lines = await db.items.where('orderId').equals(id).toArray();
+        const f = lines.find((l) => l.titleEn === 'OIL FILTER');
+        return { looked: !!f?.aiFind, pics: (f?.diagramIds?.length ?? 0) + (f?.sampleIds?.length ?? 0), osc: window.__osc, text: document.querySelector('[data-ai-notice="parts"]')?.textContent };
+      }, job.id);
+      if (!all.looked || !all.pics || !/ИИ: 2 запчасти/.test(all.text ?? '')) throw new Error('every part: ' + JSON.stringify(all));
+      if (all.osc < 3) throw new Error('the AI made no sound: ' + all.osc);
+      await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const { removeItem } = await import('/src/services/estimate.ts');
+        const f = (await db.items.where('orderId').equals(id).toArray()).find((l) => l.titleEn === 'OIL FILTER');
+        if (f) await removeItem(f.id);
+      }, job.id);
+      await front('.list-row').filter({ hasText: 'OIL FILTER' }).waitFor({ state: 'detached' });
     } finally {
       await page.evaluate(async () => (await import('/src/services/ai.ts')).setAiTransport(undefined));
     }

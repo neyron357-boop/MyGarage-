@@ -6,6 +6,7 @@ import { dayShort, dubaiDate } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { useLang } from '../../ui/hooks';
 import { onAiNotice, type AiNotice } from '../../services/ai';
+import { chime } from '../../ui/sound';
 import { AiMark } from './Ai';
 
 /**
@@ -47,6 +48,14 @@ export function AiNotices() {
               {n.from !== n.to && <span className="ai-toast-was">{n.from}</span>}
             </>
           );
+        } else if (n.kind === 'parts') {
+          // Every part of a job (v0.52): how many lines, and what was done to them.
+          title = t('ai.partsTitle', { count: n.lines });
+          body = (
+            <span className="ai-toast-sub" data-ai-parts-done>
+              {[n.names ? t('ai.partsNames', { count: n.names }) : '', n.numbers ? t('ai.partsNumbers', { count: n.numbers }) : '', n.pictures ? t('ai.partsPictures', { count: n.pictures }) : ''].filter(Boolean).join(' · ') || t('ai.partsNothing')}
+            </span>
+          );
         } else if (n.kind === 'expense') {
           // A receipt recorded as an expense (v0.50): the sum and the seller, the job it went to (or none — a tap away in the sheet).
           title = n.close ? t('ai.receiptClose') : t('ai.receiptTitle');
@@ -85,6 +94,8 @@ export function AiNotices() {
             </span>
           );
         }
+        // The AI has finished with a result: its sound (v0.52) — a long work finished, three notes.
+        chime(n.kind === 'parts' ? 'done' : 'found');
         notifications.show({
           id,
           className: 'ai-toast',

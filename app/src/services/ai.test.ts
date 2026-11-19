@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { aiFindPart, aiFixPartName, aiReadVin, onAiNotice, setAiTransport, type AiNotice } from './ai';
+import { aiAllParts, aiFindPart, aiFixPartName, aiReadVin, onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { updateVehicle } from './customers';
 import { addItem, updateItem } from './estimate';
 import { addMedia } from './media';
@@ -250,5 +250,48 @@ describe('the AI looks at a part', () => {
     expect(await aiFindPart(it1.id)).toBeUndefined();
     await aiFindPart(it1.id, { again: true });
     expect((await db.items.get(it1.id))!.partNumber).toBe('90915-YZZE1');
+  });
+});
+
+describe('every part of a job at once (v0.52)', () => {
+  it('the names put right first (quietly), then each part looked up: a number only when it is the one found and proven; the pictures on every line; one card — «Отменить» brings names and numbers back', async () => {
+    const o = await car('Toyota', 'Corolla');
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'колодки тормазные передние', qty: 1, unitPriceFils: 0 });
+    const filter = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
+    const work = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'BRAKE SERVICE', qty: 1, unitPriceFils: 0 });
+    // The filter's search finds two numbers, both seen in a catalogue: neither is written.
+    const one = answers['part-find'];
+    setAiTransport(async (path, body) => {
+      asked.push({ path, body: body as Record<string, unknown> });
+      if (path !== 'part-find') return answers[path];
+      if ((body as { part: string }).part === 'OIL FILTER')
+        return { ...(one as object), numbers: [{ number: '90915-YZZE1', brand: 'Toyota', seen: ['https://www.amayama.com/a', 'https://megazip.net/b'] }, { number: '90915-10003', brand: 'Toyota', seen: ['https://partsouq.com/c'] }] };
+      return one;
+    });
+    const r = await aiAllParts(o.id);
+    expect(r).toEqual({ lines: 2, names: 1, numbers: 1, pictures: 2 });
+    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part).sort()).toEqual(['FRONT BRAKE PADS', 'OIL FILTER']);
+    const [p, f, w] = await Promise.all([db.items.get(pads.id), db.items.get(filter.id), db.items.get(work.id)]);
+    expect([p!.titleRu, p!.titleEn, p!.partNumber]).toEqual(['КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ', 'FRONT BRAKE PADS', '04465-12610']);
+    expect([f!.partNumber, f!.aiFind?.numbers.length]).toEqual([undefined, 2]);
+    expect([p!.diagramIds?.length, p!.sampleIds?.length, f!.diagramIds?.length]).toEqual([1, 1, 1]);
+    expect(w!.aiFind).toBeUndefined();
+    // One card for all of it — no card per line.
+    expect(notices.map((n) => n.kind)).toEqual(['parts']);
+    await notices[0].undo();
+    const back = (await db.items.get(pads.id))!;
+    expect([back.titleRu, back.titleEn, back.partNumber]).toEqual(['КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ', undefined, undefined]);
+    expect(back.diagramIds).toHaveLength(1);
+  });
+
+  it('a line with its number but no pictures is looked up for them; a line already looked up is not asked again', async () => {
+    const o = await car('Toyota', 'Corolla');
+    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-99999' });
+    await aiAllParts(o.id);
+    const i = (await db.items.get(it1.id))!;
+    expect([i.partNumber, i.diagramIds?.length]).toEqual(['04465-99999', 1]);
+    asked = [];
+    await aiAllParts(o.id);
+    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
   });
 });

@@ -10,7 +10,8 @@ import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '../../domain/types';
 import { aiAfterPart } from '../../services/ai';
-import { AiDiagrams, AiPartNumbers, YandexButton } from '../ai/Ai';
+import { AiPartNumbers, YandexButton } from '../ai/Ai';
+import { LineMedia } from './LineMedia';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
@@ -19,7 +20,6 @@ import { setProcurement } from '../../services/parts';
 import { FormRow, Money, MoneyInput, RowGroup } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
-import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
 
@@ -345,6 +345,20 @@ export function LineSheet({
           </div>
         )}
 
+        {/* Every picture first (v0.52): the line's own, then the AI's — one row, one size. */}
+        <LineMedia
+          own={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
+          onAdd={(files) => setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))])}
+          onRemove={(p) => {
+            if (p.src) {
+              URL.revokeObjectURL(p.src);
+              setFresh((f) => f.filter((x) => x.id !== p.id));
+            } else setKept((k) => k.filter((x) => x !== p.id));
+          }}
+          diagramIds={kind === 'part' ? live?.diagramIds : undefined}
+          sampleIds={kind === 'part' ? live?.sampleIds : undefined}
+        />
+
         {/* What it is: the name, large; for a part — where it stands. */}
         <div className="ios-group">
           <div className="ios-row left line-name">
@@ -600,18 +614,6 @@ export function LineSheet({
           </div>
         )}
 
-        {kind === 'part' && item && <AiDiagrams itemId={item.id} />}
-        <PhotoStrip
-          name="line"
-          photos={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
-          onAdd={(files) => setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))])}
-          onRemove={(p) => {
-            if (p.src) {
-              URL.revokeObjectURL(p.src);
-              setFresh((f) => f.filter((x) => x.id !== p.id));
-            } else setKept((k) => k.filter((x) => x !== p.id));
-          }}
-        />
         {/* A line may be saved without a price (a part still to find): it cannot go to the customer until it has one. */}
         {/* Pinned to the bottom of the sheet: "Save" is in reach however long the form is. */}
         <div className="sheet-footer">

@@ -14,6 +14,9 @@ import { App } from './App';
 import { ensureSeed } from './services/seed';
 import { applyAccent } from './ui/accent';
 import { installHaptics, isApple } from './ui/haptics';
+import { armSound } from './ui/sound';
+
+armSound();
 import { installTapGuard } from './ui/tapGuard';
 import { startSync } from './services/sync/engine';
 

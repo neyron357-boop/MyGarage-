@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
-import { AiLineWork } from '../ai/Ai';
+import { AiLineWork, AiPartsTile } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
   IconBuildingStore,
@@ -1165,6 +1165,8 @@ export function JobPage() {
           <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
             {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
             {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} onClick={() => void copyLines()} />}
+            {/* The AI for every part at once (v0.52): names, numbers, diagrams and photos. */}
+            {parts.length > 0 && <AiPartsTile orderId={oid} />}
             {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
           </AddBar>
         )}

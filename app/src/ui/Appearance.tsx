@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { setLang } from '../i18n';
 import { FormRow, RowGroup } from './components';
 import { FeedbackSwitchRow } from '../devtools/feedback';
+import { useSyncExternalStore } from 'react';
 import { hapticsAvailable, iosVersion, isApple, useHaptics } from './haptics';
+import { setSoundEnabled, soundEnabled, subscribeSound } from './sound';
 import { useLang } from './hooks';
 import { ACCENTS, ACCENT_COLOR, setAccent, useAccent } from './accent';
 import { setSchemePref, useSchemePref } from './scheme';
@@ -72,6 +74,7 @@ export function AppearanceRows() {
   const { t } = useTranslation();
   const a = useAppearance();
   const [haptics, setHaptics] = useHaptics();
+  const sound = useSyncExternalStore(subscribeSound, soundEnabled);
   const ios = iosVersion();
   // An iPhone older than iOS 18 has no haptics for web apps at all: say so instead of a dead switch.
   // No explaining what a switch does; only why it is missing on an old iPhone.
@@ -92,6 +95,10 @@ export function AppearanceRows() {
           <Switch checked={haptics} onChange={(e) => setHaptics(e.currentTarget.checked)} aria-label={t('app.haptics')} />
         </FormRow>
       )}
+      {/* The AI's sound when it has finished with a result (v0.52) — this device. */}
+      <FormRow label={t('app.aiSound')}>
+        <Switch checked={sound} onChange={(e) => setSoundEnabled(e.currentTarget.checked)} aria-label={t('app.aiSound')} data-ai-sound />
+      </FormRow>
       <FeedbackSwitchRow />
     </RowGroup>
   );

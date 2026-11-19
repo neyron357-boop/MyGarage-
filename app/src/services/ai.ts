@@ -94,6 +94,8 @@ export type AiNotice =
   | { kind: 'car'; vehicleId: string; filled: CarFill; undo: () => Promise<void> }
   | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
   | { kind: 'number'; itemId: string; number: string; catalogs: number; garage: number; undo: () => Promise<void> }
+  /** Every part of a job looked at at once (v0.52, `aiAllParts`): how many lines, names put right, numbers written, lines with pictures. */
+  | { kind: 'parts'; orderId: string; lines: number; names: number; numbers: number; pictures: number; undo: () => Promise<void> }
   /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
   | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; date: string; dateSure: boolean; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
 
@@ -179,7 +181,7 @@ async function carOf(item: OrderItem): Promise<Vehicle | undefined> {
  * was typed in Russian (domain/ai.ts `nameFix`). The dictionary first (domain/partsVocab.ts), then a line typed the
  * same before, the AI last (v0.49). Only a draft line (a quote sent keeps its words).
  */
-export function aiFixPartName(itemId: string): Promise<boolean | undefined> {
+export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boolean } = {}): Promise<boolean | undefined> {
   return once(`name:${itemId}`, async () => {
     const item = await db.items.get(itemId);
     const typed = item?.titleRu || item?.titleEn || '';
@@ -216,7 +218,7 @@ export function aiFixPartName(itemId: string): Promise<boolean | undefined> {
     if (fix.title) patch[russian ? 'titleRu' : 'titleEn'] = fix.title;
     if (fix.english) patch.titleEn = fix.english;
     await db.items.update(itemId, patch);
-    if (fix.title || fix.english) {
+    if ((fix.title || fix.english) && !quiet) {
       const before = { titleRu: now.titleRu, titleEn: now.titleEn };
       // Said as the line now shows it: in the job's documents' language (an English name, once there is one).
       const lang = (await db.orders.get(now.orderId))?.docLanguage ?? 'en';
@@ -330,22 +332,30 @@ function merged(web: FoundNumber[], mem: Memory, make: string): FoundNumber[] {
  * photos of the part are kept with the line (not sent to the customer). Once a line, unless asked again (`again` —
  * ↻ on the line); a guess made without the web is looked up again the next time the line is saved.
  */
-export function aiFindPart(itemId: string, { again = false }: { again?: boolean } = {}): Promise<AiFind | undefined> {
+export function aiFindPart(
+  itemId: string,
+  { again = false, quiet = false, single = false, pictures = false }: { again?: boolean; quiet?: boolean; single?: boolean; pictures?: boolean } = {},
+): Promise<AiFind | undefined> {
   return once(`find:${itemId}`, async () => {
     const item = await db.items.get(itemId);
     const part = item?.titleEn || item?.titleRu || '';
     const looked = item?.aiFind?.part === part && item.aiFind.search !== 'model';
-    if (!item || item.kind !== 'part' || !part || (!again && (item.partNumber || looked))) return undefined;
+    // `pictures` (every part of a job, v0.52): a line with its number but no pictures is looked up for them too.
+    const hasPictures = !!(item?.diagramIds?.length || item?.sampleIds?.length);
+    if (!item || item.kind !== 'part' || !part || (!again && (looked || (item.partNumber && !(pictures && !hasPictures))))) return undefined;
     const car = await carOf(item);
     const carKey = { make: car?.make ?? '', model: car?.model ?? '', year: car?.year, engine: car?.engine };
     const mem = partsMemory((await priorParts()).filter((p) => p.id !== itemId), carKey, part);
     const write = async (r: Pick<AiFind, 'search' | 'numbers'>, pics: { diagrams: string[]; samples: string[] }, proven: string | undefined) => {
       const now = await db.items.get(itemId);
       if (!now) return;
-      const fill = proven && !now.partNumber ? proven : undefined;
+      // `single` (v0.52, the user: «номера добавлять, если они точные; если вышли сразу несколько — не добавлять»): written
+      // only when it is the one number found (seen in a catalogue or used by the garage).
+      const several = r.numbers.filter((x) => x.seen.length > 0 || (x.garage ?? 0) > 0).length > 1;
+      const fill = proven && !now.partNumber && !(single && several) ? proven : undefined;
       await db.items.update(itemId, { aiFind: { at: nowIso(), search: r.search, part, numbers: r.numbers, filled: fill }, ...(await keepPictures(now, pics)), ...(fill ? { partNumber: fill } : {}) });
       forgetPriorParts();
-      if (fill) {
+      if (fill && !quiet) {
         const n = r.numbers.find((x) => sameNumber(x.number, fill));
         notify({
           kind: 'number',
@@ -403,6 +413,93 @@ export function aiFindPart(itemId: string, { again = false }: { again?: boolean 
     await write({ search: r.search, numbers }, pics, provenNumber({ search: r.search, numbers }, carKey.make));
     return { ...r, numbers };
   });
+}
+
+/** How far every part of a job has got (v0.52): lines done of all. */
+const allProgress = new Map<string, { done: number; total: number }>();
+export const aiPartsProgress = (orderId: string): { done: number; total: number } | undefined => allProgress.get(orderId);
+
+/** A few at a time (the server answers them side by side; a long list is done in minutes, not tens of them). */
+async function inTurns<T>(list: T[], at: number, fn: (x: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(at, list.length) }, async () => {
+      while (next < list.length) {
+        const x = list[next++];
+        await fn(x).catch(() => undefined);
+      }
+    }),
+  );
+}
+
+/**
+ * Every part of a job at once (v0.52, the user: «одна кнопка — ИИ исправляет все названия, потом ищет на всех схемы и
+ * фото и загружает прямо в превью позиции детали; номера добавлять, если они точные, если вышли сразу несколько — не
+ * добавлять»): first every name put right (the dictionary answers most of them without the AI), then each part's number,
+ * diagram and photos looked up — the garage's own jobs first, the web after — three at a time; a number written only
+ * when it is proven and the only one found; the pictures go on the line (its preview shows them). Each line shows the AI
+ * at work; at the end one card says what was done (and the AI's sound) — «Отменить» brings the names and numbers back.
+ */
+export async function aiAllParts(orderId: string): Promise<{ lines: number; names: number; numbers: number; pictures: number } | undefined> {
+  const key = `all:${orderId}`;
+  if (working.has(key)) return undefined;
+  const items = (await db.items.where('orderId').equals(orderId).toArray())
+    .filter((i) => i.kind === 'part' && i.approvalState !== 'declined' && !i.customerSupplied && !!(i.titleRu || i.titleEn))
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.createdAt.localeCompare(b.createdAt));
+  if (!items.length) return undefined;
+  const before = new Map(items.map((i) => [i.id, { titleRu: i.titleRu, titleEn: i.titleEn, partNumber: i.partNumber, pics: (i.diagramIds?.length ?? 0) + (i.sampleIds?.length ?? 0) }]));
+  working.add(key);
+  allProgress.set(orderId, { done: 0, total: items.length });
+  workChanged();
+  let names = 0;
+  let numbers = 0;
+  let pictures = 0;
+  try {
+    await inTurns(items, 3, async (i) => {
+      if (await aiFixPartName(i.id, { quiet: true })) names++;
+    });
+    await inTurns(items, 3, async (i) => {
+      try {
+        await aiFindPart(i.id, { quiet: true, single: true, pictures: true });
+      } finally {
+        const now = await db.items.get(i.id);
+        const b = before.get(i.id)!;
+        if (now?.partNumber && !b.partNumber) numbers++;
+        if (now && b.pics === 0 && (now.diagramIds?.length ?? 0) + (now.sampleIds?.length ?? 0) > 0) pictures++;
+        const p = allProgress.get(orderId);
+        if (p) p.done++;
+        workChanged();
+      }
+    });
+  } finally {
+    working.delete(key);
+    allProgress.delete(orderId);
+    workChanged();
+  }
+  notify({
+    kind: 'parts',
+    orderId,
+    lines: items.length,
+    names,
+    numbers,
+    pictures,
+    // The names and the numbers as they were (where nobody changed them since); the pictures stay — they help.
+    undo: async () => {
+      for (const [id, b] of before) {
+        const cur = await db.items.get(id);
+        if (!cur) continue;
+        const patch: Partial<OrderItem> = {};
+        if (cur.approvalState === 'draft' && cur.aiName && (cur.titleRu !== b.titleRu || cur.titleEn !== b.titleEn)) {
+          patch.titleRu = b.titleRu;
+          patch.titleEn = b.titleEn;
+          patch.aiName = { from: cur.aiName.from, to: cur.aiName.from, at: nowIso() };
+        }
+        if (!b.partNumber && cur.partNumber && cur.aiFind?.filled === cur.partNumber) patch.partNumber = undefined;
+        if (Object.keys(patch).length) await db.items.update(id, patch);
+      }
+    },
+  });
+  return { lines: items.length, names, numbers, pictures };
 }
 
 /** A part line saved: its name looked at, then its number looked up — not waited for. */

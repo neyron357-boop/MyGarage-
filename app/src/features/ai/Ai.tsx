@@ -1,13 +1,11 @@
 import { ActionIcon, Text } from '@mantine/core';
 import { IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
-import { useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useSyncExternalStore, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
-import { catalogCount, siteOf } from '../../domain/ai';
-import { aiFindPart, aiOn, aiWorking, aiWorkVersion, subscribeAiWork, yandexUrl } from '../../services/ai';
-import { MediaImage } from '../../ui/components';
+import { catalogCount } from '../../domain/ai';
+import { aiAllParts, aiFindPart, aiOn, aiPartsProgress, aiWorking, aiWorkVersion, subscribeAiWork, yandexUrl } from '../../services/ai';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
-import { PhotoViewer } from '../../ui/PhotoViewer';
 
 /*
  * How the garage's AI looks (v0.48.1, the user: «улучши дизайн под ИИ, качественно и профессионально»): one mark — a
@@ -39,6 +37,24 @@ export function AiLineWork({ itemId }: { itemId: string }) {
     <span style={{ marginLeft: 6 }} className="fade-enter">
       <AiMark size={17} busy label={t('ai.working')} />
     </span>
+  );
+}
+
+/**
+ * Under a job's lines (v0.52): the AI for every part at once — its mark on a narrow tile, twinkling while it works,
+ * how many lines are done under it. Only where the garage's AI is.
+ */
+export function AiPartsTile({ orderId }: { orderId: string }) {
+  const { t } = useTranslation();
+  useSyncExternalStore(subscribeAiWork, aiWorkVersion);
+  if (!aiOn()) return null;
+  const busy = aiWorking(`all:${orderId}`);
+  const p = aiPartsProgress(orderId);
+  return (
+    <button type="button" className="action-tile add-extra ai-parts-tile" aria-label={t('ai.allParts')} aria-busy={busy || undefined} data-ai-parts={busy ? 'busy' : ''} disabled={busy} onClick={() => void aiAllParts(orderId)}>
+      <AiMark size={24} busy={busy} />
+      {busy && p && <span className="ai-parts-n tnum">{p.done}/{p.total}</span>}
+    </button>
   );
 }
 
@@ -150,61 +166,3 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
   );
 }
 
-/**
- * What the AI brought off the catalogue pages for the part: its diagram — a card of its own (the drawing on white, the
- * site under it) — and photos of the part itself, «Образцы», in a row of tiles; a tap — full screen. Kept with the line,
- * never sent with a quote.
- */
-export function AiDiagrams({ itemId }: { itemId: string }) {
-  const { t } = useTranslation();
-  const [viewing, setViewing] = useState<{ list: 'diagrams' | 'samples'; i: number } | null>(null);
-  const shown = useScreenLiveQuery(async () => {
-    const item = await db.items.get(itemId);
-    const of = async (ids: string[]) => (await db.media.bulkGet(ids)).filter((m) => !!m).map((m) => ({ id: m!.id, site: siteOf(m!.name ?? '') }));
-    return { diagrams: await of(item?.diagramIds ?? []), samples: await of(item?.sampleIds ?? []) };
-  }, [itemId]);
-  if (!shown || (!shown.diagrams.length && !shown.samples.length)) return null;
-  const list = viewing ? shown[viewing.list] : [];
-  const title = viewing?.list === 'samples' ? t('ai.samples') : t('ai.diagram');
-  return (
-    <div className="ai-diagram rise-enter" data-ai-diagram>
-      {shown.diagrams.length > 0 && (
-        <>
-          <div className="ai-head">
-            <AiMark size={20} />
-            <span className="ai-text">{t('ai.diagram')}</span>
-          </div>
-          {shown.diagrams.map((d, i) => (
-            <button key={d.id} type="button" className="ai-diagram-card" aria-label={t('ai.diagram')} onClick={() => setViewing({ list: 'diagrams', i })}>
-              <MediaImage id={d.id} card h="100%" w="100%" radius="0" />
-              {d.site && <span className="ai-diagram-site">{d.site}</span>}
-            </button>
-          ))}
-        </>
-      )}
-      {shown.samples.length > 0 && (
-        <>
-          <div className="ai-head">
-            <AiMark size={20} />
-            <span className="ai-text">{t('ai.samples')}</span>
-          </div>
-          <div className="strip-row" data-ai-samples>
-            {shown.samples.map((d, i) => (
-              <button key={d.id} type="button" className="action-tile strip-tile" aria-label={t('ai.samples')} onClick={() => setViewing({ list: 'samples', i })}>
-                <MediaImage id={d.id} h="100%" w="100%" radius="0" />
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-      {viewing !== null && list.length > 0 && (
-        <PhotoViewer
-          items={list.map((d) => ({ id: d.id, title, caption: d.site }))}
-          index={Math.min(viewing.i, list.length - 1)}
-          onIndex={(i) => setViewing({ list: viewing.list, i })}
-          onClose={() => setViewing(null)}
-        />
-      )}
-    </div>
-  );
-}

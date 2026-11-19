@@ -6417,45 +6417,111 @@ html.desk .ai-scan-pill {
   font-size: 17px;
 }
 
-/* The part's diagram off a catalogue page: a card of its own, the picture on white (diagrams are drawn on white),
-   the site it came from under it. */
-.ai-diagram {
-  display: grid;
-  gap: 8px;
-}
-.ai-diagram-card {
-  position: relative;
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 18px;
-  overflow: hidden;
-  background: #fff;
-  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
-  cursor: zoom-in;
-  aspect-ratio: 16 / 10;
-}
-.ai-diagram-card img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-.ai-diagram-site {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.55);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .ai-mark[data-busy] svg,
   .ai-ring[data-ai-busy]::before {
     animation: none;
   }
+}
+
+/* A line's pictures on top of its sheet (v0.52): one row, one size — «Фото», its own, then the AI's (marked). */
+.line-media {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -2px;
+  padding: 2px 2px 4px;
+  scroll-snap-type: x proximity;
+}
+.line-media::-webkit-scrollbar {
+  display: none;
+}
+.line-media-tile {
+  --tile: 92px;
+  position: relative;
+  flex: 0 0 var(--tile);
+  width: var(--tile);
+  height: var(--tile);
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--app-group);
+  scroll-snap-align: start;
+  transition: transform var(--dur-1) var(--spring);
+}
+.line-media-tile:active {
+  transform: scale(0.95);
+}
+.line-media-tile > img,
+.line-media-tile > div:first-child {
+  position: absolute;
+  inset: 0;
+}
+.line-media-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+/* A catalogue drawing: whole, on white (cut to a square it loses the part). */
+.line-media-tile[data-kind='diagram'] {
+  background: #fff;
+}
+.line-media-tile[data-kind='diagram'] img {
+  object-fit: contain;
+  padding: 6px;
+}
+.line-media-add {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  color: var(--mantine-color-cobalt-6);
+  font-size: 13px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 9%, var(--app-group));
+}
+.line-media-ai {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  padding: 2px 7px 2px 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The line's preview showing the AI's picture: its mark in the corner. */
+.part-thumb-ai {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  line-height: 0;
+}
+/* The AI for every part of a job: a narrow tile under the lines, how far it got under the mark. */
+.ai-parts-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+}
+.ai-parts-tile:disabled {
+  opacity: 1;
+}
+.ai-parts-n {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--app-label-2);
 }
