@@ -6787,3 +6787,8 @@ html.desk .ai-scan-pill {
   padding: 0 16px 8px;
   text-align: right;
 }
+
+/* A long list drawn as it is scrolled (v0.60.1, ui/moreRows.tsx): the end it watches takes no room. */
+.more-rows {
+  height: 1px;
+}

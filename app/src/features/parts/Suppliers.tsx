@@ -1,7 +1,7 @@
 import { ActionIcon, Button, Group, Loader, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
 import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
@@ -21,6 +21,7 @@ import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { SheetFor } from '../../ui/lazy';
+import { useMoreRows } from '../../ui/moreRows';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SupplierBookActions } from './SupplierBookActions';
 import { emirateName, NO_REGION, regionLabel, SupplierFilters, useSupplierFilter } from './SupplierFilters';
@@ -282,6 +283,55 @@ export function SupplierSheet({
 }
 
 /**
+ * A supplier's row on the phone (v0.60.1): drawn again only when its supplier, area or jobs change — a list of a thousand
+ * drawn as it is scrolled does not draw the rows above again each time it grows.
+ */
+const SupplierRow = memo(function SupplierRow({ s, area, jobs, onOpen }: { s: Supplier; area?: string; jobs: number; onOpen: (s: Supplier) => void }) {
+  const { t } = useTranslation();
+  return (
+    <ListRow
+      onClick={() => onOpen(s)}
+      title={
+        <span className="supplier-name">
+          <span className="supplier-name-text">{s.name}</span>
+          <StarsPill s={s} />
+        </span>
+      }
+      subtitle={
+        [
+          area ?? '',
+          jobs ? t('suppliers.jobs', { count: jobs }) : '',
+          s.service ? t('suppliers.contractor') : s.condition ? t(`suppliers.cond.${s.condition}`) : '',
+          s.makes?.join(', '),
+          s.parts,
+        ]
+          .filter(Boolean)
+          .join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)
+      }
+      right={
+        <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+          {s.locationUrl && (
+            <ActionIcon component="a" href={s.locationUrl} target="_blank" rel="noopener" variant="light" color="gray" size={36} radius="xl" aria-label={t('parts.map')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <IconMapPin size={18} />
+            </ActionIcon>
+          )}
+          {(s.phone || supplierChatLink(s)) && (
+            <ActionIcon component="a" href={supplierChatLink(s) ?? whatsappUrl(s.phone!, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <IconBrandWhatsapp size={19} />
+            </ActionIcon>
+          )}
+          {s.phone && (
+            <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <IconPhone size={18} />
+            </ActionIcon>
+          )}
+        </Group>
+      }
+    />
+  );
+});
+
+/**
  * The supplier list: a search over names, makes and what they sell; a tap opens the card, the phone
  * and WhatsApp are one tap from the row; one's own list comes in from Excel or CSV. The most used and best rated first
  * (v0.38), each with its stars and how many jobs it supplied.
@@ -297,20 +347,32 @@ export function SuppliersTab() {
   const phone = usePhone();
   const lang = useLang();
   const filter = useSupplierFilter(all);
-  if (!all) return null;
   // Found by its name, makes, what it sells — or its number as said here (050…); by region, make and kind (v0.60).
-  const list = all.filter((s) => filter.pass(s) && supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
+  const list = (all ?? []).filter((s) => filter.pass(s) && supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
   const regionOfS = (s: Supplier) => filter.facts.regions.get(s.id);
   // On the phone the list goes by emirate, the most suppliers first (an emirate picked — that one alone).
-  const groups = (() => {
+  const grouped = (() => {
     if (filter.f.region) return [{ key: filter.f.region, rows: list }];
     const by = new Map<string, Supplier[]>();
     for (const s of list) {
       const k = regionOfS(s)?.emirate ?? NO_REGION;
-      by.set(k, [...(by.get(k) ?? []), s]);
+      const g = by.get(k);
+      if (g) g.push(s);
+      else by.set(k, [s]);
     }
     return [...by.entries()].sort((a, b) => (a[0] === NO_REGION ? 1 : b[0] === NO_REGION ? -1 : b[1].length - a[1].length)).map(([key, rows]) => ({ key, rows }));
   })();
+  // v0.60.1 (1000+ suppliers made the screen hang): the rows drawn as the list is scrolled — the first thirty at once.
+  const shown = useMoreRows(list.length, `${q}|${filter.f.region}|${filter.f.area}|${filter.f.make}|${filter.f.kind}`);
+  let room = shown.limit;
+  const groups = grouped
+    .map((g) => {
+      const rows = g.rows.slice(0, Math.max(0, room));
+      room -= rows.length;
+      return { key: g.key, total: g.rows.length, rows };
+    })
+    .filter((g) => g.rows.length);
+  if (!all) return null;
   const contact = (s: Supplier, size: number) => (
     <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
       {s.locationUrl && (
@@ -363,61 +425,23 @@ export function SuppliersTab() {
       {all.length === 0 ? (
         <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} />
       ) : !phone ? (
-        list.length > 0 && <DataTable rows={list} columns={cols} rowKey={(s) => s.id} onRow={setEdit} initialSort={{ key: 'rank', dir: 1 }} label={t('nav.suppliers')} />
+        list.length > 0 && <DataTable rows={list} columns={cols} rowKey={(s) => s.id} onRow={setEdit} initialSort={{ key: 'rank', dir: 1 }} label={t('nav.suppliers')} page />
       ) : (
         groups.map((g) => (
           <div key={g.key} className="supplier-group" data-region={g.key}>
             <div className="group-title">
               {g.key === NO_REGION ? t('suppliers.noRegion') : emirateName(g.key, lang)}
-              <span className="count">{g.rows.length}</span>
+              <span className="count">{g.total}</span>
             </div>
         <List>
           {g.rows.map((s) => (
-            <ListRow
-              key={s.id}
-              onClick={() => setEdit(s)}
-              title={
-                <span className="supplier-name">
-                  <span className="supplier-name-text">{s.name}</span>
-                  <StarsPill s={s} />
-                </span>
-              }
-              subtitle={
-                [
-                  regionOfS(s)?.area ?? '',
-                  useOf(ranked!.use, s.id).jobs ? t('suppliers.jobs', { count: useOf(ranked!.use, s.id).jobs }) : '',
-                  s.service ? t('suppliers.contractor') : s.condition ? t(`suppliers.cond.${s.condition}`) : '',
-                  s.makes?.join(', '),
-                  s.parts,
-                ]
-                  .filter(Boolean)
-                  .join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)
-              }
-              right={
-                <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
-                  {s.locationUrl && (
-                    <ActionIcon component="a" href={s.locationUrl} target="_blank" rel="noopener" variant="light" color="gray" size={36} radius="xl" aria-label={t('parts.map')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                      <IconMapPin size={18} />
-                    </ActionIcon>
-                  )}
-                  {(s.phone || supplierChatLink(s)) && (
-                    <ActionIcon component="a" href={supplierChatLink(s) ?? whatsappUrl(s.phone!, '')} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                      <IconBrandWhatsapp size={19} />
-                    </ActionIcon>
-                  )}
-                  {s.phone && (
-                    <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                      <IconPhone size={18} />
-                    </ActionIcon>
-                  )}
-                </Group>
-              }
-            />
+            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} onOpen={setEdit} />
           ))}
         </List>
           </div>
         ))
       )}
+      {phone && shown.more()}
       {list.length === 0 && all.length > 0 && (
         <Text c="dimmed" ta="center" size="sm">
           {t('suppliers.notFound')}

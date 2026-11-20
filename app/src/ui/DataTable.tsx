@@ -1,5 +1,6 @@
 import { IconArrowDown, IconArrowUp } from '@tabler/icons-react';
 import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useMoreRows } from './moreRows';
 
 /*
  * A list of a PC as a table (v0.41): a row a line, the columns the facts of it, a click on a head sorts by it (once
@@ -81,6 +82,7 @@ export function DataTable<T>({
   sortId,
   empty,
   label,
+  page,
 }: {
   rows?: T[];
   /** Rows in groups, each under its own head (then no sorting: the groups keep their order). */
@@ -98,10 +100,14 @@ export function DataTable<T>({
   sortId?: string;
   empty?: ReactNode;
   label?: string;
+  /** A long list (v0.60.1): its rows drawn as it is scrolled, the first thirty at once. */
+  page?: boolean;
 }) {
   const [sort, setSort] = useState<Sort>(() => readSort(sortId, initialSort));
   const col = sort ? columns.find((c) => c.key === sort.key && c.sort) : undefined;
   const sorted = !sections && rows && col && sort ? [...rows].sort((a, b) => sort.dir * compare(col.sort!(a), col.sort!(b))) : rows;
+  const shown = useMoreRows(page && sorted ? sorted.length : 0, `${rows?.length}|${sort?.key}|${sort?.dir}`);
+  const drawn = page && sorted ? sorted.slice(0, shown.limit) : sorted;
   const pick = (c: Column<T>) => {
     const next: Sort = sort?.key === c.key ? { key: c.key, dir: sort.dir === 1 ? -1 : 1 } : { key: c.key, dir: c.desc ? -1 : 1 };
     setSort(next);
@@ -175,7 +181,8 @@ export function DataTable<T>({
                   ]
                 ) : null,
               )
-            : sorted?.map(row)}
+            : drawn?.map(row)}
+          {page && !sections && shown.more('tr', columns.length)}
           {nothing && empty && (
             <tr>
               <td colSpan={columns.length} className="dt-empty">
