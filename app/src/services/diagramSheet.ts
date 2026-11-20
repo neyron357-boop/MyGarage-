@@ -1,31 +1,49 @@
 import { db } from '../db/db';
-import { fitInto, fitMark, ringOn, sheetEntries, sheetLayout, sheetName, sheetsOf, type DiagramMark, type SheetEntry } from '../domain/diagramSheet';
+import { diagramOf, fitInto, fitMark, MAX_MARKS, ovalOn, sheetEntries, sheetLayout, sheetName, sheetsOf, type DiagramMark, type SheetEntry } from '../domain/diagramSheet';
 import type { OrderItem } from '../domain/types';
 import { AppError } from './errors';
-import { addMedia, mediaBlob } from './media';
+import { addMedia, cardBlob, cardUrl } from './media';
 
 /*
  * The parts' diagrams for a supplier, four to a picture (v0.59; rules — domain/diagramSheet.ts). Drawn here on the
  * device from the diagrams the line keeps, no AI and no server: a diagram added by hand (a catalogue's screenshot), the
- * manager's ring on the part, the catalogue's place already drawn into a diagram the garage's AI found.
+ * manager's outlines of the part, the catalogue's place already drawn into a diagram the garage's AI found. A diagram is
+ * read at a card's size (1080 px — the cell's own; v0.59.1: the original came from the server each time, slowly) and kept
+ * on the device once brought.
  */
 
 /** A diagram added by hand to a part (a screenshot of a catalogue, a photo of one): first among its diagrams, the one
- * the sheet shows — a ring on another is taken off (the part is ringed on this one next). */
+ * the sheet shows — outlines on another are taken off (the part is outlined on this one next). */
 export async function addDiagram(itemId: string, file: Blob): Promise<string> {
   const item = await db.items.get(itemId);
   if (!item) throw new AppError('err.notFound');
   const m = await addMedia({ ownerType: 'item', ownerId: itemId, slot: 'diagram', file });
-  await db.items.update(itemId, { diagramIds: [m.id, ...(item.diagramIds ?? [])], diagramMark: undefined });
+  await db.items.update(itemId, { diagramIds: [m.id, ...(item.diagramIds ?? [])], diagramMark: undefined, diagramMarks: undefined });
   return m.id;
 }
 
-/** The part ringed on its diagram (`undefined` — the ring taken off). */
-export async function setDiagramMark(itemId: string, mark: DiagramMark | undefined): Promise<void> {
+/**
+ * The part's outlines on its diagram (v0.59.1: several — every piece of it; none — all taken off). All on one diagram of
+ * the part's; v0.59's one ring gives way to them.
+ */
+export async function setDiagramMarks(itemId: string, marks: DiagramMark[]): Promise<void> {
   const item = await db.items.get(itemId);
   if (!item) throw new AppError('err.notFound');
-  if (mark && !(item.diagramIds ?? []).includes(mark.id)) throw new AppError('err.notFound');
-  await db.items.update(itemId, { diagramMark: mark ? fitMark(mark) : undefined });
+  const ids = new Set(marks.map((m) => m.id));
+  if (ids.size > 1 || [...ids].some((id) => !(item.diagramIds ?? []).includes(id))) throw new AppError('err.notFound');
+  const list = marks.slice(0, MAX_MARKS).map(fitMark);
+  await db.items.update(itemId, { diagramMarks: list.length ? list : undefined, diagramMark: undefined });
+}
+
+/**
+ * The diagrams of these parts brought to the device at a card's size, one after another (the suppliers' screen asks as it
+ * opens: by the tap the outline sheet opens at once, and the sheets draw fast).
+ */
+export async function warmDiagrams(items: OrderItem[]): Promise<void> {
+  for (const i of items) {
+    const d = diagramOf(i);
+    if (d) await cardUrl(d).catch(() => undefined);
+  }
 }
 
 // The system's red and yellow (iOS) — a marker's ink, as on the catalogue's diagrams (media.ts `drawMarks`).
@@ -33,8 +51,8 @@ const RED = 'rgb(255, 59, 48)';
 const INK = 'rgb(28, 28, 30)';
 const GREY = 'rgb(99, 99, 102)';
 const LINE = 'rgb(209, 209, 214)';
-/** The ring's line on a 1080 px cell. */
-const RING_LINE = 8;
+/** The outline's line on a 1080 px cell. */
+const RING_LINE = 7;
 const FONT = '-apple-system, "SF Pro Text", "Segoe UI", Roboto, Arial, sans-serif';
 
 /** Words cut to the width, with "…" (one line). */
@@ -67,7 +85,7 @@ function twoLines(g: CanvasRenderingContext2D, text: string, width: number): str
 
 async function bitmapOf(id: string): Promise<ImageBitmap | undefined> {
   try {
-    const blob = await mediaBlob(id);
+    const blob = await cardBlob(id);
     return blob ? await createImageBitmap(blob) : undefined;
   } catch {
     return undefined;
@@ -133,34 +151,53 @@ async function drawSheet(entries: SheetEntry[]): Promise<Blob | undefined> {
     try {
       const drawn = fitInto(bmp.width, bmp.height, pic, 24);
       g.drawImage(bmp, drawn.x, drawn.y, drawn.w, drawn.h);
-      if (e.mark) {
-        // The ring round the part: a white edge under the red so it reads on black lines; its number beside it.
-        const ring = ringOn(e.mark, drawn);
-        const lw = RING_LINE;
-        g.lineWidth = lw + 6;
-        g.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      if (e.marks.length) {
+        const ovals = e.marks.map((m) => ovalOn(m, drawn));
+        const pad = 6;
+        // The rest of the drawing a little paler: the outlined pieces stand out, the lines round them still read.
+        g.save();
         g.beginPath();
-        g.arc(ring.cx, ring.cy, ring.r, 0, Math.PI * 2);
-        g.stroke();
-        g.lineWidth = lw;
-        g.strokeStyle = RED;
-        g.beginPath();
-        g.arc(ring.cx, ring.cy, ring.r, 0, Math.PI * 2);
-        g.stroke();
-        const tag = 30;
-        // Upper right of the ring, kept inside the diagram's room.
-        const a = -Math.PI / 4;
-        const txg = Math.min(pic.x + pic.w - tag - 4, Math.max(pic.x + tag + 4, ring.cx + Math.cos(a) * (ring.r + tag * 0.6)));
-        const tyg = Math.min(pic.y + pic.h - tag - 4, Math.max(pic.y + tag + 4, ring.cy + Math.sin(a) * (ring.r + tag * 0.6)));
-        g.fillStyle = RED;
-        g.beginPath();
-        g.arc(txg, tyg, tag, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = '#fff';
-        g.font = `700 34px ${FONT}`;
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
-        g.fillText(String(e.n), txg, tyg + 1);
+        g.rect(drawn.x, drawn.y, drawn.w, drawn.h);
+        for (const o of ovals) {
+          g.moveTo(o.cx + o.rx + pad, o.cy);
+          g.ellipse(o.cx, o.cy, o.rx + pad, o.ry + pad, 0, 0, Math.PI * 2, true);
+        }
+        g.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        g.fill('evenodd');
+        g.restore();
+        for (const o of ovals) {
+          // A soft red inside, a white edge under the red line so it reads over black lines.
+          g.fillStyle = 'rgba(255, 59, 48, 0.08)';
+          g.beginPath();
+          g.ellipse(o.cx, o.cy, o.rx, o.ry, 0, 0, Math.PI * 2);
+          g.fill();
+          g.lineWidth = RING_LINE + 6;
+          g.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+          g.stroke();
+          g.lineWidth = RING_LINE;
+          g.strokeStyle = RED;
+          g.stroke();
+        }
+        // The part's number at each outline (upper right), kept inside the diagram's room.
+        const tag = 28;
+        for (const o of ovals) {
+          const a = -Math.PI / 4;
+          const tx = Math.min(pic.x + pic.w - tag - 4, Math.max(pic.x + tag + 4, o.cx + Math.cos(a) * o.rx + tag * 0.45));
+          const ty = Math.min(pic.y + pic.h - tag - 4, Math.max(pic.y + tag + 4, o.cy + Math.sin(a) * o.ry - tag * 0.45));
+          g.fillStyle = '#fff';
+          g.beginPath();
+          g.arc(tx, ty, tag + 4, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = RED;
+          g.beginPath();
+          g.arc(tx, ty, tag, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = '#fff';
+          g.font = `700 32px ${FONT}`;
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText(String(e.n), tx, ty + 1);
+        }
       }
     } finally {
       bmp.close();

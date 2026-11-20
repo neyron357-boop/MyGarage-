@@ -633,6 +633,11 @@ export interface OrderItem {
    * diagrams sent to a supplier — no AI; a diagram added by hand (a catalogue's screenshot) gets one the same way.
    */
   diagramMark?: { id: string; x: number; y: number; r: number };
+  /**
+   * The part outlined on its diagram by the manager (v0.59.1, domain/diagramSheet.ts): ovals — as many as the part has
+   * pieces to show (an engine mount complete — three); `diagramMark` above — v0.59's one ring, read when these are none.
+   */
+  diagramMarks?: { id: string; x: number; y: number; rx: number; ry: number }[];
   /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */
   sampleIds?: string[];
   brand?: string;

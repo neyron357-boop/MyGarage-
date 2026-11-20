@@ -1,5 +1,6 @@
 import { ActionIcon, Button, Group } from '@mantine/core';
-import { IconBrandWhatsapp, IconPhone, IconSend, IconStarFilled, IconTruck } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { IconBrandWhatsapp, IconClipboardCheck, IconPhone, IconSend, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -83,9 +84,23 @@ export function JobSuppliersPage() {
     const withFiles = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
     // Where files cannot be shared (a PC): the sheets saved, to attach.
     if (files.length && !withFiles) files.forEach(downloadFile);
+    if (withFiles) {
+      // v0.59.1 (the user: «текст должен быть как подпись последней фотографии»): a page cannot say which picture the
+      // words go under — WhatsApp sent them first, apart. So the pictures go alone, and the list waits in the clipboard,
+      // to paste under the last of them. Both start in the tap itself (iOS shares only there).
+      const copied = copyText(ask);
+      const shared = navigator.share({ files });
+      void copied.then((ok) => ok && notifications.show({ color: 'green', message: t('diagrams.pasteCaption'), autoClose: 6000, icon: <IconClipboardCheck size={18} /> }));
+      try {
+        await shared;
+      } catch {
+        // closed without sending: the list stays copied
+      }
+      return;
+    }
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share(withFiles ? { files, text: ask } : { text: ask });
+        await navigator.share({ text: ask });
         return;
       } catch (e) {
         if ((e as Error)?.name === 'AbortError') return;

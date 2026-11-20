@@ -1766,6 +1766,7 @@ export const en: typeof ru = {
     },
   },
   diagrams: {
+    pasteCaption: 'List copied — paste it under the last photo',
     title: 'Diagrams',
     ring: 'Ring it',
     ringed: 'Ringed',

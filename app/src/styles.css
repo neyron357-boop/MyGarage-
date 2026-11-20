@@ -6675,30 +6675,67 @@ html.desk .ai-scan-pill {
   background: color-mix(in srgb, var(--mantine-color-cobalt-5) 12%, transparent);
   color: var(--mantine-color-cobalt-6);
 }
-.mark-editor-pic {
+.diagram-marked {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--app-label-3);
+  font-size: 13px;
+  font-weight: 600;
+}
+.diagram-marked[data-ringed] {
+  color: var(--mantine-color-red-6);
+}
+/* The outline sheet (v0.59.1): the diagram on white, two fingers bring it closer; ovals drawn by the finger. */
+.mark-stage {
   position: relative;
+  overflow: hidden;
   background: #fff;
   border-radius: 16px;
-  overflow: hidden;
-  touch-action: manipulation;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   cursor: crosshair;
-  min-height: 120px;
 }
-.mark-editor-pic img {
+.mark-zoom {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.mark-pic {
+  position: relative;
+}
+.mark-pic img {
   display: block;
   width: 100%;
   height: auto;
-  object-fit: contain;
   pointer-events: none;
-  user-select: none;
   -webkit-user-drag: none;
 }
-.mark-ring {
+.mark-loading {
+  aspect-ratio: 4 / 3;
+  background: linear-gradient(100deg, rgb(242, 242, 247) 30%, rgb(250, 250, 252) 50%, rgb(242, 242, 247) 70%) 0 0 / 300% 100%;
+  animation: mg-shimmer 1.2s linear infinite;
+}
+.mark-oval {
+  --k: 1;
   position: absolute;
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  border: calc(3px * var(--k)) solid rgb(255, 59, 48);
   border-radius: 50%;
-  border: 4px solid rgb(255, 59, 48);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), inset 0 0 0 2px rgba(255, 255, 255, 0.9);
+  background: rgba(255, 59, 48, 0.08);
+  box-shadow: 0 0 0 calc(2px * var(--k)) rgba(255, 255, 255, 0.95), inset 0 0 0 calc(2px * var(--k)) rgba(255, 255, 255, 0.95);
   pointer-events: none;
+}
+.mark-oval[data-picked] {
+  background: rgba(255, 59, 48, 0.16);
+  box-shadow: 0 0 0 calc(2px * var(--k)) rgba(255, 255, 255, 0.95), 0 0 0 calc(6px * var(--k)) rgba(255, 59, 48, 0.28), inset 0 0 0 calc(2px * var(--k)) rgba(255, 255, 255, 0.95);
+}
+.mark-oval[data-draft] {
+  border-style: dashed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark-loading {
+    animation: none;
+  }
 }

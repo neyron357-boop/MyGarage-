@@ -4,18 +4,29 @@ import type { OrderItem } from './types';
  * The parts' diagrams for a supplier in one picture (v0.59, the user: «когда отправляю поставщику список запчастей… в
  * одной фотографии максимум по 4 схемы с нумерациями и названием детали, в схеме обводка той самой детали… должна
  * работать без ИИ»): what goes on a sheet and where — pure, no canvas. Each part with a diagram gets a cell: its
- * number (the same as in the text sent with it), its name, its part number, the diagram, and the part ringed on it —
- * the manager's own ring (`OrderItem.diagramMark`), or the catalogue's place already drawn into the diagram.
+ * number (the same as in the text sent with it), its name, its part number, the diagram, and the part outlined on it —
+ * the manager's own outlines (`OrderItem.diagramMarks`, v0.59.1: as many as the part has pieces — an engine mount
+ * complete is three), or the catalogue's place already drawn into the diagram.
  */
 
-/** A part's ring on its diagram, put there by the manager's finger: the centre and the radius in parts of the picture. */
+/**
+ * An outline round a part on its diagram (v0.59.1), drawn by the manager's finger: an oval — its centre (0…1 of the
+ * picture's width and height) and its half-width and half-height (parts of the width and of the height).
+ */
 export interface DiagramMark {
-  /** The diagram (media id) the ring is on. */
+  /** The diagram (media id) the outline is on. */
   id: string;
-  /** The centre, 0…1 of the picture's width and height. */
   x: number;
   y: number;
-  /** The radius, a part of the picture's shorter side. */
+  rx: number;
+  ry: number;
+}
+
+/** v0.59's one ring: the radius a part of the picture's shorter side (read still, written no more). */
+export interface OldRing {
+  id: string;
+  x: number;
+  y: number;
   r: number;
 }
 
@@ -28,45 +39,83 @@ export interface SheetEntry {
   qty: number;
   /** The diagram on the sheet: the one ringed, else the first. */
   diagramId: string;
-  mark?: DiagramMark;
+  /** The outlines on it (an old ring — as it was). */
+  marks: (DiagramMark | OldRing)[];
 }
 
 export const PER_SHEET = 4;
 
-/** The ring's sizes the manager steps through (a part of the shorter side). */
-export const MARK_SIZES = [0.04, 0.06, 0.09, 0.13, 0.18];
-export const MARK_DEFAULT = 0.09;
+/** At most this many outlines on one diagram. */
+export const MAX_MARKS = 8;
+/** An outline's half-size, at least and at most (a part of the side). */
+export const MARK_MIN = 0.012;
+export const MARK_MAX = 0.5;
+/** A tap's outline: a circle, its radius this part of the shorter side. */
+export const TAP_RADIUS = 0.06;
 
-/** A ring kept to the picture: its centre inside, its radius one of a sane size. */
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
+
+/** An outline kept to the picture: its centre inside, its size sane. */
 export function fitMark(m: DiagramMark): DiagramMark {
-  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
-  return { id: m.id, x: clamp(m.x, 0, 1), y: clamp(m.y, 0, 1), r: clamp(m.r, MARK_SIZES[0], MARK_SIZES[MARK_SIZES.length - 1]) };
+  return { id: m.id, x: clamp(m.x, 0, 1), y: clamp(m.y, 0, 1), rx: clamp(m.rx, MARK_MIN, MARK_MAX), ry: clamp(m.ry, MARK_MIN, MARK_MAX) };
 }
 
-/** The next ring size up (+1) or down (−1). */
-export function stepMark(r: number, by: 1 | -1): number {
-  const at = MARK_SIZES.reduce((best, s, i) => (Math.abs(s - r) < Math.abs(MARK_SIZES[best] - r) ? i : best), 0);
-  return MARK_SIZES[Math.min(MARK_SIZES.length - 1, Math.max(0, at + by))];
+/** An outline grown (> 1) or shrunk (< 1) about its centre. */
+export function scaleMark(m: DiagramMark, by: number): DiagramMark {
+  return fitMark({ ...m, rx: m.rx * by, ry: m.ry * by });
 }
 
-/** The diagram a part shows: the ringed one while it is still the part's, else its first. */
-export function diagramOf(item: Pick<OrderItem, 'diagramIds' | 'diagramMark'>): string | undefined {
+/** The outline a finger drew from one corner to the other (fractions of the picture), a little roomier than the stroke. */
+export function markFromBox(id: string, x1: number, y1: number, x2: number, y2: number): DiagramMark {
+  return fitMark({ id, x: (x1 + x2) / 2, y: (y1 + y2) / 2, rx: (Math.abs(x2 - x1) / 2) * 1.08, ry: (Math.abs(y2 - y1) / 2) * 1.08 });
+}
+
+/** A tap's circle on a picture of `w`×`h` (round on screen: in the picture's parts its half-sizes differ). */
+export function markAtTap(id: string, x: number, y: number, w: number, h: number): DiagramMark {
+  const r = TAP_RADIUS * Math.min(w, h);
+  return fitMark({ id, x, y, rx: r / Math.max(1, w), ry: r / Math.max(1, h) });
+}
+
+/** v0.59's ring as an outline, on a picture of `w`×`h`. */
+export function fromOldRing(m: OldRing, w: number, h: number): DiagramMark {
+  const r = m.r * Math.min(w, h);
+  return fitMark({ id: m.id, x: m.x, y: m.y, rx: r / Math.max(1, w), ry: r / Math.max(1, h) });
+}
+
+/** Whether a point (fractions) is on an outline — inside it, or within `slack` of its edge (in its own sizes). */
+export function onMark(m: DiagramMark, x: number, y: number, slack = 0.25): boolean {
+  const dx = (x - m.x) / m.rx;
+  const dy = (y - m.y) / m.ry;
+  return dx * dx + dy * dy <= (1 + slack) * (1 + slack);
+}
+
+/** The diagram a part shows: the outlined one while it is still the part's, else its first. */
+export function diagramOf(item: Pick<OrderItem, 'diagramIds' | 'diagramMark' | 'diagramMarks'>): string | undefined {
   const ids = item.diagramIds ?? [];
-  if (item.diagramMark && ids.includes(item.diagramMark.id)) return item.diagramMark.id;
+  const marked = item.diagramMarks?.[0]?.id ?? item.diagramMark?.id;
+  if (marked && ids.includes(marked)) return marked;
   return ids[0];
+}
+
+/** The outlines on the diagram the part shows (v0.59's one ring when it has no others). */
+export function marksOf(item: Pick<OrderItem, 'diagramIds' | 'diagramMark' | 'diagramMarks'>): (DiagramMark | OldRing)[] {
+  const d = diagramOf(item);
+  if (!d) return [];
+  const list = (item.diagramMarks ?? []).filter((m) => m.id === d).map(fitMark);
+  if (list.length) return list.slice(0, MAX_MARKS);
+  return item.diagramMark && item.diagramMark.id === d ? [item.diagramMark] : [];
 }
 
 /**
  * The cells, in the order of the list sent (`items` — the very list, numbered from 1): only the parts with a diagram,
  * each with its number in that list. `name` — what the supplier reads (English first: the trade's language here).
  */
-export function sheetEntries(items: Pick<OrderItem, 'id' | 'titleEn' | 'titleRu' | 'partNumber' | 'qty' | 'diagramIds' | 'diagramMark'>[]): SheetEntry[] {
+export function sheetEntries(items: Pick<OrderItem, 'id' | 'titleEn' | 'titleRu' | 'partNumber' | 'qty' | 'diagramIds' | 'diagramMark' | 'diagramMarks'>[]): SheetEntry[] {
   const out: SheetEntry[] = [];
   items.forEach((i, k) => {
     const diagramId = diagramOf(i);
     if (!diagramId) return;
-    const mark = i.diagramMark && i.diagramMark.id === diagramId ? fitMark(i.diagramMark) : undefined;
-    out.push({ n: k + 1, itemId: i.id, name: (i.titleEn || i.titleRu || '').trim(), partNumber: i.partNumber?.trim() || undefined, qty: i.qty, diagramId, ...(mark ? { mark } : {}) });
+    out.push({ n: k + 1, itemId: i.id, name: (i.titleEn || i.titleRu || '').trim(), partNumber: i.partNumber?.trim() || undefined, qty: i.qty, diagramId, marks: marksOf(i) });
   });
   return out;
 }
@@ -132,9 +181,15 @@ export function fitInto(w: number, h: number, room: Rect, pad = 0): Rect {
   return { x: room.x + (room.w - dw) / 2, y: room.y + (room.h - dh) / 2, w: dw, h: dh };
 }
 
-/** The ring on the drawn picture: its centre and radius in the sheet's pixels. */
-export function ringOn(mark: DiagramMark, drawn: Rect): { cx: number; cy: number; r: number } {
-  return { cx: drawn.x + mark.x * drawn.w, cy: drawn.y + mark.y * drawn.h, r: mark.r * Math.min(drawn.w, drawn.h) };
+/** An outline on the drawn picture: its centre and half-sizes in the sheet's pixels. */
+export function ovalOn(mark: DiagramMark | OldRing, drawn: Rect): { cx: number; cy: number; rx: number; ry: number } {
+  const cx = drawn.x + mark.x * drawn.w;
+  const cy = drawn.y + mark.y * drawn.h;
+  if ('r' in mark) {
+    const r = mark.r * Math.min(drawn.w, drawn.h);
+    return { cx, cy, rx: r, ry: r };
+  }
+  return { cx, cy, rx: mark.rx * drawn.w, ry: mark.ry * drawn.h };
 }
 
 /** A sheet's file name: «parts-1.png», or «parts-1-of-3.png» with several. */
