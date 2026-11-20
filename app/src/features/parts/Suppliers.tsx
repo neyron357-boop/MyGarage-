@@ -24,6 +24,7 @@ import { SheetFor } from '../../ui/lazy';
 import { useMoreRows } from '../../ui/moreRows';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SupplierBookActions } from './SupplierBookActions';
+import { partsType } from '../../domain/supplierTidy';
 import { emirateName, NO_REGION, regionLabel, SupplierFilters, useSupplierFilter } from './SupplierFilters';
 import { Autocomplete } from '@mantine/core';
 
@@ -170,7 +171,7 @@ export function SupplierSheet({
               fullWidth
               style={{ flex: 1 }}
               aria-label={t('suppliers.condition')}
-              value={v.condition ?? 'both'}
+              value={v.condition ?? partsType({ ...supplier, name: supplier.name ?? '' }) ?? 'both'}
               onChange={(c) => setV({ ...v, condition: c as Supplier['condition'] })}
               data={(['new', 'used', 'both'] as const).map((c) => ({ value: c, label: t(`suppliers.cond.${c}`) }))}
             />
@@ -301,7 +302,7 @@ const SupplierRow = memo(function SupplierRow({ s, area, jobs, onOpen }: { s: Su
         [
           area ?? '',
           jobs ? t('suppliers.jobs', { count: jobs }) : '',
-          s.service ? t('suppliers.contractor') : s.condition ? t(`suppliers.cond.${s.condition}`) : '',
+          s.service ? t('suppliers.contractor') : partsType(s) ? t(`suppliers.cond.${partsType(s)}`) : '',
           s.makes?.join(', '),
           s.parts,
         ]
@@ -363,7 +364,7 @@ export function SuppliersTab() {
     return [...by.entries()].sort((a, b) => (a[0] === NO_REGION ? 1 : b[0] === NO_REGION ? -1 : b[1].length - a[1].length)).map(([key, rows]) => ({ key, rows }));
   })();
   // v0.60.1 (1000+ suppliers made the screen hang): the rows drawn as the list is scrolled — the first thirty at once.
-  const shown = useMoreRows(list.length, `${q}|${filter.f.region}|${filter.f.area}|${filter.f.make}|${filter.f.kind}`);
+  const shown = useMoreRows(list.length, `${q}|${filter.f.region}|${filter.f.area}|${filter.f.make}|${filter.f.type}`);
   let room = shown.limit;
   const groups = grouped
     .map((g) => {

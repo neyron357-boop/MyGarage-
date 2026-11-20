@@ -663,3 +663,25 @@ export function tidyOf(s: Supplier): Partial<Pick<Supplier, 'name' | 'nameAr' | 
   if (guessed.size !== (s.guessed?.length ?? 0)) out.guessed = [...guessed];
   return Object.keys(out).length ? out : null;
 }
+
+/* ---------------- New or used: the two kinds of parts suppliers (v0.60.2) ---------------- */
+
+/**
+ * Categories of the base that are not parts suppliers at all (equipment, accounting, printing, buildings, transport, card
+ * terminals) — neither new nor used.
+ */
+const NOT_PARTS = /оборудован|инструмент|бухгалтер|аудит|консалт|печать|вывеск|обслуживание зданий|перевозк|pos|эквайринг|страхован|юрист/i;
+
+/**
+ * New or used (v0.60.2, the user: «оставь только 2 категории автозапчастей, поставщиков — Б/у и Новые»): a parts supplier
+ * is one or the other (or both); a contractor or a business of another kind is neither. What the supplier or the manager
+ * said (`condition`) comes first; else its name («Used», «مستعمل», «Scrap»); else a parts shop is one of new parts — the
+ * base marks the used ones.
+ */
+export function partsType(s: Pick<Supplier, 'name' | 'condition' | 'service'> & { nameAr?: string; book?: Supplier['book'] }): Supplier['condition'] {
+  if (s.service) return undefined;
+  if (s.condition) return s.condition;
+  const cats = s.book?.contact?.['Категории']?.v ?? '';
+  if (cats && NOT_PARTS.test(cats) && !/запчаст/i.test(cats)) return undefined;
+  return guessFromName(s).condition === 'used' ? 'used' : 'new';
+}

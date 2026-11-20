@@ -2,12 +2,12 @@ import { IconCar, IconMapPin, IconPackage } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { EMIRATES } from '../../domain/plates';
-import { kindsOf, PART_KINDS, regionOf, type Region } from '../../domain/supplierTidy';
+import { partsType, regionOf, type Region } from '../../domain/supplierTidy';
 import type { Lang, Supplier } from '../../domain/types';
 import { useLang } from '../../ui/hooks';
 
 /*
- * The supplier base by region, make and kind (v0.60, the user: «больше 1000 контактов… по регионам разделены… фильтр по
+ * The supplier base by region, make and kind — new or used since v0.60.2 (v0.60, the user: «больше 1000 контактов… по регионам разделены… фильтр по
  * маркам и тд»): rows of chips with how many each holds — the emirate (then its areas), the make, what they sell. A tap
  * picks, a tap on the picked one lets go. Where a supplier is and what it is about are read, not stored
  * (domain/supplierTidy.ts `regionOf`, `kindsOf`).
@@ -30,7 +30,8 @@ export interface SupplierFilter {
   region: string;
   area: string;
   make: string;
-  kind: string;
+  /** New or used (v0.60.2: the only two kinds of parts suppliers). */
+  type: string;
 }
 
 const counted = (keys: string[]) => {
@@ -45,23 +46,24 @@ export function useSupplierFilter(all: Supplier[] | undefined) {
     region: '',
     area: '',
     make: '',
-    kind: '',
+    type: '',
   });
   const facts = useMemo(() => {
     const regions = new Map<string, Region>();
-    const kinds = new Map<string, string[]>();
+    const types = new Map<string, Supplier['condition']>();
     for (const s of all ?? []) {
       regions.set(s.id, regionOf(s));
-      kinds.set(s.id, kindsOf(s));
+      types.set(s.id, partsType(s));
     }
-    return { regions, kinds };
+    return { regions, types };
   }, [all]);
   const pass = (s: Supplier, skip?: keyof SupplierFilter) => {
     const r = facts.regions.get(s.id);
     if (skip !== 'region' && f.region && (r?.emirate ?? NO_REGION) !== f.region) return false;
     if (skip !== 'area' && skip !== 'region' && f.area && r?.area !== f.area) return false;
     if (skip !== 'make' && f.make && !s.makes?.includes(f.make)) return false;
-    if (skip !== 'kind' && f.kind && !(f.kind === 'service' ? s.service : facts.kinds.get(s.id)?.includes(f.kind))) return false;
+    // «both» is one of the new and one of the used
+    if (skip !== 'type' && f.type && ![f.type, 'both'].includes(facts.types.get(s.id) ?? '')) return false;
     return true;
   };
   return {
@@ -69,7 +71,7 @@ export function useSupplierFilter(all: Supplier[] | undefined) {
     setF,
     facts,
     pass,
-    on: !!(f.region || f.area || f.make || f.kind),
+    on: !!(f.region || f.area || f.make || f.type),
   };
 }
 
@@ -83,13 +85,7 @@ export function SupplierFilters({ all, api }: { all: Supplier[]; api: FilterApi 
   const regionRow = counted(all.filter((s) => pass(s, 'region')).map((s) => facts.regions.get(s.id)?.emirate ?? NO_REGION));
   const areaRow = f.region ? counted(all.filter((s) => pass(s, 'area')).flatMap((s) => (facts.regions.get(s.id)?.area ? [facts.regions.get(s.id)!.area!] : []))) : [];
   const makeRow = counted(all.filter((s) => pass(s, 'make')).flatMap((s) => s.makes ?? [])).slice(0, 24);
-  const kindRow = counted(all.filter((s) => pass(s, 'kind')).flatMap((s) => [...(facts.kinds.get(s.id) ?? []), ...(s.service ? ['service'] : [])]));
-  const kindName = (k: string) =>
-    k === 'service'
-      ? t('suppliers.contractor')
-      : t(`suppliers.kinds.${k}`, {
-          defaultValue: PART_KINDS.find((x) => x.key === k)?.en ?? k,
-        });
+  const typeRow = (['new', 'used'] as const).map((k) => [k, all.filter((s) => pass(s, 'type') && [k, 'both'].includes(facts.types.get(s.id) ?? '')).length] as const);
   const chip = (key: string, label: string, n: number | undefined, active: boolean, onClick: () => void) => (
     <button key={key} type="button" className="chip" data-active={active} onClick={onClick}>
       {label}
@@ -121,13 +117,11 @@ export function SupplierFilters({ all, api }: { all: Supplier[]; api: FilterApi 
           {makeRow.map(([m, n]) => chip(m, m, n, f.make === m, () => pick('make', m)))}
         </div>
       )}
-      {kindRow.length > 0 && (
-        <div className="chip-row" aria-label={t('suppliers.parts')} data-filter="kind">
-          <IconPackage size={18} className="filter-icon" aria-hidden />
-          {chip('all', t('suppliers.allKinds'), undefined, !f.kind, () => setF((x) => ({ ...x, kind: '' })))}
-          {kindRow.map(([k, n]) => chip(k, kindName(k), n, f.kind === k, () => pick('kind', k)))}
-        </div>
-      )}
+      <div className="chip-row" aria-label={t('suppliers.condition')} data-filter="type">
+        <IconPackage size={18} className="filter-icon" aria-hidden />
+        {chip('all', t('suppliers.allKinds'), undefined, !f.type, () => setF((x) => ({ ...x, type: '' })))}
+        {typeRow.map(([k, n]) => chip(k, t(`suppliers.cond.${k}`), n, f.type === k, () => pick('type', k)))}
+      </div>
     </div>
   );
 }

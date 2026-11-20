@@ -1778,7 +1778,7 @@ export const ru = {
     allRegions: 'Все регионы',
     noRegion: 'Без региона',
     allMakes: 'Все марки',
-    allKinds: 'Все запчасти',
+    allKinds: 'Все',
     guessed: 'угадано',
     tidy: 'Перевести и дополнить',
     tidyNone: 'Всё уже на английском и заполнено',

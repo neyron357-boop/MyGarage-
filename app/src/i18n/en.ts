@@ -1778,7 +1778,7 @@ export const en: typeof ru = {
     allRegions: 'All regions',
     noRegion: 'No region',
     allMakes: 'All makes',
-    allKinds: 'All parts',
+    allKinds: 'All',
     guessed: 'guessed',
     tidy: 'Translate and fill in',
     tidyNone: 'Everything is in English and filled in already',

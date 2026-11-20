@@ -67,3 +67,17 @@ describe('the supplier base in order (v0.60)', () => {
     expect(tidyOf(supplier({ name: 'Al Noor Radiators Repair', service: true }))).toBeNull();
   });
 });
+
+describe('new or used — the two kinds of parts suppliers (v0.60.2)', () => {
+  it('what was said first, then the name; an unmarked parts shop is new; a contractor or another business — neither', async () => {
+    const { partsType } = await import('./supplierTidy');
+    expect(partsType({ name: 'A', condition: 'used' })).toBe('used');
+    expect(partsType({ name: 'A', condition: 'both' })).toBe('both');
+    expect(partsType({ name: 'Desert Used Auto Parts' })).toBe('used');
+    expect(partsType({ name: 'Al Test Auto Spare Parts Trading LLC' })).toBe('new');
+    expect(partsType({ name: 'Al Test Radiators', service: true })).toBeUndefined();
+    expect(partsType({ name: 'Zahra Audit', book: book({ Категории: 'Бухгалтерия / аудит · Консалтинг' }) })).toBeUndefined();
+    expect(partsType({ name: 'Tools Co', book: book({ Категории: 'Оборудование / инструменты' }) })).toBeUndefined();
+    expect(partsType({ name: 'Parts Co', book: book({ Категории: 'Автозапчасти • Аккумуляторы' }) })).toBe('new');
+  });
+});
