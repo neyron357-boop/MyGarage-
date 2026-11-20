@@ -3015,7 +3015,11 @@ async function launchBrowser() {
     await chip.scrollIntoViewIfNeeded();
     await chip.click();
     await page.waitForURL(/\/suppliers$/);
-    const first = front('.job-suppliers .list-row').first();
+    // v0.59: the parts' diagrams first — a row a part to buy, numbered as the list asked about; then the suppliers.
+    await front('.job-suppliers .diagram-parts .list-row').first().waitFor();
+    const diagramRows = await front('.job-suppliers .diagram-parts .list-row').count();
+    if (!diagramRows) throw new Error('no parts under «Схемы» on the job suppliers screen');
+    const first = front('.job-suppliers .list-row:not(.diagram-parts .list-row)').first();
     await first.waitFor();
     if (!(await first.innerText()).includes('На этом заказе')) throw new Error('the job’s own supplier is not first: ' + (await first.innerText()));
     await shot('44a-job-suppliers');

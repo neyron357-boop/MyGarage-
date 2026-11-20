@@ -14,6 +14,8 @@ import { haptic } from '../../ui/haptics';
 import { useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { SupplierSheet } from '../parts/Suppliers';
+import { DiagramParts, useDiagramSheets } from './DiagramSheets';
+import { downloadFile } from '../../ui/share';
 
 /** The manager's stars of a supplier, small: "★ 4" (not rated — nothing). */
 export function StarsPill({ s }: { s: Pick<Supplier, 'reliability'> }) {
@@ -66,17 +68,24 @@ export function JobSuppliersPage() {
   const data = useScreenLiveQuery(() => suppliersForJob(id, lang), [id, lang]);
   const why = useWhy();
   const [card, setCard] = useState<Supplier | null>(null);
+  // What is still to buy (all the parts, once every one is ordered) — the list asked about, and its diagrams' sheets.
+  const needed = data ? data.partLines.filter((i) => !i.procurementStatus || i.procurementStatus === 'needed') : [];
+  const asked = data ? (needed.length ? needed : data.partLines) : [];
+  const sheets = useDiagramSheets(asked);
   if (data === undefined) return <PageSkeleton />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const v = data.vehicle;
-  // What is still to buy (all the parts, once every one is ordered).
-  const needed = data.partLines.filter((i) => !i.procurementStatus || i.procurementStatus === 'needed');
-  const ask = v && data.partLines.length ? partsRequestText(v, needed.length ? needed : data.partLines) : '';
+  const ask = v && asked.length ? partsRequestText(v, asked) : '';
   const share = async () => {
     haptic('light');
+    // v0.59: with the diagrams' sheets (four to a picture, numbered as the list) when the phone can share files.
+    const files = sheets.files;
+    const withFiles = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
+    // Where files cannot be shared (a PC): the sheets saved, to attach.
+    if (files.length && !withFiles) files.forEach(downloadFile);
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({ text: ask });
+        await navigator.share(withFiles ? { files, text: ask } : { text: ask });
         return;
       } catch (e) {
         if ((e as Error)?.name === 'AbortError') return;
@@ -135,9 +144,10 @@ export function JobSuppliersPage() {
         }
       />
       <div className="job-suppliers">
+        <DiagramParts items={asked} sheets={sheets} />
         {data.parts.length ? (
           <>
-            {data.contractors.length > 0 && <div className="group-title">{t('suppliers.partsSellers')}</div>}
+            {(data.contractors.length > 0 || asked.length > 0) && <div className="group-title">{t('suppliers.partsSellers')}</div>}
             {rows(data.parts)}
           </>
         ) : (

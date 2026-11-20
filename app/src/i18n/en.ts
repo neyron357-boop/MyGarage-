@@ -1765,6 +1765,12 @@ export const en: typeof ru = {
       update: 'Update the app: close it and open it again',
     },
   },
+  diagrams: {
+    title: 'Diagrams',
+    ring: 'Ring it',
+    ringed: 'Ringed',
+    another: 'Diagram',
+  },
   suppliers: {
     all: 'All suppliers',
     find: 'Find',

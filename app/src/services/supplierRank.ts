@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
-import { itemTitle, lineName } from '../domain/items';
+import { byPosition, itemTitle, lineName } from '../domain/items';
 import { rankForJob, rankSuppliers, supplierUse, type BoughtLine, type Ranked, type SupplierUse } from '../domain/supplierRank';
 import type { Lang, OrderItem, Supplier, Vehicle } from '../domain/types';
 
@@ -52,7 +52,8 @@ export async function suppliersForJob(orderId: string, lang: Lang): Promise<{ pa
   ]);
   const use = supplierUse(lines, returns);
   const onJob = new Set(items.flatMap((i) => [i.supplierId, i.outsource?.supplierId, ...(i.offers ?? []).map((o) => o.supplierId)]).filter((x): x is string => !!x));
-  const partLines = items.filter((i) => i.kind === 'part' && !i.customerSupplied && i.approvalState !== 'declined');
+  // In the job's order (v0.59: the list sent and the diagrams' sheets are numbered alike).
+  const partLines = items.filter((i) => i.kind === 'part' && !i.customerSupplied && i.approvalState !== 'declined').sort(byPosition);
   const handed = items.filter((i) => !!i.outsource);
   const now = nowIso();
   const named = (i: OrderItem) => ({ name: lineName(itemTitle(i, lang), i.kind), title: titleOf(i) });

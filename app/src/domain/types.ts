@@ -628,6 +628,11 @@ export interface OrderItem {
   };
   /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */
   diagramIds?: string[];
+  /**
+   * The part ringed on its diagram by the manager (v0.59, domain/diagramSheet.ts): the ring drawn on the sheet of
+   * diagrams sent to a supplier — no AI; a diagram added by hand (a catalogue's screenshot) gets one the same way.
+   */
+  diagramMark?: { id: string; x: number; y: number; r: number };
   /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */
   sampleIds?: string[];
   brand?: string;
