@@ -160,6 +160,20 @@ export function partRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year'
   return out.join('\n');
 }
 
+/**
+ * The same request on one line (v0.59.2, the user: «текст вставляю в ватсап, но не сортировано правильно»): WhatsApp
+ * on the phone took the copied lines run together. Numbered parts, each ending in «;», then the question — it reads
+ * the same wherever it lands.
+ */
+export function partsRequestFlat(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>, items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>[]): string {
+  const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ');
+  const head = [car, vehicle.vin ? `VIN ${vehicle.vin}` : ''].filter(Boolean).join(' · ');
+  const list = items
+    .map((i, k) => `${k + 1}. ${i.titleEn || i.titleRu || ''}${i.qty > 1 ? ` × ${i.qty}` : ''}${i.partNumber ? ` (${i.partNumber})` : ''}`)
+    .join('; ');
+  return [head ? `${head}: ` : '', list, list ? '. ' : '', 'Price and availability, please: original / aftermarket?'].join('');
+}
+
 /** All of a job's parts to ask a supplier about at once (v0.38, the job's suppliers): the car, its VIN, the parts. */
 export function partsRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>, items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>[]): string {
   const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ');

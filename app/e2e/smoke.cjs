@@ -3030,7 +3030,8 @@ async function launchBrowser() {
     });
     await front('.nav-bar, .page-header').getByRole('button', { name: 'Спросить' }).first().click();
     const asked = await page.waitForFunction(() => window.__asked).then((h) => h.jsonValue());
-    if (!/^1\. /m.test(asked) || !/Price and availability/.test(asked)) throw new Error('asked: ' + asked);
+    // v0.59.2: one line, numbered, the question last (a caption loses its line breaks on the phone).
+    if (!/: 1\. /.test(asked) || asked.includes('\n') || !/Price and availability/.test(asked)) throw new Error('asked: ' + asked);
     // Its card: four stars, saved; the pill on its row.
     await first.click();
     const dlg = page.getByRole('dialog');

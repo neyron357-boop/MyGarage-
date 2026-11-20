@@ -189,7 +189,16 @@ function useDiagramPicture(id: string, full: boolean): string | undefined {
   useEffect(() => {
     if (!full) return;
     let alive = true;
-    void mediaSrc(id).then((u) => alive && u && setSrc(u));
+    // Loaded before it is shown (v0.59.2: the phone showed a broken picture when the original did not come — the
+    // card stays on screen in that case).
+    void mediaSrc(id)
+      .then((u) => {
+        if (!alive || !u) return;
+        const probe = new Image();
+        probe.onload = () => alive && setSrc(u);
+        probe.src = u;
+      })
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -349,7 +358,7 @@ function MarkEditor({ item, onDone, onAdd }: { item: OrderItem; onDone: () => vo
         onPointerCancel={up}
       >
         <div className="mark-zoom" style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.s})` }}>
-          <div className="mark-pic" ref={pic}>
+          <div className="mark-pic" ref={pic} style={size ? { aspectRatio: `${size.w} / ${size.h}` } : undefined}>
             {src && <img src={src} alt="" draggable={false} onLoad={(e) => onLoad(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} />}
             {shown.map((m, k) => (
               <span
