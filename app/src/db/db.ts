@@ -24,6 +24,7 @@ import type {
   ItemDecision,
   JobNote,
   JobTemplate,
+  Lender,
   Media,
   MediaBlob,
   MessageLog,
@@ -92,6 +93,8 @@ export class GarageDB extends Dexie {
   creditPayments!: Table<CreditPayment, string>;
   /** The customers' drivers (v0.43): who brings a company's cars; a job keeps its own (`order.driver`). */
   drivers!: Table<Driver, string>;
+  /** Whom the garage owes because they paid for it (v0.61): an expense on credit's `lenderId`. */
+  lenders!: Table<Lender, string>;
   /** Invoices given before this app, read off their PDFs (v0.45): the customer's reports read them, money here does not. */
   historyInvoices!: Table<HistoryInvoice, string>;
   /** The rows of the monthly summaries that came with them (v0.45): the garage's own check. */
@@ -215,6 +218,11 @@ export class GarageDB extends Dexie {
       serviceCategories: 'id, _t',
       services: 'id, categoryId, _t',
       serviceMap: 'id, serviceId, _t',
+    });
+    // v10 (v0.61): whom the garage owes because they paid for it — a new table only; an expense on credit from before
+    // has no `lenderId` and owes its seller, as it did.
+    this.version(10).stores({
+      lenders: 'id, phone, _t',
     });
     installGuards(this);
     installSyncHooks(this);

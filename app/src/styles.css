@@ -3532,6 +3532,26 @@ html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] .count {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Whom a credit is owed to, inside a row (v0.61): a person's mark and the name — orange, as the debt itself. */
+.owed-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--mantine-color-orange-7);
+  font-weight: 600;
+  vertical-align: bottom;
+}
+.owed-name > svg {
+  flex-shrink: 0;
+}
+.owed-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Room for a job's step pill while it is read (search, visits). */
 .phase-pill-space {
   display: inline-block;

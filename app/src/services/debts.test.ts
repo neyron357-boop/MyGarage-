@@ -11,6 +11,7 @@ import { addItem } from './estimate';
 import { approveAll, leaveOnDebt } from './flow';
 import { addIncome, loadLedger, setOpeningBalances } from './ledger';
 import { addExpense, cashState, createDebt, quickInvoice } from './money';
+import { owedChoices, owedOf, setOwedTo, updateLender } from './lenders';
 import { moneySheetOfBook } from './moneySheet';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { ensureSeed } from './seed';
@@ -178,8 +179,12 @@ describe('the garage on credit', () => {
     // The expense is counted once — 1 000, not 1 300.
     const [orders, invoices, items, expenses, payments, closings, incomes] = await Promise.all([db.orders.toArray(), db.invoices.toArray(), db.items.toArray(), db.expenses.toArray(), db.payments.toArray(), db.cashClosings.toArray(), db.incomes.toArray()]);
     expect(computeReport({ from: '2000-01-01', to: '2100-01-01', orders, invoices, items, expenses, payments, closings, incomes }).expensesGross).toBe(100_000);
-    // The money sheet: the payment is the expense it pays off.
-    expect((await moneySheetOfBook()).rows.map((r) => [r.type, r.category, r.amountFils, r.notes])).toEqual([['Expense', 'Parts Purchases', 30_000, 'Credit paid: Al Futtaim Parts']]);
+    // The money sheet: the credit itself (v0.61: Payment «Credit», whom it is owed to — the seller, named once), and the
+    // payment — the expense it pays off.
+    expect((await moneySheetOfBook()).rows.map((r) => [r.type, r.payment, r.category, r.amountFils, r.notes])).toEqual([
+      ['Expense', 'Credit', 'Parts Purchases', 100_000, 'Owed to Al Futtaim Parts'],
+      ['Expense', 'Cash', 'Parts Purchases', 30_000, 'Credit paid to Al Futtaim Parts'],
+    ]);
 
     // Not more than is left; paid off — no longer owed.
     await expect(payCredit(e.id, { amountFils: 80_000, method: 'card' })).rejects.toMatchObject({ code: 'err.creditOver' });
@@ -241,8 +246,12 @@ describe('an expense paid in parts (v0.58, the user: «часть наличны
       ['credit', 5_000, 5_000],
     ]);
     expect(lines.filter(moved).reduce((s, e) => s - e.amountFils, 0)).toBe(-10_000);
-    // The money sheet: the money that moved; the report: the whole purchase, once.
-    expect((await moneySheetOfBook()).rows.map((r) => [r.payment, r.amountFils])).toEqual([['Cash', 10_000]]);
+    // The money sheet: the money that moved, and the credit part (v0.61: «Credit» — in no balance); the report: the
+    // whole purchase, once.
+    expect((await moneySheetOfBook()).rows.map((r) => [r.payment, r.amountFils]).sort()).toEqual([
+      ['Cash', 10_000],
+      ['Credit', 5_000],
+    ]);
     const [orders, invoices, items, expenses, payments, closings, incomes] = await Promise.all([db.orders.toArray(), db.invoices.toArray(), db.items.toArray(), db.expenses.toArray(), db.payments.toArray(), db.cashClosings.toArray(), db.incomes.toArray()]);
     expect(computeReport({ from: '2000-01-01', to: '2100-01-01', orders, invoices, items, expenses, payments, closings, incomes }).expensesGross).toBe(15_000);
     // A part is an operation of its own: deleted — the other stays.
@@ -347,5 +356,98 @@ describe('a seller the garage owes (v0.50.2)', () => {
     expect((await companyDebtOf(newer.id))!.leftFils).toBe(6_275);
     expect(await cash()).toEqual({ book: before.book - 10_000, box: before.box - 10_000 });
     expect((await loadCreditors()).creditors[0].credits.map((d) => d.expense.id)).toEqual([newer.id]);
+  });
+});
+
+describe('whom the garage owes (v0.61, the user: «заказали запчасть, а заплатил не мы, а кто-то другой в долг»)', () => {
+  it('a person who paid three times, on different days for different things, is one card; the seller of his parts is not owed', async () => {
+    await setOpeningBalances(500_000, 0);
+    const parts = await cat('parts');
+    // Ahmed paid Al Noor for the pads; then the oil for us; then (named the same way, another phone not given) the tyres.
+    const a = await addExpense({ date: '2026-11-10', categoryId: parts, amountFils: 30_000, vatFils: 0, vendor: 'Al Noor Auto', method: 'credit', owedTo: { kind: 'new', name: 'Ahmed', phone: '050 111 2233' } });
+    const b = await addExpense({ date: '2026-11-12', categoryId: await cat('consumables'), amountFils: 12_000, vatFils: 0, method: 'credit', owedTo: { kind: 'new', name: ' ahmed ' } });
+    const lenders = await db.lenders.toArray();
+    expect(lenders.map((l) => [l.name, l.phone])).toEqual([['Ahmed', '+971501112233']]);
+    const c = await addExpense({ date: '2026-11-14', categoryId: parts, amountFils: 50_000, vatFils: 0, vendor: 'Tyre Shop', method: 'credit', owedTo: { kind: 'lender', id: lenders[0].id, name: 'Ahmed' } });
+    // The shop gave its own goods on credit: owed to the seller, as before.
+    const shop = await addExpense({ date: '2026-11-13', categoryId: parts, amountFils: 7_000, vatFils: 0, vendor: 'Al Noor Auto', method: 'credit', owedTo: { kind: 'seller', name: 'Al Noor Auto' } });
+    expect((await db.expenses.get(a.id))!.lenderId).toBe(lenders[0].id);
+    expect((await db.expenses.get(shop.id))!.lenderId).toBeUndefined();
+
+    const { creditors, loose } = await loadCreditors();
+    expect(loose).toEqual([]);
+    expect(creditors.map((x) => [x.name, x.lender?.id, x.phone, x.credits.map((d) => d.expense.id), x.leftFils])).toEqual([
+      ['Ahmed', lenders[0].id, '+971501112233', [a.id, b.id, c.id], 92_000],
+      ['Al Noor Auto', undefined, undefined, [shop.id], 7_000],
+    ]);
+    // Paid back 30 000 at once: his oldest goes first and is paid off — it stays on his card, among the paid ones.
+    await paySupplier(creditors[0].credits.map((d) => d.expense.id), { amountFils: 30_000, method: 'cash' });
+    const after = (await loadCreditors()).creditors.find((x) => x.lender)!;
+    expect([after.credits.map((d) => d.expense.id), after.settled.map((d) => d.expense.id), after.leftFils]).toEqual([[b.id, c.id], [a.id], 62_000]);
+
+    // The book names him on the credits and on the payment; the money sheet too.
+    const book = (await loadLedger()).entries;
+    expect(book.filter((e) => e.owedTo === 'Ahmed').map((e) => [e.source, e.amountFils]).sort()).toEqual([
+      ['credit', 30_000],
+      ['expense', 12_000],
+      ['expense', 30_000],
+      ['expense', 50_000],
+    ]);
+    const rows = (await moneySheetOfBook()).rows;
+    expect(rows.filter((r) => r.payment === 'Credit').map((r) => [r.amountFils, r.notes])).toEqual([
+      [30_000, 'Owed to Ahmed — Al Noor Auto'],
+      [12_000, 'Owed to Ahmed'],
+      [7_000, 'Owed to Al Noor Auto'],
+      [50_000, 'Owed to Ahmed — Tyre Shop'],
+    ]);
+    expect(rows.find((r) => r.payment === 'Cash' && r.amountFils === 30_000)!.notes).toBe('Credit paid to Ahmed: Al Noor Auto');
+  });
+
+  it('a part paid by us, the rest by a person: only the credit part is owed to him', async () => {
+    await setOpeningBalances(500_000, 0);
+    const first = await addExpense({
+      date: dubaiDate(),
+      categoryId: await cat('parts'),
+      amountFils: 15_000,
+      vatFils: 0,
+      vendor: 'NAKASH',
+      method: 'cash',
+      parts: [
+        { method: 'cash', amountFils: 10_000 },
+        { method: 'credit', amountFils: 5_000 },
+      ],
+      owedTo: { kind: 'new', name: 'Rashid' },
+    });
+    const list = await db.expenses.filter((e) => e.splitId === first.id).toArray();
+    const rashid = (await db.lenders.toArray())[0];
+    expect(list.map((e) => [e.method, e.vendor, e.lenderId]).sort()).toEqual([
+      ['cash', 'NAKASH', undefined],
+      ['credit', 'NAKASH', rashid.id],
+    ]);
+    expect((await loadCreditors()).creditors.map((c) => [c.name, c.leftFils])).toEqual([['Rashid', 5_000]]);
+  });
+
+  it('an old credit with nobody named gets one later; a person’s name and phone change everywhere', async () => {
+    const e = await addExpense({ date: '2026-11-15', categoryId: await cat('parts'), amountFils: 5_000, vatFils: 0, method: 'credit' });
+    expect((await loadCreditors()).loose.map((d) => d.expense.id)).toEqual([e.id]);
+    expect((await owedOf(e.id))!.to).toBeUndefined();
+    await setOwedTo(e.id, { kind: 'new', name: 'Omar' });
+    expect((await owedOf(e.id))!.to!.name).toBe('Omar');
+    const omar = (await db.lenders.toArray())[0];
+    await updateLender(omar.id, { name: 'Omar Khan', phone: '055 999 8877' });
+    expect((await loadCreditors()).creditors.map((c) => [c.name, c.phone])).toEqual([['Omar Khan', '+971559998877']]);
+    expect((await loadLedger()).entries.find((x) => x.id === e.id)!.owedTo).toBe('Omar Khan');
+    // Owed to a supplier of the base instead: the expense's seller is it, no person any more.
+    const s = uid();
+    await db.suppliers.add({ id: s, name: 'Gulf Star Trading', phone: '', createdAt: '2026-11-01T00:00:00.000Z' } as never);
+    await setOwedTo(e.id, { kind: 'supplier', id: s, name: 'Gulf Star Trading' });
+    const now = (await db.expenses.get(e.id))!;
+    expect([now.lenderId, now.supplierId, now.vendor]).toEqual([undefined, s, 'Gulf Star Trading']);
+    expect((await loadCreditors()).creditors.map((c) => c.name)).toEqual(['Gulf Star Trading']);
+    // The chips: whom the garage owed lately, one each — Omar, added after that credit was taken, first.
+    expect((await owedChoices()).map((p) => [p.kind, p.name])).toEqual([
+      ['lender', 'Omar Khan'],
+      ['supplier', 'Gulf Star Trading'],
+    ]);
   });
 });

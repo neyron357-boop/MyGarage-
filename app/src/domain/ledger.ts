@@ -1,4 +1,5 @@
 import { dubaiDate, inRange } from './dates';
+import { owedToOf, type OwedIndex } from './debts';
 import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Order, Payment } from './types';
 
 /*
@@ -44,6 +45,11 @@ export interface LedgerEntry {
   leftFils?: number;
   /** An expense paid in parts: the id its parts share (v0.58). */
   splitId?: string;
+  /**
+   * On credit and what is paid towards it (v0.61, the user: «тот, кто заплатил в долг, должен отображаться в учёте и в
+   * таблице при экспорте»): whom the garage owes — the person who paid for it, else the seller (`owedToOf`).
+   */
+  owedTo?: string;
   note?: string;
   /** Expenses: where it was bought and the note as typed (`note` shows both). */
   vendor?: string;
@@ -74,6 +80,8 @@ export interface LedgerInput {
   closings: CashClosing[];
   /** What was paid towards expenses taken on credit. */
   creditPayments?: CreditPayment[];
+  /** The people and suppliers the credits are owed to (v0.61): the lines name them. */
+  owed?: OwedIndex;
   orders: Pick<Order, 'id' | 'vehicleId' | 'customerId'>[];
 }
 
@@ -119,6 +127,17 @@ export function expenseEntry(e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardA
     customerId: e.customerId,
     splitId: e.splitId,
   };
+}
+
+/**
+ * A line's note beside whom it is owed to (v0.61): the seller owed is named once — «Al Noor · pads» owed to Al Noor is
+ * «pads» under the name.
+ */
+export function noteBesides(e: Pick<LedgerEntry, 'note' | 'owedTo'>): string | undefined {
+  const name = e.owedTo?.trim();
+  if (!name || !e.note) return e.note;
+  if (e.note === name) return undefined;
+  return e.note.startsWith(`${name} · `) ? e.note.slice(name.length + 3) || undefined : e.note;
 }
 
 /** A cash movement as a line of the book (without the links of its job and the balances after it). */
@@ -228,17 +247,18 @@ export function buildLedger(input: LedgerInput): LedgerResult {
   const expenses = new Map(input.expenses.map((e) => [e.id, e]));
   // What is paid towards each expense taken on credit (its line says what is left).
   const paid = new Map<string, number>();
+  const owedTo = (e: Expense) => (input.owed ? owedToOf(e, input.owed)?.name : undefined);
   for (const c of input.creditPayments ?? []) if (!c.voidedAt) paid.set(c.expenseId, (paid.get(c.expenseId) ?? 0) + c.amountFils);
   for (const e of input.expenses) {
     if (e.voidedAt) continue;
     // On credit (v0.58): a line of its own purse — no money moved; its payments are lines of the money that did.
-    const left = e.method === 'credit' ? { leftFils: Math.max(0, e.amountFils - (paid.get(e.id) ?? 0)) } : {};
+    const left = e.method === 'credit' ? { leftFils: Math.max(0, e.amountFils - (paid.get(e.id) ?? 0)), owedTo: owedTo(e) } : {};
     raw.push({ ...expenseEntry(e), ...left, ...linkOf(e.orderId, e.vehicleId, e.customerId) });
   }
   for (const c of input.creditPayments ?? []) {
     const e = expenses.get(c.expenseId);
     if (c.voidedAt || !e) continue;
-    raw.push({ ...creditEntry(c, e), ...linkOf(e.orderId, e.vehicleId, e.customerId) });
+    raw.push({ ...creditEntry(c, e), owedTo: owedTo(e), ...linkOf(e.orderId, e.vehicleId, e.customerId) });
   }
   // Cash movements not shown through their payment, income, expense or payment of a credit: parts bought for
   // cash, supplier refunds, handing cash to the owner, corrections. Reversals of cancelled entries are

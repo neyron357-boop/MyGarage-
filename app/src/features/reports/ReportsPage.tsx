@@ -3,6 +3,7 @@ import { IconChartBar, IconDownload, IconFileTypePdf, IconShare } from '@tabler/
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
+import { owedIndex, owedToOf } from '../../domain/debts';
 import { invoiceBuyer } from '../../domain/invoice';
 import { addDays, dubaiDate, formatDate, nowIso } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
@@ -150,10 +151,14 @@ export function ReportsPage() {
       `invoices-${f}-${tt}.csv`,
     );
     const ex = data.expenses.filter((e) => e.date >= f && e.date <= tt);
+    // On credit (v0.61): whom it is owed to — the person who paid for it, else the seller.
+    const credit = ex.filter((e) => e.method === 'credit');
+    const [lenders, sellers] = await Promise.all([credit.length ? db.lenders.toArray() : [], db.suppliers.bulkGet([...new Set(credit.map((e) => e.supplierId).filter((id): id is string => !!id))])]);
+    const owed = owedIndex(sellers.filter((s) => !!s), lenders);
     await downloadBlob(
       toCsv([
-        ['date', 'category', 'vendor', 'method', 'gross_aed', 'vat_aed', 'note'],
-        ...ex.map((e) => [formatDate(e.date), catName(e.categoryId), e.vendor, e.method, (e.amountFils / 100).toFixed(2), (e.vatFils / 100).toFixed(2), e.note]),
+        ['date', 'category', 'vendor', 'method', 'owed_to', 'gross_aed', 'vat_aed', 'note'],
+        ...ex.map((e) => [formatDate(e.date), catName(e.categoryId), e.vendor, e.method, e.method === 'credit' ? owedToOf(e, owed)?.name : '', (e.amountFils / 100).toFixed(2), (e.vatFils / 100).toFixed(2), e.note]),
       ]),
       `expenses-${f}-${tt}.csv`,
     );

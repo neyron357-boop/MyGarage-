@@ -2,6 +2,7 @@ import { db, nextNumber, uid } from '../db/db';
 import { cashTotals } from '../domain/cash';
 import { dubaiDate, monthKey, nowIso, onDubaiDay } from '../domain/dates';
 import { partsFit, shareVat, type ExpensePart } from '../domain/expenseParts';
+import type { OwedPick } from '../domain/lenders';
 import { atDay, jobDay } from '../domain/jobDay';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, jobDocNumber, paidNet } from '../domain/invoice';
@@ -11,6 +12,7 @@ import { placeInDay, recountClosing } from './cashDays';
 import { setDiscount } from './discount';
 import { AppError } from './errors';
 import { recordDecisions, sendVersion, setDone } from './estimate';
+import { owedFields } from './lenders';
 import { addMedia } from './media';
 import { bundleAmountDue, loadOrderBundle, logEvent, tryStage } from './orders';
 import { setProcurement } from './parts';
@@ -337,6 +339,11 @@ export interface ExpenseInput {
    * the receipt with each; `method` is then not read. One transaction: all the parts or none.
    */
   parts?: ExpensePart[];
+  /**
+   * On credit — whom the garage owes (v0.61): a person who paid for it (one of the list, or new), a supplier of the base,
+   * or the seller by its name (services/lenders.ts). Not read when nothing is on credit; a person goes on the credit part only.
+   */
+  owedTo?: OwedPick;
 }
 
 export async function categoryMonthSpent(categoryId: string, month: string = monthKey()): Promise<number> {
@@ -363,6 +370,7 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
   const ids = parts.map(() => uid());
   const vats = split ? shareVat(input.vatFils, parts) : [input.vatFils];
   const createdAt = nowIso();
+  const owe = input.owedTo && parts.some((p) => p.method === 'credit') ? input.owedTo : undefined;
   const list: Expense[] = [];
   for (const [i, p] of parts.entries()) {
     // The receipt with each part: a part is an operation of its own (deleted with its photos).
@@ -387,7 +395,16 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
     });
   }
   const cash = list.filter((e) => e.method === 'cash').map((e) => ({ e, movementId: uid() }));
-  await db.transaction('rw', db.expenses, db.cashMovements, async () => {
+  await db.transaction('rw', db.expenses, db.cashMovements, db.lenders, async () => {
+    // Whom it is owed to (v0.61): a person — on the credit part; a supplier or a seller — the seller of every part.
+    if (owe) {
+      const f = await owedFields(owe, { vendor: list[0].vendor, supplierId: list[0].supplierId });
+      for (const e of list) {
+        e.vendor = f.vendor || undefined;
+        e.supplierId = f.supplierId || undefined;
+        if (e.method === 'credit' && f.lenderId) e.lenderId = f.lenderId;
+      }
+    }
     await db.expenses.bulkAdd(list);
     for (const { e, movementId } of cash) {
       await db.cashMovements.add({ id: movementId, at: e.createdAt, direction: 'out', amountFils: e.amountFils, reason: 'expense', expenseId: e.id, note: e.vendor ?? e.note });

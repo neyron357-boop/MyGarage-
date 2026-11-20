@@ -111,3 +111,39 @@ describe('the money sheet (Money Tracker workbook)', () => {
     expect((await planMoneyImport(buildMoneyWorkbook(SHEET))).rows).toHaveLength(0);
   });
 });
+
+describe('the money sheet and the credits (v0.61, the user: «тот, кто заплатил в долг, должен отображаться… в таблице при экспорте»)', () => {
+  it('a credit is a row «Credit» naming whom it is owed to, in no balance; out and back in, nothing doubles; a typed one comes in owed to that person', async () => {
+    await setOpeningBalances(10_000, 0);
+    await addExpense({ date: '2026-11-10', categoryId: await cat('parts'), amountFils: 30_000, vatFils: 0, vendor: 'Al Noor Auto', method: 'credit', note: 'pads', owedTo: { kind: 'new', name: 'Ahmed' } });
+    await addExpense({ date: '2026-11-11', categoryId: await cat('parts'), amountFils: 2_000, vatFils: 0, method: 'cash', note: 'bolts' });
+    const sheet = await moneySheetOfBook();
+    expect(sheet.rows.map((r) => [r.payment, r.amountFils, r.notes])).toEqual([
+      ['Credit', 30_000, 'Owed to Ahmed — Al Noor Auto · pads'],
+      ['Cash', 2_000, 'bolts'],
+    ]);
+    // In no balance and no total: the cash after the credit is the start, the cash out — the bolts only.
+    const b = sheetBalances(sheet);
+    expect([b.cash, b.cashOut, b.cardOut]).toEqual([[10_000, 8_000], 2_000, 0]);
+    const bytes = buildMoneyWorkbook(sheet);
+    const xml = new TextDecoder().decode((await unzip(bytes)).get('xl/worksheets/sheet1.xml'));
+    expect(xml).toContain('<c r="F7" s="14" t="str"><f t="shared" ref="F7:F');
+    expect((await readMoneyWorkbook(bytes)).rows.map((r) => r.payment)).toEqual(['Credit', 'Cash']);
+    expect((await planMoneyImport(bytes)).rows).toHaveLength(0);
+
+    // Typed into the sheet by hand: a credit to Ahmed again (the same man), and one to a new one.
+    const typed: MoneySheet = {
+      cashStartFils: 10_000,
+      cardStartFils: 0,
+      rows: [
+        { date: '2026-11-12', type: 'Expense', amountFils: 4_000, payment: 'Credit', category: 'Parts Purchases', notes: 'Owed to ahmed — oil' },
+        { date: '2026-11-12', type: 'Expense', amountFils: 6_000, payment: 'Credit', category: 'Parts Purchases', notes: 'Owed to Rashid' },
+      ],
+    };
+    expect(await importMoneyPlan(await planMoneyImport(buildMoneyWorkbook(typed)))).toBe(2);
+    const lenders = await db.lenders.toArray();
+    expect(lenders.map((l) => l.name).sort()).toEqual(['Ahmed', 'Rashid']);
+    const oil = (await db.expenses.toArray()).find((e) => e.amountFils === 4_000)!;
+    expect([oil.method, oil.note, lenders.find((l) => l.id === oil.lenderId)?.name]).toEqual(['credit', 'oil', 'Ahmed']);
+  });
+});

@@ -396,6 +396,20 @@ export interface Driver {
   archivedAt?: string;
 }
 
+/**
+ * Someone the garage owes because he paid for it (v0.61): a friend, the owner, a mechanic, another garage — whoever paid
+ * a supplier (or a bill) for the garage, all of it or a part, and is to be paid back. Not a supplier: the supplier base
+ * stays the shops. One record however many times he paid (`Expense.lenderId`).
+ */
+export interface Lender {
+  id: string;
+  name: string;
+  /** E.164, or '' when not known. */
+  phone: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 /** The driver on a job (v0.43): his record in the list (`id`), with his name and phone as they were then. */
 export interface JobDriver {
   id: string;
@@ -1008,6 +1022,12 @@ export interface Expense {
   receiptMediaId?: string;
   /** The supplier it was bought from (v0.50.2: a receipt's seller) — «Мы должны» puts its credits under it. */
   supplierId?: string;
+  /**
+   * On credit — whom the garage owes when it is not the seller (v0.61, the user: «заказали запчасть, а заплатил не мы, а
+   * кто-то другой в долг — это нужно чётко обозначить»): the person who paid for it (`lenders`). «Мы должны» puts the
+   * credit under him, the book and the money sheet name him. Unset — the seller is owed (`supplierId`, else `vendor`).
+   */
+  lenderId?: string;
   /** What it was spent on: a job, or just a car / a customer (filled from the job when one is picked). */
   orderId?: string;
   vehicleId?: string;

@@ -103,6 +103,10 @@ async function launchBrowser() {
     const cat = (await db.expenseCategories.toArray()).find((c) => c.code === 'parts');
     const e = await addExpense({ date: dubaiDate(), categoryId: cat.id, amountFils: 100000, vatFils: 0, vendor: 'Al Futtaim Parts', method: 'credit' });
     await payCredit(e.id, { amountFils: 30000, method: 'cash' });
+    // v0.61: a person who paid for the garage twice — one card with both, the first paid off.
+    await addExpense({ date: dubaiDate(), categoryId: cat.id, amountFils: 45000, vatFils: 0, vendor: 'Al Noor Auto', method: 'credit', note: 'BRAKE PADS', owedTo: { kind: 'new', name: 'Karim Hassan', phone: '050 444 5566' } });
+    await addExpense({ date: dubaiDate(), categoryId: cat.id, amountFils: 12000, vatFils: 0, vendor: 'ADNOC', method: 'credit', note: 'ENGINE OIL', owedTo: { kind: 'new', name: 'Karim Hassan' } });
+    await addExpense({ date: dubaiDate(), categoryId: cat.id, amountFils: 8000, vatFils: 0, method: 'credit', owedTo: { kind: 'new', name: 'Karim Hassan' } }).then((x) => payCredit(x.id, { amountFils: 8000, method: 'cash' }));
   };
 
   const tour = async (prefix) => {

@@ -261,10 +261,13 @@ export async function loadCompanyDebts(): Promise<CompanyDebt[]> {
   return (await loadCredits()).filter((d) => d.leftFils > 0);
 }
 
-/** What the garage owes, by whom (v0.50.2): one seller — one card with its credits; a credit with no seller on its own. */
+/**
+ * What the garage owes, by whom (v0.50.2: one seller — one card with its credits; v0.61: a person who paid for it too —
+ * however many times, one card); a credit owed to nobody on its own. A card has its paid-off credits too (`settled`).
+ */
 export async function loadCreditors(): Promise<{ creditors: Creditor<CompanyDebt>[]; loose: CompanyDebt[] }> {
-  const [debts, suppliers] = await Promise.all([loadCompanyDebts(), db.suppliers.toArray()]);
-  return groupCredits(debts, suppliers);
+  const [credits, suppliers, lenders] = await Promise.all([loadCredits(), db.suppliers.toArray(), db.lenders.toArray()]);
+  return groupCredits(credits, suppliers, lenders);
 }
 
 /**

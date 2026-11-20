@@ -1,5 +1,6 @@
 import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
+import { owedIndex } from '../domain/debts';
 import { buildLedger, type LedgerResult } from '../domain/ledger';
 import type { Expense, Income, PayMethod } from '../domain/types';
 import { placeInDay } from './cashDays';
@@ -24,7 +25,13 @@ export async function loadLedger(): Promise<LedgerResult & { cashStartFils: numb
   const first = [...closings].sort((a, b) => a.closedAt.localeCompare(b.closedAt))[0];
   const cashStartFils = first ? first.openingFils : settings.cashStartFils ?? 0;
   const cardStartFils = settings.cardStartFils ?? 0;
-  return { ...buildLedger({ cashStartFils, cardStartFils, payments, incomes, expenses, movements, closings, creditPayments, orders }), cashStartFils, cardStartFils, cashStartLocked: !!first };
+  // Whom the credits are owed to (v0.61): the people, and the suppliers the credits were bought from — only those (the
+  // base has a thousand and more); a seller written by its name is named as written.
+  const credits = expenses.filter((e) => e.method === 'credit');
+  const supplierIds = [...new Set(credits.map((e) => e.supplierId).filter((id): id is string => !!id))];
+  const [lenders, suppliers] = await Promise.all([credits.length ? db.lenders.toArray() : [], db.suppliers.bulkGet(supplierIds)]);
+  const owed = owedIndex(suppliers.filter((s) => !!s), lenders);
+  return { ...buildLedger({ cashStartFils, cardStartFils, payments, incomes, expenses, movements, closings, creditPayments, orders, owed }), cashStartFils, cardStartFils, cashStartLocked: !!first };
 }
 
 /** "Cash Start" and "Card Start": what was in the cash box and on the card when the book began. */

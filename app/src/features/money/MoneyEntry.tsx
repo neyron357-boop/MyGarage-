@@ -27,6 +27,7 @@ import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
 import { debtQueue, historyKey, spread } from '../../domain/debts';
 import { PART_WAYS, partRows, partsOf, partsRest } from '../../domain/expenseParts';
 import { incomeCategoryName, KEPT_INCOME, renamedIn } from '../../domain/incomeCategories';
+import type { OwedPick } from '../../domain/lenders';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import type { ExpenseMethod, IncomeCategory, Order } from '../../domain/types';
@@ -43,6 +44,7 @@ import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
+import { OwedToField } from './OwedTo';
 
 /** The garage's income categories, in their order — taken out ones too (their entries show their names). */
 export function useIncomeCategories(): IncomeCategory[] | undefined {
@@ -694,6 +696,8 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const [receipt, setReceipt] = useState<File>();
   const [over, setOver] = useState('');
   const [spent, setSpent] = useState(0);
+  // On credit (v0.61): whom the garage owes — to be said each time.
+  const [owed, setOwed] = useState<OwedPick>();
   // Money comes in by a way it can be counted: "on credit" is only a way to spend.
   const setKind = (k: 'in' | 'out') => {
     setKindState(k);
@@ -720,11 +724,17 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     setVat(preset?.expense?.vatFils);
     setReceipt(preset?.receipt);
     setOver('');
+    setOwed(undefined);
     setMore(!!preset?.expense?.vendor || !!preset?.expense?.vatFils);
   }, [opened, preset]);
   useEffect(() => {
     if (!expenseCat && cats?.length) setExpenseCat(cats.find((c) => c.code === 'parts')?.id ?? cats[0].id);
   }, [cats, expenseCat]);
+  // «The seller» picked as the one owed follows the seller's name as it is typed (erased — nobody picked).
+  useEffect(() => {
+    const name = vendor.trim();
+    setOwed((o) => (o?.kind !== 'seller' ? o : name ? (o.name === name ? o : { kind: 'seller', name }) : undefined));
+  }, [vendor]);
   // The category picked was taken out of the chips (here, or before the sheet opened): the first one offered instead.
   // One not in the list yet (just added — the list follows a moment later) stays.
   useEffect(() => {
@@ -738,6 +748,8 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const overLimit = kind === 'out' && !!cat && cat.monthlyLimitFils > 0 && spent + (amount ?? 0) > cat.monthlyLimitFils;
   const debtIn = kind === 'in' && incomeCat === 'debt';
   const split = kind === 'out' && parts ? partsOf(amount, parts, typed) : undefined;
+  // Something of it taken on credit: whom it is owed to is said before it is saved (v0.61).
+  const onCredit = kind === 'out' && (parts ? parts.includes('credit') : method === 'credit');
   const save = () =>
     run(async () => {
       if (kind === 'in') {
@@ -756,6 +768,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           note,
           overLimitComment: over,
           receipt,
+          owedTo: onCredit ? owed : undefined,
           ...link,
         });
       haptic('success');
@@ -778,6 +791,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
         <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
         <PursePicker value={method} onChange={setMethod} kind={kind} credit={kind === 'out'} parts={kind === 'out' ? parts : undefined} onParts={kind === 'out' ? setParts : undefined} />
         {kind === 'out' && parts && <SplitRows amountFils={amount} ways={parts} typed={typed} onTyped={setTyped} />}
+        {onCredit && <OwedToField value={owed} onChange={setOwed} seller={vendor.trim() ? { kind: 'seller', name: vendor.trim() } : undefined} missing={!owed} />}
         <div>
           <Text size="sm" fw={500} mb={6}>
             {t('expense.category')}
@@ -864,7 +878,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           color={kind === 'in' ? 'green' : 'red'}
           leftSection={kind === 'in' ? <IconArrowDownLeft size={20} /> : <IconArrowUpRight size={20} />}
           loading={busy}
-          disabled={!amount || (kind === 'out' && !expenseCat) || (kind === 'out' && !!parts && !split) || (overLimit && !over.trim())}
+          disabled={!amount || (kind === 'out' && !expenseCat) || (kind === 'out' && !!parts && !split) || (overLimit && !over.trim()) || (onCredit && !owed)}
           onClick={save}
         >
           {t(kind === 'in' ? 'ledger.saveIn' : 'ledger.saveOut')}

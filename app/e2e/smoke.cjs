@@ -394,16 +394,33 @@ async function launchBrowser() {
     await front('button').filter({ hasText: /^Расход$/ }).first().click();
     await dlg.getByLabel('Сумма').fill('1000');
     await dlg.getByRole('radio', { name: 'В кредит' }).click();
+    // v0.61: whom the garage owes is said before it is saved — here a person who paid for it, added in «Найти».
+    if (await dlg.getByRole('button', { name: /^Записать расход/ }).isEnabled()) throw new Error('a credit could be saved with nobody owed');
+    await dlg.locator('[data-owed-field][data-missing]').waitFor();
+    await dlg.locator('[data-owed-find]').click();
+    await page.getByLabel('Кому должны: Имя').fill('Karim Lender');
+    await page.getByLabel('Кому должны: Телефон').fill('050 444 5566');
+    await page.locator('[data-owed-add]').click();
+    await page.getByLabel('Кому должны: Имя').waitFor({ state: 'detached' });
+    await dlg.locator('[data-owed-chip="Karim Lender"][data-active="true"]').waitFor();
+    await shot('22b-credit-owed-to');
     await dlg.getByRole('button', { name: /^Записать расход/ }).click();
     await dlg.waitFor({ state: 'hidden' });
     if ((await cashNow()) !== before) throw new Error('an expense on credit moved the cash');
+    // The book names him on the line.
+    await front('[data-owed-to="Karim Lender"]').first().waitFor();
     await page.goto(BASE + '#/money?tab=debts');
     await front('.kpi').filter({ hasText: 'Мы должны' }).filter({ hasText: '1 000,00' }).waitFor();
     // v0.30: what the garage owes is its own tab.
     await front('.kpi-tab[data-side="owe"]').click();
+    // v0.61: the person is a card of his own, his phone under the name.
+    const karim = front('.debt-card').filter({ hasText: 'Karim Lender' });
+    await karim.filter({ hasText: '+971 50 444 5566' }).filter({ hasText: '1 000,00' }).waitFor();
     await shot('22c-money-debts', true);
     // 300 of it paid in cash: the cash −300, 700 left.
-    await front('.list-row').filter({ hasText: 'Запчасти' }).filter({ hasText: '1 000,00' }).first().click();
+    await karim.locator('.list-row').first().click();
+    await front('.debt-card.is-open').filter({ hasText: 'Karim Lender' }).locator('.list-row').filter({ hasText: 'Запчасти' }).filter({ hasText: '1 000,00' }).first().click();
+    await dlg.locator('[data-owed-chip="Karim Lender"][data-active="true"]').waitFor();
     await dlg.getByLabel('Сумма').fill('300');
     await dlg.getByRole('button', { name: /^Оплатить/ }).click();
     await dlg.locator('[data-credit-left="70000"]').waitFor();
@@ -1650,7 +1667,7 @@ async function launchBrowser() {
     await page.waitForTimeout(500);
     await shot('24-cash', true);
     // The money sheet (Excel, as the garage's Money Tracker): the export holds the whole book — the money that moved
-    // (v0.58: an expense taken on credit is a line of the book, in the sheet it is its payments); a sheet imports once.
+    // and (v0.61) each expense taken on credit, Payment «Credit», whom it is owed to in its notes; a sheet imports once.
     const book = await page.evaluate(async () => {
       const { exportMoneySheet } = await import('/src/services/moneySheet.ts');
       const { readMoneyWorkbook } = await import('/src/domain/moneySheet.ts');
@@ -1658,9 +1675,10 @@ async function launchBrowser() {
       const { moved } = await import('/src/domain/ledger.ts');
       const file = await exportMoneySheet();
       const entries = (await loadLedger()).entries;
-      return { rows: (await readMoneyWorkbook(new Uint8Array(await file.arrayBuffer()))).rows.length, entries: entries.filter(moved).length, credit: entries.length - entries.filter(moved).length, name: file.name };
+      const rows = (await readMoneyWorkbook(new Uint8Array(await file.arrayBuffer()))).rows;
+      return { rows: rows.length, entries: entries.filter(moved).length, credit: entries.length - entries.filter(moved).length, owed: rows.filter((r) => r.payment === 'Credit' && r.notes.startsWith('Owed to Karim Lender')).length, name: file.name };
     });
-    if (!book.rows || book.rows !== book.entries || !book.credit || !/^Money Tracker/.test(book.name)) throw new Error('money sheet export: ' + JSON.stringify(book));
+    if (!book.rows || book.rows !== book.entries + book.credit || !book.credit || book.owed !== 1 || !/^Money Tracker/.test(book.name)) throw new Error('money sheet export: ' + JSON.stringify(book));
     const sheet = await page.evaluate(async () => {
       const { buildMoneyWorkbook } = await import('/src/domain/moneySheet.ts');
       const b = buildMoneyWorkbook({

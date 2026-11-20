@@ -32,6 +32,7 @@ import { DebtsOverview } from './Debts';
 import { EntryDetails, LedgerTab, useCategoryLabel } from './LedgerTab';
 import { EntrySheet, PURSE_ICON, wayLabel } from './MoneyEntry';
 import { MoneySheetActions } from './MoneySheetActions';
+import { OwedName } from './OwedTo';
 
 const METHOD_ICON: Record<ExpenseMethod, Icon> = PURSE_ICON;
 
@@ -141,6 +142,13 @@ function CashTab() {
                 subtitle={
                   <>
                     {data.photos.has(entry.id) && <IconPaperclip size={13} className="inline-icon" aria-label={t('ledger.proof')} />}
+                    {/* A credit paid: to whom (v0.61). */}
+                    {entry.owedTo && (
+                      <>
+                        <OwedName name={entry.owedTo} />
+                        {' · '}
+                      </>
+                    )}
                     {`${timed ? formatDateTime(m.at) : formatDate(date)}${m.note ? ` · ${m.note}` : ''}`}
                   </>
                 }
@@ -228,16 +236,18 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const [shown, setShown] = useState<string | null>(null);
   const [month, setMonth] = useState(monthKey());
   const data = useScreenLiveQuery(async () => {
-    const [list, cats, vehicles, credits] = await Promise.all([
+    const [list, cats, vehicles, credits, lenders] = await Promise.all([
       db.expenses.filter((e) => e.date.startsWith(month) && !e.voidedAt).reverse().sortBy('date'),
       db.expenseCategories.toArray(),
       db.vehicles.toArray(),
       loadCredits(),
+      db.lenders.toArray(),
     ]);
     const photos = await proofIndex(list.map((e) => e.id));
     // On credit: what is still owed on each (counted as spent all the same — once, when it was taken).
     const owed = new Map(credits.map((c) => [c.expense.id, c.leftFils]));
-    return { list, cats, photos, owed, vehicles: new Map(vehicles.map((v) => [v.id, v])) };
+    // A person who paid for it (v0.61): named on its row (a seller is named in the title already).
+    return { list, cats, photos, owed, lenders: new Map(lenders.map((l) => [l.id, l.name])), vehicles: new Map(vehicles.map((v) => [v.id, v])) };
   }, [month]);
   // The open one is read by itself: moved to another month (v0.23), it stays open and follows; deleted — it closes.
   const opened = useScreenLiveQuery(async () => (shown ? ((await db.expenses.get(shown)) ?? null) : null), [shown]);
@@ -315,6 +325,11 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
                 title={`${c ? (lang === 'ru' ? c.nameRu : c.nameEn) : ''}${e.vendor ? ` · ${e.vendor}` : ''}`}
                 subtitle={
                   <Group gap={6} wrap="nowrap" mt={2}>
+                    {e.method === 'credit' && e.lenderId && data.lenders.get(e.lenderId) && (
+                      <Text span size="xs" style={{ display: 'flex', minWidth: 0, flexShrink: 1 }}>
+                        <OwedName name={data.lenders.get(e.lenderId)!} />
+                      </Text>
+                    )}
                     {e.vehicleId && data.vehicles.get(e.vehicleId) && <PlateText plate={data.vehicles.get(e.vehicleId)!.plate} size="xs" />}
                     <Text span size="xs" c="dimmed" lineClamp={2}>
                       {`${formatDate(e.date)} · ${wayLabel(t, e.method, 'out')}`}

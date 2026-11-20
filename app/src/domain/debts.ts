@@ -1,7 +1,7 @@
 import { amountDue } from './invoice';
 import { summarize } from './items';
 import { sellerKey } from './suppliers';
-import type { CreditPayment, Customer, Expense, HistoryInvoice, Income, Invoice, Order, OrderItem, Payment, Supplier, Vehicle } from './types';
+import type { CreditPayment, Customer, Expense, HistoryInvoice, Income, Invoice, Lender, Order, OrderItem, Payment, Supplier, Vehicle } from './types';
 
 /*
  * Who owes whom (v0.20).
@@ -165,51 +165,98 @@ export function allocate(amountFils: number, debts: { orderId: string; dueFils: 
   return { parts: r.parts.map((p) => ({ orderId: p.key, amountFils: p.amountFils })), restFils: r.restFils };
 }
 
-/** A seller the garage owes (v0.50.2): one card, its credits inside. */
-export interface Creditor<T> {
+/**
+ * Whom an expense on credit is owed to (v0.61): the person who paid for it (`lender`), else the seller — the garage's
+ * supplier it was bought from, or the seller's name as written. `key` is the same for every credit of the same one.
+ */
+export interface OwedTo {
   key: string;
   name: string;
+  phone?: string;
+  /** A person who paid for the garage (`Expense.lenderId`). */
+  lender?: Pick<Lender, 'id' | 'name' | 'phone'>;
   /** The garage's supplier it is, when it is one. */
   supplier?: Pick<Supplier, 'id' | 'name' | 'phone'>;
-  /** Its credits, the oldest first (paid off in that order). */
-  credits: T[];
-  leftFils: number;
 }
 
-/**
- * The garage's credits by whom they are owed to (v0.50.2, the user: «один поставщик на двух квитанциях в кредит
- * отображается как два кредитора — надо один поставщик, раскрывающийся список с его кредитами»): the supplier the
- * expense was bought from (`supplierId`), else the garage's supplier of the same name (its company words aside —
- * `sellerKey`), else the seller's name as written. A credit with no seller is on its own (`loose`). The seller owed
- * most first.
- */
-export function groupCredits<T extends { expense: Pick<Expense, 'id' | 'vendor' | 'supplierId' | 'date'>; leftFils: number }>(
-  list: T[],
-  suppliers: Pick<Supplier, 'id' | 'name' | 'phone' | 'archivedAt'>[],
-): { creditors: Creditor<T>[]; loose: T[] } {
-  const byId = new Map(suppliers.map((s) => [s.id, s]));
-  const byKey = new Map<string, (typeof suppliers)[number]>();
+type SupplierLike = Pick<Supplier, 'id' | 'name' | 'phone' | 'archivedAt'>;
+type LenderLike = Pick<Lender, 'id' | 'name' | 'phone'>;
+
+/** The suppliers and the lenders, ready to tell whom a credit is owed to (`owedToOf`) — made once for a list. */
+export interface OwedIndex {
+  lenders: Map<string, LenderLike>;
+  suppliers: Map<string, SupplierLike>;
+  /** The suppliers by their name without the company's words (`sellerKey`): a seller written another way. */
+  byKey: Map<string, SupplierLike>;
+}
+
+export function owedIndex(suppliers: SupplierLike[], lenders: LenderLike[] = []): OwedIndex {
+  const byKey = new Map<string, SupplierLike>();
   for (const s of suppliers) {
     const k = sellerKey(s.name);
     if (k.length >= 3 && (!byKey.has(k) || !s.archivedAt)) byKey.set(k, s);
   }
+  return { lenders: new Map(lenders.map((l) => [l.id, l])), suppliers: new Map(suppliers.map((s) => [s.id, s])), byKey };
+}
+
+/**
+ * Whom an expense on credit is owed to (v0.61): its lender (a person who paid for it); else (v0.50.2) the supplier it
+ * was bought from (`supplierId`), else the garage's supplier of the same name (its company words aside — `sellerKey`),
+ * else the seller's name as written. Nobody — undefined (an old credit typed with no seller).
+ */
+export function owedToOf(e: Pick<Expense, 'vendor' | 'supplierId' | 'lenderId'>, idx: OwedIndex): OwedTo | undefined {
+  const lender = e.lenderId ? idx.lenders.get(e.lenderId) : undefined;
+  if (lender) return { key: `l:${lender.id}`, name: lender.name, phone: lender.phone || undefined, lender: { id: lender.id, name: lender.name, phone: lender.phone } };
+  const vendorKey = sellerKey(e.vendor ?? '');
+  const supplier = (e.supplierId ? idx.suppliers.get(e.supplierId) : undefined) ?? (vendorKey.length >= 3 ? idx.byKey.get(vendorKey) : undefined);
+  if (supplier) return { key: `s:${supplier.id}`, name: supplier.name, phone: supplier.phone || undefined, supplier: { id: supplier.id, name: supplier.name, phone: supplier.phone } };
+  if (vendorKey.length >= 3) return { key: `v:${vendorKey}`, name: e.vendor!.trim() };
+  return undefined;
+}
+
+/** Whom the garage owes (v0.50.2: a seller; v0.61: a person too): one card, its credits inside. */
+export interface Creditor<T> extends OwedTo {
+  /** Its credits still owed, the oldest first (paid off in that order). */
+  credits: T[];
+  leftFils: number;
+  /** Its credits paid off already (v0.61: the whole story with him), the latest first. */
+  settled: T[];
+}
+
+/**
+ * The garage's credits by whom they are owed to (v0.50.2, the user: «один поставщик на двух квитанциях в кредит
+ * отображается как два кредитора — надо один поставщик, раскрывающийся список с его кредитами»; v0.61: «если один
+ * человек несколько раз платил в долг в разное время на разные расходы — это должно отображаться в «Мы должны»») —
+ * `owedToOf`. A credit owed to nobody is on its own (`loose`). The one owed most first; one owed nothing any more is not
+ * among them — its paid-off credits are under the ones still owed (`settled`).
+ */
+export function groupCredits<T extends { expense: Pick<Expense, 'id' | 'vendor' | 'supplierId' | 'lenderId' | 'date'>; leftFils: number }>(
+  list: T[],
+  suppliers: SupplierLike[],
+  lenders: LenderLike[] = [],
+): { creditors: Creditor<T>[]; loose: T[] } {
+  const idx = owedIndex(suppliers, lenders);
   const groups = new Map<string, Creditor<T>>();
   const loose: T[] = [];
   for (const d of list) {
-    const vendorKey = sellerKey(d.expense.vendor ?? '');
-    const supplier = (d.expense.supplierId ? byId.get(d.expense.supplierId) : undefined) ?? (vendorKey.length >= 3 ? byKey.get(vendorKey) : undefined);
-    const key = supplier ? `s:${supplier.id}` : vendorKey.length >= 3 ? `v:${vendorKey}` : '';
-    if (!key) {
-      loose.push(d);
+    const to = owedToOf(d.expense, idx);
+    if (!to) {
+      if (d.leftFils > 0) loose.push(d);
       continue;
     }
-    const g = groups.get(key) ?? { key, name: supplier?.name ?? d.expense.vendor!.trim(), supplier: supplier ? { id: supplier.id, name: supplier.name, phone: supplier.phone } : undefined, credits: [], leftFils: 0 };
-    g.credits.push(d);
-    g.leftFils += d.leftFils;
-    groups.set(key, g);
+    const g = groups.get(to.key) ?? { ...to, credits: [], settled: [], leftFils: 0 };
+    if (d.leftFils > 0) g.credits.push(d);
+    else g.settled.push(d);
+    g.leftFils += Math.max(0, d.leftFils);
+    groups.set(to.key, g);
   }
+  for (const [k, g] of groups) if (!g.credits.length) groups.delete(k);
   const creditors = [...groups.values()];
-  for (const g of creditors) g.credits.sort((a, b) => a.expense.date.localeCompare(b.expense.date) || a.expense.id.localeCompare(b.expense.id));
+  const oldest = (a: T, b: T) => a.expense.date.localeCompare(b.expense.date) || a.expense.id.localeCompare(b.expense.id);
+  for (const g of creditors) {
+    g.credits.sort(oldest);
+    g.settled.sort((a, b) => oldest(b, a));
+  }
   return { creditors: creditors.sort((a, b) => b.leftFils - a.leftFils || a.name.localeCompare(b.name)), loose };
 }
 

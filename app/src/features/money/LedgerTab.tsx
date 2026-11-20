@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dayHeading, formatDate, monthKey, monthLong, monthRange } from '../../domain/dates';
-import { moved, periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
+import { moved, noteBesides, periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory } from '../../domain/types';
 import { companyDebtOf, debtPaymentHistory, debtPaymentParts } from '../../services/debts';
@@ -20,6 +20,7 @@ import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks
 import { DataTable, type Column } from '../../ui/DataTable';
 import { CreditSheet } from './Debts';
 import { EntrySheet, IncomeChips, LinkPicker, PURSE_ICON, PursePicker, SplitParts, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
+import { ExpenseOwedTo, OwedName } from './OwedTo';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
 
@@ -258,6 +259,7 @@ export function EntryDetails({
           <PursePicker value={entry.method ?? 'cash'} onChange={(method) => method !== entry.method && change({ method })} kind={entry.source === 'payment' ? 'in' : entry.kind} credit={entry.source === 'expense'} />
         )}
         {entry.source === 'expense' && entry.splitId && <SplitParts splitId={entry.splitId} current={entry.id} />}
+        {entry.source === 'expense' && entry.method === 'credit' && live && <ExpenseOwedTo expenseId={entry.id} />}
         {entry.source === 'expense' && entry.method === 'credit' && <CreditLeft expenseId={entry.id} />}
         {debt && <DebtParts entry={entry} />}
         {entry.closing && (
@@ -352,7 +354,7 @@ export function LedgerTab() {
         const v = e.vehicleId ? data.vehicles.get(e.vehicleId) : undefined;
         const c = e.customerId ? data.customers.get(e.customerId) : undefined;
         const o = e.orderId ? data.orders.get(e.orderId) : undefined;
-        return [label(e), e.note, v?.plateSearch, v?.make, v?.model, c?.name, c?.companyName, o ? `№${o.number}` : '', (e.amountFils / 100).toFixed(2)].some((s) => s?.toLowerCase().includes(query));
+        return [label(e), e.note, e.owedTo, v?.plateSearch, v?.make, v?.model, c?.name, c?.companyName, o ? `№${o.number}` : '', (e.amountFils / 100).toFixed(2)].some((s) => s?.toLowerCase().includes(query));
       })
       .reverse();
   }, [data, from, to, kind, purse, q, label]);
@@ -400,7 +402,14 @@ export function LedgerTab() {
               {data.photos.has(e.id) && <IconPaperclip size={14} className="inline-icon" aria-label={t('ledger.proof')} />}
               {label(e)}
             </span>
-            {e.note && <span className="dt-sub dt-clip">{e.note}</span>}
+            {(e.note || e.owedTo) && (
+              <span className="dt-sub dt-clip">
+                {/* On credit, and what is paid towards it: whom the garage owes (v0.61), before the note. */}
+                {e.owedTo && <OwedName name={e.owedTo} />}
+                {e.owedTo && noteBesides(e) ? ' · ' : ''}
+                {noteBesides(e)}
+              </span>
+            )}
           </span>
         </span>
       ),
@@ -621,10 +630,17 @@ export function LedgerTab() {
                       }
                       subtitle={
                         <Stack gap={3} mt={1}>
-                          {/* The note is what the row is about (the "Notes" of the money sheet): shown in full. */}
-                          {e.note && (
+                          {/* On credit, and what is paid towards it: whom the garage owes (v0.61) — first, as it matters. */}
+                          {e.owedTo && (
+                            <Text span size="sm" lh={1.3} style={{ display: 'flex', minWidth: 0 }}>
+                              <OwedName name={e.owedTo} />
+                            </Text>
+                          )}
+                          {/* The note is what the row is about (the "Notes" of the money sheet): shown in full — the seller
+                              owed is named once. */}
+                          {noteBesides(e) && (
                             <Text span size="sm" c="var(--mantine-color-text)" lineClamp={2} lh={1.3}>
-                              {e.note}
+                              {noteBesides(e)}
                             </Text>
                           )}
                           <Group gap={6} wrap="nowrap">

@@ -1,8 +1,10 @@
 import { db } from '../db/db';
 import { dubaiDate } from '../domain/dates';
-import { moved, type LedgerEntry, type Purse } from '../domain/ledger';
-import { buildMoneyWorkbook, readMoneyWorkbook, type MoneyPayment, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
+import { noteBesides, type LedgerEntry, type Purse } from '../domain/ledger';
+import { buildMoneyWorkbook, owedInNotes, readMoneyWorkbook, type MoneyPayment, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
 import { incomeCategoryNamed } from '../domain/incomeCategories';
+import { sameLender, type OwedPick } from '../domain/lenders';
+import { sellerKey } from '../domain/suppliers';
 import { formatPlate } from '../domain/plates';
 import type { ExpenseCategory, IncomeCategory } from '../domain/types';
 import { AppError } from './errors';
@@ -57,8 +59,9 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
   const orderBy = new Map(orders.map((o) => [o.id, o]));
   const carBy = new Map(vehicles.map((v) => [v.id, v]));
   const customerBy = new Map(customers.map((c) => [c.id, c]));
-  // The money that moved: an expense taken on credit (v0.58, a line of the book) is in the sheet as its payments.
-  const rows: MoneyRow[] = book.entries.filter(moved).map((e) => {
+  // The money that moved, and (v0.61, the user: «тот, кто заплатил в долг, должен отображаться… в таблице при экспорте»)
+  // each expense taken on credit — Payment «Credit», in no balance and no total, whom it is owed to first in its notes.
+  const rows: MoneyRow[] = book.entries.map((e) => {
     const o = e.orderId ? orderBy.get(e.orderId) : undefined;
     const v = e.vehicleId ? carBy.get(e.vehicleId) : undefined;
     // The sheet's notes say what the money was for: the job and its car, then the note typed.
@@ -67,14 +70,17 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
     const c = debt && e.customerId ? customerBy.get(e.customerId) : undefined;
     // A debt paid names its customer (it has no job of its own: it may pay several).
     const about = debt ? ['Debt payment', c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) : ''].filter(Boolean).join(' ') : [o ? `#${o.number}` : '', car].filter(Boolean).join(' ');
-    const what = e.source === 'closing' ? 'Day closing difference' : e.source === 'credit' ? ['Credit paid', e.note].filter(Boolean).join(': ') : e.note ?? '';
+    const paidTo = e.source === 'credit' ? ['Credit paid', e.owedTo ? `to ${e.owedTo}` : ''].filter(Boolean).join(' ') : '';
+    // The seller owed is named once (its name before the note goes — `noteBesides`).
+    const what = e.source === 'closing' ? 'Day closing difference' : e.source === 'credit' ? [paidTo, noteBesides(e)].filter(Boolean).join(': ') : noteBesides(e) ?? '';
+    const credit = e.purse === 'credit';
     return {
       date: e.date,
       type: e.kind === 'in' ? 'Income' : 'Expense',
       amountFils: e.amountFils,
-      payment: e.purse === 'cash' ? 'Cash' : e.purse === 'outside' ? 'Owner' : 'Card',
+      payment: credit ? 'Credit' : e.purse === 'cash' ? 'Cash' : e.purse === 'outside' ? 'Owner' : 'Card',
       category: sheetCategory(e, catBy, incomeBy),
-      notes: [about, what].filter(Boolean).join(' — '),
+      notes: [credit && e.owedTo ? `Owed to ${e.owedTo}` : '', about, what].filter(Boolean).join(' — '),
     };
   });
   return { cashStartFils: book.cashStartFils, cardStartFils: book.cardStartFils, rows };
@@ -88,7 +94,7 @@ export async function exportMoneySheet(): Promise<File> {
 
 /* ---------------- Import ---------------- */
 
-const purseOfSheet = (p: MoneyPayment): Purse => (p === 'Card' ? 'card' : p === 'Owner' ? 'outside' : 'cash');
+const purseOfSheet = (p: MoneyPayment): Purse => (p === 'Card' ? 'card' : p === 'Owner' ? 'outside' : p === 'Credit' ? 'credit' : 'cash');
 
 /** The income category of a sheet's one: the sheet's own words, else one of the garage's by its name (v0.26), else none. */
 const incomeCategory = (c: string, list: IncomeCategory[]): string | undefined =>
@@ -173,6 +179,18 @@ export async function planMoneyImport(bytes: Uint8Array): Promise<MoneyImportPla
   };
 }
 
+/**
+ * Whom a «Credit» row of the sheet is owed to, by the name in its notes: a person of the list by that name, else the
+ * supplier of the base by that name (its company words aside), else a new person.
+ */
+async function owedNamed(name: string): Promise<OwedPick> {
+  const lender = sameLender(await db.lenders.toArray(), { name, phone: '' });
+  if (lender) return { kind: 'lender', id: lender.id, name: lender.name };
+  const k = sellerKey(name);
+  const supplier = k.length >= 3 ? (await db.suppliers.toArray()).find((s) => !s.archivedAt && sellerKey(s.name) === k) : undefined;
+  return supplier ? { kind: 'supplier', id: supplier.id, name: supplier.name } : { kind: 'new', name };
+}
+
 /** Add the plan's rows to the book (and its opening balances when the book has none). Returns how many. */
 export async function importMoneyPlan(plan: MoneyImportPlan): Promise<number> {
   const [cats, incomeCats] = await Promise.all([db.expenseCategories.toArray(), db.incomeCategories.toArray()]);
@@ -181,18 +199,23 @@ export async function importMoneyPlan(plan: MoneyImportPlan): Promise<number> {
   if (plan.opening) await setOpeningBalances(plan.sheet.cashStartFils, plan.sheet.cardStartFils);
   let n = 0;
   for (const r of plan.rows) {
-    const method = r.payment === 'Card' ? 'card' : r.payment === 'Owner' ? 'outside' : 'cash';
+    // Money in comes by a way it can be counted: «Credit» is only a way to spend.
+    const method = r.payment === 'Card' ? 'card' : r.payment === 'Owner' ? 'outside' : r.payment === 'Credit' && r.type === 'Expense' ? 'credit' : 'cash';
     if (r.type === 'Income') {
       const category = incomeCategory(r.category, incomeCats);
       // A category the app has no place for stays in the note.
       const note = !category && r.category ? [r.category, r.notes].filter(Boolean).join(': ') : r.notes;
-      await addIncome({ date: r.date, category: category ?? 'other', amountFils: r.amountFils, method, note });
+      await addIncome({ date: r.date, category: category ?? 'other', amountFils: r.amountFils, method: method === 'credit' ? 'cash' : method, note });
     } else {
       const cat = byCode.get(expenseCode(r.category)) ?? other;
-      const note = cat === other && r.category && !/^other$/i.test(r.category) ? [r.category, r.notes].filter(Boolean).join(': ') : r.notes;
+      // On credit (v0.61): whom it is owed to, as the app writes it («Owed to Ahmed — …») — that person (the same one
+      // the app knows by that name, else a new one); the rest is the note.
+      const owed = method === 'credit' ? owedInNotes(r.notes) : { rest: r.notes };
+      const notes = owed.rest;
+      const note = cat === other && r.category && !/^other$/i.test(r.category) ? [r.category, notes].filter(Boolean).join(': ') : notes;
       // History from the sheet: a month already over the category's limit is not asked about again.
       const over = cat.monthlyLimitFils > 0 && (await categoryMonthSpent(cat.id, r.date.slice(0, 7))) + r.amountFils > cat.monthlyLimitFils;
-      await addExpense({ date: r.date, categoryId: cat.id, amountFils: r.amountFils, vatFils: 0, method, note, overLimitComment: over ? 'Money Tracker' : undefined });
+      await addExpense({ date: r.date, categoryId: cat.id, amountFils: r.amountFils, vatFils: 0, method, note, overLimitComment: over ? 'Money Tracker' : undefined, owedTo: owed.name ? await owedNamed(owed.name) : undefined });
     }
     n++;
   }

@@ -26,6 +26,7 @@ import { shareOrDownload } from '../../ui/share';
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { EntryDetails } from './LedgerTab';
 import { EntrySheet, PursePicker, wayLabel, type EntryPreset } from './MoneyEntry';
+import { ExpenseOwedTo, LenderSheet } from './OwedTo';
 
 /*
  * Who owes whom (v0.20): the customers' debts as one card per customer — the board's "Debts" and "Money → Debts"
@@ -209,19 +210,24 @@ export function CompanyDebtList({ list, cats, onOpen }: { list: CompanyDebt[]; c
 }
 
 /**
- * A seller the garage owes (v0.50.2, the user: «один поставщик — раскрывающийся список, а там его кредиты»): folded —
- * the name and what is owed to it all; a tap unfolds its credits (each opens to pay it, or to see it), the oldest first,
- * and «Оплата» — one sum to the seller, spread over its credits the oldest first; WhatsApp to the seller.
+ * Whom the garage owes (v0.50.2, the user: «один поставщик — раскрывающийся список, а там его кредиты»; v0.61: a person
+ * who paid for the garage too — «если один человек несколько раз платил в долг в разное время на разные расходы»):
+ * folded — the name and what is owed to him all; a tap unfolds his credits (each opens to pay it, or to see it), the
+ * oldest first — for a person, where each was bought — and the ones paid off already under them; «Оплата» — one sum to
+ * him, spread over his credits the oldest first; WhatsApp; a person's name and phone («Контакт»).
  */
-const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay }: { c: Creditor<CompanyDebt>; catName: (id: string) => string; onOpen: (expenseId: string) => void; onPay: (c: Creditor<CompanyDebt>) => void }) {
+const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onContact }: { c: Creditor<CompanyDebt>; catName: (id: string) => string; onOpen: (expenseId: string) => void; onPay: (c: Creditor<CompanyDebt>) => void; onContact: (c: Creditor<CompanyDebt>) => void }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const phone = c.supplier?.phone;
+  const [past, setPast] = useState(false);
+  const phone = c.phone;
+  // A person's credit says where it was bought (the seller is not who is owed).
+  const where = (e: CompanyDebt['expense']) => (c.lender ? e.vendor ?? '' : '');
   return (
-    <List className={open ? 'debt-card is-open' : 'debt-card'}>
+    <List className={open ? 'debt-card is-open' : 'debt-card'} data-creditor={c.name}>
       <ListRow
         onClick={() => setOpen((o) => !o)}
-        left={<PersonAvatar name={c.name} company />}
+        left={<PersonAvatar name={c.name} company={!c.lender} />}
         title={
           <Text span inherit fw={600} lineClamp={2}>
             {c.name}
@@ -242,10 +248,41 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay }: {
             chevron
             onClick={() => onOpen(e.id)}
             title={[formatDate(e.date), catName(e.categoryId)].join(' · ')}
-            subtitle={[paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ') || undefined}
+            subtitle={[where(e), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ') || undefined}
             right={<Money fils={leftFils} size="sm" c="orange.7" roll />}
           />
         ))}
+        {/* What was owed to him and is paid off already (v0.61): the whole story with him, folded under the debts. */}
+        {c.settled.length > 0 && (
+          <ListRow
+            onClick={() => setPast((p) => !p)}
+            title={
+              <Text span inherit c="dimmed" fw={500} data-settled={c.settled.length}>
+                {t('owed.settled', { count: c.settled.length })}
+              </Text>
+            }
+            right={<IconChevronDown size={18} color="var(--app-label-3)" style={{ transform: past ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} aria-hidden />}
+          />
+        )}
+        {/* Not a second Collapse inside the card's: the outer one would keep its old height and cut the tiles. */}
+        {past && (
+          <div className="rise-enter">
+            {c.settled.map(({ expense: e }) => (
+              <ListRow
+                key={e.id}
+                chevron
+                onClick={() => onOpen(e.id)}
+                title={
+                  <Text span inherit c="dimmed">
+                    {[formatDate(e.date), catName(e.categoryId)].join(' · ')}
+                  </Text>
+                }
+                subtitle={[where(e), e.note ?? ''].filter(Boolean).join(' · ') || undefined}
+                right={<Money fils={e.amountFils} size="sm" c="dimmed" />}
+              />
+            ))}
+          </div>
+        )}
         <div className="debt-actions">
           <button type="button" className="action-tile" data-pay-supplier onClick={() => onPay(c)}>
             <span className="tile-icon" style={{ '--c': 'var(--mantine-color-red-6)' } as React.CSSProperties}>
@@ -259,6 +296,14 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay }: {
                 <IconBrandWhatsapp size={21} stroke={1.9} aria-hidden />
               </span>
               <span>WhatsApp</span>
+            </button>
+          )}
+          {c.lender && (
+            <button type="button" className="action-tile" data-lender-contact onClick={() => onContact(c)}>
+              <span className="tile-icon" style={{ '--c': 'var(--mantine-color-cobalt-6)' } as React.CSSProperties}>
+                <IconUser size={21} stroke={1.9} aria-hidden />
+              </span>
+              <span>{t('owed.contact')}</span>
             </button>
           )}
         </div>
@@ -290,7 +335,7 @@ function SupplierPaySheet({ c, opened, onClose }: { c: Creditor<CompanyDebt>; op
                 <ListRow
                   key={p.key}
                   title={formatDate(d.expense.date)}
-                  subtitle={d.expense.note || undefined}
+                  subtitle={[c.lender ? d.expense.vendor ?? '' : '', d.expense.note ?? ''].filter(Boolean).join(' · ') || undefined}
                   right={
                     <Text size="sm" className="tnum">
                       <Money fils={p.amountFils} size="sm" /> <span className="chip-note">{t('debt.ofTotal', { sum: formatAed(d.leftFils) })}</span>
@@ -330,19 +375,21 @@ function SupplierPaySheet({ c, opened, onClose }: { c: Creditor<CompanyDebt>; op
   );
 }
 
-/** What the garage owes, by whom: a card per seller; a credit with no seller as its own row. */
+/** What the garage owes, by whom: a card per seller or person; a credit owed to nobody yet as its own row. */
 export function CreditorList({ creditors, loose, cats, onOpen }: { creditors: Creditor<CompanyDebt>[]; loose: CompanyDebt[]; cats?: ExpenseCategory[]; onOpen: (expenseId: string) => void }) {
   const catName = useCategoryName(cats);
   const [pay, setPay] = useState<Creditor<CompanyDebt> | null>(null);
+  const [contact, setContact] = useState<Creditor<CompanyDebt> | null>(null);
   return (
     <>
       <Stack gap="md" className="debt-cards">
         {creditors.map((c) => (
-          <CreditorCard key={c.key} c={c} catName={catName} onOpen={onOpen} onPay={setPay} />
+          <CreditorCard key={c.key} c={c} catName={catName} onOpen={onOpen} onPay={setPay} onContact={setContact} />
         ))}
         {loose.length > 0 && <CompanyDebtList list={loose} cats={cats} onOpen={onOpen} />}
       </Stack>
       <SheetFor value={pay}>{(c, o) => <SupplierPaySheet c={c} opened={o} onClose={() => setPay(null)} />}</SheetFor>
+      <SheetFor value={contact?.lender}>{(l, o) => <LenderSheet lender={l} opened={o} onClose={() => setContact(null)} />}</SheetFor>
     </>
   );
 }
@@ -399,6 +446,8 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
               {[formatDate(d.expense.date), d.expense.note ?? ''].filter(Boolean).join(' · ')}
             </Text>
           </Box>
+          {/* Whom it is owed to (v0.61): said here, changed with a tap. */}
+          <ExpenseOwedTo expenseId={expenseId} />
           {d.paid.length > 0 && (
             <Box>
               <div className="group-title">{t('debt.payments')}</div>
