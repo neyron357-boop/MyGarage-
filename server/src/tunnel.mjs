@@ -50,9 +50,21 @@ async function answers(url, tries = 3) {
   return false;
 }
 
-export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir = exe ? path.dirname(exe) : '' }) {
+/**
+ * `alive`, `reach` and `every` are for the tests: is this process the tunnel, does the address reach this server, how
+ * often the tunnel is looked at.
+ */
+export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir = exe ? path.dirname(exe) : '', alive = isTunnel, reach = answers, every = 15_000 }) {
   const stateFile = dir ? path.join(dir, 'tunnel.json') : '';
   const outFile = dir ? path.join(dir, 'cloudflared.log') : '';
+  /** The address cloudflared has written in its output, if it has. */
+  const written = () => {
+    try {
+      return tunnelAddress(fs.readFileSync(outFile, 'utf8'));
+    } catch {
+      return '';
+    }
+  };
   let pid = 0;
   let url = '';
   let wanted = false;
@@ -86,14 +98,25 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
   function watching() {
     if (watch) return;
     watch = setInterval(() => {
-      if (!wanted || starting || isTunnel(pid)) return;
+      if (!wanted || starting) return;
+      if (alive(pid)) {
+        // Its address read whenever it is written (v0.59.4): after a reboot cloudflared took 85 s to give one, the
+        // server had stopped waiting after 60 — and for 8 hours the phone did not learn where the server was.
+        const found = url ? '' : written();
+        if (found) {
+          tries = 0;
+          setUrl(found);
+          writeState();
+        }
+        return;
+      }
       log('tunnel stopped, again in a moment');
       pid = 0;
       setUrl('');
       tries++;
       clearTimeout(again);
       again = setTimeout(() => void start(), Math.min(60_000, 2000 * 2 ** Math.min(tries, 5)));
-    }, 15_000);
+    }, every);
     watch.unref?.();
   }
 
@@ -104,24 +127,32 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
     try {
       // Left running by this server before it was started again: kept, with its address.
       const saved = readState();
-      if (saved?.pid && saved.url) {
-        if (isTunnel(saved.pid)) {
-          if (await answers(saved.url)) {
-            pid = saved.pid;
-            tries = 0;
-            setUrl(saved.url);
-            log(`tunnel kept: ${saved.url}`);
-            watching();
-            return;
-          }
-          log(`tunnel ${saved.url} does not answer: a new one`);
-          try {
-            process.kill(saved.pid);
-          } catch {
-            // gone already
-          }
-        } else log(`tunnel ${saved.url} is not running any more: a new one`);
-      }
+      if (saved?.pid && alive(saved.pid)) {
+        // Its address as kept, else from its own output (v0.59.4: the server before had stopped waiting for it).
+        const was = saved.url || written();
+        if (!was) {
+          // Still starting: kept — its address is read as soon as it is written (`watching`), not a second tunnel.
+          pid = saved.pid;
+          log('tunnel kept, its address not written yet');
+          watching();
+          return;
+        }
+        if (await reach(was)) {
+          pid = saved.pid;
+          tries = 0;
+          setUrl(was);
+          if (was !== saved.url) writeState();
+          log(`tunnel kept: ${was}`);
+          watching();
+          return;
+        }
+        log(`tunnel ${was} does not answer: a new one`);
+        try {
+          process.kill(saved.pid);
+        } catch {
+          // gone already
+        }
+      } else if (saved?.url) log(`tunnel ${saved.url} is not running any more: a new one`);
       if (!wanted) return;
       // The last tunnel's own output kept beside (v0.42.2): why it stopped, if it did.
       try {
@@ -136,16 +167,10 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
       child.unref();
       pid = child.pid ?? 0;
       writeState();
-      // Its address, from its output (in the file).
+      // Its address, from its output (in the file): looked for often for a minute, then by `watching` until it is there.
       for (let i = 0; i < 120 && wanted && pid === child.pid; i++) {
         await new Promise((r) => setTimeout(r, 500));
-        let text = '';
-        try {
-          text = fs.readFileSync(outFile, 'utf8');
-        } catch {
-          // not written yet
-        }
-        const found = tunnelAddress(text);
+        const found = written();
         if (found) {
           tries = 0;
           setUrl(found);

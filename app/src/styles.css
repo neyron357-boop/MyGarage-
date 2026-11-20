@@ -4471,6 +4471,11 @@ html.kb .screen-bottom > .sticky-bar {
 .viewer-img[data-animate='true'] {
   transition: transform var(--dur-2) var(--ease-out);
 }
+/* No photo to show (v0.59.4: not here, and the server out of reach) — a quiet mark, not a broken picture. */
+.viewer-none {
+  color: rgba(255, 255, 255, 0.4);
+  animation: mg-fade-in var(--dur-2) ease both;
+}
 .viewer-nav {
   position: absolute;
   top: 50%;

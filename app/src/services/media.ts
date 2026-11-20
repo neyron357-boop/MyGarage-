@@ -365,11 +365,15 @@ export async function cardBlob(id: string): Promise<Blob | undefined> {
   return rec?.card ?? rec?.blob ?? (await remoteMedia(id, 'card')) ?? (await remoteMedia(id, 'blob'));
 }
 
-const srcCache = new Map<string, string>();
+/**
+ * Files found on the server only. Their address is made anew each time (v0.59.4): the server's address changes (a new
+ * tunnel after the computer starts again) while the app stays open — one kept from before led nowhere.
+ */
+const onServer = new Set<string>();
 
 /** The address a picture or a video element loads by itself, made before (`mediaSrc`). */
 export function cachedMediaSrc(id: string): string | undefined {
-  return urlCache.get(`${id}:f`) ?? srcCache.get(id);
+  return urlCache.get(`${id}:f`) ?? (onServer.has(id) ? remoteMediaSrc(id, 'blob') : undefined);
 }
 
 /**
@@ -384,7 +388,7 @@ export async function mediaSrc(id: string): Promise<string | undefined> {
   if (!rec?.blob) {
     const remote = remoteMediaSrc(id, 'blob');
     if (remote) {
-      srcCache.set(id, remote);
+      onServer.add(id);
       return remote;
     }
   }

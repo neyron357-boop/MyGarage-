@@ -1,5 +1,5 @@
 import { Loader } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight, IconDownload, IconRotate, IconShare2, IconX } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight, IconDownload, IconPhotoOff, IconRotate, IconShare2, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -62,28 +62,45 @@ function ShareButton({ item }: { item?: ViewerItem }) {
   );
 }
 
+/** Does the picture at this address come, and draw? (A server out of reach, a file not there: no.) */
+function loads(src: string): Promise<boolean> {
+  const im = new Image();
+  im.src = src;
+  return im.decode().then(
+    () => true,
+    () => im.naturalWidth > 0,
+  );
+}
+
 /**
  * The address of a stored photo: the small picture first (instant), the full one as soon as it is read. Until
- * a new photo is read, the one before is still given (with its id) — the viewer decides whether to show it.
+ * a new photo is read, the one before is still given (with its id) — the viewer decides whether to show it. No address
+ * (`url` empty) when none of them could be had.
  */
 function useFullUrl(id?: string) {
-  const [shown, setShown] = useState<{ id: string; url: string; full: boolean }>();
+  const [shown, setShown] = useState<{ id: string; url?: string; rank: number }>();
   useEffect(() => {
     let alive = true;
     if (!id) return;
-    const better = (u: string | undefined, full: boolean) => alive && u && setShown((s) => (s?.id === id && s.full ? s : { id, url: u, full }));
-    void mediaUrl(id, true).then((u) => better(u, false));
+    let got = false;
+    // Only ever sharper: the preview (0), the card (1), the original (2) — whichever comes first.
+    const better = (u: string | undefined, rank: number) => {
+      if (!alive || !u) return;
+      got = true;
+      setShown((s) => (s?.id === id && s.url && s.rank >= rank ? s : { id, url: u, rank }));
+    };
+    const small = mediaUrl(id, true).then((u) => better(u, 0));
     // v0.41.3: the card (1080 px — about the screen's own) next, then the original once it is in — never a frame
     // emptied while it comes.
-    void cardUrl(id).then((u) => better(u, false));
-    void mediaSrc(id).then(async (u) => {
+    const card = cardUrl(id).then((u) => better(u, 1));
+    const sharp = mediaSrc(id).then(async (u) => {
       if (!u || !alive) return;
-      if (!u.startsWith('blob:')) {
-        const im = new Image();
-        im.src = u;
-        await im.decode().catch(() => undefined);
-      }
-      if (alive) setShown({ id, url: u, full: true });
+      // v0.59.4 (the user's screenshot: a broken «?» on the whole screen): the server's original only once it has come —
+      // with the server out of reach the viewer had put its address over the card this phone keeps.
+      if (u.startsWith('blob:') || (await loads(u))) better(u, 2);
+    });
+    void Promise.allSettled([small, card, sharp]).then(() => {
+      if (alive && !got) setShown({ id, rank: -1 });
     });
     return () => {
       alive = false;
@@ -139,6 +156,8 @@ export function PhotoViewer({
       ? stored
       : undefined;
   const url = pic?.url;
+  // Neither here nor on the server (out of reach): a quiet mark, not a broken picture or a spinner for ever.
+  const none = !!pic && !url;
   const turned = turn && pic && turn.id === pic.id ? turn : null;
   const stage = useRef<HTMLDivElement>(null);
   const img = useRef<HTMLImageElement>(null);
@@ -359,6 +378,8 @@ export function PhotoViewer({
               data-animate={!gesture.current}
               style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale * (turned?.fit ?? 1)}) rotate(${turned?.deg ?? 0}deg)` }}
             />
+          ) : none ? (
+            <IconPhotoOff size={44} stroke={1.5} className="viewer-none" aria-hidden />
           ) : (
             <Loader color="white" />
           )}
