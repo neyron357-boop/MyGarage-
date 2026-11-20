@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
+import { dubaiDate } from '../domain/dates';
 import { onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { addItem } from './estimate';
 import { checkIn } from './orders';
@@ -149,7 +150,11 @@ describe('a receipt scanned', () => {
     const older = await job('Toyota', 'Corolla', ['OIL FILTER']);
     await new Promise((r) => setTimeout(r, 5));
     const fresher = await job('Toyota', 'Corolla', ['OIL FILTER']);
-    answer = { ...base(), carText: '', dateText: '19-Nov-2024', date: '2024-11-19', dateSure: false, items: [{ name: 'Oil filter', total: 35 }], subtotal: undefined, vat: undefined, total: 35 };
+    // A year under a stamp: today's day and month, read two years back — put right to today, said unsure. (Built from
+    // today: a fixed «19-Nov-2024» became yesterday on 20/11/2026, before both jobs — and no job fitted.)
+    const [y, m, d] = dubaiDate().split('-');
+    const misread = `${Number(y) - 2}-${m}-${d}`;
+    answer = { ...base(), carText: '', dateText: `${d}/${m}/${Number(y) - 2}`, date: misread, dateSure: false, items: [{ name: 'Oil filter', total: 35 }], subtotal: undefined, vat: undefined, total: 35 };
     const r = await scanReceipt(PHOTO());
     expect(r.job).toMatchObject({ orderId: fresher.id, close: true });
     expect((await db.items.get(fresher.lines[0]))!.costPriceFils ?? 0).toBe(0);
@@ -157,6 +162,7 @@ describe('a receipt scanned', () => {
     const n = notices.find((x) => x.kind === 'expense')!;
     expect(n).toMatchObject({ close: true, dateSure: false });
     expect(n.kind === 'expense' && n.date).toBe(r.expense!.date);
+    expect(r.expense!.date).toBe(dubaiDate());
   });
 
   it('a price already typed on a line stays; a receipt naming no job’s parts is recorded without a job', async () => {
