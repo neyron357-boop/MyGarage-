@@ -18,11 +18,12 @@ import { whatsappUrl } from '../../services/messages';
 import { saveSupplier, setSupplierCard } from '../../services/parts';
 import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { typedOnly, useAction, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { typedOnly, useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { SheetFor } from '../../ui/lazy';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { SupplierBookActions } from './SupplierBookActions';
+import { emirateName, NO_REGION, regionLabel, SupplierFilters, useSupplierFilter } from './SupplierFilters';
 import { Autocomplete } from '@mantine/core';
 
 /**
@@ -136,6 +137,12 @@ export function SupplierSheet({
           <div className="ios-row left line-name">
             <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" data-autofocus={(!v.id && !v.phone) || undefined} />
           </div>
+          {/* The name as it came, in Arabic (v0.60: put in English by the app). */}
+          {v.nameAr && (
+            <div className="supplier-name-ar" dir="rtl" data-name-ar>
+              {v.nameAr}
+            </div>
+          )}
           <FormRow label={t('customer.phone')}>
             <TextInput
               aria-label={t('customer.phone')}
@@ -217,7 +224,10 @@ export function SupplierSheet({
         </div>
 
         <div>
-          <div className="group-title">{t('suppliers.makes')}</div>
+          <div className="group-title">
+            {t('suppliers.makes')}
+            {supplier.guessed?.includes('makes') && JSON.stringify(makes) === JSON.stringify(supplier.makes ?? []) && <span className="guess-mark">{t('suppliers.guessed')}</span>}
+          </div>
           <div className="chip-row wrap" aria-label={t('suppliers.makes')}>
             {chips.map((m) => (
               <button key={m} type="button" className="chip" data-active={makes.includes(m)} onClick={() => toggleMake(m)}>
@@ -243,7 +253,17 @@ export function SupplierSheet({
 
         <div className="ios-group">
           <div className="ios-row left">
-            <Textarea aria-label={t('suppliers.parts')} placeholder={t('suppliers.partsHint')} autosize minRows={1} value={v.parts ?? ''} onChange={(e) => setV({ ...v, parts: e.currentTarget.value })} w="100%" />
+            <Textarea
+              aria-label={t('suppliers.parts')}
+              placeholder={t('suppliers.partsHint')}
+              autosize
+              minRows={1}
+              value={v.parts ?? ''}
+              onChange={(e) => setV({ ...v, parts: e.currentTarget.value })}
+              w="100%"
+              rightSectionWidth={96}
+              rightSection={supplier.guessed?.includes('parts') && v.parts === supplier.parts ? <span className="guess-mark" data-guessed="parts">{t('suppliers.guessed')}</span> : undefined}
+            />
           </div>
           <div className="ios-row left">
             <TextInput aria-label={t('parts.location')} placeholder={t('suppliers.mapHint')} value={v.locationUrl ?? ''} onChange={(e) => setV({ ...v, locationUrl: e.currentTarget.value })} w="100%" />
@@ -275,9 +295,22 @@ export function SuppliersTab() {
   const [q, setQ] = useState(params.get('q') ?? '');
   const [edit, setEdit] = useState<Partial<Supplier> | null>(null);
   const phone = usePhone();
+  const lang = useLang();
+  const filter = useSupplierFilter(all);
   if (!all) return null;
-  // Found by its name, makes, what it sells — or its number as said here (050…).
-  const list = all.filter((s) => supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
+  // Found by its name, makes, what it sells — or its number as said here (050…); by region, make and kind (v0.60).
+  const list = all.filter((s) => filter.pass(s) && supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
+  const regionOfS = (s: Supplier) => filter.facts.regions.get(s.id);
+  // On the phone the list goes by emirate, the most suppliers first (an emirate picked — that one alone).
+  const groups = (() => {
+    if (filter.f.region) return [{ key: filter.f.region, rows: list }];
+    const by = new Map<string, Supplier[]>();
+    for (const s of list) {
+      const k = regionOfS(s)?.emirate ?? NO_REGION;
+      by.set(k, [...(by.get(k) ?? []), s]);
+    }
+    return [...by.entries()].sort((a, b) => (a[0] === NO_REGION ? 1 : b[0] === NO_REGION ? -1 : b[1].length - a[1].length)).map(([key, rows]) => ({ key, rows }));
+  })();
   const contact = (s: Supplier, size: number) => (
     <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
       {s.locationUrl && (
@@ -311,6 +344,7 @@ export function SuppliersTab() {
       ),
     },
     { key: 'phone', label: t('desk.col.phone'), cell: (s) => (s.phone ? formatPhone(s.phone) : ''), sort: (s) => s.phone ?? '', muted: true, nowrap: true, width: 180 },
+    { key: 'region', label: t('suppliers.region'), cell: (s) => <span className="dt-clip">{regionLabel(regionOfS(s), lang)}</span>, sort: (s) => regionLabel(regionOfS(s), lang) || '~', muted: true, width: 220 },
     { key: 'makes', label: t('desk.col.makes'), cell: (s) => <span className="dt-clip">{s.service ? t('suppliers.contractor') : s.makes?.join(', ')}</span>, sort: (s) => (s.service ? t('suppliers.contractor') : s.makes?.join(', ') ?? '') },
     { key: 'parts', label: t('desk.col.part'), cell: (s) => <span className="dt-clip">{s.parts}</span>, sort: (s) => s.parts ?? '', muted: true },
     { key: 'jobs', label: t('desk.col.jobs'), cell: (s) => useOf(ranked!.use, s.id).jobs || '', sort: (s) => useOf(ranked!.use, s.id).jobs, desc: true, align: 'right', width: 100 },
@@ -325,13 +359,20 @@ export function SuppliersTab() {
         <SupplierBookActions />
       </Group>
       {(all.length > 6 || q) && (phone ? <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} /> : <div style={{ maxWidth: 560 }}><SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} /></div>)}
+      {all.length > 6 && <SupplierFilters all={all} api={filter} />}
       {all.length === 0 ? (
         <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} />
       ) : !phone ? (
         list.length > 0 && <DataTable rows={list} columns={cols} rowKey={(s) => s.id} onRow={setEdit} initialSort={{ key: 'rank', dir: 1 }} label={t('nav.suppliers')} />
       ) : (
+        groups.map((g) => (
+          <div key={g.key} className="supplier-group" data-region={g.key}>
+            <div className="group-title">
+              {g.key === NO_REGION ? t('suppliers.noRegion') : emirateName(g.key, lang)}
+              <span className="count">{g.rows.length}</span>
+            </div>
         <List>
-          {list.map((s) => (
+          {g.rows.map((s) => (
             <ListRow
               key={s.id}
               onClick={() => setEdit(s)}
@@ -343,6 +384,7 @@ export function SuppliersTab() {
               }
               subtitle={
                 [
+                  regionOfS(s)?.area ?? '',
                   useOf(ranked!.use, s.id).jobs ? t('suppliers.jobs', { count: useOf(ranked!.use, s.id).jobs }) : '',
                   s.service ? t('suppliers.contractor') : s.condition ? t(`suppliers.cond.${s.condition}`) : '',
                   s.makes?.join(', '),
@@ -373,6 +415,8 @@ export function SuppliersTab() {
             />
           ))}
         </List>
+          </div>
+        ))
       )}
       {list.length === 0 && all.length > 0 && (
         <Text c="dimmed" ta="center" size="sm">

@@ -10,13 +10,17 @@ import { addMedia, deleteMedia } from './media';
 import { addExpense } from './money';
 import { logEvent } from './orders';
 import { importSupplierBook } from './supplierBook';
+import { stillGuessed } from './supplierTidy';
 
 export async function saveSupplier(given: Partial<Supplier> & { name: string }): Promise<Supplier> {
   if (!given.name.trim()) throw new AppError('err.nameRequired');
   // The number as the app keeps numbers (E.164): typed «050 123 4567», its WhatsApp opens (v0.24).
   const input = 'phone' in given ? { ...given, phone: given.phone?.trim() ? normalizePhone(given.phone) ?? given.phone.trim() : undefined } : given;
   if (input.id) {
-    await db.suppliers.update(input.id, input);
+    // A field guessed from the name (v0.60) and now set by hand is no longer a guess.
+    const was = await db.suppliers.get(input.id);
+    const left = was ? stillGuessed(was, input) : undefined;
+    await db.suppliers.update(input.id, left ? { ...input, guessed: left.length ? left : undefined } : input);
     return (await db.suppliers.get(input.id))!;
   }
   const s: Supplier = { ...input, name: input.name.trim(), id: uid(), createdAt: nowIso() };

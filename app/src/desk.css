@@ -1461,3 +1461,9 @@ html.desk .desk-pal-go {
   flex: none;
   color: var(--mantine-color-cobalt-6);
 }
+
+/* The supplier filters (v0.60): the rows inside the page's width on a PC. */
+html.desk .supplier-filters .chip-row {
+  margin: 0;
+  padding: 2px 0;
+}

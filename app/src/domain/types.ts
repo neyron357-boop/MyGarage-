@@ -767,6 +767,10 @@ export interface Supplier {
   cardMediaIds?: string[];
   /** Its row in the garage's supplier base workbook (UAE_Contacts.xlsx), when it came from there. */
   book?: SupplierBookRow;
+  /** Its name as it came, in Arabic, when the app put it in English (v0.60, domain/supplierTidy.ts). */
+  nameAr?: string;
+  /** What the app guessed from its name (v0.60) — not said by the supplier or the manager; a field edited by hand leaves it. */
+  guessed?: ('parts' | 'makes' | 'condition')[];
   createdAt: string;
   archivedAt?: string;
 }

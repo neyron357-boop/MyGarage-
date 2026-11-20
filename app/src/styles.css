@@ -6744,3 +6744,46 @@ html.desk .ai-scan-pill {
     animation: none;
   }
 }
+
+/* ---------- The supplier base by region, make and kind (v0.60, features/parts/SupplierFilters.tsx) ---------- */
+.supplier-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.supplier-filters .chip-row {
+  align-items: center;
+  margin: 0 -16px;
+  padding: 2px 16px;
+}
+.supplier-filters .filter-icon {
+  flex-shrink: 0;
+  color: var(--app-label-3);
+}
+.chip .chip-count {
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-label-3);
+}
+.chip[data-active='true'] .chip-count {
+  color: inherit;
+  opacity: 0.8;
+}
+.guess-mark {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mantine-color-orange-7);
+  background: color-mix(in srgb, var(--mantine-color-orange-5) 14%, transparent);
+}
+.supplier-name-ar {
+  font-size: 13px;
+  color: var(--app-label-3);
+  padding: 0 16px 8px;
+  text-align: right;
+}
