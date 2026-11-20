@@ -1,6 +1,7 @@
 import { ActionIcon, Box, Button, Collapse, Group, Modal, SegmentedControl, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
 import {
   IconArrowDownLeft,
+  IconArrowsSplit2,
   IconArrowUpRight,
   IconBuildingBank,
   IconCar,
@@ -24,6 +25,7 @@ import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
 import { debtQueue, historyKey, spread } from '../../domain/debts';
+import { PART_WAYS, partRows, partsOf, partsRest } from '../../domain/expenseParts';
 import { incomeCategoryName, KEPT_INCOME, renamedIn } from '../../domain/incomeCategories';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
@@ -35,7 +37,7 @@ import { addIncomeCategory, loadIncomeCategories, removeIncomeCategory, restoreI
 import { addIncome, moneyOf, type Links } from '../../services/ledger';
 import { addExpense, categoryMonthSpent } from '../../services/money';
 import { CaptureButton } from '../../ui/CaptureButton';
-import { Money, MoneyInput, PersonAvatar, PlateText, SelectCard, undoToast } from '../../ui/components';
+import { FormRow, Money, MoneyInput, PersonAvatar, PlateText, SelectCard, undoToast } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
@@ -164,28 +166,137 @@ export function wayLabel(t: TFunction, m: ExpenseMethod, kind: 'in' | 'out'): st
   return t(`payment.method.${m}`);
 }
 
-export function PursePicker({ value, onChange, kind, credit }: { value: ExpenseMethod; onChange: (m: ExpenseMethod) => void; kind: 'in' | 'out'; /** "On credit" offered too (a new expense). */ credit?: boolean }) {
+/**
+ * How money went: a way a chip. A new expense may be paid in parts (v0.58): «Частями» — and the chips pick several
+ * ways (the sums under them — `SplitRows`); one way left — a way again.
+ */
+export function PursePicker({
+  value,
+  onChange,
+  kind,
+  credit,
+  parts,
+  onParts,
+}: {
+  value: ExpenseMethod;
+  onChange: (m: ExpenseMethod) => void;
+  kind: 'in' | 'out';
+  /** "On credit" offered too (a new expense). */
+  credit?: boolean;
+  /** Paid in parts: the ways picked; undefined — one way. */
+  parts?: ExpenseMethod[];
+  /** «Частями» offered (a new expense): the ways it starts with, or undefined — one way again. */
+  onParts?: (ways: ExpenseMethod[] | undefined) => void;
+}) {
   const { t } = useTranslation();
-  const ways: ExpenseMethod[] = credit ? ['cash', 'card', 'transfer', 'credit', 'outside'] : ['cash', 'card', 'transfer', 'outside'];
+  const ways: ExpenseMethod[] = credit ? [...PART_WAYS] : ['cash', 'card', 'transfer', 'outside'];
+  const tap = (m: ExpenseMethod) => {
+    if (!parts || !onParts) return onChange(m);
+    if (!parts.includes(m)) return onParts([...parts, m]);
+    const left = parts.filter((w) => w !== m);
+    if (left.length > 1) return onParts(left);
+    // One way left: a way again.
+    onParts(undefined);
+    onChange(left[0] ?? m);
+  };
+  const toggle = () => {
+    if (!onParts) return;
+    if (parts) {
+      onParts(undefined);
+      onChange(parts[0]);
+      // The usual case first (the user: «часть наличными, а часть в кредит остаётся»): the way picked and on credit.
+    } else onParts(value === 'credit' ? ['cash', 'credit'] : [value, 'credit']);
+  };
   return (
     <Stack gap={4}>
-      <div className="chip-row wrap" role="radiogroup">
+      <div className="chip-row wrap" role={parts ? 'group' : 'radiogroup'}>
         {ways.map((m) => {
           const I = PURSE_ICON[m];
+          const on = parts ? parts.includes(m) : value === m;
           return (
-            <button key={m} type="button" className="chip" role="radio" aria-checked={value === m} data-active={value === m} data-way={m} onClick={() => onChange(m)}>
+            <button key={m} type="button" className="chip" role={parts ? 'checkbox' : 'radio'} aria-checked={on} data-active={on} data-way={m} onClick={() => tap(m)}>
               <I size={17} stroke={2} aria-hidden />
               {m === 'transfer' ? t('ledger.transferFull') : wayLabel(t, m, kind)}
             </button>
           );
         })}
+        {onParts && (
+          <button type="button" className="chip" aria-pressed={!!parts} data-active={!!parts} data-way="parts" onClick={toggle}>
+            <IconArrowsSplit2 size={17} stroke={2} aria-hidden />
+            {t('expense.parts')}
+          </button>
+        )}
       </div>
-      {kind === 'out' && (value === 'card' || value === 'transfer') && (
+      {kind === 'out' && !parts && (value === 'card' || value === 'transfer') && (
         <Text size="xs" c="dimmed">
           {t('ledger.cardOutHint')}
         </Text>
       )}
     </Stack>
+  );
+}
+
+/**
+ * The sums of an expense paid in parts (v0.58): a row a way — typed, but the last one: it takes what is left of the
+ * whole (on credit, when it is one of them — what is not paid now is owed; domain/expenseParts.ts).
+ */
+function SplitRows({ amountFils, ways, typed, onTyped }: { amountFils: number | undefined; ways: ExpenseMethod[]; typed: Partial<Record<ExpenseMethod, number>>; onTyped: (typed: Partial<Record<ExpenseMethod, number>>) => void }) {
+  const { t } = useTranslation();
+  const rows = partRows(ways);
+  const rest = partsRest(amountFils, ways, typed);
+  return (
+    <div className="ios-group" data-split-rows>
+      {rows.map((w, i) => {
+        const I = PURSE_ICON[w];
+        const name = wayLabel(t, w, 'out');
+        const label = (
+          <Group gap={8} wrap="nowrap" component="span">
+            <I size={18} stroke={2} aria-hidden style={{ flexShrink: 0 }} />
+            {name}
+          </Group>
+        );
+        return i < rows.length - 1 ? (
+          <FormRow key={w} label={label}>
+            <MoneyInput label={undefined} ariaLabel={name} value={typed[w]} onChange={(v) => onTyped({ ...typed, [w]: v })} />
+          </FormRow>
+        ) : (
+          <FormRow key={w} label={label}>
+            <Text span fw={600} c={rest <= 0 ? 'red.7' : w === 'credit' ? 'orange.7' : undefined} data-split-rest={w}>
+              <Money fils={rest} />
+            </Text>
+          </FormRow>
+        );
+      })}
+    </div>
+  );
+}
+
+/** An expense paid in parts, in its sheet (v0.58): all its parts — a way and a sum each, this one marked. */
+export function SplitParts({ splitId, current }: { splitId: string; current: string }) {
+  const { t } = useTranslation();
+  const parts = useLiveQuery(async () => {
+    const list = await db.expenses.filter((e) => e.splitId === splitId && !e.voidedAt).toArray();
+    const order = partRows(list.map((e) => e.method));
+    return list.sort((a, b) => order.indexOf(a.method) - order.indexOf(b.method));
+  }, [splitId]);
+  if (!parts || parts.length < 2) return null;
+  return (
+    <div>
+      <Text size="sm" fw={500} mb={6}>
+        {t('expense.parts')} · <Money fils={parts.reduce((s, p) => s + p.amountFils, 0)} />
+      </Text>
+      <div className="chip-row wrap" data-split-parts>
+        {parts.map((p) => {
+          const I = PURSE_ICON[p.method];
+          return (
+            <span key={p.id} className="chip" data-active={p.id === current} aria-current={p.id === current || undefined}>
+              <I size={17} stroke={2} aria-label={wayLabel(t, p.method, 'out')} />
+              <Money fils={p.amountFils} />
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -567,6 +678,9 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const [kind, setKindState] = useState<'in' | 'out'>('out');
   const [amount, setAmount] = useState<number>();
   const [method, setMethod] = useState<ExpenseMethod>('cash');
+  // Paid in parts (v0.58): the ways, and the sums typed for them (the last way takes the rest).
+  const [parts, setParts] = useState<ExpenseMethod[]>();
+  const [typed, setTyped] = useState<Partial<Record<ExpenseMethod, number>>>({});
   const [incomeCat, setIncomeCat] = useState('service');
   const incomeCats = useIncomeCategories();
   const [expenseCat, setExpenseCat] = useState<string>();
@@ -583,7 +697,10 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   // Money comes in by a way it can be counted: "on credit" is only a way to spend.
   const setKind = (k: 'in' | 'out') => {
     setKindState(k);
-    if (k === 'in') setMethod((m) => (m === 'credit' ? 'cash' : m));
+    if (k === 'in') {
+      setMethod((m) => (m === 'credit' ? 'cash' : m));
+      setParts(undefined);
+    }
   };
 
   useEffect(() => {
@@ -594,6 +711,8 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     if (preset?.debt) setIncomeCat('debt');
     // The sheet opens on real money; "on credit" is picked each time it is meant.
     setMethod((m) => (m === 'credit' ? 'cash' : m));
+    setParts(undefined);
+    setTyped({});
     setAmount(preset?.expense?.amountFils);
     setNote(preset?.expense?.note ?? '');
     setDate(preset?.expense?.date ?? dubaiDate());
@@ -618,6 +737,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const cat = cats?.find((c) => c.id === expenseCat);
   const overLimit = kind === 'out' && !!cat && cat.monthlyLimitFils > 0 && spent + (amount ?? 0) > cat.monthlyLimitFils;
   const debtIn = kind === 'in' && incomeCat === 'debt';
+  const split = kind === 'out' && parts ? partsOf(amount, parts, typed) : undefined;
   const save = () =>
     run(async () => {
       if (kind === 'in') {
@@ -632,6 +752,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           vatFils: vat ?? 0,
           vendor,
           method,
+          parts: split,
           note,
           overLimitComment: over,
           receipt,
@@ -655,7 +776,8 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           ]}
         />
         <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
-        <PursePicker value={method} onChange={setMethod} kind={kind} credit={kind === 'out'} />
+        <PursePicker value={method} onChange={setMethod} kind={kind} credit={kind === 'out'} parts={kind === 'out' ? parts : undefined} onParts={kind === 'out' ? setParts : undefined} />
+        {kind === 'out' && parts && <SplitRows amountFils={amount} ways={parts} typed={typed} onTyped={setTyped} />}
         <div>
           <Text size="sm" fw={500} mb={6}>
             {t('expense.category')}
@@ -742,7 +864,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           color={kind === 'in' ? 'green' : 'red'}
           leftSection={kind === 'in' ? <IconArrowDownLeft size={20} /> : <IconArrowUpRight size={20} />}
           loading={busy}
-          disabled={!amount || (kind === 'out' && !expenseCat) || (overLimit && !over.trim())}
+          disabled={!amount || (kind === 'out' && !expenseCat) || (kind === 'out' && !!parts && !split) || (overLimit && !over.trim())}
           onClick={save}
         >
           {t(kind === 'in' ? 'ledger.saveIn' : 'ledger.saveOut')}

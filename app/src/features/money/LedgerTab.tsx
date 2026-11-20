@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dayHeading, formatDate, monthKey, monthLong, monthRange } from '../../domain/dates';
-import { periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
+import { moved, periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory } from '../../domain/types';
 import { companyDebtOf, debtPaymentHistory, debtPaymentParts } from '../../services/debts';
@@ -19,7 +19,7 @@ import { haptic } from '../../ui/haptics';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { CreditSheet } from './Debts';
-import { EntrySheet, IncomeChips, LinkPicker, PursePicker, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
+import { EntrySheet, IncomeChips, LinkPicker, PURSE_ICON, PursePicker, SplitParts, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
 
@@ -257,6 +257,7 @@ export function EntryDetails({
           // A job's refund leaves the card account (no "it does not reduce the card" note under it): passed as money in.
           <PursePicker value={entry.method ?? 'cash'} onChange={(method) => method !== entry.method && change({ method })} kind={entry.source === 'payment' ? 'in' : entry.kind} credit={entry.source === 'expense'} />
         )}
+        {entry.source === 'expense' && entry.splitId && <SplitParts splitId={entry.splitId} current={entry.id} />}
         {entry.source === 'expense' && entry.method === 'credit' && <CreditLeft expenseId={entry.id} />}
         {debt && <DebtParts entry={entry} />}
         {entry.closing && (
@@ -362,8 +363,15 @@ export function LedgerTab() {
   const totals = periodTotals(book.entries, from, to);
   const days = new Map<string, LedgerEntry[]>();
   for (const r of rows) days.set(r.date, [...(days.get(r.date) ?? []), r]);
+  // A day's sum: the money that moved (an expense taken on credit is a line of it, its sum is not — v0.58).
+  const netOf = (list: LedgerEntry[]) => list.filter(moved).reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
+  // Under a line's sum: the cash after it; past the cash box — how it went; on credit — what is still owed on it.
+  const after = (e: LedgerEntry) =>
+    e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : e.purse === 'credit' ? (e.leftFils ? t('debt.leftSum', { sum: formatAed(e.leftFils) }) : t('payment.paidFull')) : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort');
+  // A line's mark: in — green, out — red, out on credit — orange (as in the expenses), a day closing — grey.
+  const markColor = (e: LedgerEntry) => (e.kind === 'in' ? 'green' : e.purse === 'credit' ? 'orange' : 'red');
   const dayHead = (day: string, list: LedgerEntry[]) => {
-    const net = list.reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
+    const net = netOf(list);
     const head = dayHeading(day, lang);
     return { net, text: head.word ? t(`common.${head.word}`) : head.text };
   };
@@ -383,7 +391,7 @@ export function LedgerTab() {
               <IconLock size={16} />
             </ThemeIcon>
           ) : (
-            <ThemeIcon variant="light" color={e.kind === 'in' ? 'green' : 'red'} size={32} radius="md">
+            <ThemeIcon variant="light" color={markColor(e)} size={32} radius="md">
               {e.kind === 'in' ? <IconArrowDownLeft size={17} /> : <IconArrowUpRight size={17} />}
             </ThemeIcon>
           )}
@@ -430,9 +438,21 @@ export function LedgerTab() {
       align: 'right',
       nowrap: true,
       muted: true,
-      width: 132,
+      // Wide enough for «осталось 1 234,00 AED» under an expense on credit (v0.58).
+      width: 168,
       // The cash after it, as the money sheet's «Cash Balance»; past the cash box — how it went (card, transfer, owner).
-      cell: (e) => (e.purse === 'cash' ? formatAed(e.cashAfter).replace(/^-/, '−') : e.method ? wayLabel(t, e.method, e.kind) : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')),
+      cell: (e) =>
+        e.purse === 'cash' ? (
+          formatAed(e.cashAfter).replace(/^-/, '−')
+        ) : e.purse === 'credit' ? (
+          <span style={{ color: e.leftFils ? 'var(--mantine-color-orange-7)' : undefined }}>{after(e)}</span>
+        ) : e.method ? (
+          wayLabel(t, e.method, e.kind)
+        ) : e.purse === 'outside' ? (
+          t('ledger.outsideShort')
+        ) : (
+          t('ledger.cardShort')
+        ),
     },
   ];
   const deskBook = (
@@ -532,12 +552,15 @@ export function LedgerTab() {
               {k === 'in' ? t('ledger.ins') : t('ledger.outs')}
             </button>
           ))}
-          {(['cash', 'card', 'outside'] as const).filter((p) => p !== 'outside' || purse === p || totals.outside.inFils || totals.outside.outFils).map((p) => (
-            <button key={p} type="button" className="chip" data-active={purse === p} aria-pressed={purse === p} data-purse={p} onClick={() => setPurse(purse === p ? 'all' : p)}>
-              {p === 'cash' ? <IconCash size={17} stroke={2} aria-hidden /> : p === 'outside' ? <IconUserDollar size={17} stroke={2} aria-hidden /> : <IconCreditCard size={17} stroke={2} aria-hidden />}
-              {p === 'outside' ? t('ledger.outside') : t(`payment.method.${p}`)}
-            </button>
-          ))}
+          {(['cash', 'card', 'outside', 'credit'] as const).filter((p) => (p !== 'outside' && p !== 'credit') || purse === p || totals[p].inFils || totals[p].outFils).map((p) => {
+            const I = p === 'credit' ? PURSE_ICON.credit : p === 'cash' ? IconCash : p === 'outside' ? IconUserDollar : IconCreditCard;
+            return (
+              <button key={p} type="button" className="chip" data-active={purse === p} aria-pressed={purse === p} data-purse={p} onClick={() => setPurse(purse === p ? 'all' : p)}>
+                <I size={17} stroke={2} aria-hidden />
+                {p === 'outside' ? t('ledger.outside') : t(`payment.method.${p}`)}
+              </button>
+            );
+          })}
         </div>
         <SearchField placeholder={t('ledger.search')} value={q} onChange={setQ} />
       </Stack>
@@ -555,7 +578,7 @@ export function LedgerTab() {
         // not when the tab opens — the book is simply there.
         <Stack gap="lg" key={view} className={view === firstView.current ? undefined : 'fade-enter'}>
         {[...days.entries()].map(([day, list]) => {
-          const net = list.reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
+          const net = netOf(list);
           const head = dayHeading(day, lang);
           return (
             <Box key={day}>
@@ -585,7 +608,7 @@ export function LedgerTab() {
                             <IconLock size={18} />
                           </ThemeIcon>
                         ) : (
-                          <ThemeIcon variant="light" color={e.kind === 'in' ? 'green' : 'red'} size={38} radius="md">
+                          <ThemeIcon variant="light" color={markColor(e)} size={38} radius="md">
                             {e.kind === 'in' ? <IconArrowDownLeft size={19} /> : <IconArrowUpRight size={19} />}
                           </ThemeIcon>
                         )
@@ -617,8 +640,8 @@ export function LedgerTab() {
                         <Stack gap={0} align="flex-end">
                           {/* As a bank shows it: money in green with a plus, money out in the text's colour with a minus. */}
                           <Money fils={e.kind === 'in' ? e.amountFils : -e.amountFils} c={e.kind === 'in' ? 'green.7' : undefined} fw={600} signed />
-                          <Text size="10px" c="dimmed" className="tnum" style={{ whiteSpace: 'nowrap' }}>
-                            {e.purse === 'cash' ? `${t('ledger.cashShort')} ${formatAed(e.cashAfter).replace(/^-/, '−')}` : e.purse === 'outside' ? t('ledger.outsideShort') : t('ledger.cardShort')}
+                          <Text size="10px" c={e.purse === 'credit' && e.leftFils ? 'orange.7' : 'dimmed'} fw={e.purse === 'credit' && e.leftFils ? 600 : undefined} className="tnum" style={{ whiteSpace: 'nowrap' }}>
+                            {after(e)}
                           </Text>
                         </Stack>
                       }

@@ -89,7 +89,11 @@ describe('the user’s case: a recovery of 180 — 10 from the cash box, 170 on 
     await updateEntry({ source: 'credit', id: paid.id }, { date: '2026-11-11' });
     expect((await db.creditPayments.get(paid.id))!.date).toBe('2026-11-11');
     expect((await cashState()).lines.map((l) => l.date)).toEqual(['2026-11-11']);
-    expect((await loadLedger()).entries.map((e) => [e.source, e.date, e.amountFils])).toEqual([['credit', '2026-11-11', 1_000]]);
+    // The debt a line of its own purse (v0.58: no money moved), the 10 paid — a line of the cash.
+    expect((await loadLedger()).entries.map((e) => [e.source, e.purse, e.date, e.amountFils])).toEqual([
+      ['expense', 'credit', '2026-11-11', 18_000],
+      ['credit', 'cash', '2026-11-11', 1_000],
+    ]);
     expect(await cash()).toBe(99_000);
     expect((await companyDebtOf(credit.id))!.leftFils).toBe(17_000);
 

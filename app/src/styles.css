@@ -1123,6 +1123,12 @@ html.kb .tab-bar-wrap {
   margin-left: 0.25em;
   color: var(--mantine-color-dimmed);
 }
+/* On a lit chip (white words on the accent — the parts of an expense, v0.58): "AED" in the chip's own ink, a step
+   quieter, not the page's grey. */
+.chip[data-active='true'] .money .cur {
+  color: inherit;
+  opacity: 0.78;
+}
 /* The sum a money sheet is about: large rounded figures in the middle, "AED" beside them. */
 .money-big .mantine-Input-input {
   height: 76px;

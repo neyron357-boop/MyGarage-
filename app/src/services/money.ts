@@ -1,6 +1,7 @@
 import { db, nextNumber, uid } from '../db/db';
 import { cashTotals } from '../domain/cash';
 import { dubaiDate, monthKey, nowIso, onDubaiDay } from '../domain/dates';
+import { partsFit, shareVat, type ExpensePart } from '../domain/expenseParts';
 import { atDay, jobDay } from '../domain/jobDay';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, jobDocNumber, paidNet } from '../domain/invoice';
@@ -330,6 +331,12 @@ export interface ExpenseInput {
   note?: string;
   overLimitComment?: string;
   receipt?: Blob;
+  /**
+   * Paid in parts (v0.58, the user: «часть наличными, а часть в кредит остаётся»): a part a way, adding up to
+   * `amountFils` — each saved as an expense of its own (its cash moves, its credit is owed), the VAT shared by their sums,
+   * the receipt with each; `method` is then not read. One transaction: all the parts or none.
+   */
+  parts?: ExpensePart[];
 }
 
 export async function categoryMonthSpent(categoryId: string, month: string = monthKey()): Promise<number> {
@@ -337,48 +344,58 @@ export async function categoryMonthSpent(categoryId: string, month: string = mon
   return list.reduce((s, e) => s + e.amountFils, 0);
 }
 
+/** A new expense (the first part, when it is paid in parts — `ExpenseInput.parts`). */
 export async function addExpense(input: ExpenseInput): Promise<Expense> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  const split = !!input.parts && input.parts.length > 1;
+  if (split && !partsFit(input.amountFils, input.parts!)) throw new AppError('err.partsSum');
+  const parts: ExpensePart[] = split ? input.parts! : [{ method: input.method, amountFils: input.amountFils }];
   const cat = await db.expenseCategories.get(input.categoryId);
   if (!cat) throw new AppError('err.categoryRequired');
   const spent = await categoryMonthSpent(cat.id, input.date.slice(0, 7));
   if (cat.monthlyLimitFils > 0 && spent + input.amountFils > cat.monthlyLimitFils && !input.overLimitComment?.trim()) {
     throw new AppError('err.overLimitComment');
   }
-  const id = uid();
   // A job brings its car and customer; a car brings its owner.
   const order = input.orderId ? await db.orders.get(input.orderId) : undefined;
   const vehicleId = input.vehicleId || order?.vehicleId || undefined;
   const customerId = input.customerId || order?.customerId || (vehicleId ? (await db.vehicles.get(vehicleId))?.customerId : undefined) || undefined;
-  let receiptMediaId: string | undefined;
-  if (input.receipt) receiptMediaId = (await addMedia({ ownerType: 'expense', ownerId: id, slot: 'receipt', file: input.receipt })).id;
-  const e: Expense = {
-    id,
-    date: input.date,
-    categoryId: input.categoryId,
-    amountFils: input.amountFils,
-    vatFils: input.vatFils,
-    vendor: input.vendor?.trim() || undefined,
-    supplierId: input.supplierId || undefined,
-    method: input.method,
-    receiptMediaId,
-    orderId: input.orderId || undefined,
-    vehicleId,
-    customerId,
-    note: input.note?.trim() || undefined,
-    overLimitComment: input.overLimitComment?.trim() || undefined,
-    createdAt: nowIso(),
-  };
-  const movementId = uid();
+  const ids = parts.map(() => uid());
+  const vats = split ? shareVat(input.vatFils, parts) : [input.vatFils];
+  const createdAt = nowIso();
+  const list: Expense[] = [];
+  for (const [i, p] of parts.entries()) {
+    // The receipt with each part: a part is an operation of its own (deleted with its photos).
+    const receiptMediaId = input.receipt ? (await addMedia({ ownerType: 'expense', ownerId: ids[i], slot: 'receipt', file: input.receipt })).id : undefined;
+    list.push({
+      id: ids[i],
+      date: input.date,
+      categoryId: input.categoryId,
+      amountFils: p.amountFils,
+      vatFils: vats[i],
+      vendor: input.vendor?.trim() || undefined,
+      supplierId: input.supplierId || undefined,
+      method: p.method,
+      receiptMediaId,
+      orderId: input.orderId || undefined,
+      vehicleId,
+      customerId,
+      note: input.note?.trim() || undefined,
+      overLimitComment: input.overLimitComment?.trim() || undefined,
+      createdAt,
+      splitId: split ? ids[0] : undefined,
+    });
+  }
+  const cash = list.filter((e) => e.method === 'cash').map((e) => ({ e, movementId: uid() }));
   await db.transaction('rw', db.expenses, db.cashMovements, async () => {
-    await db.expenses.add(e);
-    if (e.method === 'cash') {
+    await db.expenses.bulkAdd(list);
+    for (const { e, movementId } of cash) {
       await db.cashMovements.add({ id: movementId, at: e.createdAt, direction: 'out', amountFils: e.amountFils, reason: 'expense', expenseId: e.id, note: e.vendor ?? e.note });
     }
   });
   // Spent on a day already counted: into that day's closing (the count had this money gone already).
-  if (e.method === 'cash' && e.date !== dubaiDate(e.createdAt)) await placeInDay(e.date, e.createdAt, movementId);
-  return e;
+  for (const { e, movementId } of cash) if (e.date !== dubaiDate(e.createdAt)) await placeInDay(e.date, e.createdAt, movementId);
+  return list[0];
 }
 
 // ---------- Salaries ----------

@@ -9,13 +9,17 @@ import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, 
  * - card balance = card start + card in; money spent by card is tracked ("Card Out") but does NOT
  *   reduce the card balance (it is paid from elsewhere and settled separately).
  *
- * The book is the money that moved (v0.20): an expense taken on credit is not a line of it — what is paid towards
- * it later is ("credit"), on the day and by the way it is paid. A customer's debt paid at once for several jobs is
- * one line, the income; the jobs' payments it was spread into are not lines of their own.
+ * What is paid towards an expense taken on credit is a line ("credit"), on the day and by the way it is paid. The
+ * expense itself (v0.58, the user: «расходы в кредит также отображались как и другие расходы») is a line too — of the
+ * purse "credit": no money moved, so it is in no balance, in no day's sum and not in the money sheet; it says what is
+ * still owed on it (`leftFils`). A customer's debt paid at once for several jobs is one line, the income; the jobs'
+ * payments it was spread into are not lines of their own.
  */
 
-export type Purse = 'cash' | 'card' | 'outside';
-export const purseOf = (m: ExpenseMethod): Purse => (m === 'cash' ? 'cash' : m === 'outside' ? 'outside' : 'card');
+export type Purse = 'cash' | 'card' | 'outside' | 'credit';
+export const purseOf = (m: ExpenseMethod): Purse => (m === 'cash' ? 'cash' : m === 'outside' ? 'outside' : m === 'credit' ? 'credit' : 'card');
+/** A line money moved by (not an expense taken on credit): the one a day's sum counts. */
+export const moved = (e: Pick<LedgerEntry, 'purse'>): boolean => e.purse !== 'credit';
 
 export type LedgerSource = 'payment' | 'income' | 'expense' | 'credit' | 'movement' | 'closing';
 
@@ -28,7 +32,7 @@ export interface LedgerEntry {
   date: string; // YYYY-MM-DD (Dubai)
   kind: 'in' | 'out';
   purse: Purse;
-  /** How it was paid; "credit" only on an expense opened from the expenses (it is not a line of the book). */
+  /** How it was paid; "credit" — an expense taken on credit (purse "credit": no money moved). */
   method?: ExpenseMethod;
   /** Positive; a refund to a customer is an "out" of its purse. */
   amountFils: number;
@@ -36,6 +40,10 @@ export interface LedgerEntry {
   category: string;
   /** A payment of a credit: the expense it pays off. */
   credit?: { expenseId: string; categoryId: string };
+  /** An expense taken on credit: what is still owed on it (v0.58). */
+  leftFils?: number;
+  /** An expense paid in parts: the id its parts share (v0.58). */
+  splitId?: string;
   note?: string;
   /** Expenses: where it was bought and the note as typed (`note` shows both). */
   vendor?: string;
@@ -109,6 +117,7 @@ export function expenseEntry(e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardA
     orderId: e.orderId,
     vehicleId: e.vehicleId,
     customerId: e.customerId,
+    splitId: e.splitId,
   };
 }
 
@@ -217,10 +226,14 @@ export function buildLedger(input: LedgerInput): LedgerResult {
     });
   }
   const expenses = new Map(input.expenses.map((e) => [e.id, e]));
+  // What is paid towards each expense taken on credit (its line says what is left).
+  const paid = new Map<string, number>();
+  for (const c of input.creditPayments ?? []) if (!c.voidedAt) paid.set(c.expenseId, (paid.get(c.expenseId) ?? 0) + c.amountFils);
   for (const e of input.expenses) {
-    // On credit: no money has moved — its payments are the lines.
-    if (e.voidedAt || e.method === 'credit') continue;
-    raw.push({ ...expenseEntry(e), ...linkOf(e.orderId, e.vehicleId, e.customerId) });
+    if (e.voidedAt) continue;
+    // On credit (v0.58): a line of its own purse — no money moved; its payments are lines of the money that did.
+    const left = e.method === 'credit' ? { leftFils: Math.max(0, e.amountFils - (paid.get(e.id) ?? 0)) } : {};
+    raw.push({ ...expenseEntry(e), ...left, ...linkOf(e.orderId, e.vehicleId, e.customerId) });
   }
   for (const c of input.creditPayments ?? []) {
     const e = expenses.get(c.expenseId);
@@ -257,8 +270,8 @@ export function buildLedger(input: LedgerInput): LedgerResult {
     // A day closing adds its difference, so the balance follows the counted cash. (Not a reset to the
     // counted amount: an entry typed later with an earlier date must still count.)
     if (r.purse === 'cash') cash += r.kind === 'in' ? r.amountFils : -r.amountFils;
-    else if (r.purse === 'outside') {
-      // past the cash box and the card: no balance moves
+    else if (r.purse === 'outside' || r.purse === 'credit') {
+      // past the cash box and the card, or no money moved at all: no balance moves
     } else if (r.kind === 'in') card += r.amountFils;
     else if (r.category === 'refund') card -= r.amountFils; // money given back to a customer leaves the card account
     // other card spending: tracked, the card balance stays
@@ -267,9 +280,12 @@ export function buildLedger(input: LedgerInput): LedgerResult {
   return { entries, cash, card };
 }
 
-/** In / out of each purse over a period (YYYY-MM-DD, inclusive); a closing difference counts as in or out. */
+/**
+ * In / out of each purse over a period (YYYY-MM-DD, inclusive); a closing difference counts as in or out. "credit" —
+ * what was taken on credit in it (no money moved).
+ */
 export function periodTotals(entries: LedgerEntry[], from: string, to: string): Record<Purse, PurseTotals> {
-  const t: Record<Purse, PurseTotals> = { cash: { inFils: 0, outFils: 0 }, card: { inFils: 0, outFils: 0 }, outside: { inFils: 0, outFils: 0 } };
+  const t: Record<Purse, PurseTotals> = { cash: { inFils: 0, outFils: 0 }, card: { inFils: 0, outFils: 0 }, outside: { inFils: 0, outFils: 0 }, credit: { inFils: 0, outFils: 0 } };
   for (const e of entries) {
     if (!inRange(e.date, from, to)) continue;
     if (e.kind === 'in') t[e.purse].inFils += e.amountFils;

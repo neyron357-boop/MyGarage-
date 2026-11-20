@@ -1001,6 +1001,11 @@ export interface Expense {
   note?: string;
   overLimitComment?: string;
   createdAt: string;
+  /**
+   * Paid in parts (v0.58): one purchase paid a part a way — each part an expense of its own (its way, its sum, its
+   * share of the VAT); the parts share this id (domain/expenseParts.ts). Each is changed and deleted as any expense.
+   */
+  splitId?: string;
   /** Entered by mistake: cancelled (a cash entry is reversed in the cash book, nothing is deleted). */
   voidedAt?: string;
 }

@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
+import { dubaiDate } from '../domain/dates';
+import { moved } from '../domain/ledger';
 import { computeReport } from '../domain/reports';
 import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadCreditors, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit, paySupplier } from './debts';
 import { removeEntry, restoreEntry } from './entries';
@@ -159,7 +161,8 @@ describe('the garage on credit', () => {
     const before = await cash();
     const e = await addExpense({ date: '2026-11-14', categoryId: await cat('parts'), amountFils: 100_000, vatFils: 0, vendor: 'Al Futtaim Parts', method: 'credit' });
     expect(await cash()).toEqual(before);
-    expect((await loadLedger()).entries.some((x) => x.id === e.id)).toBe(false);
+    // A line of the book all the same (v0.58), of its own purse: no balance moved, what is owed on it.
+    expect((await loadLedger()).entries.find((x) => x.id === e.id)).toMatchObject({ source: 'expense', kind: 'out', purse: 'credit', method: 'credit', amountFils: 100_000, leftFils: 100_000 });
     expect((await loadCompanyDebts()).map((d) => [d.expense.id, d.leftFils])).toEqual([[e.id, 100_000]]);
 
     await payCredit(e.id, { amountFils: 30_000, method: 'cash' });
@@ -167,6 +170,7 @@ describe('the garage on credit', () => {
     expect(before.book - after.book).toBe(30_000);
     expect(before.box - after.box).toBe(30_000);
     expect((await companyDebtOf(e.id))!.leftFils).toBe(70_000);
+    expect((await loadLedger()).entries.find((x) => x.id === e.id)!.leftFils).toBe(70_000);
     // The book: the payment, on its day and by its way; the cash box: its movement.
     const line = (await loadLedger()).entries.find((x) => x.source === 'credit')!;
     expect(line).toMatchObject({ kind: 'out', purse: 'cash', amountFils: 30_000, category: 'credit_payment', credit: { expenseId: e.id } });
@@ -182,6 +186,7 @@ describe('the garage on credit', () => {
     await expect(voidExpense(e.id)).rejects.toMatchObject({ code: 'err.creditPaid' });
     await payCredit(e.id, { amountFils: 70_000, method: 'transfer' });
     expect(await loadCompanyDebts()).toEqual([]);
+    expect((await loadLedger()).entries.find((x) => x.id === e.id)!.leftFils).toBe(0);
     expect((await cash()).book).toBe(after.book); // a transfer does not touch the cash
   });
 
@@ -197,6 +202,61 @@ describe('the garage on credit', () => {
     // With nothing paid it can be cancelled itself.
     await voidExpense(e.id);
     expect(await loadCompanyDebts()).toEqual([]);
+  });
+});
+
+describe('an expense paid in parts (v0.58, the user: «часть наличными, а часть в кредит остаётся»)', () => {
+  it('150 — 100 in cash, the rest on credit: two expenses, the cash −100, 50 owed; the book, the sheet and the report agree', async () => {
+    await setOpeningBalances(500_000, 0);
+    const before = await cash();
+    const receipt = new File([new Uint8Array(4000).fill(7)], 'r.jpg', { type: 'image/jpeg' });
+    const first = await addExpense({
+      date: dubaiDate(),
+      categoryId: await cat('parts'),
+      amountFils: 15_000,
+      vatFils: 714,
+      vendor: 'NAKASH',
+      method: 'cash',
+      note: 'BRAKES',
+      receipt,
+      parts: [
+        { method: 'cash', amountFils: 10_000 },
+        { method: 'credit', amountFils: 5_000 },
+      ],
+    });
+    const parts = await db.expenses.where('date').equals(dubaiDate()).toArray();
+    expect(parts.map((p) => [p.method, p.amountFils, p.vatFils, p.vendor, p.note, p.splitId]).sort()).toEqual([
+      ['cash', 10_000, 476, 'NAKASH', 'BRAKES', first.id],
+      ['credit', 5_000, 238, 'NAKASH', 'BRAKES', first.id],
+    ]);
+    // The receipt with each part (each an operation of its own).
+    expect(parts.every((p) => !!p.receiptMediaId)).toBe(true);
+    expect(await cash()).toEqual({ book: before.book - 10_000, box: before.box - 10_000 });
+    const credit = parts.find((p) => p.method === 'credit')!;
+    expect((await loadCompanyDebts()).map((d) => [d.expense.id, d.leftFils])).toEqual([[credit.id, 5_000]]);
+    // The book: both lines; the day's sum — the money that moved.
+    const lines = (await loadLedger()).entries.filter((e) => e.date === dubaiDate());
+    expect(lines.map((e) => [e.purse, e.amountFils, e.leftFils]).sort()).toEqual([
+      ['cash', 10_000, undefined],
+      ['credit', 5_000, 5_000],
+    ]);
+    expect(lines.filter(moved).reduce((s, e) => s - e.amountFils, 0)).toBe(-10_000);
+    // The money sheet: the money that moved; the report: the whole purchase, once.
+    expect((await moneySheetOfBook()).rows.map((r) => [r.payment, r.amountFils])).toEqual([['Cash', 10_000]]);
+    const [orders, invoices, items, expenses, payments, closings, incomes] = await Promise.all([db.orders.toArray(), db.invoices.toArray(), db.items.toArray(), db.expenses.toArray(), db.payments.toArray(), db.cashClosings.toArray(), db.incomes.toArray()]);
+    expect(computeReport({ from: '2000-01-01', to: '2100-01-01', orders, invoices, items, expenses, payments, closings, incomes }).expensesGross).toBe(15_000);
+    // A part is an operation of its own: deleted — the other stays.
+    await removeEntry({ source: 'expense', id: first.id });
+    expect((await db.expenses.toArray()).map((e) => e.id)).toEqual([credit.id]);
+    expect(await cash()).toEqual(before);
+  });
+
+  it('parts that do not add up, or one way twice — refused, nothing written', async () => {
+    const base = { date: dubaiDate(), categoryId: await cat('parts'), amountFils: 15_000, vatFils: 0, method: 'cash' as const };
+    await expect(addExpense({ ...base, parts: [{ method: 'cash', amountFils: 10_000 }, { method: 'credit', amountFils: 4_000 }] })).rejects.toMatchObject({ code: 'err.partsSum' });
+    await expect(addExpense({ ...base, parts: [{ method: 'cash', amountFils: 10_000 }, { method: 'cash', amountFils: 5_000 }] })).rejects.toMatchObject({ code: 'err.partsSum' });
+    expect(await db.expenses.count()).toBe(0);
+    expect(await db.cashMovements.count()).toBe(0);
   });
 });
 

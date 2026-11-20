@@ -1649,15 +1649,18 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByRole('button', { name: 'Закрыть день' }).click();
     await page.waitForTimeout(500);
     await shot('24-cash', true);
-    // The money sheet (Excel, as the garage's Money Tracker): the export holds the whole book; a sheet imports once.
+    // The money sheet (Excel, as the garage's Money Tracker): the export holds the whole book — the money that moved
+    // (v0.58: an expense taken on credit is a line of the book, in the sheet it is its payments); a sheet imports once.
     const book = await page.evaluate(async () => {
       const { exportMoneySheet } = await import('/src/services/moneySheet.ts');
       const { readMoneyWorkbook } = await import('/src/domain/moneySheet.ts');
       const { loadLedger } = await import('/src/services/ledger.ts');
+      const { moved } = await import('/src/domain/ledger.ts');
       const file = await exportMoneySheet();
-      return { rows: (await readMoneyWorkbook(new Uint8Array(await file.arrayBuffer()))).rows.length, entries: (await loadLedger()).entries.length, name: file.name };
+      const entries = (await loadLedger()).entries;
+      return { rows: (await readMoneyWorkbook(new Uint8Array(await file.arrayBuffer()))).rows.length, entries: entries.filter(moved).length, credit: entries.length - entries.filter(moved).length, name: file.name };
     });
-    if (!book.rows || book.rows !== book.entries || !/^Money Tracker/.test(book.name)) throw new Error('money sheet export: ' + JSON.stringify(book));
+    if (!book.rows || book.rows !== book.entries || !book.credit || !/^Money Tracker/.test(book.name)) throw new Error('money sheet export: ' + JSON.stringify(book));
     const sheet = await page.evaluate(async () => {
       const { buildMoneyWorkbook } = await import('/src/domain/moneySheet.ts');
       const b = buildMoneyWorkbook({

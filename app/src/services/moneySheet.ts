@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { dubaiDate } from '../domain/dates';
-import type { LedgerEntry, Purse } from '../domain/ledger';
+import { moved, type LedgerEntry, type Purse } from '../domain/ledger';
 import { buildMoneyWorkbook, readMoneyWorkbook, type MoneyPayment, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
 import { incomeCategoryNamed } from '../domain/incomeCategories';
 import { formatPlate } from '../domain/plates';
@@ -57,7 +57,8 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
   const orderBy = new Map(orders.map((o) => [o.id, o]));
   const carBy = new Map(vehicles.map((v) => [v.id, v]));
   const customerBy = new Map(customers.map((c) => [c.id, c]));
-  const rows: MoneyRow[] = book.entries.map((e) => {
+  // The money that moved: an expense taken on credit (v0.58, a line of the book) is in the sheet as its payments.
+  const rows: MoneyRow[] = book.entries.filter(moved).map((e) => {
     const o = e.orderId ? orderBy.get(e.orderId) : undefined;
     const v = e.vehicleId ? carBy.get(e.vehicleId) : undefined;
     // The sheet's notes say what the money was for: the job and its car, then the note typed.
