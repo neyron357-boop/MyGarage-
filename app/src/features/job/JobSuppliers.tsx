@@ -7,7 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { supplierChatLink } from '../../domain/supplierBook';
 import { starsOf, type Ranked, type Why } from '../../domain/supplierRank';
 import type { Supplier } from '../../domain/types';
-import { partsRequestFlat, whatsappUrl } from '../../services/messages';
+import { partsRequestText, whatsappUrl } from '../../services/messages';
 import { suppliersForJob } from '../../services/supplierRank';
 import { copyText } from '../../ui/clipboard';
 import { EmptyState, List, ListRow, PageHeader, PageSkeleton, PersonAvatar } from '../../ui/components';
@@ -76,7 +76,7 @@ export function JobSuppliersPage() {
   if (data === undefined) return <PageSkeleton />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const v = data.vehicle;
-  const ask = v && asked.length ? partsRequestFlat(v, asked) : '';
+  const ask = v && asked.length ? partsRequestText(v, asked) : '';
   const share = async () => {
     haptic('light');
     // v0.59: with the diagrams' sheets (four to a picture, numbered as the list) when the phone can share files.
