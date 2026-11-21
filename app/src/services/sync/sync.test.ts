@@ -294,6 +294,39 @@ describe('syncing with the garage’s server (v0.40)', () => {
     await applyChanges([{ t: 'drivers', k: driverId, d: { id: driverId, name: 'Muhammad', phone: '+971501112233', createdAt: '2026-11-18T10:00:00.000Z' } }]);
   });
 
+  it('what a device never took — an old version skipped it while its list of tables already says it took it (v0.62.1: the computer without the invoices from before the app) — comes once; nothing it has is overwritten', async () => {
+    as('pc');
+    const hist = (id: string, totalFils: number) => ({ id, customerId: 'c-company', vehicleId: 'v-1', template: 'B', numberKind: 'job', number: id, date: '2026-06-03', plateRaw: 'W 1', plate: 'W-1', vehicleText: 'Nissan Urvan', lines: [], netFils: totalFils, vatFils: 0, totalFils, source: { file: 'x.pdf', sha256: 'x', page: 1 }, importedAt: '' });
+    await db.historyInvoices.bulkAdd([hist('hi-old-1', 30_000), hist('hi-old-2', 20_000)] as never);
+    await syncNow();
+    as('phone');
+    await syncNow();
+    expect(await db.historyInvoices.count()).toBe(2);
+    expect(syncState().holes).toBe(1);
+    // As the computer was: both skipped by its old version (nowhere to put them), the cursor past them, and the list of
+    // tables taken as one that always had this table — `catchUp` does not see it as new.
+    await applyChanges([
+      { t: 'historyInvoices', k: 'hi-old-1', d: null },
+      { t: 'historyInvoices', k: 'hi-old-2', d: null },
+    ]);
+    // A record it has, changed here and not sent: stays as it is.
+    const before = (await db.orders.get(orderId))!;
+    await db.orders.update(orderId, { complaint: 'typed on the phone' });
+    const { holes: _h, ...older } = syncState();
+    resetSyncState(older);
+    expect(syncState().tables).toContain('historyInvoices');
+    await syncNow();
+    expect((await db.historyInvoices.toArray()).map((h) => h.id).sort()).toEqual(['hi-old-1', 'hi-old-2']);
+    expect((await db.orders.get(orderId))?.complaint).toBe('typed on the phone');
+    expect(syncState().holes).toBe(1);
+    // Once: a record gone again is not taken again.
+    await applyChanges([{ t: 'historyInvoices', k: 'hi-old-2', d: null }]);
+    await syncNow();
+    expect(await db.historyInvoices.get('hi-old-2')).toBeUndefined();
+    await db.orders.update(orderId, { complaint: before.complaint });
+    await syncNow();
+  });
+
   it('a record that comes without its id inside (the server’s renumbering wrote them so, v0.42.3) is put under its key, and the changes after it come too', async () => {
     as('phone');
     const { id: _id, ...bare } = (await db.orders.get(orderId))!;

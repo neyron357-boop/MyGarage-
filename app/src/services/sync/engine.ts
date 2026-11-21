@@ -173,8 +173,57 @@ async function catchUp(cfg: SyncConfig): Promise<void> {
   if (!st.tables || now.some((n) => !st.tables!.includes(n))) setSyncState({ tables: now });
 }
 
+/**
+ * What a device never took, filled in once (v0.62.1, the user: «в телефоне все долги отображаются, а на ПК только
+ * новые»). A device that went from a version before v0.43 (no list of tables kept) straight to one with more tables took
+ * all but `drivers` for tables it had always had: the invoices from before the app, written on the server while it was
+ * still on the old version (skipped — nowhere to put them — its cursor past them), never came, and the company's old
+ * debts were not on the computer. Once: everything the server has up to this device's cursor that it has no record of —
+ * and has not deleted itself (a deletion still to go) — is put here as the server's. Nothing this device has is
+ * overwritten. A device starting from nothing takes it all anyway and does not need it.
+ */
+async function fillHoles(cfg: SyncConfig): Promise<void> {
+  const st = syncState();
+  if (st.holes) return;
+  if (!(st.cursor > 0)) {
+    setSyncState({ holes: 1 });
+    return;
+  }
+  if (st.replacing || !st.initialDone) return;
+  const end = st.cursor;
+  let since = 0;
+  for (;;) {
+    const res = await callJson<{ changes: Change[]; cursor: number; more: boolean }>(cfg, `/api/sync/pull?since=${since}&limit=1000`, { timeout: 90_000 });
+    const theirs = res.changes.filter((c) => c.d !== null && (c.r ?? 0) <= end && !!tableOf(c.t));
+    if (theirs.length) await putMissing(theirs);
+    since = res.cursor;
+    if (!res.more || since >= end) break;
+  }
+  setSyncState({ holes: 1 });
+}
+
+/** The server's records this device has nothing of (no record, no deletion of its own waiting to go): put as they are. */
+async function putMissing(changes: Change[]): Promise<void> {
+  const tombs = new Set((await db.syncTombs.toArray()).map((x) => `${x.t}\u0000${x.k}`));
+  const byTable = new Map<string, Change[]>();
+  for (const c of changes) if (!tombs.has(`${c.t}\u0000${c.k}`)) byTable.set(c.t, [...(byTable.get(c.t) ?? []), c]);
+  const tables = [...byTable.keys()].map(tableOf).filter((t): t is Table => !!t);
+  if (!tables.length) return;
+  await db.transaction('rw', tables, async () => {
+    markRemote(Dexie.currentTransaction);
+    for (const table of tables) {
+      const list = byTable.get(table.name)!;
+      const have = await table.bulkGet(list.map((c) => c.k));
+      const key = table.schema.primKey.keyPath as string;
+      const missing = list.filter((_, i) => !have[i]).map((c) => ({ ...c.d!, [key]: c.k, [STAMP]: 0 }));
+      if (missing.length) await table.bulkPut(missing);
+    }
+  });
+}
+
 async function pullRecords(cfg: SyncConfig): Promise<number> {
   await catchUp(cfg);
+  await fillHoles(cfg);
   let cursor = syncState().cursor;
   let n = 0;
   for (;;) {

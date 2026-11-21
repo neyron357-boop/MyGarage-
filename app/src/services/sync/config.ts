@@ -51,6 +51,11 @@ export interface SyncState {
    * version skipped its records — it had nowhere to put them) is taken once from the start (engine `catchUp`).
    */
   tables?: string[];
+  /**
+   * Everything the server had up to `cursor` that this device had no record of was put here once (v0.62.1, engine
+   * `fillHoles`): records an old version skipped while its list of tables already said it took them.
+   */
+  holes?: 1;
 }
 
 const CONFIG_KEY = 'mygarage.sync';
