@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -10,6 +10,11 @@ import path from 'node:path';
  *
  * v0.41.1: cloudflared runs on its own, not as the server's child — the server stopped and started again (an update)
  * finds it still running and keeps it, so the address the phones have does not change; only a reboot changes it.
+ *
+ * v0.62.3: one tunnel, ever. The check «is it still running» (tasklist, 5 s) said «no» of a tunnel that ran — on a busy
+ * evening 23 times in two hours — and each «no» started one more cloudflared beside it: 24 at once, two addresses the
+ * devices came through, the address in server.log flipping every minute. Now a tunnel is stopped only when the running
+ * processes say so too, and before one is kept or started, every other cloudflared of this program is stopped.
  */
 
 const ADDRESS = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
@@ -19,21 +24,58 @@ export function tunnelAddress(text) {
   return ADDRESS.exec(String(text))?.[0] ?? '';
 }
 
-/** Is this process number cloudflared (a number reused after a reboot is someone else's)? */
-function isTunnel(pid) {
+/** Is a process with this number running? Only a clear «no such process» is no — a check that cannot tell is not. */
+function exists(pid) {
   if (!pid) return false;
   try {
     process.kill(pid, 0);
+    return true;
   } catch (e) {
-    if (e.code !== 'EPERM') return false;
+    return e.code !== 'ESRCH';
   }
-  if (process.platform !== 'win32') return true;
-  try {
-    const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true, encoding: 'utf8', timeout: 5000 });
-    return /cloudflared/i.test(out);
-  } catch {
-    return false;
-  }
+}
+
+/** The numbers in a program's output, one a line. */
+const numbers = (out) =>
+  String(out)
+    .split(/\r?\n/)
+    .map((l) => Number(l.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+
+/**
+ * The cloudflared processes started from this program (its own path: a number reused after a reboot is someone else's,
+ * and so is a cloudflared run from elsewhere), by number; null — they could not be seen.
+ */
+export function tunnelsOf(exe) {
+  return new Promise((resolve) => {
+    if (!exe) return resolve([]);
+    if (process.platform === 'win32') {
+      // The path goes in the script itself, sent as UTF-16 (the data folder's «Служебное» survives no code page).
+      const quote = (s) => `'${String(s).replace(/'/g, "''")}'`;
+      const script = [
+        "$ErrorActionPreference = 'Stop'",
+        "$ProgressPreference = 'SilentlyContinue'",
+        `$exe = ${quote(path.resolve(exe))}`,
+        `Get-CimInstance Win32_Process -Filter ${quote(`Name='${path.basename(exe).replace(/'/g, "\\'")}'`)} | Where-Object { $_.ExecutablePath -eq $exe } | ForEach-Object { $_.ProcessId }`,
+      ].join('; ');
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+        { windowsHide: true, timeout: 60_000 },
+        (err, out) => resolve(err ? null : numbers(out)),
+      );
+      return;
+    }
+    execFile('ps', ['-eo', 'pid=,args='], { timeout: 30_000 }, (err, out) => {
+      if (err) return resolve(null);
+      const mine = [];
+      for (const line of String(out).split('\n')) {
+        const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+        if (m && (m[2] === exe || m[2].startsWith(`${exe} `))) mine.push(Number(m[1]));
+      }
+      resolve(mine);
+    });
+  });
 }
 
 /** Does the address reach this server (through the tunnel)? */
@@ -50,11 +92,28 @@ async function answers(url, tries = 3) {
   return false;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * `alive`, `reach` and `every` are for the tests: is this process the tunnel, does the address reach this server, how
- * often the tunnel is looked at.
+ * For the tests: `alive` — is a process with this number running; `running` — the tunnels of this program running now
+ * (null — not seen); `end` — stop one; `launch` — start cloudflared with these arguments, its output to this file;
+ * `reach` — does the address reach this server; `every` — how often the tunnel is looked at; `pause` — how long before
+ * a tunnel that stopped is started again.
  */
-export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir = exe ? path.dirname(exe) : '', alive = isTunnel, reach = answers, every = 15_000 }) {
+export function createTunnel({
+  exe,
+  port,
+  log = () => {},
+  onUrl = () => {},
+  dir = exe ? path.dirname(exe) : '',
+  alive = exists,
+  running = () => tunnelsOf(exe),
+  end = (pid) => process.kill(pid),
+  launch = (args, out) => spawn(exe, args, { detached: true, windowsHide: true, stdio: ['ignore', out, out] }),
+  reach = answers,
+  every = 15_000,
+  pause = (tries) => Math.min(60_000, 2000 * 2 ** Math.min(tries, 5)),
+}) {
   const stateFile = dir ? path.join(dir, 'tunnel.json') : '';
   const outFile = dir ? path.join(dir, 'cloudflared.log') : '';
   /** The address cloudflared has written in its output, if it has. */
@@ -69,6 +128,7 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
   let url = '';
   let wanted = false;
   let starting = false;
+  let looking = false;
   let tries = 0;
   let watch = null;
   let again = null;
@@ -94,11 +154,35 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
     onUrl(u);
   };
 
-  /** Still there? Gone (no network, a crash): started again, less often each time. */
-  function watching() {
-    if (watch) return;
-    watch = setInterval(() => {
-      if (!wanted || starting) return;
+  /** These tunnels stopped, and gone before anything goes on (a few seconds at most). */
+  async function stopAll(pids) {
+    for (const p of pids) {
+      try {
+        end(p);
+      } catch {
+        // gone already
+      }
+    }
+    for (let i = 0; i < 25 && pids.some(alive); i++) await sleep(200);
+  }
+
+  /** Started again in a while — less often each time; once, not again on every look. */
+  function later() {
+    if (again) return;
+    tries++;
+    again = setTimeout(() => {
+      again = null;
+      void start();
+    }, pause(tries));
+    again.unref?.();
+  }
+
+  /** Still there? Gone (no network, a crash): started again. */
+  async function look() {
+    if (!wanted || starting || looking) return;
+    if (!pid) return later();
+    looking = true;
+    try {
       if (alive(pid)) {
         // Its address read whenever it is written (v0.59.4): after a reboot cloudflared took 85 s to give one, the
         // server had stopped waiting after 60 — and for 8 hours the phone did not learn where the server was.
@@ -110,13 +194,21 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
         }
         return;
       }
+      // Stopped only when the running processes agree (v0.62.3): a check that could not tell had started 23 more.
+      const seen = await running();
+      if (!wanted || starting || !pid || seen?.includes(pid)) return;
       log('tunnel stopped, again in a moment');
       pid = 0;
       setUrl('');
-      tries++;
-      clearTimeout(again);
-      again = setTimeout(() => void start(), Math.min(60_000, 2000 * 2 ** Math.min(tries, 5)));
-    }, every);
+      later();
+    } finally {
+      looking = false;
+    }
+  }
+
+  function watching() {
+    if (watch) return;
+    watch = setInterval(() => void look(), every);
     watch.unref?.();
   }
 
@@ -124,35 +216,41 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
     wanted = true;
     if (starting || pid || !exe || !fs.existsSync(exe)) return;
     starting = true;
+    clearTimeout(again);
+    again = null;
     try {
-      // Left running by this server before it was started again: kept, with its address.
       const saved = readState();
-      if (saved?.pid && alive(saved.pid)) {
-        // Its address as kept, else from its own output (v0.59.4: the server before had stopped waiting for it).
-        const was = saved.url || written();
-        if (!was) {
-          // Still starting: kept — its address is read as soon as it is written (`watching`), not a second tunnel.
-          pid = saved.pid;
-          log('tunnel kept, its address not written yet');
-          watching();
-          return;
-        }
-        if (await reach(was)) {
-          pid = saved.pid;
+      // The tunnels of this program running now: one is kept at most, the others stopped (v0.62.3).
+      const seen = await running();
+      if (!wanted) return;
+      if (!seen) log('tunnel: the running ones could not be seen');
+      // Left running by this server before it was started again: kept, with its address.
+      const left = saved?.pid && (seen ? seen.includes(saved.pid) : alive(saved.pid)) ? saved.pid : 0;
+      let keep = 0;
+      // Its address as kept, else from its own output (v0.59.4: the server before had stopped waiting for it).
+      const was = left ? saved.url || written() : '';
+      if (left && !was) keep = left; // still starting: its address is read as soon as it is written (`look`)
+      else if (left && (await reach(was))) keep = left;
+      else if (left) log(`tunnel ${was} does not answer: a new one`);
+      else if (saved?.url) log(`tunnel ${saved.url} is not running any more: a new one`);
+      if (!wanted) return;
+      // Only the one kept goes on; one seen to run is stopped — never a second beside it.
+      const others = (seen ?? []).filter((p) => p !== keep);
+      if (others.length) {
+        log(`tunnel: ${others.length} more running, stopped`);
+        await stopAll(others);
+      }
+      if (keep) {
+        pid = keep;
+        if (was) {
           tries = 0;
           setUrl(was);
           if (was !== saved.url) writeState();
           log(`tunnel kept: ${was}`);
-          watching();
-          return;
-        }
-        log(`tunnel ${was} does not answer: a new one`);
-        try {
-          process.kill(saved.pid);
-        } catch {
-          // gone already
-        }
-      } else if (saved?.url) log(`tunnel ${saved.url} is not running any more: a new one`);
+        } else log('tunnel kept, its address not written yet');
+        watching();
+        return;
+      }
       if (!wanted) return;
       // The last tunnel's own output kept beside (v0.42.2): why it stopped, if it did.
       try {
@@ -161,15 +259,19 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
         // still held: written over
       }
       const out = fs.openSync(outFile, 'w');
-      const child = spawn(exe, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`], { detached: true, windowsHide: true, stdio: ['ignore', out, out] });
-      fs.closeSync(out);
-      child.on('error', (e) => log(`tunnel failed: ${e.message}`));
-      child.unref();
+      let child;
+      try {
+        child = launch(['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${port}`], out);
+      } finally {
+        fs.closeSync(out);
+      }
+      child.on?.('error', (e) => log(`tunnel failed: ${e.message}`));
+      child.unref?.();
       pid = child.pid ?? 0;
       writeState();
-      // Its address, from its output (in the file): looked for often for a minute, then by `watching` until it is there.
-      for (let i = 0; i < 120 && wanted && pid === child.pid; i++) {
-        await new Promise((r) => setTimeout(r, 500));
+      // Its address, from its output (in the file): looked for often for a minute, then by `look` until it is there.
+      for (let i = 0; i < 120 && wanted && pid && pid === child.pid && alive(pid); i++) {
+        await sleep(500);
         const found = written();
         if (found) {
           tries = 0;
@@ -184,20 +286,25 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
     }
   }
 
-  /** Turned off by the owner: the tunnel stops. */
+  /** Turned off by the owner: the tunnel stops — and any other of this program still running. */
   function stop() {
     wanted = false;
     clearInterval(watch);
     clearTimeout(again);
     watch = null;
+    again = null;
     if (pid) {
       try {
-        process.kill(pid);
+        end(pid);
       } catch {
         // gone already
       }
     }
     pid = 0;
+    if (exe && fs.existsSync(exe))
+      void running().then((seen) => {
+        if (!wanted && seen?.length) void stopAll(seen);
+      });
     try {
       if (stateFile) fs.rmSync(stateFile, { force: true });
     } catch {
@@ -211,6 +318,7 @@ export function createTunnel({ exe, port, log = () => {}, onUrl = () => {}, dir 
     clearInterval(watch);
     clearTimeout(again);
     watch = null;
+    again = null;
   }
 
   return { start: () => void start(), stop, detach, url: () => url, on: () => wanted, available: () => !!exe && fs.existsSync(exe) };

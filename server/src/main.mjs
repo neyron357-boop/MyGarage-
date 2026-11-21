@@ -52,7 +52,12 @@ pairing.issue();
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
 let learnt = store.metaGet('publicHost') || '';
 let tunnelUrl = '';
-const publicUrl = () => config.publicUrl || tunnelUrl || (learnt ? `https://${learnt}` : '');
+// The quick tunnel's own address is read from cloudflared (tunnel.mjs), not learnt from requests (v0.62.3): a request
+// through one left running beside it had flipped the address in server.log every minute — and, while the tunnel
+// started again, given the devices that one.
+const QUICK = /\.trycloudflare\.com$/i;
+const ownTunnel = (host) => tunnel.on() && QUICK.test(host);
+const publicUrl = () => config.publicUrl || tunnelUrl || (learnt && !ownTunnel(learnt) ? `https://${learnt}` : '');
 const tunnel = createTunnel({
   exe: config.tunnelExe,
   port: config.port,
@@ -63,7 +68,7 @@ const tunnel = createTunnel({
   },
 });
 function onSeen(host) {
-  if (host === learnt || /:\d+$/.test(host)) return;
+  if (host === learnt || /:\d+$/.test(host) || ownTunnel(host)) return;
   learnt = host;
   store.metaSet('publicHost', host);
   log(`address: https://${host}`);
