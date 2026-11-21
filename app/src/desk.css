@@ -456,6 +456,10 @@ html.desk .row-icon svg {
   width: 17px;
   height: 17px;
 }
+/* A row under a month (v0.62) steps in as far as the month's icon. */
+html.desk .row-indent {
+  width: 28px;
+}
 /* Chips: 30 px, 13.5 px. */
 html.desk .chip {
   min-height: 30px;

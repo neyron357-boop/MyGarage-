@@ -1249,6 +1249,7 @@ export const ru = {
     credits_few: '{{count}} кредита',
     credits_many: '{{count}} кредитов',
     credits_other: '{{count}} кредита',
+    monthsPaid: 'Оплаченные месяцы · {{count}}',
   },
   owed: {
     title: 'Кому должны',

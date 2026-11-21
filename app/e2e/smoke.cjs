@@ -3434,6 +3434,18 @@ async function launchBrowser() {
       return (await loadHistoryDebts(customerId))[0].dues.map((d) => [d.number, d.dueFils]);
     }, id);
     if (JSON.stringify(left) !== JSON.stringify([['302', 10500]])) throw new Error(`left: ${JSON.stringify(left)}`);
+    // v0.62: a month's row pays that month — the payment opens with it picked and what it owes; paid — the card is gone,
+    // and May is a month paid among the customer's months.
+    await card.locator('[data-debt-month="2026-05"]').click();
+    const dlg = page.getByRole('dialog');
+    await dlg.locator('.choice-card[data-active="true"] [data-debt-month="2026-05"]').waitFor();
+    if ((await dlg.getByLabel('Сумма').inputValue()) !== '105') throw new Error('the month offered ' + (await dlg.getByLabel('Сумма').inputValue()));
+    await shot('49b-pay-a-month');
+    await dlg.getByRole('button', { name: /^Записать приход/ }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    await card.waitFor({ state: 'detached' });
+    const months = await page.evaluate(async (customerId) => (await (await import('/src/services/debts.ts')).loadCustomerMonths(customerId)).map((m) => [m.month, m.totalFils, m.dueFils]), id);
+    if (JSON.stringify(months) !== JSON.stringify([['2026-05', 33600, 0]])) throw new Error(`months: ${JSON.stringify(months)}`);
   });
   await step('v0.53: a job typed in after the fact — «День» in «Новый заказ», its chip, «Готово» on that day; a car in work takes a second job', async () => {
     const dlg = page.getByRole('dialog');

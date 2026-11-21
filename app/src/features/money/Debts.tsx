@@ -1,18 +1,18 @@
 import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconBrandWhatsapp, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileText, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCalendarCheck, IconCalendarDollar, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { memo, useEffect, useState } from 'react';
+import { Fragment, memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
-import { spread, type Creditor, type Debtor } from '../../domain/debts';
+import { byMonths, creditMonths, creditSince, spread, type Creditor, type DebtJob, type DebtMonth, type Debtor } from '../../domain/debts';
 import { creditEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { formatPlate } from '../../domain/plates';
 import type { Customer, ExpenseCategory, PayMethod } from '../../domain/types';
-import { companyDebtOf, loadCreditors, loadDebtors, payCredit, paySupplier, type CompanyDebt } from '../../services/debts';
+import { companyDebtOf, loadCreditors, loadCustomerMonths, loadDebtors, payCredit, paySupplier, type CompanyDebt } from '../../services/debts';
 import { openWhatsApp } from '../../services/messages';
 import { debtInvoicesZip, statementPdf } from '../../services/debtDocs';
 import { openPdf } from '../../services/documents';
@@ -38,21 +38,72 @@ const tint = (color: string) => ({ background: `var(--mantine-color-${color}-6)`
 export const customerName = (c: Pick<Customer, 'type' | 'companyName' | 'name'>) => (c.type === 'company' && c.companyName ? c.companyName : c.name);
 
 /**
+ * A job a customer still owes on, in its card: the car, its number and day, the signed date; a tap opens the job.
+ */
+function DebtJobRow({ j, indent }: { j: DebtJob; indent?: boolean }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const navigate = useNavigate();
+  const late = !!j.dueDate && j.dueDate < dubaiDate();
+  return (
+    <ListRow
+      chevron
+      onClick={() => navigate(`/orders/${j.order.id}`)}
+      left={indent ? <span className="row-indent" aria-hidden /> : undefined}
+      title={[j.vehicle.make, j.vehicle.model].filter(Boolean).join(' ') || formatPlate(j.vehicle.plate, lang)}
+      subtitle={
+        <Stack gap={2} align="flex-start">
+          {/* Under its month (v0.62) the day is enough — the month and year are above it. */}
+          <PlateLine plate={j.vehicle.plate}>{`№${j.order.number} · ${indent ? formatDate(j.since).slice(0, 5) : formatDate(j.since)}`}</PlateLine>
+          {j.dueDate && (
+            <Text span inherit c={late ? 'red' : undefined}>
+              {t('debt.until', { date: formatDate(j.dueDate) })}
+              {late ? ` · ${t('debt.overdue')}` : ''}
+            </Text>
+          )}
+        </Stack>
+      }
+      right={<Money fils={j.dueFils} size="sm" roll />}
+    />
+  );
+}
+
+/**
  * One customer and what they owe (v0.30: folded — the name and the total; a tap unfolds it): each car with what each of
  * its jobs still owes, and the papers — take a payment, one sheet for all of it (a statement), every invoice in a .zip,
  * the customer's card.
+ *
+ * v0.62 (the user: «оплаты долгов компаний и клиентов по месяцам, выбор месяца и оплата — за некоторые месяцы инвойсы
+ * оплачены»): what it owes by month, the oldest first — a month's row (what is left of it, «из» what its invoices came
+ * to) opens the payment with that month picked and its sum; its jobs under it. The months paid (every invoice of them)
+ * are folded under the ones owed. One month of this app's jobs only — the jobs as they were, by car (`byMonths`).
  */
-const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (customerId: string) => void }) {
+const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (customerId: string, month?: DebtMonth) => void }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
   const { run, busy } = useAction();
   const [open, setOpen] = useState(false);
+  // Unfolded to the end: what comes in after it (the months paid) is not cut by the fold still measuring its height.
+  const [settled, setSettled] = useState(false);
+  const [past, setPast] = useState(false);
   const today = dubaiDate();
   const name = customerName(d.customer) || t('customer.noName');
   const jobs = d.cars.reduce((n, c) => n + c.jobs.length, 0);
   const before = d.history.reduce((n, m) => n + m.dues.length, 0);
   const late = d.cars.some((c) => c.jobs.some((j) => !!j.dueDate && j.dueDate < today));
+  const monthly = byMonths(d.months);
+  // Every month of its papers, read only once the card is opened (a card folded reads nothing more).
+  const papers = useScreenLiveQuery(() => (open ? loadCustomerMonths(d.customer.id) : undefined), [open, d.customer.id]);
+  const came = new Map((papers ?? []).map((m) => [m.month, m.totalFils]));
+  const owing = new Set(d.months.map((m) => m.month));
+  const paid = (papers ?? []).filter((m) => m.dueFils <= 0 && !owing.has(m.month)).reverse();
+  // (A timer, not the fold's own end: with motion reduced the fold does not move and says nothing.)
+  useEffect(() => {
+    if (!open) return setSettled(false);
+    const timer = window.setTimeout(() => setSettled(true), 280);
+    return () => window.clearTimeout(timer);
+  }, [open]);
   const statement = () => run(async () => openPdf(await statementPdf(d.customer.id)));
   const archive = () => run(async () => shareOrDownload(await debtInvoicesZip(d.customer.id)));
   return (
@@ -82,47 +133,68 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
         }
       />
       <Collapse in={open} transitionDuration={260}>
-      {d.cars.map((car) =>
-        car.jobs.map((j) => {
-          const late = !!j.dueDate && j.dueDate < today;
-          return (
-            <ListRow
-              key={j.order.id}
-              chevron
-              onClick={() => navigate(`/orders/${j.order.id}`)}
-              title={[car.vehicle.make, car.vehicle.model].filter(Boolean).join(' ') || formatPlate(car.vehicle.plate, lang)}
-              subtitle={
-                <Stack gap={2} align="flex-start">
-                  <PlateLine plate={car.vehicle.plate}>{`№${j.order.number} · ${formatDate(j.since)}`}</PlateLine>
-                  {j.dueDate && (
-                    <Text span inherit c={late ? 'red' : undefined}>
-                      {t('debt.until', { date: formatDate(j.dueDate) })}
-                      {late ? ` · ${t('debt.overdue')}` : ''}
+      {monthly
+        ? d.months.map((m) => {
+            const of = came.get(m.month) ?? 0;
+            return (
+              <Fragment key={m.month}>
+                {/* A month: what is left of it; a tap — pay it (v0.62). Its invoices from before the app are in it. */}
+                <ListRow
+                  onClick={() => onPay(d.customer.id, m)}
+                  left={
+                    <span className="row-icon" style={tint('green')} aria-hidden>
+                      <IconCalendarDollar size={19} stroke={2} />
+                    </span>
+                  }
+                  title={
+                    <Text span inherit fw={600} data-debt-month={m.month}>
+                      {monthLong(m.month, lang)}
                     </Text>
-                  )}
-                </Stack>
-              }
-              right={<Money fils={j.dueFils} size="sm" roll />}
-            />
-          );
-        }),
-      )}
-      {/* The invoices from before the app (v0.47): a month a row — its statement — what is still owed on it. */}
-      {d.history.map((m) => (
+                  }
+                  subtitle={[m.jobs.length ? t('debt.jobs', { count: m.jobs.length }) : '', m.history.length ? t('history.count', { count: m.history.length }) : '', of > m.dueFils ? t('debt.ofTotal', { sum: formatAed(of) }) : ''].filter(Boolean).join(' · ')}
+                  right={<Money fils={m.dueFils} size="sm" c="red" fw={600} roll />}
+                />
+                {m.jobs.map((j) => (
+                  <DebtJobRow key={j.order.id} j={j} indent />
+                ))}
+              </Fragment>
+            );
+          })
+        : d.cars.map((car) => car.jobs.map((j) => <DebtJobRow key={j.order.id} j={j} />))}
+      {/* The months paid (v0.62, «за некоторые месяцы инвойсы оплачены»): folded under the debts, the latest first. */}
+      {settled && paid.length > 0 && (
         <ListRow
-          key={m.month}
-          chevron
-          onClick={() => navigate(`/customers/${d.customer.id}`)}
-          left={
-            <span className="row-icon" style={tint('grape')} aria-hidden>
-              <IconFileText size={19} stroke={2} />
-            </span>
+          onClick={() => setPast((p) => !p)}
+          title={
+            <Text span inherit c="dimmed" fw={500} data-months-paid={paid.length}>
+              {t('debt.monthsPaid', { count: paid.length })}
+            </Text>
           }
-          title={monthLong(m.month, lang)}
-          subtitle={t('history.count', { count: m.dues.length })}
-          right={<Money fils={m.dueFils} size="sm" roll />}
+          right={<IconChevronDown size={18} color="var(--app-label-3)" style={{ transform: past ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} aria-hidden />}
         />
-      ))}
+      )}
+      {/* Not a second Collapse inside the card's: the outer one would keep its old height and cut the tiles. */}
+      {settled && past && (
+        <div className="rise-enter">
+          {paid.map((m) => (
+            <ListRow
+              key={m.month}
+              left={
+                <span className="row-icon" style={tint('teal')} aria-hidden>
+                  <IconCalendarCheck size={19} stroke={2} />
+                </span>
+              }
+              title={
+                <Text span inherit c="dimmed" data-month-paid={m.month}>
+                  {monthLong(m.month, lang)}
+                </Text>
+              }
+              subtitle={t('history.count', { count: m.count })}
+              right={<Money fils={m.totalFils} size="sm" c="dimmed" />}
+            />
+          ))}
+        </div>
+      )}
       <div className="debt-actions">
         <button type="button" className="action-tile" onClick={() => onPay(d.customer.id)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
@@ -159,7 +231,8 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
 
 /**
  * The customers who owe, one card each — whoever owes most first. A car or a job opens the job; "Take payment"
- * opens money in as a debt payment of that customer (spread over their jobs, the oldest first).
+ * opens money in as a debt payment of that customer (spread over their jobs, the oldest first); a month (v0.62) — the
+ * same with that month picked and what it owes offered.
  */
 export function DebtorList({ debtors }: { debtors: Debtor[] }) {
   const [pay, setPay] = useState<EntryPreset | null>(null);
@@ -167,7 +240,7 @@ export function DebtorList({ debtors }: { debtors: Debtor[] }) {
     <>
       <Stack gap="md" className="debt-cards">
         {debtors.map((d) => (
-          <DebtorCard key={d.customer.id} d={d} onPay={(customerId) => setPay({ debt: { customerId } })} />
+          <DebtorCard key={d.customer.id} d={d} onPay={(customerId, m) => setPay(m ? { debt: { customerId, months: [m.month] }, amountFils: m.dueFils } : { debt: { customerId } })} />
         ))}
       </Stack>
       <SheetFor value={pay}>{(p, o) => <EntrySheet opened={o} onClose={() => setPay(null)} preset={p} />}</SheetFor>
@@ -216,13 +289,27 @@ export function CompanyDebtList({ list, cats, onOpen }: { list: CompanyDebt[]; c
  * oldest first — for a person, where each was bought — and the ones paid off already under them; «Оплата» — one sum to
  * him, spread over his credits the oldest first; WhatsApp; a person's name and phone («Контакт»).
  */
-const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onContact }: { c: Creditor<CompanyDebt>; catName: (id: string) => string; onOpen: (expenseId: string) => void; onPay: (c: Creditor<CompanyDebt>) => void; onContact: (c: Creditor<CompanyDebt>) => void }) {
+const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onContact }: { c: Creditor<CompanyDebt>; catName: (id: string) => string; onOpen: (expenseId: string) => void; onPay: (c: Creditor<CompanyDebt>, month?: string) => void; onContact: (c: Creditor<CompanyDebt>) => void }) {
   const { t } = useTranslation();
+  const lang = useLang();
   const [open, setOpen] = useState(false);
   const [past, setPast] = useState(false);
   const phone = c.phone;
   // A person's credit says where it was bought (the seller is not who is owed).
   const where = (e: CompanyDebt['expense']) => (c.lender ? e.vendor ?? '' : '');
+  // v0.62: credits of two months or more — by month (a supplier's monthly statement); a month's row pays that month.
+  const months = creditMonths(c.credits);
+  const credit = ({ expense: e, paid, leftFils }: CompanyDebt, indent?: boolean) => (
+    <ListRow
+      key={e.id}
+      chevron
+      onClick={() => onOpen(e.id)}
+      left={indent ? <span className="row-indent" aria-hidden /> : undefined}
+      title={[formatDate(e.date), catName(e.categoryId)].join(' · ')}
+      subtitle={[where(e), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ') || undefined}
+      right={<Money fils={leftFils} size="sm" c="orange.7" roll />}
+    />
+  );
   return (
     <List className={open ? 'debt-card is-open' : 'debt-card'} data-creditor={c.name}>
       <ListRow
@@ -242,16 +329,28 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
         }
       />
       <Collapse in={open} transitionDuration={260}>
-        {c.credits.map(({ expense: e, paid, leftFils }) => (
-          <ListRow
-            key={e.id}
-            chevron
-            onClick={() => onOpen(e.id)}
-            title={[formatDate(e.date), catName(e.categoryId)].join(' · ')}
-            subtitle={[where(e), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ') || undefined}
-            right={<Money fils={leftFils} size="sm" c="orange.7" roll />}
-          />
-        ))}
+        {months.length > 1
+          ? months.map((m) => (
+              <Fragment key={m.month}>
+                <ListRow
+                  onClick={() => onPay(c, m.month)}
+                  left={
+                    <span className="row-icon" style={tint('red')} aria-hidden>
+                      <IconCalendarDollar size={19} stroke={2} />
+                    </span>
+                  }
+                  title={
+                    <Text span inherit fw={600} data-credit-month={m.month}>
+                      {monthLong(m.month, lang)}
+                    </Text>
+                  }
+                  subtitle={t('debt.credits', { count: m.credits.length })}
+                  right={<Money fils={m.leftFils} size="sm" c="orange.7" fw={600} roll />}
+                />
+                {m.credits.map((d) => credit(d, true))}
+              </Fragment>
+            ))
+          : c.credits.map((d) => credit(d))}
         {/* What was owed to him and is paid off already (v0.61): the whole story with him, folded under the debts. */}
         {c.settled.length > 0 && (
           <ListRow
@@ -315,18 +414,41 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
 /**
  * One sum to a seller (v0.50.2): all it is owed is offered (a part is typed over it); it goes to its credits the oldest
  * first — the rows under the sum say how much to which — on the day it was paid, by the way it was paid.
+ * v0.62: credits of two months or more — the months as chips: those picked go first, and what they owe is offered
+ * (a month's row in the card opens the sheet with it picked).
  */
-function SupplierPaySheet({ c, opened, onClose }: { c: Creditor<CompanyDebt>; opened: boolean; onClose: () => void }) {
+function SupplierPaySheet({ c, months: start, opened, onClose }: { c: Creditor<CompanyDebt>; months: string[]; opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
+  const lang = useLang();
   const { run, busy } = useAction();
-  const [amount, setAmount] = useState<number | undefined>(c.leftFils);
+  const months = creditMonths(c.credits);
+  const owes = (picked: string[]) => months.reduce((a, m) => a + (picked.includes(m.month) ? m.leftFils : 0), 0);
+  const [picked, setPicked] = useState(start);
+  const [amount, setAmount] = useState<number | undefined>(start.length ? owes(start) : c.leftFils);
   const [method, setMethod] = useState<PayMethod>('cash');
   const [date, setDate] = useState(dubaiDate());
-  const parts = spread(amount ?? 0, c.credits.map((d) => ({ key: d.expense.id, dueFils: d.leftFils, since: `${d.expense.date}|${d.expense.createdAt}` }))).parts;
+  const first = months.filter((m) => picked.includes(m.month)).flatMap((m) => m.credits.map((d) => d.expense.id));
+  const parts = spread(amount ?? 0, c.credits.map((d) => ({ key: d.expense.id, dueFils: d.leftFils, since: creditSince(d.expense) })), first).parts;
+  // A month picked or let go: the sum follows while it is what the months picked owe (a sum typed over it stays).
+  const toggle = (month: string) => {
+    const next = picked.includes(month) ? picked.filter((x) => x !== month) : [...picked, month];
+    if (!amount || amount === (picked.length ? owes(picked) : c.leftFils)) setAmount(next.length ? owes(next) : c.leftFils);
+    setPicked(next);
+  };
   return (
     <Modal opened={opened} onClose={onClose} title={c.name}>
       <Stack gap="md">
         <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} big />
+        {months.length > 1 && (
+          <div className="chip-row wrap">
+            {months.map((m) => (
+              <button key={m.month} type="button" className="chip" data-active={picked.includes(m.month)} data-pay-month={m.month} onClick={() => toggle(m.month)}>
+                {monthLong(m.month, lang)}
+                <span className="chip-note">{formatAed(m.leftFils)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {parts.length > 0 && (
           <List>
             {parts.map((p) => {
@@ -360,7 +482,7 @@ function SupplierPaySheet({ c, opened, onClose }: { c: Creditor<CompanyDebt>; op
             run(async () => {
               await paySupplier(
                 c.credits.map((d) => d.expense.id),
-                { amountFils: amount ?? 0, method, date },
+                { amountFils: amount ?? 0, method, date, first },
               );
               haptic('success');
               onClose();
@@ -378,17 +500,17 @@ function SupplierPaySheet({ c, opened, onClose }: { c: Creditor<CompanyDebt>; op
 /** What the garage owes, by whom: a card per seller or person; a credit owed to nobody yet as its own row. */
 export function CreditorList({ creditors, loose, cats, onOpen }: { creditors: Creditor<CompanyDebt>[]; loose: CompanyDebt[]; cats?: ExpenseCategory[]; onOpen: (expenseId: string) => void }) {
   const catName = useCategoryName(cats);
-  const [pay, setPay] = useState<Creditor<CompanyDebt> | null>(null);
+  const [pay, setPay] = useState<{ c: Creditor<CompanyDebt>; months: string[] } | null>(null);
   const [contact, setContact] = useState<Creditor<CompanyDebt> | null>(null);
   return (
     <>
       <Stack gap="md" className="debt-cards">
         {creditors.map((c) => (
-          <CreditorCard key={c.key} c={c} catName={catName} onOpen={onOpen} onPay={setPay} onContact={setContact} />
+          <CreditorCard key={c.key} c={c} catName={catName} onOpen={onOpen} onPay={(c, month) => setPay({ c, months: month ? [month] : [] })} onContact={setContact} />
         ))}
         {loose.length > 0 && <CompanyDebtList list={loose} cats={cats} onOpen={onOpen} />}
       </Stack>
-      <SheetFor value={pay}>{(c, o) => <SupplierPaySheet c={c} opened={o} onClose={() => setPay(null)} />}</SheetFor>
+      <SheetFor value={pay}>{(p, o) => <SupplierPaySheet c={p.c} months={p.months} opened={o} onClose={() => setPay(null)} />}</SheetFor>
       <SheetFor value={contact?.lender}>{(l, o) => <LenderSheet lender={l} opened={o} onClose={() => setContact(null)} />}</SheetFor>
     </>
   );

@@ -1,7 +1,8 @@
 import { db, nextNumber, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
-import { creditLeft, debtQueue, groupCredits, groupDebts, historyDues, historyKeyOf, isCustomerDebt, orderDue, spread, type DebtJob, type Creditor, type DebtShare, type Debtor, type HistoryDue } from '../domain/debts';
+import { creditLeft, creditSince, debtMonths, debtQueue, groupCredits, groupDebts, historyDues, historyKeyOf, historyLeft, isCustomerDebt, monthKeys, monthTotals, orderDue, spread, type DebtJob, type Creditor, type DebtShare, type Debtor, type HistoryDue, type MonthTotal } from '../domain/debts';
 import { activeInvoice, amountDue, formatDocNumber } from '../domain/invoice';
+import { summarize } from '../domain/items';
 import type { CreditPayment, Customer, Expense, Income, Invoice, Order, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
 import { AppError } from './errors';
 import { placeInDay } from './cashDays';
@@ -77,7 +78,9 @@ export async function loadDebtJobs(customerId?: string): Promise<DebtJob[]> {
     const dueFils = orderDue(order, items.get(order.id) ?? [], inv, payments.get(order.id) ?? []);
     if (!isCustomerDebt(order, dueFils)) return [];
     const signed = (debts.get(order.id) ?? []).filter((d) => d.status === 'open').sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
-    return [{ order, dueFils, since: activeInvoice(inv)?.issuedAt ?? order.deliveredAt ?? order.closedAt ?? order.createdAt, dueDate: signed?.dueDate }];
+    const active = activeInvoice(inv);
+    const totalFils = active ? active.totalFils : summarize(items.get(order.id) ?? []).approvedGross;
+    return [{ order, dueFils, totalFils, since: active?.issuedAt ?? order.deliveredAt ?? order.closedAt ?? order.createdAt, dueDate: signed?.dueDate }];
   });
   if (!found.length) return [];
   const [customers, vehicles] = await Promise.all([
@@ -115,6 +118,31 @@ export async function loadDebtors(): Promise<Debtor[]> {
   return groupDebts(jobs, history);
 }
 
+/**
+ * Every month of a customer's papers (v0.62) — what its invoices came to and what is still owed of it: the jobs gone (the
+ * invoice in force, else — a debt with none — the agreed lines; by the day their debt began, as `debtMonths`) and the
+ * invoices from before the app. A month owing nothing is a month paid. Read for one customer, when its card is opened.
+ */
+export async function loadCustomerMonths(customerId: string): Promise<MonthTotal[]> {
+  const [owing, { gone, invoices, payments }, history, incomes] = await Promise.all([
+    loadDebtJobs(customerId),
+    customerGone(customerId),
+    db.historyInvoices.where('customerId').equals(customerId).toArray(),
+    db.incomes.where('customerId').equals(customerId).toArray(),
+  ]);
+  const owes = new Set(owing.map((j) => j.order.id));
+  const rows = owing.map((j) => ({ date: dubaiDate(j.since), totalFils: j.totalFils ?? j.dueFils, dueFils: j.dueFils }));
+  for (const o of gone) {
+    // Nothing is owed on history carried over or on a job closed without payment: not a month paid either.
+    if (owes.has(o.id) || o.imported?.history || o.waived) continue;
+    const inv = invoices.get(o.id) ?? [];
+    const active = activeInvoice(inv);
+    if (active) rows.push({ date: dubaiDate(active.issuedAt), totalFils: active.totalFils, dueFils: Math.max(0, amountDue(0, inv, payments.get(o.id) ?? [])) });
+  }
+  for (const h of historyLeft(history, incomes)) rows.push({ date: h.date, totalFils: h.totalFils, dueFils: h.dueFils });
+  return monthTotals(rows);
+}
+
 export interface DebtPaymentInput {
   amountFils: number;
   method: PayMethod;
@@ -122,6 +150,8 @@ export interface DebtPaymentInput {
   customerId?: string;
   /** The job to pay off first (then the oldest). */
   orderId?: string;
+  /** v0.62: the months (YYYY-MM) to pay off first — their jobs and invoices from before the app, the oldest first. */
+  months?: string[];
   date?: string;
   note?: string;
 }
@@ -141,7 +171,10 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
   const customer = input.customerId ? await db.customers.get(input.customerId) : undefined;
   if (input.customerId && !customer) throw new AppError('err.notFound');
   const [debts, history] = customer ? await Promise.all([loadDebtJobs(customer.id), loadHistoryDebts(customer.id)]) : [[], []];
-  const spent = spread(input.amountFils, debtQueue(debts, history[0]?.dues ?? []), input.orderId);
+  const dues = history[0]?.dues ?? [];
+  // The months picked go first (v0.62), else the job picked; then the oldest.
+  const first = input.months?.length ? monthKeys(debtMonths(debts, dues), input.months) : input.orderId;
+  const spent = spread(input.amountFils, debtQueue(debts, dues), first);
   const restFils = spent.restFils;
   const parts: DebtShare[] = spent.parts.filter((p) => !historyKeyOf(p.key)).map((p) => ({ orderId: p.key, amountFils: p.amountFils }));
   const historyParts = spent.parts.flatMap((p) => {
@@ -272,14 +305,16 @@ export async function loadCreditors(): Promise<{ creditors: Creditor<CompanyDebt
 
 /**
  * A seller paid at once (v0.50.2): the sum goes to its credits the oldest first, each part a payment of its own (as
- * `payCredit`: the money moves by the way it is paid). More than is owed — refused.
+ * `payCredit`: the money moves by the way it is paid). More than is owed — refused. v0.62: the credits of the months
+ * picked (`first`) go first, the oldest of them first.
  */
-export async function paySupplier(expenseIds: string[], input: { amountFils: number; method: PayMethod; date?: string }): Promise<CreditPayment[]> {
+export async function paySupplier(expenseIds: string[], input: { amountFils: number; method: PayMethod; date?: string; first?: string[] }): Promise<CreditPayment[]> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
   const debts = (await Promise.all(expenseIds.map((id) => companyDebtOf(id)))).filter((d): d is CompanyDebt => !!d && d.leftFils > 0);
   const { parts, restFils } = spread(
     input.amountFils,
-    debts.map((d) => ({ key: d.expense.id, dueFils: d.leftFils, since: `${d.expense.date}|${d.expense.createdAt}` })),
+    debts.map((d) => ({ key: d.expense.id, dueFils: d.leftFils, since: creditSince(d.expense) })),
+    input.first,
   );
   if (restFils > 0) throw new AppError('err.creditOver');
   const done: CreditPayment[] = [];

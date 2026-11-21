@@ -4,12 +4,12 @@ import {
   IconArrowsSplit2,
   IconArrowUpRight,
   IconBuildingBank,
+  IconCalendarDollar,
   IconCar,
   IconCash,
   IconChevronDown,
   IconClockDollar,
   IconCreditCard,
-  IconFileText,
   IconPlus,
   IconReceipt2,
   IconSearch,
@@ -24,7 +24,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
-import { debtQueue, historyKey, spread } from '../../domain/debts';
+import { byMonths, debtQueue, historyKey, monthKeys, monthsDue, spread, type DebtJob } from '../../domain/debts';
 import { PART_WAYS, partRows, partsOf, partsRest } from '../../domain/expenseParts';
 import { incomeCategoryName, KEPT_INCOME, renamedIn } from '../../domain/incomeCategories';
 import type { OwedPick } from '../../domain/lenders';
@@ -410,18 +410,25 @@ export function LinkPicker({ value, onChange }: { value: Links; onChange: (v: Li
   );
 }
 
-/** Whose debt a "debt payment" is, and the job to pay off first. */
+/** Whose debt a "debt payment" is, and the job to pay off first — or (v0.62) the months to pay off first. */
 export interface DebtPick {
   customerId?: string;
   orderId?: string;
+  /** YYYY-MM */
+  months?: string[];
 }
 
 /**
  * The customer of a "debt payment" — optional. Those who owe are offered at once (who owes most first), anyone
  * else is found by name, phone or plate. A customer picked shows their debts and where this sum goes: the oldest
  * first; a tap on a job pays that one first. What nobody owes is shown as money in with no debt to it.
+ *
+ * v0.62: debts of two months or more (or invoices from before the app) — by month, each month a card with its jobs under
+ * it: a tap on months picks them (they are paid first, the oldest of them first) and offers what they owe as the sum
+ * (`onAmount`, while the sum is what the months picked before owed — a sum typed over it stays). A job picked lets the
+ * months go, and the other way round.
  */
-function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChange: (v: DebtPick) => void; amountFils: number }) {
+function DebtorField({ value, onChange, amountFils, onAmount }: { value: DebtPick; onChange: (v: DebtPick) => void; amountFils: number; onAmount?: (fils: number | undefined) => void }) {
   const { t } = useTranslation();
   const lang = useLang();
   const debtors = useLiveQuery(loadDebtors, []);
@@ -446,10 +453,40 @@ function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChang
   if (value.customerId) {
     const debtor = debtors?.find((d) => d.customer.id === value.customerId);
     const jobs = debtor ? debtor.cars.flatMap((c) => c.jobs) : [];
-    // Spread as the payment will be: the jobs and (v0.47) the invoices from before the app, the oldest first.
-    const plan = spread(amountFils, debtQueue(jobs, debtor ? debtor.history.flatMap((m) => m.dues) : []), value.orderId);
+    const months = debtor?.months ?? [];
+    const chosen = value.months ?? [];
+    // Spread as the payment will be: the jobs and (v0.47) the invoices from before the app, the oldest first — the months
+    // picked first (v0.62), else the job picked.
+    const plan = spread(amountFils, debtQueue(jobs, debtor ? debtor.history.flatMap((m) => m.dues) : []), chosen.length ? monthKeys(months, chosen) : value.orderId);
     const got = new Map(plan.parts.map((p) => [p.key, p.amountFils]));
     const c = debtor?.customer ?? picked ?? undefined;
+    const pickMonth = (month: string) => {
+      const next = chosen.includes(month) ? chosen.filter((x) => x !== month) : [...chosen, month];
+      if (!amountFils || amountFils === monthsDue(months, chosen)) onAmount?.(monthsDue(months, next) || undefined);
+      onChange({ customerId: value.customerId, months: next.length ? next : undefined });
+    };
+    const jobCard = (j: DebtJob) => {
+      const part = got.get(j.order.id) ?? 0;
+      return (
+        <SelectCard key={j.order.id} active={value.orderId === j.order.id} onClick={() => onChange({ customerId: value.customerId, orderId: value.orderId === j.order.id ? undefined : j.order.id })}>
+          <Group justify="space-between" wrap="nowrap" gap="sm" data-debt-job={j.order.number}>
+            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+              <PlateText plate={j.vehicle.plate} size="xs" />
+              <Text size="sm" fw={600} lineClamp={1}>
+                №{j.order.number}
+                <Text span inherit fw={400} c="dimmed">
+                  {[' ', j.vehicle.make, j.vehicle.model].filter(Boolean).join(' ')}
+                </Text>
+              </Text>
+            </Group>
+            <Stack gap={0} align="flex-end" style={{ flexShrink: 0 }}>
+              <Money fils={j.dueFils} size="sm" />
+              {part > 0 && <Money fils={-part} size="xs" c="green.7" />}
+            </Stack>
+          </Group>
+        </SelectCard>
+      );
+    };
     return (
       <Stack gap={8} className="debt-pick">
         <Group justify="space-between" wrap="nowrap" gap="sm">
@@ -476,49 +513,39 @@ function DebtorField({ value, onChange, amountFils }: { value: DebtPick; onChang
             <IconX size={18} />
           </ActionIcon>
         </Group>
-        {/* The invoices from before the app, a month a row, on top: they are paid first (the oldest first — not picked). */}
-        {debtor?.history.map((m) => {
-          const part = m.dues.reduce((a, d) => a + (got.get(historyKey(d.invoiceId)) ?? 0), 0);
-          return (
-            <Group key={m.month} justify="space-between" wrap="nowrap" gap="sm" className="choice-card" data-debt-month={m.month}>
-              <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                <IconFileText size={18} stroke={1.8} color="var(--mantine-color-grape-6)" aria-hidden />
-                <Text size="sm" fw={600} lineClamp={1}>
-                  {monthLong(m.month, lang)}
-                  <Text span inherit fw={400} c="dimmed">
-                    {` · ${t('history.count', { count: m.dues.length })}`}
-                  </Text>
-                </Text>
-              </Group>
-              <Stack gap={0} align="flex-end" style={{ flexShrink: 0 }}>
-                <Money fils={m.dueFils} size="sm" />
-                {part > 0 && <Money fils={-part} size="xs" c="green.7" />}
-              </Stack>
-            </Group>
-          );
-        })}
-        {jobs.map((j) => {
-          const part = got.get(j.order.id) ?? 0;
-          return (
-            <SelectCard key={j.order.id} active={value.orderId === j.order.id} onClick={() => onChange({ customerId: value.customerId, orderId: value.orderId === j.order.id ? undefined : j.order.id })}>
-              <Group justify="space-between" wrap="nowrap" gap="sm" data-debt-job={j.order.number}>
-                <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                  <PlateText plate={j.vehicle.plate} size="xs" />
-                  <Text size="sm" fw={600} lineClamp={1}>
-                    №{j.order.number}
-                    <Text span inherit fw={400} c="dimmed">
-                      {[' ', j.vehicle.make, j.vehicle.model].filter(Boolean).join(' ')}
-                    </Text>
-                  </Text>
-                </Group>
-                <Stack gap={0} align="flex-end" style={{ flexShrink: 0 }}>
-                  <Money fils={j.dueFils} size="sm" />
-                  {part > 0 && <Money fils={-part} size="xs" c="green.7" />}
+        {byMonths(months)
+          ? months.map((m) => {
+              const part = m.jobs.reduce((a, j) => a + (got.get(j.order.id) ?? 0), 0) + m.history.reduce((a, d) => a + (got.get(historyKey(d.invoiceId)) ?? 0), 0);
+              return (
+                <Stack key={m.month} gap={6}>
+                  <SelectCard active={chosen.includes(m.month)} onClick={() => pickMonth(m.month)}>
+                    <Group justify="space-between" wrap="nowrap" gap="sm" data-debt-month={m.month}>
+                      <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                        <IconCalendarDollar size={18} stroke={1.8} color="var(--mantine-color-green-6)" aria-hidden />
+                        <Text size="sm" fw={600} lineClamp={1}>
+                          {monthLong(m.month, lang)}
+                          {m.history.length > 0 && (
+                            <Text span inherit fw={400} c="dimmed">
+                              {` · ${t('history.count', { count: m.history.length })}`}
+                            </Text>
+                          )}
+                        </Text>
+                      </Group>
+                      <Stack gap={0} align="flex-end" style={{ flexShrink: 0 }}>
+                        <Money fils={m.dueFils} size="sm" />
+                        {part > 0 && <Money fils={-part} size="xs" c="green.7" />}
+                      </Stack>
+                    </Group>
+                  </SelectCard>
+                  {m.jobs.length > 0 && (
+                    <Stack gap={6} pl={16}>
+                      {m.jobs.map(jobCard)}
+                    </Stack>
+                  )}
                 </Stack>
-              </Group>
-            </SelectCard>
-          );
-        })}
+              );
+            })
+          : jobs.map(jobCard)}
         {amountFils > 0 && plan.restFils > 0 && (
           <Group justify="space-between" wrap="nowrap" px={4} data-debt-rest>
             <Text size="sm" c="dimmed">
@@ -653,6 +680,8 @@ export interface EntryPreset {
   link?: Links;
   /** Money in as a "debt payment" (of this customer, this job first). */
   debt?: DebtPick;
+  /** The sum offered (v0.62: a month picked to pay — what it owes). */
+  amountFils?: number;
   /** A receipt photographed before the sheet (v0.50): attached, and what was read off it filled in. */
   receipt?: File;
   expense?: { amountFils?: number; vatFils?: number; vendor?: string; note?: string; date?: string };
@@ -717,7 +746,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     setMethod((m) => (m === 'credit' ? 'cash' : m));
     setParts(undefined);
     setTyped({});
-    setAmount(preset?.expense?.amountFils);
+    setAmount(preset?.amountFils ?? preset?.expense?.amountFils);
     setNote(preset?.expense?.note ?? '');
     setDate(preset?.expense?.date ?? dubaiDate());
     setVendor(preset?.expense?.vendor ?? '');
@@ -754,7 +783,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     run(async () => {
       if (kind === 'in') {
         const way = method === 'credit' ? 'cash' : method;
-        if (debtIn) await addIncome({ date, category: 'debt', amountFils: amount ?? 0, method: way, note, customerId: debt.customerId, orderId: debt.orderId });
+        if (debtIn) await addIncome({ date, category: 'debt', amountFils: amount ?? 0, method: way, note, customerId: debt.customerId, orderId: debt.orderId, months: debt.months });
         else await addIncome({ date, category: incomeCat, amountFils: amount ?? 0, method: way, note, ...link });
       } else
         await addExpense({
@@ -816,7 +845,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
                 {t('debt.who')}
               </Text>
             </Group>
-            <DebtorField value={debt} onChange={setDebt} amountFils={amount ?? 0} />
+            <DebtorField value={debt} onChange={setDebt} amountFils={amount ?? 0} onAmount={setAmount} />
           </div>
         ) : (
           <div>

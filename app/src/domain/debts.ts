@@ -1,3 +1,4 @@
+import { dubaiDate } from './dates';
 import { amountDue } from './invoice';
 import { summarize } from './items';
 import { sellerKey } from './suppliers';
@@ -38,6 +39,8 @@ export interface DebtJob {
   since: string;
   /** The date a signed debt is due, when one was signed. */
   dueDate?: string;
+  /** What it came to (its invoice, else the agreed lines) — paid or not (v0.62: a month's «из …»). */
+  totalFils?: number;
 }
 
 /** An invoice from before the app that the customer still owes (v0.47) — in full, or what «debt payments» left of it. */
@@ -61,14 +64,18 @@ export interface HistoryMonth {
   dues: HistoryDue[];
 }
 
-/** What each invoice from before the app still owes: its total less the parts of «debt payments» set against it. */
-export function historyDues(invoices: HistoryInvoice[], incomes: Pick<Income, 'category' | 'historyParts' | 'voidedAt'>[]): HistoryDue[] {
+/** Each invoice from before the app with what it still owes — paid off ones too (nothing, or less than nothing). */
+export function historyLeft(invoices: HistoryInvoice[], incomes: Pick<Income, 'category' | 'historyParts' | 'voidedAt'>[]): HistoryDue[] {
   const paid = new Map<string, number>();
   for (const i of incomes) if (i.category === 'debt' && !i.voidedAt) for (const p of i.historyParts ?? []) paid.set(p.invoiceId, (paid.get(p.invoiceId) ?? 0) + p.amountFils);
   return invoices
     .map((h) => ({ invoiceId: h.id, date: h.date, number: h.number, numberKind: h.numberKind, plate: h.plate, vehicleId: h.vehicleId, totalFils: h.totalFils, dueFils: h.totalFils - (paid.get(h.id) ?? 0) }))
-    .filter((d) => d.dueFils > 0)
     .sort((a, b) => a.date.localeCompare(b.date) || a.invoiceId.localeCompare(b.invoiceId));
+}
+
+/** What each invoice from before the app still owes: its total less the parts of «debt payments» set against it. */
+export function historyDues(invoices: HistoryInvoice[], incomes: Pick<Income, 'category' | 'historyParts' | 'voidedAt'>[]): HistoryDue[] {
+  return historyLeft(invoices, incomes).filter((d) => d.dueFils > 0);
 }
 
 /** By month, oldest first. */
@@ -95,6 +102,96 @@ export const debtQueue = (jobs: Pick<DebtJob, 'order' | 'dueFils' | 'since'>[], 
   ...history.map((h) => ({ key: historyKey(h.invoiceId), dueFils: h.dueFils, since: historySince(h.date) })),
 ];
 
+/**
+ * A month of a customer's debts (v0.62, the user: «оплаты долгов компаний и клиентов по месяцам, выбор месяца и оплата —
+ * за некоторые месяцы инвойсы оплачены»): the jobs whose debt began in it (their invoice, by the day in Dubai) and its
+ * invoices from before the app — what a company's statement of the month is.
+ */
+export interface DebtMonth {
+  /** YYYY-MM */
+  month: string;
+  dueFils: number;
+  /** The oldest first. */
+  jobs: DebtJob[];
+  history: HistoryDue[];
+}
+
+/** A customer's debts by month, the oldest first. */
+export function debtMonths(jobs: DebtJob[], history: HistoryDue[]): DebtMonth[] {
+  const by = new Map<string, DebtMonth>();
+  const at = (month: string) => by.get(month) ?? by.set(month, { month, dueFils: 0, jobs: [], history: [] }).get(month)!;
+  for (const j of jobs) {
+    const m = at(dubaiDate(j.since).slice(0, 7));
+    m.jobs.push(j);
+    m.dueFils += j.dueFils;
+  }
+  for (const h of history) {
+    const m = at(h.date.slice(0, 7));
+    m.history.push(h);
+    m.dueFils += h.dueFils;
+  }
+  const out = [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
+  for (const m of out) {
+    m.jobs.sort((a, b) => a.since.localeCompare(b.since) || a.order.number - b.order.number);
+    m.history.sort((a, b) => a.date.localeCompare(b.date) || a.invoiceId.localeCompare(b.invoiceId));
+  }
+  return out;
+}
+
+/**
+ * The months are shown — to pick one and pay it — when there is a month to pick (two or more), or invoices from before
+ * the app among them (a month is their only row). One month of this app's jobs: the jobs as they were, by car.
+ */
+export const byMonths = (months: Pick<DebtMonth, 'history'>[]): boolean => months.length > 1 || months.some((m) => m.history.length > 0);
+
+/** The debts of the months picked, by their keys in a «debt payment»'s queue (`debtQueue`): they are paid first. */
+export const monthKeys = (months: Pick<DebtMonth, 'month' | 'jobs' | 'history'>[], picked: readonly string[]): string[] =>
+  months.filter((m) => picked.includes(m.month)).flatMap((m) => [...m.jobs.map((j) => j.order.id), ...m.history.map((h) => historyKey(h.invoiceId))]);
+
+/** What the months picked owe together. */
+export const monthsDue = (months: Pick<DebtMonth, 'month' | 'dueFils'>[], picked: readonly string[]): number => months.reduce((a, m) => a + (picked.includes(m.month) ? m.dueFils : 0), 0);
+
+/** A customer's month as its papers say (v0.62): what its invoices came to, what is still owed of it, how many. */
+export interface MonthTotal {
+  /** YYYY-MM */
+  month: string;
+  totalFils: number;
+  dueFils: number;
+  count: number;
+}
+
+/** A customer's invoices (`date` YYYY-MM-DD, what each came to, what each still owes) as months, the oldest first. */
+export function monthTotals(rows: { date: string; totalFils: number; dueFils: number }[]): MonthTotal[] {
+  const by = new Map<string, MonthTotal>();
+  for (const r of rows) {
+    const month = r.date.slice(0, 7);
+    const m = by.get(month) ?? by.set(month, { month, totalFils: 0, dueFils: 0, count: 0 }).get(month)!;
+    m.totalFils += r.totalFils;
+    m.dueFils += Math.max(0, r.dueFils);
+    m.count++;
+  }
+  return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
+/** The garage's credits of one it owes, by month (v0.62: a supplier's monthly statement), the oldest first. */
+export interface CreditMonth<T> {
+  /** YYYY-MM */
+  month: string;
+  leftFils: number;
+  credits: T[];
+}
+
+export function creditMonths<T extends { expense: Pick<Expense, 'date'>; leftFils: number }>(credits: T[]): CreditMonth<T>[] {
+  const by = new Map<string, CreditMonth<T>>();
+  for (const c of credits) {
+    const month = c.expense.date.slice(0, 7);
+    const m = by.get(month) ?? by.set(month, { month, leftFils: 0, credits: [] }).get(month)!;
+    m.credits.push(c);
+    m.leftFils += Math.max(0, c.leftFils);
+  }
+  return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
 export interface Debtor {
   customer: Customer;
   totalFils: number;
@@ -102,6 +199,8 @@ export interface Debtor {
   cars: { vehicle: Vehicle; totalFils: number; jobs: DebtJob[] }[];
   /** v0.47: its invoices from before the app still owing, by month, oldest first (none — empty). */
   history: HistoryMonth[];
+  /** v0.62: all it owes by month — the jobs and the invoices from before the app — the oldest first. */
+  months: DebtMonth[];
 }
 
 /**
@@ -111,7 +210,7 @@ export interface Debtor {
 export function groupDebts(jobs: DebtJob[], history: { customer: Customer; dues: HistoryDue[] }[] = []): Debtor[] {
   const by = new Map<string, Debtor>();
   for (const j of jobs) {
-    const d = by.get(j.customer.id) ?? { customer: j.customer, totalFils: 0, cars: [], history: [] };
+    const d = by.get(j.customer.id) ?? { customer: j.customer, totalFils: 0, cars: [], history: [], months: [] };
     let car = d.cars.find((c) => c.vehicle.id === j.vehicle.id);
     if (!car) d.cars.push((car = { vehicle: j.vehicle, totalFils: 0, jobs: [] }));
     car.jobs.push(j);
@@ -121,7 +220,7 @@ export function groupDebts(jobs: DebtJob[], history: { customer: Customer; dues:
   }
   for (const h of history) {
     if (!h.dues.length) continue;
-    const d = by.get(h.customer.id) ?? { customer: h.customer, totalFils: 0, cars: [], history: [] };
+    const d = by.get(h.customer.id) ?? { customer: h.customer, totalFils: 0, cars: [], history: [], months: [] };
     d.history = historyMonths(h.dues);
     d.totalFils += h.dues.reduce((a, x) => a + x.dueFils, 0);
     by.set(h.customer.id, d);
@@ -131,6 +230,10 @@ export function groupDebts(jobs: DebtJob[], history: { customer: Customer; dues:
   for (const d of out) {
     for (const c of d.cars) c.jobs.sort((a, b) => a.since.localeCompare(b.since) || a.order.number - b.order.number);
     d.cars.sort((a, b) => b.totalFils - a.totalFils || a.jobs[0].since.localeCompare(b.jobs[0].since));
+    d.months = debtMonths(
+      d.cars.flatMap((c) => c.jobs),
+      d.history.flatMap((m) => m.dues),
+    );
   }
   return out.sort((a, b) => b.totalFils - a.totalFils || name(a.customer).localeCompare(name(b.customer)));
 }
@@ -142,11 +245,13 @@ export interface DebtShare {
 
 /**
  * A sum received towards a customer's debts, spread over them — jobs and (v0.47) invoices from before the app, each
- * by its key: the oldest first — or the one picked (`first`) first, then the oldest. What is more than they owe is left
- * over (`restFils`): kept as money in with no debt to it.
+ * by its key: the oldest first — or the one picked (`first`) first, then the oldest; v0.62: several picked (a month's
+ * debts) — they first, the oldest of them first. What is more than they owe is left over (`restFils`): kept as money in
+ * with no debt to it.
  */
-export function spread(amountFils: number, debts: { key: string; dueFils: number; since: string }[], first?: string): { parts: { key: string; amountFils: number }[]; restFils: number } {
-  const queue = [...debts].sort((a, b) => Number(b.key === first) - Number(a.key === first) || a.since.localeCompare(b.since) || a.key.localeCompare(b.key));
+export function spread(amountFils: number, debts: { key: string; dueFils: number; since: string }[], first?: string | readonly string[]): { parts: { key: string; amountFils: number }[]; restFils: number } {
+  const firsts = new Set(typeof first === 'string' ? [first] : first ?? []);
+  const queue = [...debts].sort((a, b) => Number(firsts.has(b.key)) - Number(firsts.has(a.key)) || a.since.localeCompare(b.since) || a.key.localeCompare(b.key));
   let left = Math.max(0, Math.round(amountFils));
   const parts: { key: string; amountFils: number }[] = [];
   for (const d of queue) {
@@ -259,6 +364,9 @@ export function groupCredits<T extends { expense: Pick<Expense, 'id' | 'vendor' 
   }
   return { creditors: creditors.sort((a, b) => b.leftFils - a.leftFils || a.name.localeCompare(b.name)), loose };
 }
+
+/** When a credit began, for paying the oldest first: its day, then when it was typed. */
+export const creditSince = (e: Pick<Expense, 'date' | 'createdAt'>): string => `${e.date}|${e.createdAt}`;
 
 /** What is still owed on an expense taken on credit (a cancelled payment does not count). */
 export const creditLeft = (expense: Pick<Expense, 'amountFils'>, paid: Pick<CreditPayment, 'amountFils' | 'voidedAt'>[]): number =>

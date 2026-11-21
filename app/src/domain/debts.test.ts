@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, creditLeft, debtQueue, groupCredits, groupDebts, historyDues, historyKey, isCustomerDebt, orderDue, spread, type DebtJob } from './debts';
+import { allocate, byMonths, creditLeft, creditMonths, debtMonths, debtQueue, groupCredits, groupDebts, historyDues, historyKey, isCustomerDebt, monthKeys, monthsDue, monthTotals, orderDue, spread, type DebtJob } from './debts';
 import type { Customer, HistoryInvoice, Income, Invoice, Order, OrderItem, Payment, Vehicle } from './types';
 
 const customer = (id: string, name: string) => ({ id, name, type: 'individual' }) as Customer;
@@ -149,5 +149,74 @@ describe('whom the garage owes (v0.50.2)', () => {
       ['Gulf Star', undefined, ['e5', 'e6'], 5000],
     ]);
     expect(loose.map((d) => d.expense.id)).toEqual(['e7', 'e8']);
+  });
+});
+
+describe('debts by month (v0.62)', () => {
+  const acme = { id: 'acme', name: '', companyName: 'ACME', type: 'company' } as Customer;
+  const hist = (id: string, date: string, totalFils: number): HistoryInvoice => ({ id, customerId: 'acme', vehicleId: 'v1', date, number: id, numberKind: 'job', plate: 'W-1', totalFils }) as HistoryInvoice;
+  // A job's month is the day its debt began in Dubai: 31 October 22:00 UTC is already 1 November there.
+  const jobs = [
+    job(12, acme, car('patrol'), 40_000, '2026-10-31T22:00:00.000Z'),
+    job(9, acme, car('hiace'), 25_000, '2026-10-05T09:00:00.000Z'),
+    job(14, acme, car('urvan'), 15_000, '2026-11-20T09:00:00.000Z'),
+  ];
+  const dues = historyDues([hist('sep-1', '2026-09-03', 30_000), hist('oct-1', '2026-10-20', 10_000)], []);
+
+  it('a month — its jobs and its invoices from before the app — the oldest month first, its jobs the oldest first', () => {
+    const months = debtMonths(jobs, dues);
+    expect(months.map((m) => [m.month, m.dueFils, m.jobs.map((j) => j.order.number), m.history.map((h) => h.invoiceId)])).toEqual([
+      ['2026-09', 30_000, [], ['sep-1']],
+      ['2026-10', 35_000, [9], ['oct-1']],
+      ['2026-11', 55_000, [12, 14], []],
+    ]);
+    expect(groupDebts(jobs, [{ customer: acme, dues }])[0].months.map((m) => m.month)).toEqual(['2026-09', '2026-10', '2026-11']);
+  });
+
+  it('shown when there is a month to pick, or an invoice from before the app; one month of jobs — as it was', () => {
+    expect(byMonths(debtMonths(jobs, []))).toBe(true);
+    expect(byMonths(debtMonths([jobs[1]], []))).toBe(false);
+    expect(byMonths(debtMonths([], [dues[0]]))).toBe(true);
+    expect(byMonths([])).toBe(false);
+  });
+
+  it('a month picked is paid first — November before September and October; more than it owes — the oldest next', () => {
+    const months = debtMonths(jobs, dues);
+    const keys = monthKeys(months, ['2026-11']);
+    expect(keys).toEqual(['o12', 'o14']);
+    expect(monthsDue(months, ['2026-11'])).toBe(55_000);
+    expect(monthsDue(months, ['2026-09', '2026-11'])).toBe(85_000);
+    expect(spread(55_000, debtQueue(jobs, dues), keys)).toEqual({
+      parts: [
+        { key: 'o12', amountFils: 40_000 },
+        { key: 'o14', amountFils: 15_000 },
+      ],
+      restFils: 0,
+    });
+    expect(spread(60_000, debtQueue(jobs, dues), keys).parts.at(-1)).toEqual({ key: historyKey('sep-1'), amountFils: 5_000 });
+    // Two months picked: the older of them first.
+    expect(spread(35_000, debtQueue(jobs, dues), monthKeys(months, ['2026-11', '2026-10'])).parts.map((p) => p.key)).toEqual(['o9', historyKey('oct-1')]);
+  });
+
+  it('a customer’s papers by month: what they came to, what is still owed, how many — a month owing nothing is paid', () => {
+    expect(
+      monthTotals([
+        { date: '2026-10-05', totalFils: 25_000, dueFils: 25_000 },
+        { date: '2026-09-12', totalFils: 12_000, dueFils: 0 },
+        { date: '2026-10-28', totalFils: 30_000, dueFils: -500 },
+        { date: '2026-09-02', totalFils: 8_000, dueFils: 0 },
+      ]),
+    ).toEqual([
+      { month: '2026-09', totalFils: 20_000, dueFils: 0, count: 2 },
+      { month: '2026-10', totalFils: 55_000, dueFils: 25_000, count: 2 },
+    ]);
+  });
+
+  it('the garage’s credits of one it owes, by month, the oldest first', () => {
+    const c = (id: string, date: string, leftFils: number) => ({ expense: { id, date }, leftFils });
+    expect(creditMonths([c('a', '2026-11-02', 500), c('b', '2026-10-30', 700), c('d', '2026-11-20', 300)]).map((m) => [m.month, m.leftFils, m.credits.map((x) => x.expense.id)])).toEqual([
+      ['2026-10', 700, ['b']],
+      ['2026-11', 800, ['a', 'd']],
+    ]);
   });
 });

@@ -4,7 +4,7 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { dubaiDate } from '../domain/dates';
 import { moved } from '../domain/ledger';
 import { computeReport } from '../domain/reports';
-import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadCreditors, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit, paySupplier } from './debts';
+import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadCreditors, loadCustomerMonths, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit, paySupplier } from './debts';
 import { removeEntry, restoreEntry } from './entries';
 import { voidCreditPayment, voidExpense, voidIncome } from './legacyVoid';
 import { addItem } from './estimate';
@@ -449,5 +449,71 @@ describe('whom the garage owes (v0.61, the user: «заказали запчас
       ['lender', 'Omar Khan'],
       ['supplier', 'Gulf Star Trading'],
     ]);
+  });
+});
+
+describe('debts paid by month (v0.62, the user: «оплаты долгов компаний и клиентов по месяцам, выбор месяца и оплата»)', () => {
+  /** A company with invoices from before the app (April 150, May 300, June 200) and a job of this app owing 600. */
+  async function company() {
+    await setOpeningBalances(100_000, 0);
+    const job = await invoicedJob(600);
+    await leaveOnDebt(job.id, { amountFils: 60_000, dueDate: '2026-12-01', signature: signature() });
+    const customerId = job.customerId;
+    const hist = (id: string, date: string, totalFils: number) => ({ id, customerId, vehicleId: job.vehicleId, orderId: undefined, template: 'B', numberKind: 'job', number: id, date, plateRaw: 'W 1', plate: 'W-1', vehicleText: 'Toyota Camry', lines: [], netFils: totalFils, vatFils: 0, totalFils, source: { file: 'x.pdf', sha256: 'x', page: 1 }, importedAt: '' });
+    await db.historyInvoices.bulkPut([hist('hi-apr', '2026-04-08', 15_000), hist('hi-may', '2026-05-02', 30_000), hist('hi-jun', '2026-06-03', 20_000)] as never);
+    return { job, customerId };
+  }
+  const now = () => dubaiDate().slice(0, 7);
+
+  it('June picked is paid, the older months still owe; the job’s month paid through money in — the job is closed; a month paid shows as paid', async () => {
+    const { job, customerId } = await company();
+    const card = async () => (await loadDebtors()).find((d) => d.customer.id === customerId);
+    expect((await card())!.months.map((m) => [m.month, m.dueFils])).toEqual([
+      ['2026-04', 15_000],
+      ['2026-05', 30_000],
+      ['2026-06', 20_000],
+      [now(), 60_000],
+    ]);
+    const june = await addDebtPayment({ amountFils: 20_000, method: 'transfer', customerId, months: ['2026-06'] });
+    expect([june.historyParts, june.parts, june.restFils]).toEqual([[{ invoiceId: 'hi-jun', amountFils: 20_000 }], [], 0]);
+    expect((await card())!.months.map((m) => [m.month, m.dueFils])).toEqual([
+      ['2026-04', 15_000],
+      ['2026-05', 30_000],
+      [now(), 60_000],
+    ]);
+    // The job's month, from the money sheet («Приход» → «Оплата долга»): the job is paid off and closed — off the debts.
+    await addIncome({ category: 'debt', amountFils: 60_000, method: 'cash', customerId, months: [now()] });
+    expect(await due(job.id)).toBe(0);
+    expect((await db.orders.get(job.id))!.stage).toBe('closed');
+    expect((await card())!.months.map((m) => m.month)).toEqual(['2026-04', '2026-05']);
+    // Every month of its papers: June and this month paid, April and May owing.
+    expect(await loadCustomerMonths(customerId)).toEqual([
+      { month: '2026-04', totalFils: 15_000, dueFils: 15_000, count: 1 },
+      { month: '2026-05', totalFils: 30_000, dueFils: 30_000, count: 1 },
+      { month: '2026-06', totalFils: 20_000, dueFils: 0, count: 1 },
+      { month: now(), totalFils: 60_000, dueFils: 0, count: 1 },
+    ]);
+  });
+
+  it('more than the month picked owes: the rest goes to the oldest; a month half paid says what is left of it', async () => {
+    const { customerId } = await company();
+    const may = await addDebtPayment({ amountFils: 40_000, method: 'cash', customerId, months: ['2026-05'] });
+    expect(may.historyParts).toEqual([
+      { invoiceId: 'hi-may', amountFils: 30_000 },
+      { invoiceId: 'hi-apr', amountFils: 10_000 },
+    ]);
+    expect((await loadCustomerMonths(customerId)).slice(0, 2)).toEqual([
+      { month: '2026-04', totalFils: 15_000, dueFils: 5_000, count: 1 },
+      { month: '2026-05', totalFils: 30_000, dueFils: 0, count: 1 },
+    ]);
+  });
+
+  it('a seller’s month picked: its credits paid, the older month untouched', async () => {
+    await setOpeningBalances(500_000, 0);
+    const parts = await cat('parts');
+    const oct = await addExpense({ date: '2026-10-30', categoryId: parts, amountFils: 7_000, vatFils: 0, vendor: 'Gulf Star', method: 'credit' });
+    const nov = await addExpense({ date: '2026-11-02', categoryId: parts, amountFils: 5_000, vatFils: 0, vendor: 'Gulf Star', method: 'credit' });
+    await paySupplier([oct.id, nov.id], { amountFils: 5_000, method: 'cash', first: [nov.id] });
+    expect([(await companyDebtOf(oct.id))!.leftFils, (await companyDebtOf(nov.id))!.leftFils]).toEqual([7_000, 0]);
   });
 });

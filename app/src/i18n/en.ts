@@ -1249,6 +1249,7 @@ export const en: typeof ru = {
     credits_few: '{{count}} credits',
     credits_many: '{{count}} credits',
     credits_other: '{{count}} credits',
+    monthsPaid: 'Paid months · {{count}}',
   },
   owed: {
     title: 'Owed to',

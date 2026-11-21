@@ -6100,6 +6100,11 @@ button.kpi-tab .eyebrow {
   background: var(--mantine-color-red-6);
   flex: 0 0 auto;
 }
+/* A row under a month (v0.62): it starts where the month's title starts — the month's icon is the step in. */
+.row-indent {
+  width: 30px;
+  flex-shrink: 0;
+}
 .debt-actions {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
