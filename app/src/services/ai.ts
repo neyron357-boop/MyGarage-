@@ -1,4 +1,4 @@
-import { db } from '../db/db';
+import { db, uid } from '../db/db';
 import { type AiFind, type AiName, type AiVin, boughtBySpec, carKnown, catalogCount, type FoundNumber, nameFix, provenNumber, soleNumber, vinFill } from '../domain/ai';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
@@ -50,10 +50,85 @@ export function subscribeAiWork(fn: () => void): () => void {
   return () => void workListeners.delete(fn);
 }
 
+/*
+ * How far a part's search has got (v0.64, the user: «показать загрузку поиска в процентах, чтобы следить за процессом
+ * поиска и понимать, когда закончится — без трат токенов»): the garage's server counts it from the search's own steps
+ * (`/api/ai/progress`, server/src/ai.mjs — no question to anyone), asked once a second for all the searches going on, in
+ * one request; an older server, or none (a test's) — the time alone: a search takes some twenty seconds, its percent nears
+ * 95 and never gets there. Only ever forward. By the work's key (`find:<itemId>`).
+ */
+interface Going {
+  since: number;
+  shown: number;
+  /** The request's own mark the server knows it by (none — the time alone). */
+  track?: string;
+  /** The server counts it: the time no longer does. */
+  counted?: boolean;
+}
+const going = new Map<string, Going>();
+const progressListeners = new Set<() => void>();
+let progressVersion = 0;
+const progressChanged = () => {
+  progressVersion++;
+  progressListeners.forEach((f) => f());
+};
+/** How far the AI's search under this key has got, 0…99 — none while it is not searching. */
+export const aiProgress = (key: string): number | undefined => going.get(key)?.shown;
+export const aiProgressVersion = (): number => progressVersion;
+export function subscribeAiProgress(fn: () => void): () => void {
+  progressListeners.add(fn);
+  return () => void progressListeners.delete(fn);
+}
+/** The time's guess: a part's search takes some 20 s (measured, v0.54–v0.55). */
+const GUESS_MS = 20_000;
+let ticker: ReturnType<typeof setInterval> | undefined;
+let polling = false;
+/** The server does not count (older than v0.64): the time alone, not asked again. */
+let noCount = false;
+function tick() {
+  if (!going.size) {
+    clearInterval(ticker);
+    ticker = undefined;
+    return;
+  }
+  const now = Date.now();
+  for (const g of going.values()) if (!g.counted) g.shown = Math.max(g.shown, Math.floor(95 * (1 - Math.exp(-(now - g.since) / GUESS_MS))));
+  const marks = [...going.values()].flatMap((g) => (g.track ? [g.track] : []));
+  const cfg = syncConfig();
+  if (marks.length && cfg && !noCount && !polling) {
+    polling = true;
+    void callJson<Record<string, number | null>>(cfg, `/api/ai/progress?t=${marks.map(encodeURIComponent).join(',')}`, { timeout: 5000 })
+      .then(
+        (r) => {
+          for (const g of going.values()) {
+            const v = g.track ? r?.[g.track] : undefined;
+            if (typeof v !== 'number') continue;
+            g.counted = true;
+            g.shown = Math.max(g.shown, Math.min(99, Math.floor(v)));
+          }
+          progressChanged();
+        },
+        (e) => {
+          if (e instanceof SyncError && (e.status === 404 || e.status === 405)) noCount = true;
+        },
+      )
+      .finally(() => (polling = false));
+  }
+  progressChanged();
+}
+
 /** One question to the garage's server (the receipts' service asks too). */
 export async function askAi<T>(path: AiPath, body: unknown, key: string, timeout = 110_000): Promise<T> {
   working.add(key);
   workChanged();
+  // A part's search: how far it has got, by the request's own mark (v0.64).
+  const find = path === 'part-find';
+  const track = find && !transport ? uid() : undefined;
+  if (find) {
+    going.set(key, { since: Date.now(), shown: 1, track });
+    ticker ??= setInterval(tick, 1000);
+    progressChanged();
+  }
   try {
     if (transport) return (await transport(path, body)) as T;
     const cfg = syncConfig();
@@ -62,7 +137,7 @@ export async function askAi<T>(path: AiPath, body: unknown, key: string, timeout
     // cuts a request at about 100 s: asked again, the server hands over the same search, still going or done (v0.48.3).
     for (let attempt = 1; ; attempt++) {
       try {
-        return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body, timeout });
+        return await callJson<T>(cfg, `/api/ai/${path}`, { method: 'POST', body: track ? { ...(body as object), track } : body, timeout });
       } catch (e) {
         const status = e instanceof SyncError ? e.status : -1;
         if (path !== 'part-find' || attempt >= 3 || !(status === 0 || status >= 500)) throw e;
@@ -70,6 +145,10 @@ export async function askAi<T>(path: AiPath, body: unknown, key: string, timeout
       }
     }
   } finally {
+    if (find) {
+      going.delete(key);
+      progressChanged();
+    }
     working.delete(key);
     workChanged();
   }
@@ -378,7 +457,7 @@ export function aiFindPart(
       return undefined;
     }
     const mem = partsMemory((await priorParts()).filter((p) => p.id !== itemId), carKey, part);
-    const write = async (r: Pick<AiFind, 'search' | 'numbers'>, pics: { diagrams: string[]; samples: string[] }, proven: string | undefined) => {
+    const write = async (r: Pick<AiFind, 'search' | 'numbers' | 'note'>, pics: { diagrams: string[]; samples: string[] }, proven: string | undefined) => {
       const now = await db.items.get(itemId);
       if (!now) return;
       // `single` (v0.52, the user: «номера добавлять, если они точные; если вышли сразу несколько — не добавлять»): written
@@ -386,7 +465,9 @@ export function aiFindPart(
       const others = r.numbers.filter((x) => x.seen.length > 0 || (x.garage ?? 0) > 0).length > 1;
       const alone = r.search === 'web' ? soleNumber(r, carKey.make) === proven : !others;
       const fill = proven && !now.partNumber && (!single || alone) ? proven : undefined;
-      await db.items.update(itemId, { aiFind: { at: nowIso(), search: r.search, part, numbers: r.numbers, filled: fill }, ...(await keepPictures(now, pics)), ...(fill ? { partNumber: fill } : {}) });
+      // The AI's note (v0.64) kept with what it found: shown under the numbers (none — the app's own, domain/ai.ts `findNote`).
+      const note = r.note?.trim() ? { note: r.note.trim().slice(0, 240) } : {};
+      await db.items.update(itemId, { aiFind: { at: nowIso(), search: r.search, part, numbers: r.numbers, filled: fill, ...note }, ...(await keepPictures(now, pics)), ...(fill ? { partNumber: fill } : {}) });
       await refreshPriorPart(itemId);
       if (fill && !quiet) {
         const n = r.numbers.find((x) => sameNumber(x.number, fill));
@@ -476,14 +557,26 @@ export function aiFindPart(
       mem,
       carKey.make,
     );
-    await write({ search: r.search, numbers }, pics, provenNumber({ search: r.search, numbers }, carKey.make));
+    await write({ search: r.search, numbers, note: r.note }, pics, provenNumber({ search: r.search, numbers }, carKey.make));
     return { ...r, numbers };
   });
 }
 
-/** How far every part of a job has got (v0.52): lines done of all. */
-const allProgress = new Map<string, { done: number; total: number }>();
+/** How far every part of a job has got (v0.52): lines done of all — and which (v0.64, for the percent). */
+const allProgress = new Map<string, { done: number; total: number; ids: string[]; finished: Set<string> }>();
 export const aiPartsProgress = (orderId: string): { done: number; total: number } | undefined => allProgress.get(orderId);
+
+/**
+ * Every part of a job, 0…100 (v0.64): a line done counts whole, a line being looked up — its search's own percent, one
+ * waiting its turn — nothing yet.
+ */
+export function aiPartsPercent(orderId: string): number | undefined {
+  const p = allProgress.get(orderId);
+  if (!p) return undefined;
+  let sum = 0;
+  for (const id of p.ids) sum += p.finished.has(id) ? 100 : (aiProgress(`find:${id}`) ?? 0);
+  return Math.min(99, Math.floor(sum / Math.max(1, p.ids.length)));
+}
 
 /** How many parts are looked up side by side (the garage's server and Gemini answer them together). */
 const AT_ONCE = 6;
@@ -529,7 +622,7 @@ export async function aiAllParts(
   if (!carKnown(car)) notify({ kind: 'needCar' });
   const before = new Map(items.map((i) => [i.id, { titleRu: i.titleRu, titleEn: i.titleEn, partNumber: i.partNumber, pics: (i.diagramIds?.length ?? 0) + (i.sampleIds?.length ?? 0) }]));
   working.add(key);
-  allProgress.set(orderId, { done: 0, total: items.length });
+  allProgress.set(orderId, { done: 0, total: items.length, ids: items.map((i) => i.id), finished: new Set() });
   workChanged();
   let names = 0;
   let numbers = 0;
@@ -547,8 +640,12 @@ export async function aiAllParts(
         if (now?.partNumber && !b.partNumber) numbers++;
         if (now && b.pics === 0 && (now.diagramIds?.length ?? 0) + (now.sampleIds?.length ?? 0) > 0) pictures++;
         const p = allProgress.get(orderId);
-        if (p) p.done++;
+        if (p) {
+          p.done++;
+          p.finished.add(i.id);
+        }
         workChanged();
+        progressChanged();
       }
     });
   } finally {

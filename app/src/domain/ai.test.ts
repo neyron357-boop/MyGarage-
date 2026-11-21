@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boughtBySpec, carKnown, editDistance, nameFix, onlyTypos, provenNumber, soleNumber, vinFill } from './ai';
+import { boughtBySpec, carKnown, editDistance, findNote, nameFix, onlyTypos, provenNumber, soleNumber, vinFill } from './ai';
 
 const NOW = new Date('2026-11-19T08:00:00Z');
 const VIN = 'JTDBR42E39J016456'; // a Toyota (JT…), model year 2009 (10th: 9)
@@ -96,5 +96,30 @@ describe('what the maker’s catalogue says of a number (v0.55)', () => {
     expect([carKnown({ make: 'Toyota' }), carKnown({ make: ' ', vin: 'JTDBR42E39J016456' }), carKnown({ make: '', vin: 'short' }), carKnown(undefined)]).toEqual([true, true, false, false]);
     for (const n of ['2 FRONT TYRES', 'ENGINE OIL 5W30', 'COOLANT', 'SUZUKI 1L ATF (GEAR OIL)', 'BRAKE FLUID', 'AC GAS', 'масло моторное', 'антифриз']) expect([n, boughtBySpec(n)]).toEqual([n, true]);
     for (const n of ['OIL FILTER', 'OIL PUMP', 'TYRE VALVE SENSOR 433', 'COOLANT HOSE', 'BRAKE FLUID RESERVOIR CAP', 'FRONT BRAKE PADS', 'AIR CLEANER', 'GAS SPRING']) expect([n, boughtBySpec(n)]).toEqual([n, false]);
+  });
+});
+
+describe('the note on what was found (v0.64)', () => {
+  const n = (number: string, x: Partial<{ seen: string[]; garage: number; fits: boolean; replaces: string[] }> = {}) => ({ number, seen: [], ...x });
+  it('the AI’s own line first, as said', () => {
+    expect(findNote({ search: 'web', numbers: [n('04465-12610')], note: '  Two variants by build date:  check the VIN. ' })).toBe('Two variants by build date: check the VIN.');
+  });
+  it('nothing found — no note', () => {
+    expect(findNote({ search: 'web', numbers: [], note: 'x' })).toBeUndefined();
+  });
+  it('else the app’s own: the catalogue’s diagram, a newer number for an older one, the others', () => {
+    expect(findNote({ search: 'web', numbers: [n('04465-60320', { fits: true, replaces: ['04465-60280'] }), n('04465-0K290')] })).toBe(
+      "04465-60320 is on this car's diagram in the maker's catalogue. 04465-60320 supersedes 04465-60280 — the same part.",
+    );
+    expect(findNote({ search: 'web', numbers: [n('04465-60320', { fits: true }), n('04465-0K290')] })).toBe("04465-60320 is on this car's diagram in the maker's catalogue. The others are not on its diagram.");
+    expect(findNote({ search: 'web', numbers: [n('A', { fits: true }), n('B', { fits: true })] })).toBe("2 numbers on this car's diagram — variants: check the VIN or build date.");
+  });
+  it('how sure: two catalogues, one place only, the AI’s memory, the garage’s own jobs', () => {
+    expect(findNote({ search: 'web', numbers: [n('04465-12610', { seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] }), n('04465-02220')] })).toBe(
+      '04465-12610 is confirmed in 2 catalogues. The others are unconfirmed.',
+    );
+    expect(findNote({ search: 'web', numbers: [n('04465-12610', { seen: ['https://www.amayama.com/p/1'] })] })).toBe('Seen in one place only — confirm with the supplier.');
+    expect(findNote({ search: 'model', numbers: [n('04465-12610')] })).toBe("From the AI's memory, not checked online — confirm by VIN before ordering.");
+    expect(findNote({ search: 'garage', numbers: [n('90915-YZZE1', { garage: 2 })] })).toBe('Fitted on this car before.');
   });
 });

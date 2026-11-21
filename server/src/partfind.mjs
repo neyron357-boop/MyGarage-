@@ -40,7 +40,8 @@ function numberLike(cell) {
 
 /**
  * An answer in its lines — «N | number | maker | note | page», «D | picture | page» (a diagram), «P | picture | page» (a
- * photo of the part), «F | frame codes» (the car's): read here, no second question to write it down. A model's bullets,
+ * photo of the part), «F | frame codes» (the car's), «S | a note for the garage» (v0.64: why the numbers differ, what to
+ * check — a few words in the answer given anyway): read here, no second question to write it down. A model's bullets,
  * bold and numbering are let be; so is a line numbered instead of lettered («1 | 88310-52481 | Toyota | …») or with no
  * letter at all. A number said twice (with a dash and without) is one; words in a number's place («NOT APPLICABLE») are
  * no number.
@@ -49,17 +50,23 @@ export function parseFound(text) {
   const numbers = [];
   const images = [];
   const frames = [];
+  let note = '';
   for (const raw of String(text ?? '').split(/\r?\n/)) {
     const line = raw.replace(/^[\s*•\-–>#]+|\*\*/g, '').replace(/^\d+[.)]\s+/, '').trim();
-    if (!line.includes('|') && !/^[NDPF]\s*:/i.test(line)) continue;
+    if (!line.includes('|') && !/^[NDPFS]\s*:/i.test(line)) continue;
     let cells = line.split('|').map((c) => c.trim().replace(/^`+|`+$/g, ''));
     let tag = '';
-    const lettered = /^([NDPF])\s*:?\s*$/i.exec(cells[0]) ?? /^([NDPF])\s*:\s*(.+)$/i.exec(cells[0]);
+    const lettered = /^([NDPFS])\s*:?\s*$/i.exec(cells[0]) ?? /^([NDPFS])\s*:\s*(.+)$/i.exec(cells[0]);
     if (lettered) {
       tag = lettered[1].toUpperCase();
       cells = lettered[2] ? [lettered[2].trim(), ...cells.slice(1)] : cells.slice(1);
     } else if (/^\d{1,2}$/.test(cells[0])) {
       cells = cells.slice(1);
+    }
+    if (tag === 'S') {
+      const said = cells.filter(Boolean).join('; ').replace(/\s+/g, ' ').trim();
+      if (!note && said && !/^(NONE|N\/?A|-+)\.?$/i.test(said)) note = said.slice(0, 220);
+      continue;
     }
     if (tag === 'F') {
       for (const f of cells.join(' ').split(/[\s,;/]+/)) {
@@ -86,12 +93,31 @@ export function parseFound(text) {
     }
     numbers.push({ number, brand: addressIn(cells[1]) ? '' : cells[1] ?? '', note: addressIn(cells[2]) ? '' : cells[2] ?? '', pages });
   }
-  return { numbers, images, frames };
+  return { numbers, images, frames, ...(note ? { note } : {}) };
+}
+
+/**
+ * The model's note on the numbers given (v0.64): as it said it, unless it names a part number that is not among them (a
+ * number the catalogue refused, or one it never named) — such a note would talk of what the garage does not see. Years,
+ * engine and frame codes are no part numbers.
+ */
+export function noteFor(text, numbers) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 220);
+  if (!s || !numbers.length) return '';
+  const known = numbers.flatMap((n) => [n.number, ...(n.replaces ?? [])]).map(plainNumber).filter(Boolean);
+  for (const w of s.match(/[A-Z0-9][A-Z0-9.\-]{5,}[A-Z0-9]/gi) ?? []) {
+    const p = plainNumber(w);
+    if (p.length < 8 || (p.match(/\d/g) ?? []).length < 4 || /^(19|20)\d\d(19|20)\d\d$/.test(p)) continue;
+    if (!known.some((k) => k === p || k.includes(p) || p.includes(k))) return '';
+  }
+  return s;
 }
 
 const carWords = (car, vin, built) => `${car || 'unknown'}${vin ? `, VIN ${vin}` : ''}${built ? ` (built in ${built})` : ''}, in the UAE — GCC specification unless the VIN says otherwise`;
 const FRAME = `F | this car's frame (chassis) codes as the maker's catalogue has them (like NCP91, UZJ200, E26), the likeliest first`;
 const LINES = `N | number as the catalogue writes it | maker | what tells the variants apart (market, dates, engine, side; replaces …), under 60 characters`;
+/** The note for the garage (v0.64): one line of a few words — in the answer given anyway, no question of its own. */
+const NOTE = `S | a note for the garage, under 20 words: why the numbers differ, what to check before ordering`;
 
 /** The questions («заготовки»): short, what is known already put in front of the model. */
 export const PF = {
@@ -100,6 +126,7 @@ export const PF = {
 Up to 5 candidates, the most likely first (variants by engine, body or side — a line each; a replaced number — the newer one). Answer only with lines, nothing else:
 ${FRAME}
 ${LINES}
+${NOTE}
 Not sure of any number: NONE`,
   /**
    * The web's question. Plain first — «search once»: one or two searches, each paid. `steps` — asked again after an
@@ -114,7 +141,8 @@ Not sure of any number: NONE`,
     const answer = `${FRAME}
 ${LINES} | page address
 D | address of a catalogue diagram picture showing the part | page address
-P | address of a photo of the part itself | page address`;
+P | address of a photo of the part itself | page address
+${NOTE}`;
     if (!steps && !deep)
       return `Use Google Search now to find the genuine (OEM) part number of "${part}" for exactly this car: ${carWords(car, vin, built)}. ${newer}
 Search once (a second time only if the first shows no number) — catalogues: ${sites}. Every number must come from a search result or a page.${known}
@@ -166,7 +194,7 @@ function headingOf(d, brand) {
  * in the open catalogue, kept), `pageText`, `diagramImages`, `siteUrl`, `within`, the models to search with.
  */
 export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pageText, diagramImages, siteUrl, within, models, fetchMs = 8_000, log = () => {} }) {
-  return async function findPart({ part, make, model, year, engine, vin, built, hints, number, deep, before, car, catalogOnly }) {
+  return async function findPart({ part, make, model, year, engine, vin, built, hints, number, deep, before, car, catalogOnly, step = () => {} }) {
     const carKey = { make, model, year: Number(year) || undefined };
     const inCatalog = catalogSlugs(make).length > 0;
     // The car known well enough to tell a part's variants apart: its year, and its engine or its VIN.
@@ -293,6 +321,8 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
     let stage = 0;
     let sources = [];
     const named = [];
+    /** The model's note for the garage (v0.64): its last search's, else what it said from memory. */
+    let note = '';
 
     // The line has its number (typed, or the garage's own), the garage used some before: read in the catalogue first —
     // that alone may be the answer, nothing asked of the AI.
@@ -307,6 +337,8 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
       c.own = true;
       for (const s of n.seen ?? []) if (!c.backed.includes(s) && !/megazip\.net/.test(s)) c.backed.push(s);
     }
+    // How far it has got (v0.64): each step said as it starts — the server counts the percent from them, nothing is asked.
+    step('catalog');
     if (all.size) await check();
     const known = new Set(all.keys());
     /** New since the start, and with something to its name (asked to dig deeper, only this counts as found). */
@@ -321,9 +353,11 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
       //    told apart — the web is asked at once); asked to dig deeper — once more, told what the catalogue said.
       if (inCatalog && (wellKnown || deep) && !decided()) {
         try {
+          step('memory');
           const said = await ask(PF.guess(part, car, vin, built, hints, tried()), { kind: 'guess', models, timeout: 25_000 });
           const parsed = parseFound(said.text);
           take(parsed);
+          if (parsed.note) note = parsed.note;
           first = parsed.numbers[0] ? plainNumber(parsed.numbers[0].number) : undefined;
           for (const n of parsed.numbers.slice(0, 5)) add(n, 0);
           await check();
@@ -336,6 +370,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
         // 1–3. The web: one search; then with the pages read; then a deep one — each only when the one before found
         //      nothing that stands. A line with its own number asks the web once, no more (it wants its pictures).
         for (const s of deep ? [2, 3] : number ? [1] : [1, 2, 3]) {
+          step(`web${s}`);
           let r;
           try {
             // The model itself chooses whether to search (measured: the same question is searched one time and answered
@@ -348,6 +383,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
               // What it said from memory is read in the catalogue all the same (it may be right) — as a guess.
               const guessed = parseFound(r.text);
               take(guessed);
+              if (guessed.note && !note) note = guessed.note;
               for (const n of guessed.numbers.slice(0, 5)) add(n, 0);
             }
           } catch (e) {
@@ -363,6 +399,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
               let parsed = parseFound(own.text);
               if (!parsed.numbers.length && /[A-Z0-9-]{5,}/i.test(own.text) && /\d{3}/.test(own.text)) parsed = (await json(PF.extract(own.text), FIND_SCHEMA, { kind: 'extract', thinking: 'minimal', timeout: 30_000 })).value;
               take(parsed);
+              if (parsed.note) note = parsed.note;
               for (const n of (Array.isArray(parsed.numbers) ? parsed.numbers : []).slice(0, 5)) add(n, 0);
               await check();
             }
@@ -375,6 +412,8 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
             if (x) parsed = { numbers: Array.isArray(x.value.numbers) ? x.value.numbers : [], images: Array.isArray(x.value.images) ? x.value.images : [], frames: [] };
           }
           take(parsed);
+          // The last search's note: it knows what the steps before found.
+          if (parsed.note && (r.searched || !note)) note = parsed.note;
           if (r.searched) search = 'web';
           sources = [...sources, ...r.sources].slice(0, 12);
           for (const n of (parsed.numbers ?? []).slice(0, 5)) {
@@ -417,6 +456,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
     let pages = [];
     if (!spoken && search === 'web') {
       const urls = [...new Set([...live().flatMap((c) => c.pages), ...named.map((i) => i.from).filter(Boolean), ...sources.map((x) => x.url)])].slice(0, 8);
+      step('pages');
       pages = (await within(urls.map(page), fetchMs)).filter(Boolean);
       for (const c of live()) for (const pg of pages) if (plainNumber(pageText(pg.html)).includes(c.plain) && !c.opened.includes(pg.url)) c.opened.push(pg.url);
     }
@@ -452,6 +492,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
 
     // The pictures. 1. The part's factory diagram from the catalogue, its callout's place with it: of the numbers on this
     // car's diagram (two at most, of different drawings); none stands — the first number's.
+    step('pictures');
     const drawings = [];
     for (const c of fit.size ? out.filter((x) => fit.has(x)) : out.slice(0, 1)) {
       if (drawings.length >= 2) break;
@@ -491,7 +532,8 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
         }
       }
     }
-    // The diagram first, then the photo: three pictures at most.
-    return { part, car, search, stage, numbers, ...(frames.length ? { frames: frames.slice(0, 4) } : {}), sources: sources.slice(0, 8), images: [...images.slice(0, 2), ...photos].slice(0, 3) };
+    // The diagram first, then the photo: three pictures at most. The model's note — only of the numbers given.
+    const told = noteFor(note, numbers);
+    return { part, car, search, stage, numbers, ...(told ? { note: told } : {}), ...(frames.length ? { frames: frames.slice(0, 4) } : {}), sources: sources.slice(0, 8), images: [...images.slice(0, 2), ...photos].slice(0, 3) };
   };
 }

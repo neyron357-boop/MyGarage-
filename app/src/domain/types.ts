@@ -639,6 +639,8 @@ export interface OrderItem {
      */
     numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number; fits?: boolean; name?: string; model?: string; replaces?: string[] }[];
     filled?: string;
+    /** The AI's note on the numbers (v0.64, domain/ai.ts `findNote`): why they differ, what to check — in English. */
+    note?: string;
   };
   /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */
   diagramIds?: string[];

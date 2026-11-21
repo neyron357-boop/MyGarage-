@@ -2189,7 +2189,14 @@ async function launchBrowser() {
       // «Найти номер» in its sheet: the number seen in two catalogues written by itself; the diagram kept with the line.
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
       await dlg.locator('[data-ai-numbers] .ai-find').click();
+      // v0.64: while it searches — how far it has got, in percent, and a bar of the AI's colours.
+      await dlg.locator('[data-ai-numbers] .ai-pct').filter({ hasText: '%' }).waitFor({ timeout: 5000 });
+      await dlg.locator('[data-ai-numbers] .ai-progress').waitFor();
       await page.locator('[data-ai-notice="number"]').filter({ hasText: '04465-12610' }).waitFor({ timeout: 20000 });
+      // …and once found, a short note in English (no note from the AI here: the app's own, from what it knows).
+      const findNote = await dlg.locator('[data-ai-numbers] [data-ai-note]').textContent();
+      if (findNote !== '04465-12610 is confirmed in 2 catalogues. The others are unconfirmed.') throw new Error('the note: ' + findNote);
+      if (await dlg.locator('[data-ai-numbers] .ai-pct').count()) throw new Error('the percent stays after the search');
       const no = dlg.getByLabel('Номер', { exact: true });
       await page.waitForFunction(() => document.querySelector('[role="dialog"] input[aria-label="Номер"]')?.value === '04465-12610', null, { timeout: 5000 }).catch(() => undefined);
       if ((await no.inputValue()) !== '04465-12610') throw new Error('the number written by the AI: ' + (await no.inputValue()));
@@ -2211,6 +2218,36 @@ async function launchBrowser() {
       const name = await dlg.getByLabel('Запчасть').boundingBox();
       if (!media || !name || media.y > name.y) throw new Error('the pictures are not on top of the sheet');
       await shot('38-ai-part');
+      // v0.64: the diagram opened full screen — «Обвести»: the part outlined over it by the finger, kept with the line; the
+      // viewer then shows the diagram with the outline drawn in (what «Поделиться» shares and saves).
+      await dlg.locator('[data-line-media] .line-media-tile[data-kind="diagram"]').click();
+      await page.locator('.viewer [data-mark-open]').click();
+      const markPic = page.locator('[data-mark-layer] [data-mark-pic]');
+      await markPic.locator('img').waitFor();
+      await page.waitForTimeout(300);
+      const mb = await markPic.boundingBox();
+      await page.mouse.move(mb.x + mb.width * 0.3, mb.y + mb.height * 0.3);
+      await page.mouse.down();
+      await page.mouse.move(mb.x + mb.width * 0.45, mb.y + mb.height * 0.42, { steps: 4 });
+      await page.mouse.move(mb.x + mb.width * 0.55, mb.y + mb.height * 0.5, { steps: 4 });
+      await page.mouse.up();
+      await page.locator('[data-mark-layer] .mark-oval').first().waitFor();
+      await shot('38d-ai-outline');
+      await page.locator('[data-mark-layer]').getByRole('button', { name: 'Готово' }).click();
+      await page.locator('[data-mark-layer]').waitFor({ state: 'detached' });
+      // The layer went, the viewer stayed — on the outlined picture.
+      await page.locator('.viewer .viewer-img[data-given]').waitFor({ timeout: 5000 });
+      await shot('38e-ai-outlined');
+      const outlinedLine = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const i = (await db.items.where('orderId').equals(id).toArray())[0];
+        return { marks: i.diagramMarks?.length ?? 0, on: i.diagramMarks?.[0]?.id === i.diagramIds?.[0], photos: i.mediaIds?.length ?? 0 };
+      }, job.id);
+      if (outlinedLine.marks !== 1 || !outlinedLine.on || outlinedLine.photos !== 0) throw new Error('the outline: ' + JSON.stringify(outlinedLine));
+      await page.locator('.viewer').getByRole('button', { name: 'Закрыть' }).click();
+      await page.locator('.viewer').waitFor({ state: 'detached' });
+      // The sheet under it as it was; its diagram tile shows the outline.
+      await dlg.locator('[data-line-media] .line-media-tile[data-outlined]').waitFor();
       // A candidate (not seen in a catalogue — orange) taken by a tap.
       await other.click();
       if ((await no.inputValue()) !== '04465-02220') throw new Error('the candidate tapped: ' + (await no.inputValue()));
@@ -2224,6 +2261,8 @@ async function launchBrowser() {
       }, job.id);
       if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.samples !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-find')
         throw new Error('the line after the AI: ' + JSON.stringify(line));
+      // The line's preview on the job: its diagram, outlined.
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb img.part-thumb-outlined').waitFor();
       // The same part again on the same car (v0.49): the garage's own memory answers — the web search made a minute ago
       // serves again, its number and pictures with it; the server is not asked.
       await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
@@ -2268,6 +2307,8 @@ async function launchBrowser() {
       }, job.id);
       await front('.list-row').filter({ hasText: 'OIL FILTER' }).waitFor();
       await front('[data-ai-parts]').click();
+      // v0.64: the tile — how far all of them have got, in percent.
+      await front('[data-ai-parts] .ai-parts-n').filter({ hasText: '%' }).waitFor({ timeout: 5000 });
       await page.locator('[data-ai-notice="parts"]').filter({ hasText: 'ИИ: 2 запчасти' }).waitFor({ timeout: 30000 });
       await shot('38b-ai-all-parts');
       const all = await page.evaluate(async (id) => {

@@ -50,6 +50,8 @@ export interface AiFind {
   images?: { type: string; data: string; source: string; number?: string; kind?: 'diagram' | 'photo'; marks?: PictureMark[]; title?: string }[];
   /** How far the search had to go (v0.55): 0 — the catalogue alone, 1 — a web search, 2 — with the pages read, 3 — a deep one. */
   stage?: number;
+  /** The AI's note for the garage (v0.64): why the numbers differ, what to check — a line of the answer it gave anyway. */
+  note?: string;
 }
 export interface FoundNumber {
   number: string;
@@ -193,6 +195,35 @@ export function soleNumber(find: Pick<AiFind, 'search' | 'numbers'>, make = ''):
   if (!proven || !own) return undefined;
   if (own.fits) return proven;
   return find.numbers.some((n) => n !== own && (n.seen.length > 0 || (n.garage ?? 0) > 0)) ? undefined : proven;
+}
+
+/**
+ * A short note on what was found (v0.64, the user: «короткое примечание на английском про результат: на что обратить
+ * внимание, почему разные номера деталей… не очень длинно и экономично по токенам»): the AI's own line, when its answer
+ * had one (a few words in the answer it gave anyway — no question of its own); else what the app knows itself — the
+ * maker's catalogue, the garage's own jobs, in how many catalogues a number was seen. Two sentences at most, in English
+ * (the trade's language here, as on the list sent to a supplier).
+ */
+export function findNote(find: Pick<AiFind, 'search' | 'numbers' | 'note'>): string | undefined {
+  const list = find.numbers;
+  if (!list.length) return undefined;
+  const said = find.note?.replace(/\s+/g, ' ').trim();
+  if (said) return said;
+  const out: string[] = [];
+  const fits = list.filter((n) => n.fits);
+  const sure = list.filter((n) => catalogCount(n.seen) + ((n.garage ?? 0) > 0 ? 1 : 0) >= 2);
+  if (find.search === 'garage') out.push(list.length > 1 ? 'Numbers fitted on this car before — the most used first.' : 'Fitted on this car before.');
+  else if (find.search === 'model') out.push("From the AI's memory, not checked online — confirm by VIN before ordering.");
+  else if (fits.length === 1) out.push(`${fits[0].number} is on this car's diagram in the maker's catalogue.`);
+  else if (fits.length > 1) out.push(`${fits.length} numbers on this car's diagram — variants: check the VIN or build date.`);
+  else if (sure.length === 1) out.push(`${sure[0].number} is confirmed in ${catalogCount(sure[0].seen) || 1} catalogue${catalogCount(sure[0].seen) > 1 ? 's' : ''}${(sure[0].garage ?? 0) > 0 ? ' and the garage’s jobs' : ''}.`);
+  else if (sure.length > 1) out.push(`${sure.length} confirmed variants — check the VIN or build date before ordering.`);
+  else out.push(list.length > 1 ? 'None confirmed twice — check the VIN with the supplier.' : 'Seen in one place only — confirm with the supplier.');
+  const replaced = list.find((n) => n.replaces?.length);
+  const firm = fits.length ? fits : sure;
+  if (replaced) out.push(`${replaced.number} supersedes ${replaced.replaces!.slice(0, 2).join(', ')} — the same part.`);
+  else if (find.search === 'web' && firm.length && list.length > firm.length) out.push(fits.length ? 'The others are not on its diagram.' : 'The others are unconfirmed.');
+  return out.join(' ');
 }
 
 /** A car that can be looked a part up for: its make, or its VIN (v0.55 — a third of the garage's first searches had neither). */

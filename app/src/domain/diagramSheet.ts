@@ -97,13 +97,24 @@ export function diagramOf(item: Pick<OrderItem, 'diagramIds' | 'diagramMark' | '
   return ids[0];
 }
 
+/** The outlines on one of the part's diagrams (v0.64: outlined in the job's photo viewer too — any of them). */
+export function marksOn(item: Pick<OrderItem, 'diagramIds' | 'diagramMark' | 'diagramMarks'>, id: string): (DiagramMark | OldRing)[] {
+  if (!(item.diagramIds ?? []).includes(id)) return [];
+  const list = (item.diagramMarks ?? []).filter((m) => m.id === id).map(fitMark);
+  if (list.length) return list.slice(0, MAX_MARKS);
+  return item.diagramMark && item.diagramMark.id === id ? [item.diagramMark] : [];
+}
+
 /** The outlines on the diagram the part shows (v0.59's one ring when it has no others). */
 export function marksOf(item: Pick<OrderItem, 'diagramIds' | 'diagramMark' | 'diagramMarks'>): (DiagramMark | OldRing)[] {
   const d = diagramOf(item);
-  if (!d) return [];
-  const list = (item.diagramMarks ?? []).filter((m) => m.id === d).map(fitMark);
-  if (list.length) return list.slice(0, MAX_MARKS);
-  return item.diagramMark && item.diagramMark.id === d ? [item.diagramMark] : [];
+  return d ? marksOn(item, d) : [];
+}
+
+/** What changes a part's outlined picture: the diagram and its outlines (empty — none outlined). */
+export function outlineKey(id: string, marks: (DiagramMark | OldRing)[]): string {
+  if (!marks.length) return '';
+  return `${id}|${marks.map((m) => ('r' in m ? `${m.x},${m.y},${m.r}` : `${m.x},${m.y},${m.rx},${m.ry}`)).join(';')}`;
 }
 
 /**

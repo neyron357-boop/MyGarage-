@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createAi, parseFound } from '../src/ai.mjs';
 import { catalogHtml } from './catalog-page.mjs';
+import { noteFor } from '../src/partfind.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-find-'));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -22,7 +23,7 @@ const grounded = (text, { sites = ['parts.example'], backs = [], queries = ['one
   });
 
 /** A fetch that answers by address; every question to Gemini is noted as «thinking+tools». */
-function world(routes, gemini) {
+function world(routes, gemini, { now } = {}) {
   const asked = [];
   const fetched = [];
   const f = async (url, init = {}) => {
@@ -37,7 +38,7 @@ function world(routes, gemini) {
     for (const [re, fn] of routes) if (re.test(u)) return fn(u, init);
     return new Response('no', { status: 404 });
   };
-  const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
+  const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, ...(now ? { now } : {}) });
   return { ai, asked, fetched, f };
 }
 const how = (q) => `${q.thinking}${q.tools ? `+${q.tools}` : ''}`;
@@ -307,5 +308,58 @@ describe('a part looked for: the cheapest way first', () => {
     t += 31 * 60_000;
     await ai.partFind({ part: 'AC CONDENSER', make: 'GMC', model: 'Terrain', year: 2017 });
     assert.ok(questions > g1 && g1 > g0);
+  });
+});
+
+describe('the note for the garage and how far a search has got (v0.64)', () => {
+  it('«S | …» read as the note; NONE is none; the other lines as before', () => {
+    const r = parseFound('N | 04465-60280 | Toyota | GCC | https://catalog.example/p\nS | Two variants by build date | check the VIN\nS | a second note is not taken');
+    assert.equal(r.note, 'Two variants by build date; check the VIN');
+    assert.equal(r.numbers.length, 1);
+    assert.equal(parseFound('N | 04465-60280 | Toyota | GCC | https://catalog.example/p\nS | NONE').note, undefined);
+    assert.equal(parseFound('S: Only one number fits.').note, 'Only one number fits.');
+  });
+
+  it('a note naming a part number not given goes; years, engines and frames are no part numbers', () => {
+    const given = [{ number: '04465-60320', replaces: ['04465-60280'] }, { number: '04465-0K290' }];
+    assert.equal(noteFor('04465-60320 replaced 04465-60280; 04465-0K290 is for 2016-2020 1GR-FE GRJ150 only.', given), '04465-60320 replaced 04465-60280; 04465-0K290 is for 2016-2020 1GR-FE GRJ150 only.');
+    assert.equal(noteFor('Order 04465-99999 instead.', given), '');
+    assert.equal(noteFor('Check the VIN.', []), '');
+  });
+
+  it('each step as it starts, the time inside it; done — 100; a mark not heard of — null; the note of the numbers given', async () => {
+    let clock = Date.now();
+    let release;
+    const gate = new Promise((r) => (release = r));
+    const { ai, asked } = world(
+      VERSO,
+      async () => {
+        await gate;
+        return said('F | KXA10\nN | 11111-22220 | Toyota | 1.5, with pulley\nS | 11111-22221 replaced 11111-22220 — the same compressor.');
+      },
+      { now: () => clock },
+    );
+    const going = ai.partFind({ ...verso, part: 'AC COMPRESSOR', track: 't-1' });
+    // The model's memory asked (the catalogue had nothing to read first): a few seconds in, about half of that step.
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(asked.length, 1);
+    const start = ai.progress('t-1,t-unknown');
+    assert.equal(start['t-unknown'], null);
+    assert.ok(start['t-1'] >= 0 && start['t-1'] < 8, String(start['t-1']));
+    clock += 6_000;
+    const mid = ai.progress('t-1')['t-1'];
+    assert.ok(mid > 12 && mid < 26, String(mid));
+    // Never past its step's mark, however long it takes.
+    clock += 10 * 60_000;
+    assert.ok(ai.progress('t-1')['t-1'] <= 26);
+    release();
+    const r = await going;
+    assert.equal(ai.progress('t-1')['t-1'], 100);
+    // No question asked for the progress; the note — the model's, of the number that stands.
+    assert.equal(asked.length, 1);
+    assert.equal(r.note, '11111-22221 replaced 11111-22220 — the same compressor.');
+    // The same search asked again under a new mark (kept): done at once.
+    await ai.partFind({ ...verso, part: 'AC COMPRESSOR', track: 't-2' });
+    assert.equal(ai.progress('t-2')['t-2'], 100);
   });
 });

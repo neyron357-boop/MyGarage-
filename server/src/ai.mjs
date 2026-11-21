@@ -563,6 +563,33 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
 
   const findPart = createPartFind({ ask, json, page, image, lookAt, catalogPage, pageText, diagramImages, siteUrl, within, models: FIND_MODELS, fetchMs: FETCH_MS, log });
 
+  /*
+   * How far a part's search has got (v0.64, the user: «показать загрузку поиска в процентах, чтобы следить за процессом
+   * и понимать, когда закончится — без трат токенов»): each step of partfind.mjs says when it starts; inside a step the
+   * time it has run against how long such a step takes here (measured: the catalogue a second or two, the model's memory
+   * a few, a search 10–20 s, a deep one half a minute). Counted on this computer — nothing asked of anyone, no tokens. A
+   * device asks by its own mark of the request (`track`): the same search asked twice (a tunnel's cut) is one search.
+   */
+  const runs = new Map();
+  const tracks = new Map();
+  /** A step: where its percent goes and how long it usually takes (ms). */
+  const STEPS = { catalog: [8, 2_500], memory: [26, 6_000], web1: [66, 16_000], web2: [80, 22_000], web3: [92, 32_000], pages: [94, 5_000], pictures: [98, 5_000] };
+  const percentOf = (r) => {
+    if (!r) return undefined;
+    if (r.done) return 100;
+    return r.from + (r.to - r.from) * (1 - Math.exp(-Math.max(0, now() - r.at) / r.typical));
+  };
+  const stepper = (key) => (name) => {
+    const [to, typical] = STEPS[name] ?? [95, 10_000];
+    const from = percentOf(runs.get(key)) ?? 0;
+    // Only ever forward: a step that starts past its usual mark (a deep search) still has room to go.
+    runs.set(key, { at: now(), from, to: Math.min(99, Math.max(to, from + 4)), typical });
+  };
+  const forgetOld = () => {
+    for (const [k, t] of tracks) if (now() - t.at > 15 * 60_000) tracks.delete(k);
+    for (const [k, r] of runs) if (r.done && now() - r.done > 15 * 60_000) runs.delete(k);
+  };
+
   return {
     on: () => !!key(),
     status: () => ({ on: !!key(), key: key() ? `…${key().slice(-4)}` : '', search: state.search, lastOk: state.lastOk, lastError: state.lastError, usage: usageNow() }),
@@ -672,7 +699,19 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
      * is replaced; `catalogOnly` — only the catalogue's word on `number` (its name, its diagram): no AI, nothing paid.
      * No car (no make, no VIN) — nothing is looked for.
      */
-    async partFind({ part, make = '', model = '', year = '', engine = '', vin = '', built = '', hints = [], number = '', deep = false, catalogOnly = false } = {}) {
+    /** How far the searches marked so have got: 0…100 each (100 — done), null — not heard of (v0.64). */
+    progress(list) {
+      const out = {};
+      for (const t of String(list ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 24)) {
+        const key = tracks.get(t)?.key;
+        const p = key ? percentOf(runs.get(key)) : undefined;
+        const kept = key ? cache.get(key) : undefined;
+        out[t] = p !== undefined ? Math.floor(p) : kept && 'result' in kept ? 100 : null;
+      }
+      return out;
+    },
+
+    async partFind({ part, make = '', model = '', year = '', engine = '', vin = '', built = '', hints = [], number = '', deep = false, catalogOnly = false, track = '' } = {}) {
       part = String(part ?? '').trim().slice(0, 160);
       if (!part) throw httpError(400, 'no part');
       vin = VIN_RE.test(String(vin).toUpperCase()) ? String(vin).toUpperCase() : '';
@@ -689,7 +728,23 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       const life = (r) => (r?.search !== 'web' ? TTL.model : (r.numbers ?? []).some((n) => n.fits || (n.seen ?? []).length >= 2) ? TTL.proven : TTL.web);
       const before = deep ? peek(key) : undefined;
       if (catalogOnly && !number) throw httpError(400, 'no number');
-      return cached(key, 'find', life, () => findPart({ part, make, model, year, engine, vin, built, hints, number, deep: !!deep, before, car, catalogOnly: !!catalogOnly }), { fresh: !!deep });
+      forgetOld();
+      track = String(track ?? '').slice(0, 64);
+      if (track) tracks.set(track, { key, at: now() });
+      return cached(
+        key,
+        'find',
+        life,
+        async () => {
+          runs.set(key, { at: now(), from: 0, to: 4, typical: 1_500 });
+          try {
+            return await findPart({ part, make, model, year, engine, vin, built, hints, number, deep: !!deep, before, car, catalogOnly: !!catalogOnly, step: stepper(key) });
+          } finally {
+            runs.set(key, { done: now() });
+          }
+        },
+        { fresh: !!deep },
+      );
     },
   };
 }

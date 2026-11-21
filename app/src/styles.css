@@ -6637,6 +6637,75 @@ html.desk .ai-scan-pill {
   font-weight: 700;
   color: var(--app-label-2);
 }
+/* How far a search has got (v0.64): its percent beside the AI's mark, and a thin bar of its colours that only grows —
+   transform only (the sheet is not laid out again a second). */
+.ai-progress {
+  position: relative;
+  height: 4px;
+  margin: 2px 0 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ai-b) 14%, transparent);
+}
+.ai-progress > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ai-grad);
+  transform-origin: left center;
+  transition: transform var(--dur-4) var(--ease-out);
+}
+.ai-parts-tile .ai-progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  height: 3px;
+  margin: 0;
+}
+.ai-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-label-2);
+  white-space: nowrap;
+}
+.ai-line-work {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: -0.2em;
+}
+.ai-line-work .ai-mark {
+  vertical-align: 0;
+}
+.ai-line-pct {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-label-2);
+  white-space: nowrap;
+}
+/* The note on what was found (v0.64): a line or two under the numbers, in English. */
+.ai-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 0 4px;
+  border-top: 0.5px solid var(--app-hairline);
+  font-size: 13px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--app-label-2);
+}
+.ai-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--ai-b);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-progress > span {
+    transition: none;
+  }
+}
 
 /* A job typed in after the fact (v0.53): its day, a chip on the card beside the promised time — a tap changes it. */
 .day-chip {
@@ -6767,6 +6836,68 @@ html.desk .ai-scan-pill {
 }
 .mark-oval[data-draft] {
   border-style: dashed;
+}
+/* Outlining a diagram over the job's photo viewer (v0.64): a full-screen sheet of its own — the diagram whole in the room
+   left by the bar and the buttons (`--mark-room`), as wide as its shape lets it. */
+.mark-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 420;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--app-canvas);
+  color: var(--mantine-color-text);
+}
+.mark-layer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 60px;
+  padding: 8px 12px;
+}
+.mark-layer .cam-icon {
+  color: var(--mantine-color-text);
+  background: var(--app-fill);
+}
+.mark-layer-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mark-layer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 16px;
+  --mark-room: calc(100dvh - 240px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+html.desk .mark-layer-body {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+/* In the photo viewer: «Обвести» — a pill of light glass over the dark, as the viewer's round buttons. */
+.viewer .viewer-pill {
+  border: 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+.viewer .viewer-pill:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+/* The line's preview, its diagram outlined: whole, on white. */
+.part-thumb img.part-thumb-outlined {
+  object-fit: contain;
+  background: #fff;
 }
 @media (prefers-reduced-motion: reduce) {
   .mark-loading {

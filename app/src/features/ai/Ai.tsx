@@ -1,10 +1,10 @@
 import { ActionIcon, Text } from '@mantine/core';
-import { IconChecks, IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
+import { IconChecks, IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconInfoCircle, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
 import { useSyncExternalStore, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
-import { catalogCount } from '../../domain/ai';
-import { aiAllParts, aiFindPart, aiOn, aiPartsProgress, aiWorking, aiWorkVersion, subscribeAiWork, yandexUrl } from '../../services/ai';
+import { catalogCount, findNote } from '../../domain/ai';
+import { aiAllParts, aiFindPart, aiOn, aiPartsPercent, aiPartsProgress, aiProgress, aiProgressVersion, aiWorking, aiWorkVersion, subscribeAiProgress, subscribeAiWork, yandexUrl } from '../../services/ai';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 
 /*
@@ -17,6 +17,31 @@ import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 export function useAiWorking(...keys: string[]): boolean {
   useSyncExternalStore(subscribeAiWork, aiWorkVersion);
   return keys.some(aiWorking);
+}
+
+/** How far the AI's search under this key has got, 0…99 (v0.64; none — not searching). */
+export function useAiProgress(key: string): number | undefined {
+  useSyncExternalStore(subscribeAiProgress, aiProgressVersion);
+  return aiProgress(key);
+}
+
+/** A percent as the language writes it («42 %», «42%»). */
+function Percent({ value, className }: { value: number; className: string }) {
+  const { t } = useTranslation();
+  return (
+    <span className={`${className} tnum`} aria-label={t('ai.progress', { p: value })}>
+      {t('ai.percent', { p: value })}
+    </span>
+  );
+}
+
+/** A search's progress as a thin bar of the AI's colours (transform only: it does not lay the sheet out again). */
+function ProgressBar({ value }: { value: number }) {
+  return (
+    <div className="ai-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
+      <span style={{ transform: `scaleX(${Math.max(0.02, value / 100)})` }} />
+    </div>
+  );
 }
 
 /** The AI's mark: a sparkle on its colours, like an app's icon; `busy` — twinkling, the AI at work. */
@@ -32,10 +57,13 @@ export function AiMark({ size = 22, busy, label }: { size?: number; busy?: boole
 export function AiLineWork({ itemId }: { itemId: string }) {
   const { t } = useTranslation();
   const busy = useAiWorking(`name:${itemId}`, `find:${itemId}`);
+  // Its search's percent after the mark (v0.64): how far it has got, how long it has to go.
+  const p = useAiProgress(`find:${itemId}`);
   if (!busy) return null;
   return (
-    <span style={{ marginLeft: 6 }} className="fade-enter">
+    <span style={{ marginLeft: 6 }} className="fade-enter ai-line-work">
       <AiMark size={17} busy label={t('ai.working')} />
+      {p !== undefined && <Percent value={p} className="ai-line-pct" />}
     </span>
   );
 }
@@ -76,13 +104,25 @@ export function AiPickedButton({ orderId, itemIds, onStart }: { orderId: string;
 export function AiPartsTile({ orderId }: { orderId: string }) {
   const { t } = useTranslation();
   useSyncExternalStore(subscribeAiWork, aiWorkVersion);
+  useSyncExternalStore(subscribeAiProgress, aiProgressVersion);
   if (!aiOn()) return null;
   const busy = aiWorking(`all:${orderId}`);
   const p = aiPartsProgress(orderId);
+  // v0.64: how far all of them have got, in percent (the lines done count whole, those being looked up — by their search).
+  const pct = busy ? aiPartsPercent(orderId) : undefined;
   return (
-    <button type="button" className="action-tile add-extra ai-parts-tile" aria-label={t('ai.allParts')} aria-busy={busy || undefined} data-ai-parts={busy ? 'busy' : ''} disabled={busy} onClick={() => void aiAllParts(orderId)}>
+    <button
+      type="button"
+      className="action-tile add-extra ai-parts-tile"
+      aria-label={busy && p ? `${t('ai.allParts')}: ${p.done}/${p.total}` : t('ai.allParts')}
+      aria-busy={busy || undefined}
+      data-ai-parts={busy ? 'busy' : ''}
+      disabled={busy}
+      onClick={() => void aiAllParts(orderId)}
+    >
       <AiMark size={24} busy={busy} />
-      {busy && p ? <span className="ai-parts-n tnum">{p.done}/{p.total}</span> : <span className="add-extra-word">{t('ai.tileWord')}</span>}
+      {busy && pct !== undefined ? <Percent value={pct} className="ai-parts-n" /> : <span className="add-extra-word">{t('ai.tileWord')}</span>}
+      {busy && pct !== undefined && <ProgressBar value={pct} />}
     </button>
   );
 }
@@ -122,6 +162,7 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
   const { run } = useAction();
   const live = useScreenLiveQuery(() => db.items.get(itemId), [itemId]);
   const busy = useAiWorking(`find:${itemId}`, `name:${itemId}`);
+  const p = useAiProgress(`find:${itemId}`);
   const on = aiOn();
   const find = live?.aiFind;
   if (!live || (!find && !on)) return null;
@@ -132,6 +173,7 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
         <div className="ai-head">
           <AiMark busy={busy} />
           <span className="ai-text">{find?.search === 'garage' ? t('ai.ownJobs') : t('ai.catalogs')}</span>
+          {busy && p !== undefined && <Percent value={p} className="ai-pct" />}
           {on && !busy && (
             <ActionIcon variant="subtle" color="gray" radius="xl" size={32} aria-label={t('ai.again')} onClick={again}>
               <IconRefresh size={18} stroke={1.8} />
@@ -144,6 +186,7 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
           <span className="ai-text">{t('ai.find')}</span>
         </button>
       )}
+      {busy && p !== undefined && <ProgressBar value={p} />}
       {busy && !find?.numbers.length && (
         <>
           <div className="skeleton ai-skel" />
@@ -199,6 +242,20 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
           </div>
         );
       })}
+      {/* v0.64: a short note in English — why the numbers differ, what to check (the AI's line, else the app's own). */}
+      {find && !busy && <FindNote find={find} />}
+    </div>
+  );
+}
+
+function FindNote({ find }: { find: Parameters<typeof findNote>[0] }) {
+  const { t } = useTranslation();
+  const note = findNote(find);
+  if (!note) return null;
+  return (
+    <div className="ai-note" aria-label={t('ai.note')} data-ai-note>
+      <IconInfoCircle size={16} stroke={1.9} aria-hidden />
+      <span lang="en">{note}</span>
     </div>
   );
 }

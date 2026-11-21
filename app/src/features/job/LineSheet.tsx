@@ -355,6 +355,7 @@ export function LineSheet({
               setFresh((f) => f.filter((x) => x.id !== p.id));
             } else setKept((k) => k.filter((x) => x !== p.id));
           }}
+          item={kind === 'part' ? live : undefined}
           diagramIds={kind === 'part' ? live?.diagramIds : undefined}
           sampleIds={kind === 'part' ? live?.sampleIds : undefined}
         />

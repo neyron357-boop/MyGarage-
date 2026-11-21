@@ -17,7 +17,8 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/forget                     — this device leaves (its key no longer works)
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
- *        /api/ai/part-find {part, make, model, year, engine, vin}, /api/ai/receipt {image} — the garage's AI (v0.48, ai.mjs)
+ *        /api/ai/part-find {part, make, model, year, engine, vin, track}, /api/ai/receipt {image} — the garage's AI (v0.48, ai.mjs);
+ *   GET  /api/ai/progress?t=a,b          — how far the part searches marked so have got, 0…100 (v0.64: no question asked)
  *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
  *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
@@ -194,6 +195,8 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
       if (parts[0] === 'api' && parts[1] === 'ai' && parts.length === 3) {
         if (!ai?.on()) throw httpError(503, 'ai off');
         if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
+        // How far a part's search has got (v0.64): counted here, no question to Gemini — not counted against the device's.
+        if (req.method === 'GET' && parts[2] === 'progress') return send(res, 200, ai.progress(url.searchParams.get('t')));
         if (req.method === 'POST') {
           // A receipt comes as a picture (v0.50): up to 8 MB; the other questions are a few lines.
           const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : 16 * 1024);

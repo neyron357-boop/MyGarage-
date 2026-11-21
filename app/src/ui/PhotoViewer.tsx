@@ -134,6 +134,7 @@ export function PhotoViewer({
   onClose,
   actions,
   onRotate,
+  paused,
 }: {
   items: ViewerItem[];
   index: number;
@@ -142,6 +143,8 @@ export function PhotoViewer({
   actions?: (item: ViewerItem) => ReactNode;
   /** Saves the photo turned a quarter to the left; the item then comes back as a new photo (a new id). */
   onRotate?: (item: ViewerItem) => Promise<unknown>;
+  /** A layer over the viewer has the keys (v0.64: outlining a diagram) — Escape and the arrows are its. */
+  paused?: boolean;
 }) {
   const { t } = useTranslation();
   const item = items[index];
@@ -209,14 +212,16 @@ export function PhotoViewer({
   );
 
   useEffect(() => {
+    if (paused) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') closeRef.current();
       if (e.key === 'ArrowRight') go(1);
       if (e.key === 'ArrowLeft') go(-1);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go]);
+  }, [go, paused]);
 
   // The turned copy is here and read: the button may turn it again.
   useEffect(() => {
@@ -375,6 +380,7 @@ export function PhotoViewer({
               alt=""
               draggable={false}
               className="viewer-img"
+              data-given={item.src ? '' : undefined}
               data-animate={!gesture.current}
               style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale * (turned?.fit ?? 1)}) rotate(${turned?.deg ?? 0}deg)` }}
             />

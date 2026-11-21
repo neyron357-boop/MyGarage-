@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { diagramOf, fitInto, fitMark, MAX_MARKS, ovalOn, sheetEntries, sheetLayout, sheetName, sheetsOf, type DiagramMark, type SheetEntry } from '../domain/diagramSheet';
+import { diagramOf, fitInto, fitMark, MAX_MARKS, outlineKey, ovalOn, sheetEntries, sheetLayout, sheetName, sheetsOf, type DiagramMark, type OldRing, type Rect, type SheetEntry } from '../domain/diagramSheet';
 import type { OrderItem } from '../domain/types';
 import { AppError } from './errors';
 import { addMedia, cardBlob, cardUrl } from './media';
@@ -83,6 +83,119 @@ function twoLines(g: CanvasRenderingContext2D, text: string, width: number): str
   return rest ? [first, fitText(g, rest, width)] : [first];
 }
 
+type Oval = { cx: number; cy: number; rx: number; ry: number };
+
+/**
+ * The outlines drawn over a diagram (`area` — where it is drawn): the rest of the drawing a little paler, so the outlined
+ * pieces stand out and the lines round them still read; each oval a soft red inside, a white edge under the red line so
+ * it reads over black lines. `line` — the red line's width.
+ */
+function drawOutlines(g: CanvasRenderingContext2D, ovals: Oval[], area: Rect, line: number) {
+  const pad = line * 0.85;
+  g.save();
+  g.beginPath();
+  g.rect(area.x, area.y, area.w, area.h);
+  for (const o of ovals) {
+    g.moveTo(o.cx + o.rx + pad, o.cy);
+    g.ellipse(o.cx, o.cy, o.rx + pad, o.ry + pad, 0, 0, Math.PI * 2, true);
+  }
+  g.fillStyle = 'rgba(255, 255, 255, 0.42)';
+  g.fill('evenodd');
+  g.restore();
+  for (const o of ovals) {
+    g.fillStyle = 'rgba(255, 59, 48, 0.08)';
+    g.beginPath();
+    g.ellipse(o.cx, o.cy, o.rx, o.ry, 0, 0, Math.PI * 2);
+    g.fill();
+    g.lineWidth = line + line * 0.85;
+    g.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    g.stroke();
+    g.lineWidth = line;
+    g.strokeStyle = RED;
+    g.stroke();
+  }
+}
+
+/** The largest side of a part's outlined picture (a catalogue's drawing is about 1000 px; a screenshot no more than 2000). */
+const OUTLINED_SIDE = 2000;
+
+/**
+ * A part's diagram with the manager's outlines drawn into it (v0.64, the user: «нарисовать обводку прямо в карточке
+ * заказа, когда открываю фото, и сохранить в таком виде»): what the job's photo viewer shows, shares and saves. The
+ * diagram itself stays as it is (the outlines are the line's, `diagramMarks`): drawn from the original when it is on
+ * this device, else from its card. None where pictures cannot be drawn, or with no outline.
+ */
+export async function outlinedPicture(id: string, marks: (DiagramMark | OldRing)[]): Promise<Blob | undefined> {
+  if (!marks.length || typeof document === 'undefined' || typeof createImageBitmap !== 'function') return undefined;
+  let bmp: ImageBitmap | undefined;
+  try {
+    const rec = await db.mediaBlobs.get(id);
+    const blob = rec?.blob ?? (await cardBlob(id));
+    bmp = blob ? await createImageBitmap(blob) : undefined;
+  } catch {
+    bmp = undefined;
+  }
+  if (!bmp) return undefined;
+  const canvas = document.createElement('canvas');
+  try {
+    const k = Math.min(1, OUTLINED_SIDE / Math.max(bmp.width, bmp.height));
+    canvas.width = Math.max(1, Math.round(bmp.width * k));
+    canvas.height = Math.max(1, Math.round(bmp.height * k));
+    const g = canvas.getContext('2d');
+    if (!g) return undefined;
+    // A drawing with a see-through ground: on white, as in the catalogue.
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, canvas.width, canvas.height);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const area: Rect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+    // As thick for the eye as on a supplier's sheet: its 7 px on a 1080 px cell.
+    const line = Math.max(3, Math.round((RING_LINE * Math.max(canvas.width, canvas.height)) / 1080));
+    drawOutlines(g, marks.map((m) => ovalOn(m, area)), area, line);
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const out = png && png.size <= 4_500_000 ? png : await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    return out ?? undefined;
+  } finally {
+    bmp.close();
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
+/** The outlined pictures made lately (by `outlineKey`): the viewer and the tiles show them at once; a few kept. */
+const outlined = new Map<string, Promise<string | undefined>>();
+const outlinedDone = new Map<string, string>();
+
+/** A part's outlined picture as an address — made once for these outlines. */
+export function outlinedUrl(id: string, marks: (DiagramMark | OldRing)[]): Promise<string | undefined> {
+  const key = outlineKey(id, marks);
+  if (!key) return Promise.resolve(undefined);
+  let p = outlined.get(key);
+  if (!p) {
+    p = outlinedPicture(id, marks)
+      .then((b) => {
+        const u = b ? URL.createObjectURL(b) : undefined;
+        if (u) outlinedDone.set(key, u);
+        return u;
+      })
+      .catch(() => undefined);
+    outlined.set(key, p);
+    // The oldest go (their pictures a moment later — one may still be on screen).
+    while (outlined.size > 8) {
+      const old = outlined.keys().next().value as string;
+      const u = outlinedDone.get(old);
+      outlined.delete(old);
+      outlinedDone.delete(old);
+      if (u) window.setTimeout(() => URL.revokeObjectURL(u), 5000);
+    }
+  }
+  return p;
+}
+
+/** The outlined picture's address when it is made already. */
+export const cachedOutlinedUrl = (id: string, marks: (DiagramMark | OldRing)[]): string | undefined => outlinedDone.get(outlineKey(id, marks));
+
 async function bitmapOf(id: string): Promise<ImageBitmap | undefined> {
   try {
     const blob = await cardBlob(id);
@@ -153,31 +266,7 @@ async function drawSheet(entries: SheetEntry[]): Promise<Blob | undefined> {
       g.drawImage(bmp, drawn.x, drawn.y, drawn.w, drawn.h);
       if (e.marks.length) {
         const ovals = e.marks.map((m) => ovalOn(m, drawn));
-        const pad = 6;
-        // The rest of the drawing a little paler: the outlined pieces stand out, the lines round them still read.
-        g.save();
-        g.beginPath();
-        g.rect(drawn.x, drawn.y, drawn.w, drawn.h);
-        for (const o of ovals) {
-          g.moveTo(o.cx + o.rx + pad, o.cy);
-          g.ellipse(o.cx, o.cy, o.rx + pad, o.ry + pad, 0, 0, Math.PI * 2, true);
-        }
-        g.fillStyle = 'rgba(255, 255, 255, 0.42)';
-        g.fill('evenodd');
-        g.restore();
-        for (const o of ovals) {
-          // A soft red inside, a white edge under the red line so it reads over black lines.
-          g.fillStyle = 'rgba(255, 59, 48, 0.08)';
-          g.beginPath();
-          g.ellipse(o.cx, o.cy, o.rx, o.ry, 0, 0, Math.PI * 2);
-          g.fill();
-          g.lineWidth = RING_LINE + 6;
-          g.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-          g.stroke();
-          g.lineWidth = RING_LINE;
-          g.strokeStyle = RED;
-          g.stroke();
-        }
+        drawOutlines(g, ovals, drawn, RING_LINE);
         // The part's number at each outline (upper right), kept inside the diagram's room.
         const tag = 28;
         for (const o of ovals) {

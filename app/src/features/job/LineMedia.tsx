@@ -4,11 +4,12 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { siteOf } from '../../domain/ai';
+import type { OrderItem } from '../../domain/types';
 import { MediaImage } from '../../ui/components';
 import { useScreenLiveQuery } from '../../ui/hooks';
-import { PhotoViewer } from '../../ui/PhotoViewer';
 import type { StripPhoto } from '../../ui/PhotoStrip';
 import { AiMark } from '../ai/Ai';
+import { PartPhotoViewer, useOutlined } from './PartPictures';
 
 /*
  * A line's pictures, all at the top of its sheet (v0.52, the user: «место для всех фотографий, включая результаты ИИ,
@@ -16,7 +17,7 @@ import { AiMark } from '../ai/Ai';
  * «Фото» first (the camera or the phone's photos), the line's own photos (they go to the customer with the estimate),
  * then what the garage's AI found: the part's catalogue diagram first (v0.55 — the part's place marked on it), then
  * photos of the part (samples), each marked with the AI's sign and a word (they stay in the garage). A tap — all of
- * them full screen, one after another.
+ * them full screen, one after another; on a diagram — «Обвести» (v0.64), and the outlined one shows its outlines here.
  */
 
 type Tile = StripPhoto & { kind: 'own' | 'sample' | 'diagram'; site?: string };
@@ -25,18 +26,22 @@ export function LineMedia({
   own,
   onAdd,
   onRemove,
+  item,
   diagramIds = [],
   sampleIds = [],
 }: {
   own: StripPhoto[];
   onAdd: (files: File[]) => void;
   onRemove: (p: StripPhoto) => void;
+  /** The line as it is now (a part's): its diagrams are outlined on it. */
+  item?: OrderItem;
   diagramIds?: string[];
   sampleIds?: string[];
 }) {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
   const [viewing, setViewing] = useState<number | null>(null);
+  const outlined = useOutlined(item);
   const ai = useScreenLiveQuery(async () => {
     const of = async (ids: string[]) => (await db.media.bulkGet(ids)).filter((m) => !!m).map((m) => ({ id: m!.id, site: siteOf(m!.name ?? '') }));
     return { samples: await of(sampleIds), diagrams: await of(diagramIds) };
@@ -55,17 +60,20 @@ export function LineMedia({
           <IconCameraPlus size={26} stroke={1.7} aria-hidden />
           <span>{t('photos.add')}</span>
         </button>
-        {tiles.map((p, i) => (
-          <button key={p.id} type="button" className="line-media-tile" data-kind={p.kind} aria-label={word(p.kind) || t('photos.add')} onClick={() => setViewing(i)}>
-            {p.src ? <img src={p.src} alt="" /> : <MediaImage id={p.id} h="100%" w="100%" radius="0" />}
-            {p.kind !== 'own' && (
-              <span className="line-media-ai">
-                <AiMark size={16} />
-                <span>{word(p.kind)}</span>
-              </span>
-            )}
-          </button>
-        ))}
+        {tiles.map((p, i) => {
+          const ringed = p.kind === 'diagram' && outlined?.id === p.id;
+          return (
+            <button key={p.id} type="button" className="line-media-tile" data-kind={p.kind} data-outlined={ringed || undefined} aria-label={word(p.kind) || t('photos.add')} onClick={() => setViewing(i)}>
+              {p.src ? <img src={p.src} alt="" /> : ringed ? <img src={outlined.url} alt="" /> : <MediaImage id={p.id} h="100%" w="100%" radius="0" />}
+              {p.kind !== 'own' && (
+                <span className="line-media-ai">
+                  <AiMark size={16} />
+                  <span>{word(p.kind)}</span>
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
       <input
         ref={input}
@@ -81,8 +89,9 @@ export function LineMedia({
         }}
       />
       {viewing !== null && tiles.length > 0 && (
-        <PhotoViewer
-          items={tiles.map((p) => ({ id: p.id, src: p.src, title: word(p.kind) || undefined, caption: p.site }))}
+        <PartPhotoViewer
+          item={item}
+          pictures={tiles.map((p) => ({ id: p.id, src: p.src, kind: p.kind, title: word(p.kind) || undefined, caption: p.site }))}
           index={Math.min(viewing, tiles.length - 1)}
           onIndex={setViewing}
           onClose={() => setViewing(null)}

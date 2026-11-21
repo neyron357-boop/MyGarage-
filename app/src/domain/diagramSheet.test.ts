@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CELL, diagramOf, fitInto, fitMark, fromOldRing, MARK_MAX, MARK_MIN, markAtTap, markFromBox, marksOf, MAX_MARKS, onMark, ovalOn, scaleMark, sheetEntries, sheetLayout, sheetName, sheetsOf } from './diagramSheet';
+import { CELL, diagramOf, fitInto, fitMark, fromOldRing, MARK_MAX, MARK_MIN, markAtTap, markFromBox, marksOf, marksOn, MAX_MARKS, outlineKey, onMark, ovalOn, scaleMark, sheetEntries, sheetLayout, sheetName, sheetsOf } from './diagramSheet';
 
 const part = (id: string, extra: Record<string, unknown> = {}) => ({ id, titleEn: `PART ${id}`, titleRu: '', qty: 1, ...extra });
 const oval = (id: string, x = 0.5, y = 0.5, rx = 0.1, ry = 0.1) => ({ id, x, y, rx, ry });
@@ -88,5 +88,25 @@ describe('the diagrams sheet for a supplier (v0.59, v0.59.1)', () => {
     expect(onMark(m, 0.59, 0.5)).toBe(true);
     expect(onMark(m, 0.5, 0.56, 0.25)).toBe(true);
     expect(onMark(m, 0.5, 0.7)).toBe(false);
+  });
+});
+
+describe('outlines on any diagram of the part (v0.64)', () => {
+  const ring = { id: 'd2', x: 0.5, y: 0.5, rx: 0.1, ry: 0.2 };
+  const item = { diagramIds: ['d1', 'd2'], diagramMarks: [ring] };
+  it('on the diagram they are on; none on another, nor on one the part no longer has', () => {
+    expect(marksOn(item, 'd2')).toEqual([ring]);
+    expect(marksOn(item, 'd1')).toEqual([]);
+    expect(marksOn({ ...item, diagramIds: ['d1'] }, 'd2')).toEqual([]);
+    // The part shows the outlined one.
+    expect(diagramOf(item)).toBe('d2');
+    expect(marksOf(item)).toEqual([ring]);
+    // v0.59's one ring, on the diagram it is on.
+    expect(marksOn({ diagramIds: ['d1'], diagramMark: { id: 'd1', x: 0.2, y: 0.3, r: 0.05 } }, 'd1')).toEqual([{ id: 'd1', x: 0.2, y: 0.3, r: 0.05 }]);
+  });
+  it('the outlined picture’s key: changes with the outlines, none without', () => {
+    expect(outlineKey('d2', [])).toBe('');
+    expect(outlineKey('d2', [ring])).not.toBe(outlineKey('d2', [{ ...ring, x: 0.51 }]));
+    expect(outlineKey('d2', [ring])).toBe(outlineKey('d2', [{ ...ring }]));
   });
 });

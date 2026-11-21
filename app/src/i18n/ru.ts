@@ -2096,6 +2096,10 @@ export const ru = {
     needCar: 'Укажите машину',
     needCarHint: 'Марка и модель или VIN',
     none: 'Не найдено',
+    // v0.64: how far a part's search has got; the note on what was found (in English — the trade's language).
+    progress: 'Поиск: {{p}} %',
+    percent: '{{p}} %',
+    note: 'Примечание',
     seenIn_one: 'Есть в {{count}} каталоге',
     seenIn_few: 'Есть в {{count}} каталогах',
     seenIn_many: 'Есть в {{count}} каталогах',

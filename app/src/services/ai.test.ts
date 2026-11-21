@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { aiAfterPart, aiAllParts, aiFindPart, aiFixPartName, aiReadVin, aiWorking, forgetPriorParts, onAiNotice, setAiTransport, type AiNotice } from './ai';
+import { aiAfterPart, aiAllParts, aiFindPart, aiFixPartName, aiPartsPercent, aiProgress, aiReadVin, aiWorking, forgetPriorParts, onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { updateVehicle } from './customers';
 import { addItem, updateItem } from './estimate';
 import { addMedia } from './media';
@@ -398,5 +398,54 @@ describe('the maker’s catalogue behind the search (v0.55)', () => {
     expect(asked.filter((a) => a.path === 'part-find').map((a) => [a.body.number, a.body.catalogOnly])).toEqual([['04465-60280', true]]);
     const i = (await db.items.get(second.id))!;
     expect([i.partNumber, i.aiFind?.search, i.diagramIds?.length]).toEqual(['04465-60280', 'garage', 1]);
+  });
+});
+
+describe('the note and how far a search has got (v0.64)', () => {
+  it('the AI’s note kept with what it found; while it searches — its percent, only forward; after — none', async () => {
+    const o = await car('Toyota', 'Corolla');
+    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    answers['part-find'] = { ...(answers['part-find'] as object), note: '04465-12610 for GCC cars; 04465-02220 — Japan built. Check the VIN.' };
+    setAiTransport(async (path) => {
+      if (path === 'part-find') await gate;
+      return answers[path];
+    });
+    const going = aiFindPart(it1.id);
+    await until(async () => aiProgress(`find:${it1.id}`) !== undefined);
+    const first = aiProgress(`find:${it1.id}`)!;
+    expect(first).toBeGreaterThanOrEqual(1);
+    expect(first).toBeLessThan(95);
+    // No server to count it (a test's): the time alone — a second on, a little further.
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(aiProgress(`find:${it1.id}`)!).toBeGreaterThanOrEqual(first);
+    release();
+    await going;
+    expect(aiProgress(`find:${it1.id}`)).toBeUndefined();
+    expect((await db.items.get(it1.id))!.aiFind?.note).toBe('04465-12610 for GCC cars; 04465-02220 — Japan built. Check the VIN.');
+  });
+
+  it('every part of a job in percent: a line done counts whole; none while nothing runs', async () => {
+    const o = await car('Toyota', 'Corolla');
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
+    expect(aiPartsPercent(o.id)).toBeUndefined();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    setAiTransport(async (path) => {
+      // The first part answers at once, the second waits.
+      if (path === 'part-find' && calls++ === 1) await gate;
+      return answers[path];
+    });
+    const going = aiAllParts(o.id);
+    await until(async () => (aiPartsPercent(o.id) ?? 0) >= 50);
+    const p = aiPartsPercent(o.id)!;
+    expect(p).toBeGreaterThanOrEqual(50);
+    expect(p).toBeLessThan(100);
+    release();
+    await going;
+    expect(aiPartsPercent(o.id)).toBeUndefined();
   });
 });
