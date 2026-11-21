@@ -1599,8 +1599,13 @@ async function launchBrowser() {
     if ((await front('.phase-track > span').count()) !== 6) throw new Error('the phase track has six steps');
     await front('.phase-track > span[data-now]').waitFor();
     const line = (name) => front('.list-row:not([data-ghost])').filter({ hasText: name }).first();
-    // A draft swiped left all the way: gone at once, with Undo.
+    // A draft swiped left all the way is not deleted at once (v0.63.2, the owner: «слишком быстро удаляется без
+    // предложения»): «Удалить» waits for a tap — then it is gone, with Undo.
     await swipe(line('Wheel alignment'), -1);
+    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).waitFor();
+    await page.waitForTimeout(500);
+    if (!(await line('Wheel alignment').count())) throw new Error('a long swipe deleted a draft line at once');
+    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).click();
     await line('Wheel alignment').waitFor({ state: 'detached' });
     await page.getByRole('button', { name: 'Отменить' }).last().click();
     await line('Wheel alignment').waitFor();

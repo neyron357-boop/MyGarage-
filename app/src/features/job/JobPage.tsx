@@ -724,14 +724,15 @@ export function JobPage() {
   const crew = mechanicsOf(b.order);
   const outNote = (i: OrderItem) => (i.outsource && !i.done ? t(`outsource.states.${i.outsource.state}`) : '');
   const whoNote = (i: OrderItem) => (i.employeeId && !(crew.length === 1 && crew[0] === i.employeeId) ? mechanics.find((m) => m.id === i.employeeId)?.name ?? '' : '');
-  // Swipes on a line, as in the iPhone's lists. Left — off the job: a draft goes at once (with Undo), a
-  // line the customer has heard of only uncovers the button (it stays in the history as cancelled).
-  // Right — the next good thing: "agreed" on a line that waits, "done" on agreed work.
+  // Swipes on a line, as in the iPhone's lists. Left — off the job: the swipe only uncovers the button, a tap on it does
+  // it — a draft is deleted (with Undo; v0.63.2, the owner: «при свайпе влево слишком быстро удаляется без предложения —
+  // можно случайно удалить»: a long swipe deleted it at once), a line the customer has heard of is dropped (it stays in
+  // the history as cancelled). Right — the next good thing: "agreed" on a line that waits, "done" on agreed work.
   const swipeOff = (i: OrderItem): SwipeSpec | undefined =>
     picking || !canPick(i)
       ? undefined
       : i.approvalState === 'draft'
-        ? { label: t('common.delete'), icon: IconTrash, color: 'red', onCommit: () => void removeLine(i) }
+        ? { label: t('common.delete'), icon: IconTrash, color: 'red', full: false, onCommit: () => void removeLine(i) }
         : { label: t('job.drop'), icon: IconTrash, color: 'red', full: false, onCommit: () => void run(async () => (await (isAwaitingClient(i) ? takeBack([i.id], { cancel: true }) : dropLine(i.id)), haptic('light'))) };
   const swipeOn = (i: OrderItem): SwipeSpec | undefined =>
     picking || !canPick(i)
