@@ -231,6 +231,15 @@ export function supplierChatLink(s: Pick<Supplier, 'book'>): string | undefined 
   return !n || n !== digits(c?.['Основной телефон']?.v) ? link : undefined;
 }
 
+/**
+ * The number a supplier's own WhatsApp link opens the chat of («+971…»), so a message can go with it (v0.61.1); a
+ * business link has none.
+ */
+export function chatLinkNumber(link: string): string | undefined {
+  const n = waNumber(link);
+  return n ? `+${n}` : undefined;
+}
+
 const samePhone = (a: string, b: string) => digits(a) === digits(b);
 
 /**

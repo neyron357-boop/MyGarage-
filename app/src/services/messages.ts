@@ -160,14 +160,29 @@ export function partRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year'
   return out.join('\n');
 }
 
-/** All of a job's parts to ask a supplier about at once (v0.38, the job's suppliers): the car, its VIN, the parts. */
-export function partsRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>, items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>[]): string {
-  const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ');
-  const out = [car];
-  if (vehicle.vin) out.push(`VIN: ${vehicle.vin}`);
-  out.push('', ...items.map((i, k) => `${k + 1}. ${i.titleEn || i.titleRu || ''}${i.qty > 1 ? ` × ${i.qty}` : ''}${i.partNumber ? ` (${i.partNumber})` : ''}`));
-  out.push('', 'Price and availability, please: original / aftermarket?');
-  return out.join('\n');
+/**
+ * All of a job's parts to ask a supplier about at once (v0.38, the job's suppliers): the car, its VIN, the parts.
+ * v0.61.1 (the user: «список текст деталей не ложится в ватсап… одной строкой не читабельно»): a line a part, the car
+ * in WhatsApp's bold, no blank line first when the car is not known; sent with the diagrams' sheets (`diagrams`) — a
+ * line saying the sheets are numbered as this list.
+ */
+export function partsRequestText(
+  vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>,
+  items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>[],
+  opts: { diagrams?: boolean } = {},
+): string {
+  // «*» would break WhatsApp's bold (and a car never has one)
+  const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ').replace(/\*/g, '').trim();
+  const head: string[] = [];
+  if (car) head.push(`*${car}*`);
+  if (vehicle.vin?.trim()) head.push(`VIN: ${vehicle.vin.trim()}`);
+  const parts = items.map((i, k) => {
+    const name = lineName((i.titleEn || i.titleRu || '').trim());
+    const number = i.partNumber?.trim();
+    return `${k + 1}. ${name}${i.qty > 1 ? ` × ${i.qty}` : ''}${number ? ` (${number})` : ''}`;
+  });
+  const end = [...(opts.diagrams ? ['Diagrams in the photos — the same numbers.'] : []), 'Price and availability, please: original / aftermarket?'];
+  return [...head, ...(head.length ? [''] : []), ...parts, '', ...end].join('\n');
 }
 
 /** When an offer is here, in words: today, tomorrow, in 3 days. */

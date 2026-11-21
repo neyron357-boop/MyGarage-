@@ -4,7 +4,7 @@ import { IconBrandWhatsapp, IconClipboardCheck, IconPhone, IconSend, IconStarFil
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { supplierChatLink } from '../../domain/supplierBook';
+import { chatLinkNumber, supplierChatLink } from '../../domain/supplierBook';
 import { starsOf, type Ranked, type Why } from '../../domain/supplierRank';
 import type { Supplier } from '../../domain/types';
 import { partsRequestText, whatsappUrl } from '../../services/messages';
@@ -76,43 +76,58 @@ export function JobSuppliersPage() {
   if (data === undefined) return <PageSkeleton />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const v = data.vehicle;
+  // The list by lines: in the supplier's chat link (the link keeps the breaks) — and, with the sheets, in the same send.
   const ask = v && asked.length ? partsRequestText(v, asked) : '';
+  const askWithSheets = v && asked.length ? partsRequestText(v, asked, { diagrams: true }) : '';
+  const copied = () => notifications.show({ color: 'green', message: t('diagrams.pasteCaption'), autoClose: 6000, icon: <IconClipboardCheck size={18} /> });
   const share = async () => {
     haptic('light');
     // v0.59: with the diagrams' sheets (four to a picture, numbered as the list) when the phone can share files.
     const files = sheets.files;
-    const withFiles = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
-    // Where files cannot be shared (a PC): the sheets saved, to attach.
-    if (files.length && !withFiles) files.forEach(downloadFile);
-    if (withFiles) {
-      // v0.59.1 (the user: «текст должен быть как подпись последней фотографии»): a page cannot say which picture the
-      // words go under — WhatsApp sent them first, apart. So the pictures go alone, and the list waits in the clipboard,
-      // to paste under the last of them. Both start in the tap itself (iOS shares only there).
-      const copied = copyText(ask);
-      const shared = navigator.share({ files });
-      void copied.then((ok) => ok && notifications.show({ color: 'green', message: t('diagrams.pasteCaption'), autoClose: 6000, icon: <IconClipboardCheck size={18} /> }));
+    const can = (d: ShareData) => files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare(d);
+    // v0.61.1 (the user: «список текст деталей не ложится в ватсап, а только копируется, и при вставке одной строкой»):
+    // the sheets and the list in one send again. WhatsApp takes the list as its own message, by lines, and it lands
+    // by itself; the list in the clipboard (v0.59.1–v0.59.3) was pasted into the caption of WhatsApp's share window,
+    // which keeps no line breaks. Started in the tap itself (iOS shares only there).
+    if (can({ files, text: askWithSheets })) {
       try {
-        await shared;
-      } catch {
-        // closed without sending: the list stays copied
+        await navigator.share({ files, text: askWithSheets });
+      } catch (e) {
+        // closed without sending — nothing; refused — the list at least copied
+        if ((e as Error)?.name !== 'AbortError' && (await copyText(askWithSheets))) copied();
       }
       return;
     }
+    if (can({ files })) {
+      // a share sheet that takes files but not words with them: the sheets, and the list to send after them
+      const copy = copyText(askWithSheets);
+      const shared = navigator.share({ files });
+      void copy.then((ok) => ok && copied());
+      await shared.catch(() => undefined);
+      return;
+    }
+    // Where files cannot be shared (a PC): the sheets saved, to attach.
+    if (files.length) files.forEach(downloadFile);
+    const text = files.length ? askWithSheets : ask;
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({ text: ask });
+        await navigator.share({ text });
         return;
       } catch (e) {
         if ((e as Error)?.name === 'AbortError') return;
       }
     }
-    if (await copyText(ask)) haptic('selection');
+    if (await copyText(text)) haptic('selection');
   };
   const rows = (list: Ranked[]) => (
     <List>
       {list.map((r) => {
         const s = r.supplier;
-        const chat = supplierChatLink(s) ?? (s.phone ? whatsappUrl(s.phone, ask) : undefined);
+        // The chat with the list by lines in its box — also on the supplier's own WhatsApp number (v0.61.1: the
+        // workbook's link opened the chat empty); a business link opens as it is.
+        const own = supplierChatLink(s);
+        const ownNumber = own ? chatLinkNumber(own) : undefined;
+        const chat = own ? (ownNumber ? whatsappUrl(ownNumber, ask) : own) : s.phone ? whatsappUrl(s.phone, ask) : undefined;
         return (
           <ListRow
             key={s.id}

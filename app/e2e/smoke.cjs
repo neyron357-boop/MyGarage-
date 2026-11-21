@@ -3041,14 +3041,34 @@ async function launchBrowser() {
     await first.waitFor();
     if (!(await first.innerText()).includes('На этом заказе')) throw new Error('the job’s own supplier is not first: ' + (await first.innerText()));
     await shot('44a-job-suppliers');
-    // «Спросить»: all the job's parts at once, through the share sheet.
+    // «Спросить»: all the job's parts at once, through the share sheet. v0.61.1: with a diagram, its sheet and the list
+    // go in one send — the list by lines, saying the sheets carry its numbers (not left in the clipboard to paste).
+    const withDiagram = await page.evaluate(async (orderId) => {
+      const { db } = await import('/src/db/db.ts');
+      const { addDiagram } = await import('/src/services/diagramSheet.ts');
+      const part = (await db.items.where('orderId').equals(orderId).toArray()).find((i) => i.kind === 'part' && !i.diagramIds?.length);
+      if (!part) return false;
+      const c = document.createElement('canvas');
+      c.width = 400;
+      c.height = 300;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, 400, 300);
+      g.strokeStyle = '#000';
+      g.strokeRect(100, 80, 200, 140);
+      await addDiagram(part.id, await new Promise((r) => c.toBlob(r, 'image/png')));
+      return true;
+    }, job.id);
+    if (withDiagram) await front('.job-suppliers [data-diagram-sheets] img').first().waitFor({ timeout: 20000 });
     await page.evaluate(() => {
       window.__asked = null;
-      navigator.share = async (d) => void (window.__asked = d.text);
+      navigator.canShare = () => true;
+      navigator.share = async (d) => void (window.__asked = { text: d.text, files: (d.files || []).map((f) => f.type) });
     });
     await front('.nav-bar, .page-header').getByRole('button', { name: 'Спросить' }).first().click();
     const asked = await page.waitForFunction(() => window.__asked).then((h) => h.jsonValue());
-    if (!/^1\. /m.test(asked) || !/Price and availability/.test(asked)) throw new Error('asked: ' + asked);
+    if (!/^1\. /m.test(asked.text) || !/Price and availability/.test(asked.text) || asked.text.split('\n').length < 4) throw new Error('asked: ' + JSON.stringify(asked));
+    if (withDiagram && (!asked.files.length || !/^Diagrams in the photos/m.test(asked.text))) throw new Error('the sheets and the list apart: ' + JSON.stringify(asked));
     // Its card: four stars, saved; the pill on its row.
     await first.click();
     const dlg = page.getByRole('dialog');
