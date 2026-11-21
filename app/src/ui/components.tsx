@@ -637,10 +637,23 @@ export function ListRow({
     </span>
   );
   const click = onClick && (() => !(swipes && sw.consumeClick()) && onClick());
+  // PC (v0.63.3, the owner: «часто случайно нажимаю и удаляется»): an action the phone does only by a tap on the button its
+  // swipe uncovered (`full: false` — deleting a line, dropping it) takes a second click here — the first one turns the
+  // button into «Удалить?»; the mouse leaving the row, or four seconds, let it go.
+  const [armed, setArmed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
   return (
     <div
       {...handlers}
       {...touch}
+      onMouseLeave={(e) => {
+        handlers?.onMouseLeave?.(e);
+        if (armed) setArmed(null);
+      }}
       data-selected={selected || undefined}
       data-done={dim || undefined}
       aria-pressed={selected}
@@ -678,14 +691,17 @@ export function ListRow({
                 key={s.label}
                 type="button"
                 className="row-hover-btn"
+                data-armed={armed === s.label || undefined}
                 style={{ '--c': `var(--mantine-color-${s.color}-6)`, '--c-ink': `var(--mantine-color-${s.color}-light-color)` } as React.CSSProperties}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (s.full === false && armed !== s.label) return setArmed(s.label);
+                  setArmed(null);
                   s.onCommit();
                 }}
               >
                 <s.icon size={16} stroke={2} aria-hidden />
-                {s.label}
+                {armed === s.label ? `${s.label}?` : s.label}
               </button>
             ))}
         </span>

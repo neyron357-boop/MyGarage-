@@ -178,6 +178,20 @@ async function launchBrowser() {
             const btns = await line.locator('.row-hover-btn').allInnerTexts();
             const shown = await line.locator('.row-hover').evaluate((el) => getComputedStyle(el).opacity);
             check("job: a line's swipes are buttons under the mouse", btns.length > 0 && shown === '1', { btns, shown });
+            // v0.63.3 (the owner: «часто случайно нажимаю и удаляется»): «Удалить» / «Убрать» asks once more — the first
+            // click only turns it into «Удалить?»; the mouse leaving the row lets it go.
+            const off = line.locator('.row-hover-btn').last();
+            if (/^(Удалить|Убрать)$/.test((await off.innerText()).trim())) {
+              const rows = await p.locator('.job-desk-main .list-row.swipe-row').count();
+              await off.click();
+              await settle(300);
+              const asked = { armed: await off.getAttribute('data-armed'), text: (await off.innerText()).trim(), rows: await p.locator('.job-desk-main .list-row.swipe-row').count() };
+              check('job: the first click on «Удалить» only asks (nothing deleted)', asked.armed !== null && /\?$/.test(asked.text) && asked.rows === rows, asked);
+              await shot('03b3-job-line-delete-asks');
+              await p.mouse.move(5, 5);
+              await settle(300);
+              check('job: the mouse leaving the row lets the question go', (await off.getAttribute('data-armed')) === null);
+            }
           }
           await p.mouse.move(5, 5);
         }

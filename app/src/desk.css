@@ -1290,7 +1290,8 @@ html.desk .row-hover-btn {
   cursor: pointer;
   transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
 }
-html.desk .row-hover-btn:hover {
+html.desk .row-hover-btn:hover,
+html.desk .row-hover-btn[data-armed] {
   background: var(--c);
   color: #fff;
 }
