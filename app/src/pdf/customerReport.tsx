@@ -1,13 +1,16 @@
 import { Document, Page, Text, View } from '@react-pdf/renderer';
 import { db } from '../db/db';
-import { dubaiDate, formatDocDate } from '../domain/dates';
+import { paidOffOn } from '../domain/account';
+import { dubaiDate, formatDate, formatDocDate } from '../domain/dates';
+import { historyKey } from '../domain/debts';
 import { carPlate } from '../domain/historyPlan';
-import { buyerName } from '../domain/invoice';
-import type { Customer, HistoryInvoice, Settings, Vehicle, VehicleType } from '../domain/types';
+import { buyerName, invoicePaidAt } from '../domain/invoice';
+import type { Customer, HistoryInvoice, Invoice, Payment, Settings, Vehicle, VehicleType } from '../domain/types';
 import { vehicleTypeOf } from '../domain/vehicleType';
+import { customerAccount } from '../services/account';
 import { getSettings } from '../services/settings';
 import { invoicePageView, InvoicePage, renderDoc, type InvoicePageView } from './documents';
-import { aed, AR_LABEL, COLOR, GarageFooter, GarageHeader, TitleBar, type DocRow } from './garage';
+import { aed, AR_LABEL, COLOR, GarageFooter, GarageHeader, PaidStamp, TitleBar, type DocRow } from './garage';
 
 /*
  * A customer's invoices of a month (or of any period) as one PDF (v0.45 — a corporate customer's monthly pack, until now put together
@@ -29,6 +32,8 @@ export interface ReportItem {
   vehicleType?: VehicleType;
   totalFils: number;
   page: InvoicePageView;
+  /** Paid in full then (v0.62.2): the PAID stamp on its page. */
+  paidAt?: string;
 }
 
 const typeOf = (car?: Vehicle): { vehicleType?: VehicleType } => {
@@ -48,8 +53,11 @@ function dubaiMoment(date: string, time: string): string | undefined {
   return new Date(`${date}T${String(h).padStart(2, '0')}:${m[2]}:00+04:00`).toISOString();
 }
 
-/** An invoice from before this app drawn as the Tax Invoice: its number (a job's "Job ID" or "Invoice Number"), day, car as printed. */
-export function historyPageView(h: HistoryInvoice, settings: Settings, customer: Customer): InvoicePageView {
+/**
+ * An invoice from before this app drawn as the Tax Invoice: its number (a job's "Job ID" or "Invoice Number"), day, car as
+ * printed; `paidAt` — «debt payments» paid it off then (v0.62.2): the PAID stamp, as on this app's invoices.
+ */
+export function historyPageView(h: HistoryInvoice, settings: Settings, customer: Customer, paidAt?: string): InvoicePageView {
   const rows: DocRow[] = h.lines.map((l) => ({ description: l.description, price: l.unitNetFils, ...(l.discountFils ? { discount: l.discountFils } : {}), vat: l.vatFils, qty: l.qty, total: l.grossFils }));
   const at = h.time ? dubaiMoment(h.date, h.time) : undefined;
   return {
@@ -68,6 +76,7 @@ export function historyPageView(h: HistoryInvoice, settings: Settings, customer:
     total: h.totalFils,
     ...(h.paymentMethod ? { paymentMethod: h.paymentMethod } : {}),
     ...(settings.bankDetails ? { bankDetails: settings.bankDetails } : {}),
+    ...(paidAt ? { paidAt } : {}),
   };
 }
 
@@ -81,18 +90,28 @@ export async function reportItems(customerId: string, from: string, to: string):
   const [history, orders] = await Promise.all([db.historyInvoices.where('customerId').equals(customerId).toArray(), db.orders.where('customerId').equals(customerId).toArray()]);
   const cars = new Map((await db.vehicles.where('customerId').equals(customerId).toArray()).map((v) => [v.id, v]));
   const items: ReportItem[] = [];
+  // Paid in full (v0.62.2, «если долги за месяцы оплачены — на инвойсы этих месяцев печать PAID»): one from before the app
+  // — when «debt payments» paid it off; this app's — as its own PDF tells (`invoicePaidAt`).
+  const account = history.length ? await customerAccount(customerId) : undefined;
+  const historyPaid = (id: string) => {
+    const line = account?.lines.find((l) => l.key === historyKey(id));
+    return line && paidOffOn(line, account!.payments);
+  };
   for (const h of history) {
     if (h.date < from || h.date > to) continue;
     const car = cars.get(h.vehicleId);
-    items.push({ key: h.id, number: h.number, date: h.date, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : h.vehicleText, plate: h.plate, ...typeOf(car), totalFils: h.totalFils, page: historyPageView(h, settings, customer) });
+    const paidAt = historyPaid(h.id);
+    items.push({ key: h.id, number: h.number, date: h.date, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : h.vehicleText, plate: h.plate, ...typeOf(car), totalFils: h.totalFils, page: historyPageView(h, settings, customer, paidAt), ...(paidAt ? { paidAt } : {}) });
   }
-  const invoices = orders.length ? await db.invoices.where('orderId').anyOf(orders.map((o) => o.id)).toArray() : [];
+  const ids = orders.map((o) => o.id);
+  const [invoices, payments] = ids.length ? await Promise.all([db.invoices.where('orderId').anyOf(ids).toArray(), db.payments.where('orderId').anyOf(ids).toArray()]) : [[] as Invoice[], [] as Payment[]];
   for (const inv of invoices) {
     const day = dubaiDate(inv.issuedAt);
     if (inv.type === 'credit_note' || inv.status !== 'issued' || day < from || day > to) continue;
     const order = orders.find((o) => o.id === inv.orderId);
     const car = order && (cars.get(order.vehicleId) ?? (await db.vehicles.get(order.vehicleId)));
-    items.push({ key: inv.id, number: inv.number, date: day, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : '', plate: car ? carPlate(car.plate) : '', ...typeOf(car), totalFils: inv.totalFils, page: await invoicePageView(inv.id) });
+    const paidAt = order ? invoicePaidAt(inv, invoices.filter((i) => i.orderId === order.id), payments.filter((p) => p.orderId === order.id), order) : undefined;
+    items.push({ key: inv.id, number: inv.number, date: day, vehicle: car ? [car.make, car.model].filter(Boolean).join(' ') : '', plate: car ? carPlate(car.plate) : '', ...typeOf(car), totalFils: inv.totalFils, page: await invoicePageView(inv.id, paidAt), ...(paidAt ? { paidAt } : {}) });
   }
   return items.sort((a, b) => a.date.localeCompare(b.date) || a.number.localeCompare(b.number, 'en', { numeric: true }));
 }
@@ -119,7 +138,7 @@ const COLS = [
 const FIRST = 28;
 const NEXT = 40;
 
-function SummaryPage({ fam, settings, customer, title, rows, from, last, total, pageNo }: { fam: string; settings: Settings; customer: Customer; title: string; rows: { item: ReportItem; n: number }[]; from: number; last: boolean; total: number; pageNo: number }) {
+function SummaryPage({ fam, settings, customer, title, rows, from, last, total, pageNo, paidOn }: { fam: string; settings: Settings; customer: Customer; title: string; rows: { item: ReportItem; n: number }[]; from: number; last: boolean; total: number; pageNo: number; paidOn?: string }) {
   const cell = (c: (typeof COLS)[number], text: string, bold = false) => (
     <Text key={c.key} style={{ width: c.w, textAlign: c.right ? 'right' : 'left', paddingHorizontal: 4, fontWeight: bold ? 'bold' : 'normal' }} wrap={false}>
       {text}
@@ -157,6 +176,12 @@ function SummaryPage({ fam, settings, customer, title, rows, from, last, total, 
           <Text style={{ width: COLS[5].w, paddingHorizontal: 4, textAlign: 'right', fontWeight: 'bold', fontSize: 10 }}>{aed(total).replace(/^AED\s/, '')}</Text>
         </View>
       ) : null}
+      {/* Every invoice of the period paid (v0.62.2): the month is paid — stamped under its total. */}
+      {last && paidOn ? (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6 }} wrap={false}>
+          <PaidStamp on={formatDate(paidOn)} />
+        </View>
+      ) : null}
       <GarageFooter s={settings} />
     </Page>
   );
@@ -175,10 +200,12 @@ export async function renderCustomerReport(customerId: string, from: string, to:
   const lastCap = pages.length === 1 ? FIRST : NEXT;
   if (pages[pages.length - 1].length >= lastCap) pages.push([]);
   const total = items.reduce((a, i) => a + i.totalFils, 0);
+  // The whole period paid: the day its last invoice was paid off.
+  const paidOn = items.length && items.every((i) => i.paidAt) ? items.map((i) => dubaiDate(i.paidAt!.length > 10 ? i.paidAt! : `${i.paidAt}T08:00:00.000Z`)).sort().at(-1) : undefined;
   const blob = await renderDoc((fam) => (
     <Document title={`${buyerName(customer)} — ${title}`}>
       {pages.map((rows, p) => (
-        <SummaryPage key={`s${p}`} fam={fam} settings={settings} customer={customer} title={title} rows={rows} from={p === 0 ? 0 : FIRST + (p - 1) * NEXT} last={p === pages.length - 1} total={total} pageNo={p + 1} />
+        <SummaryPage key={`s${p}`} fam={fam} settings={settings} customer={customer} title={title} rows={rows} from={p === 0 ? 0 : FIRST + (p - 1) * NEXT} last={p === pages.length - 1} total={total} pageNo={p + 1} paidOn={paidOn} />
       ))}
       {items.map((it) => (
         <InvoicePage key={it.key} fam={fam} v={it.page} />

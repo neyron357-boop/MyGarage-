@@ -3446,6 +3446,32 @@ async function launchBrowser() {
     await card.waitFor({ state: 'detached' });
     const months = await page.evaluate(async (customerId) => (await (await import('/src/services/debts.ts')).loadCustomerMonths(customerId)).map((m) => [m.month, m.totalFils, m.dueFils]), id);
     if (JSON.stringify(months) !== JSON.stringify([['2026-05', 33600, 0]])) throw new Error(`months: ${JSON.stringify(months)}`);
+    // v0.62.2: «Платежи» — its two payments of all time, the latest first, nothing left after it; a tap opens the operation.
+    await page.goto(BASE + '#/money?tab=debts');
+    await front('[data-debt-payments]').click();
+    await front('[role="tab"]').filter({ hasText: 'Всё время' }).click();
+    await front(`[data-pays-who="${id}"]`).click();
+    await page.waitForFunction(() => document.querySelectorAll('.screen[data-role="top"] [data-pays-row]').length === 2);
+    const after = await front('[data-left-after]').evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-left-after'))));
+    if (JSON.stringify(after) !== JSON.stringify([0, 10500])) throw new Error(`left after each payment: ${JSON.stringify(after)}`);
+    await front('[data-pays-statement]').waitFor();
+    await shot('49c-debt-payments');
+    await front('[data-pays-row]').first().click();
+    await page.getByRole('dialog').getByText('Оплата долга').first().waitFor();
+    await closeModal();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    // The statement of the period adds up; May's invoices are PAID in its monthly pack.
+    const papers = await page.evaluate(async (customerId) => {
+      const { customerStatement } = await import('/src/services/account.ts');
+      const { statementPdf } = await import('/src/services/debtDocs.ts');
+      const { reportItems } = await import('/src/pdf/customerReport.tsx');
+      const s = (await customerStatement(customerId, '2026-05-01', '2026-11-30')).statement;
+      const pdf = await statementPdf(customerId, { from: '2026-05-01', to: '2026-11-30' });
+      return { sum: [s.openingFils, s.invoicedFils, s.paidFils, s.closingFils], paid: (await reportItems(customerId, '2026-05-01', '2026-05-31')).map((i) => !!i.paidAt), pdf: [pdf.filename, pdf.blob.size] };
+    }, id);
+    if (JSON.stringify(papers.sum) !== JSON.stringify([0, 33600, 33600, 0])) throw new Error(`statement: ${JSON.stringify(papers.sum)}`);
+    if (papers.paid.join() !== 'true,true') throw new Error(`May not stamped PAID: ${papers.paid}`);
+    if (!/^Statement - .+ - 2026-05-01 - 2026-11-30\.pdf$/.test(papers.pdf[0]) || papers.pdf[1] < 3000) throw new Error(`statement PDF: ${papers.pdf}`);
   });
   await step('v0.53: a job typed in after the fact — «День» in «Новый заказ», its chip, «Готово» on that day; a car in work takes a second job', async () => {
     const dlg = page.getByRole('dialog');

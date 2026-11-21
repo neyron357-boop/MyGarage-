@@ -1,5 +1,5 @@
 import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconBrandWhatsapp, IconCalendarCheck, IconCalendarDollar, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCalendarCheck, IconCalendarDollar, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconReceipt, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -195,12 +195,19 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           ))}
         </div>
       )}
-      <div className="debt-actions">
+      <div className="debt-actions" data-n={jobs > 0 ? 5 : 4}>
         <button type="button" className="action-tile" onClick={() => onPay(d.customer.id)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
             <IconCash size={21} stroke={1.9} aria-hidden />
           </span>
           <span>{t('debt.takeShort')}</span>
+        </button>
+        {/* Its payments (v0.62.2): what it paid, when, for which months, what was left after each. */}
+        <button type="button" className="action-tile" data-debtor-payments onClick={() => navigate(`/money/payments?side=owed&who=${d.customer.id}`)}>
+          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-teal-6)' } as React.CSSProperties}>
+            <IconReceipt size={21} stroke={1.9} aria-hidden />
+          </span>
+          <span>{t('debtPays.tile')}</span>
         </button>
         <button type="button" className="action-tile" disabled={busy} onClick={() => void statement()}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-grape-6)' } as React.CSSProperties}>
@@ -292,6 +299,7 @@ export function CompanyDebtList({ list, cats, onOpen }: { list: CompanyDebt[]; c
 const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onContact }: { c: Creditor<CompanyDebt>; catName: (id: string) => string; onOpen: (expenseId: string) => void; onPay: (c: Creditor<CompanyDebt>, month?: string) => void; onContact: (c: Creditor<CompanyDebt>) => void }) {
   const { t } = useTranslation();
   const lang = useLang();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [past, setPast] = useState(false);
   const phone = c.phone;
@@ -388,6 +396,13 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
               <IconCash size={21} stroke={1.9} aria-hidden />
             </span>
             <span>{t('debt.takeShort')}</span>
+          </button>
+          {/* What was paid to him (v0.62.2), when, and what was left after each. */}
+          <button type="button" className="action-tile" data-creditor-payments onClick={() => navigate(`/money/payments?side=owe&who=${encodeURIComponent(c.key)}`)}>
+            <span className="tile-icon" style={{ '--c': 'var(--mantine-color-teal-6)' } as React.CSSProperties}>
+              <IconReceipt size={21} stroke={1.9} aria-hidden />
+            </span>
+            <span>{t('debtPays.tile')}</span>
           </button>
           {phone && (
             <button type="button" className="action-tile" onClick={() => openWhatsApp(phone)}>
@@ -638,6 +653,7 @@ type DebtTab = (typeof DEBT_TABS)[number];
  */
 export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const side: DebtTab = params.get('side') === 'owe' ? 'owe' : 'owed';
   const setSide = (v: string) =>
@@ -690,6 +706,23 @@ export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
           </button>
         ))}
       </SimpleGrid>
+      {/* The payments of debts of a period (v0.62.2): paid, owed, after each. */}
+      <List>
+        <ListRow
+          chevron
+          onClick={() => navigate(`/money/payments?side=${side}`)}
+          left={
+            <span className="row-icon" style={tint('teal')} aria-hidden>
+              <IconReceipt size={19} stroke={2} />
+            </span>
+          }
+          title={
+            <Text span inherit fw={600} data-debt-payments>
+              {t('debtPays.title')}
+            </Text>
+          }
+        />
+      </List>
       {/* The list under the sums turns like a page (its own swipe, inside Money's). */}
       <div key={side} ref={sw.panel} data-own-swipe className="debt-panel">
         {side === 'owed' ? (

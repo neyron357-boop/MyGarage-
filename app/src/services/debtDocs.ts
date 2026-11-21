@@ -20,11 +20,17 @@ async function debtorName(customerId: string): Promise<string> {
   return safe(buyerName(c) || c.phone || 'Customer');
 }
 
-/** One sheet: all the customer owes, job by job, and the total due. */
-export async function statementPdf(customerId: string): Promise<PdfFile> {
+/**
+ * The statement of account of a period (v0.62.2, pdf/statement.tsx): the account in four figures, the months, every
+ * invoice and every payment. No period — from the first day of the oldest month still owed (else this month) to today.
+ */
+export async function statementPdf(customerId: string, period?: { from: string; to: string }): Promise<PdfFile> {
   const name = await debtorName(customerId);
+  const today = dubaiDate();
+  const oldest = (await loadDebtors()).find((d) => d.customer.id === customerId)?.months[0]?.month ?? today.slice(0, 7);
+  const { from, to } = period ?? { from: `${oldest}-01`, to: today };
   const { renderStatement } = await import('../pdf/statement');
-  return { blob: await renderStatement(customerId), filename: `Statement - ${name} - ${dubaiDate()}.pdf` };
+  return { blob: await renderStatement(customerId, from, to), filename: `Statement - ${name} - ${from} - ${to}.pdf` };
 }
 
 /** Every invoice of the jobs the customer owes for, each its own PDF, in one folder of a .zip. */

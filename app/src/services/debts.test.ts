@@ -5,12 +5,14 @@ import { dubaiDate } from '../domain/dates';
 import { moved } from '../domain/ledger';
 import { computeReport } from '../domain/reports';
 import { addDebtPayment, companyDebtOf, debtPaymentHistory, loadCompanyDebts, loadCreditors, loadCustomerMonths, loadDebtJobs, loadDebtors, loadHistoryDebts, payCredit, paySupplier } from './debts';
+import { customerAccount, customerStatement, loadDebtPayments } from './account';
+import { statementOf } from '../domain/account';
 import { removeEntry, restoreEntry } from './entries';
 import { voidCreditPayment, voidExpense, voidIncome } from './legacyVoid';
 import { addItem } from './estimate';
 import { approveAll, leaveOnDebt } from './flow';
 import { addIncome, loadLedger, setOpeningBalances } from './ledger';
-import { addExpense, cashState, createDebt, quickInvoice } from './money';
+import { addExpense, addPayment, cashState, createDebt, quickInvoice } from './money';
 import { owedChoices, owedOf, setOwedTo, updateLender } from './lenders';
 import { moneySheetOfBook } from './moneySheet';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
@@ -515,5 +517,79 @@ describe('debts paid by month (v0.62, the user: «оплаты долгов ко
     const nov = await addExpense({ date: '2026-11-02', categoryId: parts, amountFils: 5_000, vatFils: 0, vendor: 'Gulf Star', method: 'credit' });
     await paySupplier([oct.id, nov.id], { amountFils: 5_000, method: 'cash', first: [nov.id] });
     expect([(await companyDebtOf(oct.id))!.leftFils, (await companyDebtOf(nov.id))!.leftFils]).toEqual([7_000, 0]);
+  });
+});
+
+describe('the account, its statement and the payments of debts (v0.62.2, «таблица платежей… с выбором периода»; «прозрачный отчёт для клиента»)', () => {
+  /** A company: April 150, May 300, June 200 from before the app; a job left on debt for 600; a job paid at the hand-over. */
+  async function company() {
+    await setOpeningBalances(100_000, 0);
+    const job = await invoicedJob(600);
+    await leaveOnDebt(job.id, { amountFils: 60_000, dueDate: '2026-12-01', signature: signature() });
+    const customerId = job.customerId;
+    const paidAtOnce = await invoicedJob(250, customerId);
+    await addPayment(paidAtOnce.id, { kind: 'payment', method: 'card', amountFils: 25_000 });
+    await changeStage(paidAtOnce.id, 'closed');
+    const hist = (id: string, date: string, totalFils: number) => ({ id, customerId, vehicleId: job.vehicleId, orderId: undefined, template: 'B', numberKind: 'job', number: id, date, plateRaw: 'W 1', plate: 'W-1', vehicleText: 'Toyota Camry', lines: [], netFils: totalFils, vatFils: 0, totalFils, source: { file: 'x.pdf', sha256: 'x', page: 1 }, importedAt: '' });
+    await db.historyInvoices.bulkPut([hist('hi-apr', '2026-04-08', 15_000), hist('hi-may', '2026-05-02', 30_000), hist('hi-jun', '2026-06-03', 20_000)] as never);
+    return { job, paidAtOnce, customerId };
+  }
+  const today = () => dubaiDate();
+
+  it('the account: every invoice and every payment set against them; a statement adds up to the fils', async () => {
+    const { job, customerId } = await company();
+    await addDebtPayment({ amountFils: 50_000, method: 'transfer', customerId, months: ['2026-05', '2026-06'], date: '2026-06-20' });
+    const account = (await customerAccount(customerId))!;
+    expect(account.lines.map((l) => [l.key, l.totalFils]).sort()).toEqual(
+      [
+        [job.id, 60_000],
+        ['h:hi-apr', 15_000],
+        ['h:hi-may', 30_000],
+        ['h:hi-jun', 20_000],
+      ]
+        .concat(account.lines.filter((l) => l.totalFils === 25_000).map((l) => [l.key, 25_000]))
+        .sort(),
+    );
+    // May–June: April brought in (still owed), May and June invoiced and paid off by the payment of 20/06.
+    const s = statementOf(account.lines, account.payments, '2026-05-01', '2026-06-30');
+    expect([s.openingFils, s.invoicedFils, s.paidFils, s.closingFils]).toEqual([15_000, 50_000, 50_000, 15_000]);
+    expect(s.months.map((m) => [m.month, m.status, m.brought])).toEqual([
+      ['2026-04', 'unpaid', true],
+      ['2026-05', 'paid', false],
+      ['2026-06', 'paid', false],
+    ]);
+    expect(s.lines.find((l) => l.key === 'h:hi-may')?.paidOn).toBe('2026-06-20');
+    // Everything up to today: the jobs too — the one paid at the hand-over is paid; the debt left is what the card says.
+    const all = (await customerStatement(customerId, '2000-01-01', today()))!.statement;
+    expect(all.openingFils + all.invoicedFils - all.paidFils).toBe(all.closingFils);
+    expect(all.closingFils).toBe((await loadDebtors()).find((d) => d.customer.id === customerId)!.totalFils);
+    expect(all.closingFils).toBe(75_000);
+    expect(all.lines.filter((l) => l.status === 'paid')).toHaveLength(3);
+  });
+
+  it('«Платежи»: the debts paid in a period — not the one paid at the hand-over; what each paid and what was left after it; the operation to open', async () => {
+    const { customerId } = await company();
+    await addDebtPayment({ amountFils: 50_000, method: 'transfer', customerId, months: ['2026-05', '2026-06'], date: '2026-06-20' });
+    await addDebtPayment({ amountFils: 20_000, method: 'cash', customerId });
+    const year = await loadDebtPayments('owed', '2026-01-01', today());
+    expect(year.rows.map((r) => [r.date, r.amountFils, r.months, r.leftFils])).toEqual([
+      [today(), 20_000, ['2026-04', today().slice(0, 7)], 55_000],
+      ['2026-06-20', 50_000, ['2026-05', '2026-06'], 15_000],
+    ]);
+    expect(year.rows.every((r) => r.entry?.source === 'income')).toBe(true);
+    expect(year.owners.find((o) => o.key === customerId)).toMatchObject({ paidFils: 70_000, count: 2, leftFils: 55_000 });
+    // June only.
+    expect((await loadDebtPayments('owed', '2026-06-01', '2026-06-30')).rows.map((r) => r.amountFils)).toEqual([50_000]);
+  });
+
+  it('the garage’s side: what was paid to a seller, and what was left after it', async () => {
+    await setOpeningBalances(500_000, 0);
+    const parts = await cat('parts');
+    const oct = await addExpense({ date: '2026-10-30', categoryId: parts, amountFils: 7_000, vatFils: 0, vendor: 'Gulf Star', method: 'credit' });
+    const nov = await addExpense({ date: '2026-11-02', categoryId: parts, amountFils: 5_000, vatFils: 0, vendor: 'Gulf Star', method: 'credit' });
+    await paySupplier([oct.id, nov.id], { amountFils: 5_000, method: 'cash', date: '2026-11-10', first: [nov.id] });
+    const v = await loadDebtPayments('owe', '2026-11-01', '2026-11-30');
+    expect(v.rows.map((r) => [r.amountFils, r.months, r.leftFils, r.entry?.source])).toEqual([[5_000, ['2026-11'], 7_000, 'credit']]);
+    expect(v.owners.map((o) => [o.name, o.paidFils, o.leftFils])).toEqual([['Gulf Star', 5_000, 7_000]]);
   });
 });

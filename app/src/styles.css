@@ -6112,6 +6112,10 @@ button.kpi-tab .eyebrow {
   padding: 10px 12px 12px;
   border-top: 0.5px solid var(--app-hairline);
 }
+/* Five tiles (v0.62.2: «Платежи» beside «Оплата») stay one row. */
+.debt-actions[data-n='5'] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
 .debt-actions .action-tile {
   min-height: 78px;
   padding: 10px 4px 8px;
