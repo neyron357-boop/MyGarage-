@@ -14,7 +14,9 @@ import { aed, Ar, AR_LABEL, BiLine, BlockLabel, COLOR, GarageFooter, GarageHeade
  * The statement of account for the customer (v0.30; v0.62.2 — the user: «прозрачная картина / отчёт для клиента: за что
  * оплачено, что осталось и т. д. — подробная и очень грамотная»). For the invoices of a period as they stand today (v0.63,
  * «оплата была сегодня» — a month paid later is paid on its own statement):
- *   — three figures: invoiced, paid of it, balance due (invoiced − paid = due), and what the whole account owes;
+ *   — three figures: invoiced, paid of it, balance due (invoiced − paid = due) — of the period only (v0.63.1, the user:
+ *     «отображается остаток баланса за всё время — нужно, чтобы отображался баланс только за выбранный период»: what the
+ *     account owes for other periods is not on it);
  *   — the months: what each month's invoices came to, what is paid of them, what is left, PAID / PART PAID / UNPAID;
  *   — every invoice of the period: its amount, paid, left, its status and the day it was paid off;
  *   — every payment for them, whenever made: its day, receipt, way, the invoices it paid (by month), its part for them,
@@ -35,7 +37,6 @@ const AR = {
   payments: 'المدفوعات',
   totalDue: 'إجمالي المستحق',
   balanceDue: 'الرصيد المستحق',
-  accountTotal: 'إجمالي الحساب',
 };
 
 const METHOD: Record<ExpenseMethod, string> = { cash: 'Cash', card: 'Card', transfer: 'Bank transfer', outside: 'Paid to the owner', credit: 'Credit' };
@@ -152,16 +153,14 @@ export async function renderStatement(customerId: string, from: string, to: stri
           </View>
         </View>
 
-        {/* The period's invoices in three figures — invoiced − paid = due; the whole account beside them. */}
+        {/* The period's invoices in three figures — invoiced − paid = due; nothing of other periods (v0.63.1). */}
         <View style={{ flexDirection: 'row', marginTop: 8 }} wrap={false}>
           <Figure en="Invoiced" ar={AR.invoiced} fils={s.invoicedFils} />
           <Figure en="Paid" ar={AR.paid} fils={s.paidFils} />
           <Figure en="Balance due" ar={AR.balanceDue} fils={s.dueFils} strong />
-          {s.otherDueFils !== 0 ? <Figure en="Account total due" ar={AR.accountTotal} fils={s.totalDueFils} /> : null}
         </View>
         <Text style={[small, { marginTop: 3 }]}>
           {`Invoiced ${aed(s.invoicedFils)} − paid ${aed(s.paidFils)} = balance due ${aed(s.dueFils)}: the invoices of this period, with every payment made for them up to ${formatDate(today)}.`}
-          {s.otherDueFils > 0 ? ` Invoices of other periods still due: ${aed(s.otherDueFils)}; total due on the account: ${aed(s.totalDueFils)}.` : ''}
         </Text>
 
         {/* The months: what each came to, what is paid, what is left. */}
@@ -304,8 +303,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
               </View>
               <Text style={{ fontSize: 13, fontWeight: 'bold' }}>{aed(Math.max(0, s.dueFils))}</Text>
             </View>
-            {s.otherDueFils > 0 ? <Text style={[small, { marginTop: 3, textAlign: 'right' }]}>{`Total due on the account: ${aed(s.totalDueFils)}`}</Text> : null}
-            <Text style={[small, { marginTop: 3, textAlign: 'right' }]}>{`as of ${dayText(today)}`}</Text>
+            <Text style={[small, { marginTop: 3, textAlign: 'right' }]}>{`for ${dayText(first)} – ${dayText(last)}, as of ${dayText(today)}`}</Text>
           </View>
         </View>
         <Text style={[small, { marginTop: 10 }]}>
