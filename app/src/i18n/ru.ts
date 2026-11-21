@@ -1250,6 +1250,8 @@ export const ru = {
     credits_many: '{{count}} кредитов',
     credits_other: '{{count}} кредита',
     monthsPaid: 'Оплаченные месяцы · {{count}}',
+    pickedOf: '{{n}} из {{of}}',
+    monthInvoices: 'Инвойсы месяца',
   },
   debtPays: {
     title: 'Платежи',
@@ -1275,6 +1277,8 @@ export const ru = {
     count_many: '{{count}} платежей',
     count_other: '{{count}} платежа',
     period: { month: 'Месяц', year: 'Год', all: 'Всё время', custom: 'Период' },
+    by: { invoice: 'По инвойсам', payment: 'По оплатам' },
+    ofPeriod: 'по инвойсам периода',
   },
   owed: {
     title: 'Кому должны',

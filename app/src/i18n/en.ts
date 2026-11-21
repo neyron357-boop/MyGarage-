@@ -1250,6 +1250,8 @@ export const en: typeof ru = {
     credits_many: '{{count}} credits',
     credits_other: '{{count}} credits',
     monthsPaid: 'Paid months · {{count}}',
+    pickedOf: '{{n}} of {{of}}',
+    monthInvoices: 'Invoices of the month',
   },
   debtPays: {
     title: 'Payments',
@@ -1275,6 +1277,8 @@ export const en: typeof ru = {
     count_many: '{{count}} payments',
     count_other: '{{count}} payments',
     period: { month: 'Month', year: 'Year', all: 'All time', custom: 'Period' },
+    by: { invoice: 'By invoices', payment: 'By payment date' },
+    ofPeriod: 'of the period’s invoices',
   },
   owed: {
     title: 'Owed to',

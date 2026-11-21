@@ -152,6 +152,11 @@ export interface DebtPaymentInput {
   orderId?: string;
   /** v0.62: the months (YYYY-MM) to pay off first — their jobs and invoices from before the app, the oldest first. */
   months?: string[];
+  /**
+   * v0.63 (the user: «возможность оплаты конкретного инвойса в конкретном месяце»): the invoices to pay off first, by
+   * their keys in the queue (`debtQueue`: a job's id, `h:` an invoice from before the app) — over the months and the job.
+   */
+  keys?: string[];
   date?: string;
   note?: string;
 }
@@ -172,8 +177,8 @@ export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income:
   if (input.customerId && !customer) throw new AppError('err.notFound');
   const [debts, history] = customer ? await Promise.all([loadDebtJobs(customer.id), loadHistoryDebts(customer.id)]) : [[], []];
   const dues = history[0]?.dues ?? [];
-  // The months picked go first (v0.62), else the job picked; then the oldest.
-  const first = input.months?.length ? monthKeys(debtMonths(debts, dues), input.months) : input.orderId;
+  // The invoices picked go first (v0.63), else the months picked (v0.62), else the job picked; then the oldest.
+  const first = input.keys?.length ? input.keys : input.months?.length ? monthKeys(debtMonths(debts, dues), input.months) : input.orderId;
   const spent = spread(input.amountFils, debtQueue(debts, dues), first);
   const restFils = spent.restFils;
   const parts: DebtShare[] = spent.parts.filter((p) => !historyKeyOf(p.key)).map((p) => ({ orderId: p.key, amountFils: p.amountFils }));

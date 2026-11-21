@@ -3439,6 +3439,8 @@ async function launchBrowser() {
     await card.locator('[data-debt-month="2026-05"]').click();
     const dlg = page.getByRole('dialog');
     await dlg.locator('.choice-card[data-active="true"] [data-debt-month="2026-05"]').waitFor();
+    // v0.63: its invoice left (№302) is under it, picked with the month.
+    await dlg.locator('.choice-card[data-active="true"] [data-debt-invoice="302"]').waitFor();
     if ((await dlg.getByLabel('Сумма').inputValue()) !== '105') throw new Error('the month offered ' + (await dlg.getByLabel('Сумма').inputValue()));
     await shot('49b-pay-a-month');
     await dlg.getByRole('button', { name: /^Записать приход/ }).click();
@@ -3467,9 +3469,9 @@ async function launchBrowser() {
       const { reportItems } = await import('/src/pdf/customerReport.tsx');
       const s = (await customerStatement(customerId, '2026-05-01', '2026-11-30')).statement;
       const pdf = await statementPdf(customerId, { from: '2026-05-01', to: '2026-11-30' });
-      return { sum: [s.openingFils, s.invoicedFils, s.paidFils, s.closingFils], paid: (await reportItems(customerId, '2026-05-01', '2026-05-31')).map((i) => !!i.paidAt), pdf: [pdf.filename, pdf.blob.size] };
+      return { sum: [s.invoicedFils, s.paidFils, s.dueFils, s.totalDueFils], paid: (await reportItems(customerId, '2026-05-01', '2026-05-31')).map((i) => !!i.paidAt), pdf: [pdf.filename, pdf.blob.size] };
     }, id);
-    if (JSON.stringify(papers.sum) !== JSON.stringify([0, 33600, 33600, 0])) throw new Error(`statement: ${JSON.stringify(papers.sum)}`);
+    if (JSON.stringify(papers.sum) !== JSON.stringify([33600, 33600, 0, 0])) throw new Error(`statement: ${JSON.stringify(papers.sum)}`);
     if (papers.paid.join() !== 'true,true') throw new Error(`May not stamped PAID: ${papers.paid}`);
     if (!/^Statement - .+ - 2026-05-01 - 2026-11-30\.pdf$/.test(papers.pdf[0]) || papers.pdf[1] < 3000) throw new Error(`statement PDF: ${papers.pdf}`);
   });

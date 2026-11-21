@@ -98,6 +98,8 @@ export interface PaymentRow extends AccountPayment {
   numbers: string[];
   restFils: number;
   leftFils: number;
+  /** The whole payment, when the row is only its part for a period's invoices (`paymentsFor`). */
+  wholeFils?: number;
 }
 
 /** The payments of a period (`which` of them), the latest first, each with what its owner owed right after it. */
@@ -123,15 +125,46 @@ export function paymentRows(lines: OwedLine[], payments: AccountPayment[], from:
     .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
 }
 
-/** A line on a statement: what was set against it and what is left of it at the end of the period. */
+/**
+ * The payments that paid the invoices of a period — whenever they were made, up to `asOf` (v0.63, the user: «когда
+ * выбираю период, не получается за этот период скачать, потому что оплата была сегодня»): October paid today is paid for
+ * October. Each row is the part of the payment set against those invoices (`amountFils`; the whole payment —
+ * `wholeFils`, the rest of it went elsewhere — `restFils`), the months and invoices of the period it paid, and what was
+ * left of the period's invoices right after it. The latest first.
+ */
+export function paymentsFor(lines: OwedLine[], payments: AccountPayment[], from: string, to: string, asOf = '￿'): PaymentRow[] {
+  const period = lines.filter((l) => l.date >= from && l.date <= to);
+  const line = new Map(period.map((l) => [l.key, l]));
+  const linesOf = new Map<string, OwedLine[]>();
+  for (const l of period) linesOf.set(l.owner, [...(linesOf.get(l.owner) ?? []), l]);
+  const paysOf = new Map<string, AccountPayment[]>();
+  for (const p of payments) paysOf.set(p.owner, [...(paysOf.get(p.owner) ?? []), p]);
+  return payments
+    .filter((p) => p.at <= asOf && p.parts.some((x) => line.has(x.key)))
+    .map((p) => {
+      const mine = p.parts.filter((x) => line.has(x.key));
+      const applied = mine.reduce((a, x) => a + x.amountFils, 0);
+      const paid = mine.map((x) => line.get(x.key)!);
+      return {
+        ...p,
+        amountFils: applied,
+        wholeFils: p.amountFils,
+        months: [...new Set(paid.map((l) => l.date.slice(0, 7)))].sort(),
+        numbers: [...new Set(paid.map((l) => l.number).filter((n): n is string => !!n))],
+        restFils: p.amountFils - applied,
+        leftFils: balanceAt(linesOf.get(p.owner) ?? [], paysOf.get(p.owner) ?? [], p.at),
+      };
+    })
+    .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id));
+}
+
+/** An invoice on a statement: what was paid of it by the statement's day, what is left, its status. */
 export interface StatementLine extends OwedLine {
   paidFils: number;
   balanceFils: number;
   status: LineStatus;
   /** The day it was paid off (the PAID stamp's). */
   paidOn?: string;
-  /** From before the period, still owed when it began. */
-  brought: boolean;
 }
 
 export interface StatementMonth {
@@ -142,71 +175,70 @@ export interface StatementMonth {
   paidFils: number;
   balanceFils: number;
   status: LineStatus;
-  brought: boolean;
 }
 
 export interface Statement {
+  /** The invoices of these days (YYYY-MM-DD)… */
   from: string;
   to: string;
-  /** Owed when the period began. */
-  openingFils: number;
-  /** What the invoices of the period came to. */
+  /** …as they stand on this day: what is paid of them is counted up to it, whenever it was paid. */
+  asOf: string;
+  /** What the invoices of the period came to, what is paid of them, what is left: invoiced − paid = due. */
   invoicedFils: number;
-  /** What the payments of the period set against the invoices. */
   paidFils: number;
-  /** What the payments of the period set against none (money on account — not counted off the invoices). */
-  unappliedFils: number;
-  /** Owed when the period ended: opening + invoiced − paid. */
-  closingFils: number;
-  /** The invoices of the period, and those from before it still owed when it began — the oldest first. */
+  dueFils: number;
+  /** Owed on the account's other invoices (before the period or after it). */
+  otherDueFils: number;
+  /** All owed on the account: due + other. */
+  totalDueFils: number;
+  /** The invoices of the period, the oldest first. */
   lines: StatementLine[];
   months: StatementMonth[];
-  /** Every payment of the period, the oldest first, each with what was owed after it. */
+  /** The payments that paid them (`paymentsFor`), the oldest first. */
   payments: PaymentRow[];
 }
 
-/** One owner's account over a period, as a statement of account shows it. */
-export function statementOf(lines: OwedLine[], payments: AccountPayment[], from: string, to: string): Statement {
-  const start = dayStart(from);
-  const end = dayEnd(to);
-  const before = appliedBy(payments, start);
+/**
+ * A statement of the invoices of a period as they stand on a day (v0.63; the account's days before — v0.62.2 — left a
+ * month paid later unpaid on its own statement): every invoice dated in the period, what was paid of it by `asOf` and
+ * when it was paid off, its months, the payments that paid them, and what else the account owes.
+ */
+export function statementOf(lines: OwedLine[], payments: AccountPayment[], from: string, to: string, asOf: string): Statement {
+  const end = dayEnd(asOf);
   const by = appliedBy(payments, end);
-  const shown: StatementLine[] = [];
-  for (const l of [...lines].sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key))) {
-    const inPeriod = l.at >= start && l.at <= end;
-    const brought = l.at < start && l.totalFils - (before.get(l.key) ?? 0) > 0;
-    if (!inPeriod && !brought) continue;
-    const paidFils = by.get(l.key) ?? 0;
-    const balanceFils = l.totalFils - paidFils;
-    shown.push({ ...l, paidFils, balanceFils, status: statusOf(l.totalFils, balanceFils), paidOn: balanceFils <= 0 ? paidOffOn(l, payments, end) : undefined, brought: !inPeriod });
-  }
+  const shown: StatementLine[] = lines
+    .filter((l) => l.date >= from && l.date <= to && l.at <= end)
+    .sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key))
+    .map((l) => {
+      const paidFils = by.get(l.key) ?? 0;
+      const balanceFils = l.totalFils - paidFils;
+      return { ...l, paidFils, balanceFils, status: statusOf(l.totalFils, balanceFils), paidOn: balanceFils <= 0 ? paidOffOn(l, payments, end) : undefined };
+    });
   const months = new Map<string, StatementMonth>();
   for (const l of shown) {
     const month = l.date.slice(0, 7);
-    const m = months.get(month) ?? months.set(month, { month, count: 0, totalFils: 0, paidFils: 0, balanceFils: 0, status: 'unpaid', brought: l.brought }).get(month)!;
+    const m = months.get(month) ?? months.set(month, { month, count: 0, totalFils: 0, paidFils: 0, balanceFils: 0, status: 'unpaid' }).get(month)!;
     m.count++;
     m.totalFils += l.totalFils;
     m.paidFils += l.paidFils;
     m.balanceFils += l.balanceFils;
-    m.brought &&= l.brought;
   }
   for (const m of months.values()) m.status = statusOf(m.totalFils, m.balanceFils);
-  const keys = new Set(lines.map((l) => l.key));
-  const inside = payments.filter((p) => p.at >= start && p.at <= end);
-  const paidFils = inside.reduce((a, p) => a + p.parts.reduce((s, x) => s + (keys.has(x.key) ? x.amountFils : 0), 0), 0);
-  const invoicedFils = lines.reduce((a, l) => a + (l.at >= start && l.at <= end ? l.totalFils : 0), 0);
-  const rows = paymentRows(lines, payments, from, to).reverse();
+  const invoicedFils = shown.reduce((a, l) => a + l.totalFils, 0);
+  const paidFils = shown.reduce((a, l) => a + l.paidFils, 0);
+  const totalDueFils = balanceAt(lines, payments, end);
   return {
     from,
     to,
-    openingFils: balanceAt(lines, payments, start),
+    asOf,
     invoicedFils,
     paidFils,
-    unappliedFils: rows.reduce((a, r) => a + Math.max(0, r.restFils), 0),
-    closingFils: balanceAt(lines, payments, end),
+    dueFils: invoicedFils - paidFils,
+    otherDueFils: totalDueFils - (invoicedFils - paidFils),
+    totalDueFils,
     lines: shown,
     months: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
-    payments: rows,
+    payments: paymentsFor(lines, payments, from, to, end).reverse(),
   };
 }
 

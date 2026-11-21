@@ -8,7 +8,7 @@ import { periodRange, type PaymentRow, type PeriodKind } from '../../domain/acco
 import { dayHeading, dubaiDate, formatDate, monthKey, monthLong } from '../../domain/dates';
 import type { LedgerEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
-import { loadDebtPayments, type DebtSide, type PayOwner } from '../../services/account';
+import { loadDebtPayments, type DebtSide, type PaidBy, type PayOwner } from '../../services/account';
 import { statementPdf } from '../../services/debtDocs';
 import { openPdf } from '../../services/documents';
 import { DataTable, type Column } from '../../ui/DataTable';
@@ -51,12 +51,14 @@ export function DebtPaymentsPage() {
   const [kind, setKind] = useState<PeriodKind>(who ? 'all' : 'month');
   const [month, setMonth] = useState(monthKey());
   const [custom, setCustom] = useState<{ from?: string; to?: string }>({});
+  // v0.63 («оплата была сегодня»): the period's invoices and what paid them, whenever — or the payments made in it.
+  const [by, setBy] = useState<PaidBy>('invoice');
   const today = dubaiDate();
   const { from, to } = periodRange(kind, { month, ...custom }, today);
   const data = useScreenLiveQuery(async () => {
-    const [view, cats] = await Promise.all([loadDebtPayments(side, from, to), db.expenseCategories.toArray()]);
+    const [view, cats] = await Promise.all([loadDebtPayments(side, from, to, by), db.expenseCategories.toArray()]);
     return { ...view, cats };
-  }, [side, from, to]);
+  }, [side, from, to, by]);
   const label = useCategoryLabel(data?.cats);
   const [open, setOpen] = useState<LedgerEntry | null>(null);
   const owners = data?.owners ?? [];
@@ -85,6 +87,15 @@ export function DebtPaymentsPage() {
         ]}
       />
       <ScrollTabs value={kind} onChange={(v) => setKind(v as PeriodKind)} items={PERIODS.map((p) => ({ value: p, label: t(`debtPays.period.${p}`) }))} />
+      <ScrollTabs
+        segmented
+        value={by}
+        onChange={(v) => setBy(v as PaidBy)}
+        items={[
+          { value: 'invoice', label: t('debtPays.by.invoice') },
+          { value: 'payment', label: t('debtPays.by.payment') },
+        ]}
+      />
       {kind === 'month' && (
         <Box mb="md">
           <MonthField value={month} onChange={setMonth} />
@@ -138,7 +149,7 @@ export function DebtPaymentsPage() {
         {/* What was paid in the period; what is owed now. */}
         <SimpleGrid cols={2} spacing="sm">
           <Kpi label={t('debtPays.paid')} value={<Money fils={paid} roll />} color={side === 'owed' ? 'green' : undefined} hint={t('debtPays.count', { count: rows.length })} />
-          <Kpi label={t('debtPays.left')} value={<Money fils={left} roll />} color={left > 0 ? (side === 'owed' ? 'red' : 'orange') : undefined} hint={t('debtPays.now')} />
+          <Kpi label={t('debtPays.left')} value={<Money fils={left} roll />} color={left > 0 ? (side === 'owed' ? 'red' : 'orange') : undefined} hint={t(by === 'invoice' ? 'debtPays.ofPeriod' : 'debtPays.now')} />
         </SimpleGrid>
         {side === 'owed' && who && (
           <Button variant="light" size="md" leftSection={<IconFileInvoice size={18} />} loading={busy} onClick={() => void statement()} data-pays-statement>
@@ -206,10 +217,15 @@ export function DebtPaymentsPage() {
                           {who ? months(r) || (r.restFils > 0 ? t('debt.rest') : way(r)) : nameOf(r.owner)}
                         </Text>
                       }
-                      subtitle={[who ? '' : months(r), way(r), r.restFils > 0 && r.months.length ? t('debtPays.rest', { sum: formatAed(r.restFils) }) : ''].filter(Boolean).join(' · ')}
+                      subtitle={[who ? '' : months(r), way(r), by === 'payment' && r.restFils > 0 && r.months.length ? t('debtPays.rest', { sum: formatAed(r.restFils) }) : ''].filter(Boolean).join(' · ')}
                       right={
                         <Stack gap={0} align="flex-end">
                           <Money fils={r.amountFils} size="sm" c={paidC} fw={600} />
+                          {r.wholeFils !== undefined && r.wholeFils !== r.amountFils && (
+                            <Text size="xs" c="dimmed" className="tnum">
+                              {t('debt.ofTotal', { sum: formatAed(r.wholeFils) })}
+                            </Text>
+                          )}
                           <Text size="xs" c={r.leftFils > 0 ? leftC : 'dimmed'} className="tnum" data-left-after={r.leftFils}>
                             {r.leftFils > 0 ? t('debtPays.leftSum', { sum: formatAed(r.leftFils) }) : t('debtPays.settled')}
                           </Text>

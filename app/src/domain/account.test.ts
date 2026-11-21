@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appliedBy, balanceAt, dayEnd, dayStart, momentOf, paidOffOn, paymentRows, periodRange, statementOf, statusOf, type AccountPayment, type OwedLine } from './account';
+import { appliedBy, balanceAt, dayEnd, dayStart, momentOf, paidOffOn, paymentRows, paymentsFor, periodRange, statementOf, statusOf, type AccountPayment, type OwedLine } from './account';
 
 // A company's account: August and September from before the app, an October job, a November job.
 const line = (key: string, date: string, totalFils: number, number = key): OwedLine => ({ key, owner: 'acme', date, at: momentOf(date), totalFils, number });
@@ -58,35 +58,42 @@ describe('an account (v0.62.2)', () => {
     expect(paymentRows(lines, payments, '2026-01-01', '2026-12-31', (p) => p.id === 'p1').map((r) => r.id)).toEqual(['p1']);
   });
 
-  it('a statement of October–November adds up: opening + invoiced − paid = closing; September brought in, August not', () => {
-    const s = statementOf(lines, payments, '2026-10-01', '2026-11-30');
-    expect([s.openingFils, s.invoicedFils, s.paidFils, s.unappliedFils, s.closingFils]).toEqual([160_000, 165_000, 160_000, 10_000, 165_000]);
-    expect(s.openingFils + s.invoicedFils - s.paidFils).toBe(s.closingFils);
-    expect(s.lines.map((l) => [l.number, l.paidFils, l.balanceFils, l.status, l.paidOn ?? '', l.brought])).toEqual([
-      ['230', 160_000, 0, 'paid', '2026-11-02', true],
-      ['INV-2026-350', 0, 120_000, 'unpaid', '', false],
-      ['INV-2026-352', 0, 45_000, 'unpaid', '', false],
+  it('the payments for a period’s invoices, whenever made (v0.63: September paid in October and November is paid for September)', () => {
+    const rows = paymentsFor(lines, payments, '2026-09-01', '2026-09-30');
+    expect(rows.map((r) => [r.id, r.date, r.amountFils, r.wholeFils, r.restFils, r.months, r.leftFils])).toEqual([
+      ['p3', '2026-11-02', 60_000, 70_000, 10_000, ['2026-09'], 0],
+      ['p2', '2026-10-15', 100_000, 100_000, 0, ['2026-09'], 60_000],
     ]);
-    expect(s.months.map((m) => [m.month, m.count, m.totalFils, m.paidFils, m.balanceFils, m.status, m.brought])).toEqual([
-      ['2026-09', 1, 160_000, 160_000, 0, 'paid', true],
-      ['2026-10', 1, 120_000, 0, 120_000, 'unpaid', false],
-      ['2026-11', 1, 45_000, 0, 45_000, 'unpaid', false],
-    ]);
-    // The payments the oldest first, each with what was owed after it.
-    expect(s.payments.map((p) => [p.id, p.leftFils])).toEqual([
-      ['p2', 180_000],
-      ['p3', 120_000],
-    ]);
+    // By a day before the last one: that one is not there yet.
+    expect(paymentsFor(lines, payments, '2026-09-01', '2026-09-30', dayEnd('2026-10-31')).map((r) => r.id)).toEqual(['p2']);
+    expect(paymentsFor(lines, payments, '2026-10-01', '2026-11-30')).toEqual([]);
   });
 
-  it('a statement of everything: every invoice, the paid ones too; a refund counts back', () => {
+  it('a statement of September as it stands today: its invoice paid off on 02/11 — PAID, though paid after the month; the rest of the account beside it', () => {
+    const s = statementOf(lines, payments, '2026-09-01', '2026-09-30', '2026-11-30');
+    expect([s.invoicedFils, s.paidFils, s.dueFils, s.otherDueFils, s.totalDueFils]).toEqual([160_000, 160_000, 0, 165_000, 165_000]);
+    expect(s.lines.map((l) => [l.number, l.paidFils, l.balanceFils, l.status, l.paidOn ?? ''])).toEqual([['230', 160_000, 0, 'paid', '2026-11-02']]);
+    expect(s.months.map((m) => [m.month, m.count, m.totalFils, m.paidFils, m.balanceFils, m.status])).toEqual([['2026-09', 1, 160_000, 160_000, 0, 'paid']]);
+    // The payments that paid it, the oldest first — only their part for September.
+    expect(s.payments.map((p) => [p.id, p.amountFils, p.leftFils])).toEqual([
+      ['p2', 100_000, 60_000],
+      ['p3', 60_000, 0],
+    ]);
+    // As it stood at the end of October: part paid.
+    const october = statementOf(lines, payments, '2026-09-01', '2026-09-30', '2026-10-31');
+    expect([october.paidFils, october.dueFils, october.lines[0].status]).toEqual([100_000, 60_000, 'part']);
+  });
+
+  it('a statement of October–November: nothing paid of them; of everything: invoiced − paid = due, a refund counts back', () => {
+    const s = statementOf(lines, payments, '2026-10-01', '2026-11-30', '2026-11-30');
+    expect([s.invoicedFils, s.paidFils, s.dueFils, s.otherDueFils]).toEqual([165_000, 0, 165_000, 0]);
+    expect(s.payments).toEqual([]);
     const refund = pay('r1', '2026-11-21', -5_000, [['h:aug-2', -5_000]], { source: 'payment', debt: false });
-    const s = statementOf(lines, [...payments, refund], '2000-01-01', '2026-11-30');
-    expect(s.openingFils).toBe(0);
-    expect(s.lines).toHaveLength(5);
-    expect(s.lines.find((l) => l.key === 'h:aug-2')).toMatchObject({ balanceFils: 5_000, status: 'part' });
-    expect(s.openingFils + s.invoicedFils - s.paidFils).toBe(s.closingFils);
-    expect(s.closingFils).toBe(170_000);
+    const all = statementOf(lines, [...payments, refund], '2000-01-01', '2026-11-30', '2026-11-30');
+    expect(all.lines).toHaveLength(5);
+    expect(all.lines.find((l) => l.key === 'h:aug-2')).toMatchObject({ balanceFils: 5_000, status: 'part' });
+    expect(all.invoicedFils - all.paidFils).toBe(all.dueFils);
+    expect([all.dueFils, all.totalDueFils, all.otherDueFils]).toEqual([170_000, 170_000, 0]);
   });
 
   it('periods: a month to its last day, this year, all up to today, two days in either order', () => {

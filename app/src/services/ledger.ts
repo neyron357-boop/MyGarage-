@@ -68,6 +68,8 @@ export interface IncomeInput extends Links {
   note?: string;
   /** A «debt payment» (v0.62): the customer's months to pay off first (YYYY-MM). */
   months?: string[];
+  /** A «debt payment» (v0.63): the invoices to pay off first — a job's id, `h:` one from before the app. */
+  keys?: string[];
 }
 
 /**
@@ -76,7 +78,7 @@ export interface IncomeInput extends Links {
  */
 export async function addIncome(input: IncomeInput): Promise<Income> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
-  if (input.category === 'debt') return (await addDebtPayment({ amountFils: input.amountFils, method: input.method, customerId: input.customerId, orderId: input.orderId, months: input.months, date: input.date, note: input.note })).income;
+  if (input.category === 'debt') return (await addDebtPayment({ amountFils: input.amountFils, method: input.method, customerId: input.customerId, orderId: input.orderId, months: input.months, keys: input.keys, date: input.date, note: input.note })).income;
   const links = await resolveLinks(input);
   const now = nowIso();
   const income: Income = {

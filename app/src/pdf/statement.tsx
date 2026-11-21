@@ -12,13 +12,13 @@ import { aed, Ar, AR_LABEL, BiLine, BlockLabel, COLOR, GarageFooter, GarageHeade
 
 /*
  * The statement of account for the customer (v0.30; v0.62.2 — the user: «прозрачная картина / отчёт для клиента: за что
- * оплачено, что осталось и т. д. — подробная и очень грамотная»). For a period, as an accountant draws one:
- *   — the account in four figures: owed when the period began, invoiced in it, paid in it, owed when it ended (they add up
- *     to the fils: opening + invoiced − paid = closing);
+ * оплачено, что осталось и т. д. — подробная и очень грамотная»). For the invoices of a period as they stand today (v0.63,
+ * «оплата была сегодня» — a month paid later is paid on its own statement):
+ *   — three figures: invoiced, paid of it, balance due (invoiced − paid = due), and what the whole account owes;
  *   — the months: what each month's invoices came to, what is paid of them, what is left, PAID / PART PAID / UNPAID;
- *   — every invoice (of the period, and those from before it still owed when it began — «b/f»): its amount, paid, left,
- *     its status and the day it was paid off;
- *   — every payment received: its day, receipt, way, the invoices it paid (by month), and what was owed after it;
+ *   — every invoice of the period: its amount, paid, left, its status and the day it was paid off;
+ *   — every payment for them, whenever made: its day, receipt, way, the invoices it paid (by month), its part for them,
+ *     and what was left of them after it;
  *   — the one figure due, PAID when nothing is.
  * In English with Arabic labels, as the garage's documents are; the figures — domain/account.ts (services/account.ts).
  */
@@ -34,6 +34,8 @@ const AR = {
   invoices: 'الفواتير',
   payments: 'المدفوعات',
   totalDue: 'إجمالي المستحق',
+  balanceDue: 'الرصيد المستحق',
+  accountTotal: 'إجمالي الحساب',
 };
 
 const METHOD: Record<ExpenseMethod, string> = { cash: 'Cash', card: 'Card', transfer: 'Bank transfer', outside: 'Paid to the owner', credit: 'Credit' };
@@ -95,14 +97,18 @@ function Figure({ en, ar, fils, strong }: { en: string; ar: string; fils: number
   );
 }
 
-/** The customer's statement of account of a period, as a PDF. */
+/**
+ * The customer's statement of the invoices of a period, as a PDF (v0.63: as they stand today — what was paid of them up
+ * to today, whenever it was paid; the rest of the account beside them).
+ */
 export async function renderStatement(customerId: string, from: string, to: string): Promise<Blob> {
   const [account, settings] = await Promise.all([customerAccount(customerId), getSettings()]);
   if (!account) throw new Error('not found');
-  const s = statementOf(account.lines, account.payments, from, to);
+  const today = dubaiDate();
+  const s = statementOf(account.lines, account.payments, from, to, today);
   const c = account.customer;
-  const line = new Map<string, OwedLine>(account.lines.map((l) => [l.key, l]));
-  // What a payment paid, by month: "September 2026 — 230, 231".
+  const line = new Map<string, OwedLine>(s.lines.map((l) => [l.key, l]));
+  // What a payment paid of these invoices, by month: "Sept 2026: 230, 231".
   const appliedTo = (parts: { key: string; amountFils: number }[]) => {
     const by = new Map<string, string[]>();
     for (const p of parts) {
@@ -113,8 +119,10 @@ export async function renderStatement(customerId: string, from: string, to: stri
     }
     return [...by].sort((a, b) => a[0].localeCompare(b[0])).map(([m, n]) => `${monthText(m, true)}: ${n.join(', ')}`);
   };
-  const settled = s.closingFils <= 0 && (s.lines.length > 0 || s.payments.length > 0);
-  const lastPaid = s.payments.at(-1)?.date ?? dubaiDate();
+  const settled = s.dueFils <= 0 && s.lines.length > 0;
+  const lastPaid = s.lines.map((l) => l.paidOn ?? '').sort().at(-1) || today;
+  const first = from === '2000-01-01' ? s.lines[0]?.date ?? from : from;
+  const last = to > today ? today : to;
   const invoiceCols = [
     { label: 'Date', w: 54 },
     { label: 'Invoice No.', w: 72 },
@@ -132,8 +140,8 @@ export async function renderStatement(customerId: string, from: string, to: stri
         <TitleBar en="STATEMENT OF ACCOUNT" ar={AR.statement} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, marginBottom: 4 }}>
           <View>
-            <BiLine en="Date" ar={AR_LABEL.date} value={formatDate(dubaiDate())} />
-            <BiLine en="Period" ar={AR.period} value={`${dayText(from === '2000-01-01' ? s.lines[0]?.date ?? from : from)} – ${dayText(to)}`} />
+            <BiLine en="Date" ar={AR_LABEL.date} value={formatDate(today)} />
+            <BiLine en="Invoices of" ar={AR.period} value={`${dayText(first)} – ${dayText(last)}`} />
             {settings.trn ? <BiLine en="TRN" ar={AR_LABEL.taxId} value={settings.trn} /> : null}
           </View>
           <View style={{ alignItems: 'flex-end', width: 250 }}>
@@ -144,16 +152,16 @@ export async function renderStatement(customerId: string, from: string, to: stri
           </View>
         </View>
 
-        {/* The account in four figures — they add up: opening + invoiced − paid = closing. */}
+        {/* The period's invoices in three figures — invoiced − paid = due; the whole account beside them. */}
         <View style={{ flexDirection: 'row', marginTop: 8 }} wrap={false}>
-          <Figure en="Opening balance" ar={AR.opening} fils={s.openingFils} />
           <Figure en="Invoiced" ar={AR.invoiced} fils={s.invoicedFils} />
           <Figure en="Paid" ar={AR.paid} fils={s.paidFils} />
-          <Figure en="Closing balance" ar={AR.closing} fils={s.closingFils} strong />
+          <Figure en="Balance due" ar={AR.balanceDue} fils={s.dueFils} strong />
+          {s.otherDueFils !== 0 ? <Figure en="Account total due" ar={AR.accountTotal} fils={s.totalDueFils} /> : null}
         </View>
         <Text style={[small, { marginTop: 3 }]}>
-          {`Opening balance ${aed(s.openingFils)} + invoiced ${aed(s.invoicedFils)} − paid ${aed(s.paidFils)} = closing balance ${aed(s.closingFils)}.`}
-          {s.unappliedFils > 0 ? ` Received on account, not applied to an invoice: ${aed(s.unappliedFils)}.` : ''}
+          {`Invoiced ${aed(s.invoicedFils)} − paid ${aed(s.paidFils)} = balance due ${aed(s.dueFils)}: the invoices of this period, with every payment made for them up to ${formatDate(today)}.`}
+          {s.otherDueFils > 0 ? ` Invoices of other periods still due: ${aed(s.otherDueFils)}; total due on the account: ${aed(s.totalDueFils)}.` : ''}
         </Text>
 
         {/* The months: what each came to, what is paid, what is left. */}
@@ -163,7 +171,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
             <Head cols={[{ label: 'Month' }, { label: 'Invoices', w: 56, right: true }, { label: 'Invoiced', w: 78, right: true }, { label: 'Paid', w: 78, right: true }, { label: 'Balance', w: 78, right: true }, { label: 'Status', w: 74, right: true }]} />
             {s.months.map((m, i) => (
               <View key={m.month} wrap={false} style={{ flexDirection: 'row', paddingVertical: 3.5, paddingHorizontal: 3, backgroundColor: i % 2 ? '#f6f7f9' : '#fff' }}>
-                <Cell bold>{`${monthText(m.month)}${m.brought ? '  (b/f)' : ''}`}</Cell>
+                <Cell bold>{monthText(m.month)}</Cell>
                 <Cell w={56} right>
                   {String(m.count)}
                 </Cell>
@@ -187,13 +195,13 @@ export async function renderStatement(customerId: string, from: string, to: stri
                 {String(s.lines.length)}
               </Cell>
               <Cell w={78} right bold>
-                {num(s.months.reduce((a, m) => a + m.totalFils, 0))}
+                {num(s.invoicedFils)}
               </Cell>
               <Cell w={78} right bold>
-                {num(s.months.reduce((a, m) => a + m.paidFils, 0))}
+                {num(s.paidFils)}
               </Cell>
               <Cell w={78} right bold>
-                {num(s.months.reduce((a, m) => a + m.balanceFils, 0))}
+                {num(s.dueFils)}
               </Cell>
               <Cell w={74}> </Cell>
             </View>
@@ -201,7 +209,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
         )}
 
         {/* Every invoice: amount, paid, left — and when it was paid off. */}
-        {s.lines.length > 0 && (
+        {s.lines.length > 0 ? (
           <>
             <Section en="INVOICES" ar={AR.invoices} />
             <Head cols={invoiceCols} />
@@ -213,7 +221,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
                 <View key={l.key} wrap={false}>
                   {head ? (
                     <View style={{ flexDirection: 'row', paddingTop: 5, paddingBottom: 2, paddingHorizontal: 3, borderBottomWidth: 0.6, borderColor: COLOR.boxRule }}>
-                      <Text style={{ fontSize: 8.2, fontWeight: 'bold', color: COLOR.head }}>{`${monthText(m)}${l.brought ? '  — brought forward' : ''}`}</Text>
+                      <Text style={{ fontSize: 8.2, fontWeight: 'bold', color: COLOR.head }}>{monthText(m)}</Text>
                     </View>
                   ) : null}
                   <View style={{ flexDirection: 'row', paddingVertical: 3, paddingHorizontal: 3, borderBottomWidth: 0.4, borderColor: COLOR.rowRule }}>
@@ -240,9 +248,11 @@ export async function renderStatement(customerId: string, from: string, to: stri
               );
             })}
           </>
+        ) : (
+          <Text style={[small, { marginTop: 10 }]}>No invoices in this period.</Text>
         )}
 
-        {/* Every payment received: what it paid, and what was owed after it. */}
+        {/* Every payment for them, whenever it was made: what it paid of them, and what was left after it. */}
         <Section en="PAYMENTS RECEIVED" ar={AR.payments} />
         {s.payments.length ? (
           <>
@@ -259,7 +269,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
                     </Text>
                   ))}
                   {p.amountFils < 0 ? <Text style={small}>Refund</Text> : null}
-                  {p.restFils > 0 ? <Text style={small}>{`On account: ${aed(p.restFils)}`}</Text> : null}
+                  {p.wholeFils !== undefined && p.wholeFils !== p.amountFils ? <Text style={small}>{`of a payment of ${aed(p.wholeFils)}`}</Text> : null}
                 </View>
                 <Cell w={72} right bold>
                   {num(p.amountFils)}
@@ -270,7 +280,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
               </View>
             ))}
             <View wrap={false} style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: COLOR.head, paddingVertical: 4, paddingHorizontal: 3 }}>
-              <Cell bold>{`Total received (${s.payments.length})`}</Cell>
+              <Cell bold>{`Total paid (${s.payments.length})`}</Cell>
               <Cell w={72} right bold>
                 {num(s.payments.reduce((a, p) => a + p.amountFils, 0))}
               </Cell>
@@ -278,7 +288,7 @@ export async function renderStatement(customerId: string, from: string, to: stri
             </View>
           </>
         ) : (
-          <Text style={[small, { marginTop: 2 }]}>No payments in this period.</Text>
+          <Text style={[small, { marginTop: 2 }]}>No payments for these invoices yet.</Text>
         )}
 
         {/* The one figure due — PAID when nothing is. */}
@@ -287,18 +297,19 @@ export async function renderStatement(customerId: string, from: string, to: stri
           <View style={{ width: 260 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLOR.bar, paddingVertical: 7, paddingHorizontal: 9 }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                <Text style={{ fontSize: 11, fontWeight: 'bold' }}>{settled ? 'BALANCE' : 'TOTAL DUE'}  </Text>
+                <Text style={{ fontSize: 11, fontWeight: 'bold' }}>BALANCE DUE  </Text>
                 <Ar size={11} bold>
                   {AR.totalDue}
                 </Ar>
               </View>
-              <Text style={{ fontSize: 13, fontWeight: 'bold' }}>{aed(Math.max(0, s.closingFils))}</Text>
+              <Text style={{ fontSize: 13, fontWeight: 'bold' }}>{aed(Math.max(0, s.dueFils))}</Text>
             </View>
-            <Text style={[small, { marginTop: 3, textAlign: 'right' }]}>{`as of ${dayText(to < dubaiDate() ? to : dubaiDate())}`}</Text>
+            {s.otherDueFils > 0 ? <Text style={[small, { marginTop: 3, textAlign: 'right' }]}>{`Total due on the account: ${aed(s.totalDueFils)}`}</Text> : null}
+            <Text style={[small, { marginTop: 3, textAlign: 'right' }]}>{`as of ${dayText(today)}`}</Text>
           </View>
         </View>
         <Text style={[small, { marginTop: 10 }]}>
-          Each payment is applied to the invoices shown beside it; "Balance after" is the total owed on the account right after that payment. Please quote the invoice numbers with your payment.
+          Each payment shows the part of it applied to the invoices above; "Balance after" is what was left of them right after that payment. Please quote the invoice numbers with your payment.
         </Text>
         {settings.bankDetails ? <Text style={{ fontSize: 8, color: COLOR.head, marginTop: 8 }}>{settings.bankDetails}</Text> : null}
         <GarageFooter s={settings} />

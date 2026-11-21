@@ -550,21 +550,39 @@ describe('the account, its statement and the payments of debts (v0.62.2, «та�
         .concat(account.lines.filter((l) => l.totalFils === 25_000).map((l) => [l.key, 25_000]))
         .sort(),
     );
-    // May–June: April brought in (still owed), May and June invoiced and paid off by the payment of 20/06.
-    const s = statementOf(account.lines, account.payments, '2026-05-01', '2026-06-30');
-    expect([s.openingFils, s.invoicedFils, s.paidFils, s.closingFils]).toEqual([15_000, 50_000, 50_000, 15_000]);
-    expect(s.months.map((m) => [m.month, m.status, m.brought])).toEqual([
-      ['2026-04', 'unpaid', true],
-      ['2026-05', 'paid', false],
-      ['2026-06', 'paid', false],
+    // May–June as they stand today: invoiced and paid off by the payment of 20/06; April and the job — the rest of the account.
+    const s = statementOf(account.lines, account.payments, '2026-05-01', '2026-06-30', today());
+    expect([s.invoicedFils, s.paidFils, s.dueFils, s.otherDueFils, s.totalDueFils]).toEqual([50_000, 50_000, 0, 75_000, 75_000]);
+    expect(s.months.map((m) => [m.month, m.status])).toEqual([
+      ['2026-05', 'paid'],
+      ['2026-06', 'paid'],
     ]);
     expect(s.lines.find((l) => l.key === 'h:hi-may')?.paidOn).toBe('2026-06-20');
     // Everything up to today: the jobs too — the one paid at the hand-over is paid; the debt left is what the card says.
     const all = (await customerStatement(customerId, '2000-01-01', today()))!.statement;
-    expect(all.openingFils + all.invoicedFils - all.paidFils).toBe(all.closingFils);
-    expect(all.closingFils).toBe((await loadDebtors()).find((d) => d.customer.id === customerId)!.totalFils);
-    expect(all.closingFils).toBe(75_000);
+    expect(all.invoicedFils - all.paidFils).toBe(all.dueFils);
+    expect(all.dueFils).toBe((await loadDebtors()).find((d) => d.customer.id === customerId)!.totalFils);
+    expect([all.dueFils, all.otherDueFils]).toEqual([75_000, 0]);
     expect(all.lines.filter((l) => l.status === 'paid')).toHaveLength(3);
+  });
+
+  it('v0.63: April paid today is paid for April — its statement and «Платежи» by invoices; one invoice of a month picked and paid', async () => {
+    const { customerId } = await company();
+    // Paid today, the one invoice of April picked (not the oldest by chance — May's is picked over it next).
+    const april = await addDebtPayment({ amountFils: 15_000, method: 'transfer', customerId, keys: ['h:hi-apr'] });
+    expect(april.historyParts).toEqual([{ invoiceId: 'hi-apr', amountFils: 15_000 }]);
+    const june = await addDebtPayment({ amountFils: 20_000, method: 'cash', customerId, keys: ['h:hi-jun'] });
+    expect(june.historyParts).toEqual([{ invoiceId: 'hi-jun', amountFils: 20_000 }]);
+    // April's statement today: PAID, with the payment made today.
+    const s = (await customerStatement(customerId, '2026-04-01', '2026-04-30'))!.statement;
+    expect([s.invoicedFils, s.paidFils, s.dueFils, s.lines[0].status, s.lines[0].paidOn, s.payments.map((p) => [p.date, p.amountFils])]).toEqual([15_000, 15_000, 0, 'paid', today(), [[today(), 15_000]]]);
+    // «Платежи» for April by invoices: that payment; by payment day — none in April.
+    const byInvoice = await loadDebtPayments('owed', '2026-04-01', '2026-04-30', 'invoice');
+    expect(byInvoice.rows.map((r) => [r.date, r.amountFils, r.months, r.leftFils])).toEqual([[today(), 15_000, ['2026-04'], 0]]);
+    expect(byInvoice.owners.find((o) => o.key === customerId)).toMatchObject({ paidFils: 15_000, leftFils: 0 });
+    expect((await loadDebtPayments('owed', '2026-04-01', '2026-04-30', 'payment')).rows).toEqual([]);
+    // May by invoices: nothing paid of it yet, all of it left.
+    expect((await loadDebtPayments('owed', '2026-05-01', '2026-05-31', 'invoice')).owners.find((o) => o.key === customerId)).toMatchObject({ paidFils: 0, leftFils: 30_000 });
   });
 
   it('«Платежи»: the debts paid in a period — not the one paid at the hand-over; what each paid and what was left after it; the operation to open', async () => {
