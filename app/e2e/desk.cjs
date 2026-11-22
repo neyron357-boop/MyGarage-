@@ -137,6 +137,72 @@ async function launchBrowser() {
         await settle(700);
         check('keys: N opens a new job', (await p.evaluate(() => location.hash)).startsWith('#/orders/new'));
         await go('#/', 700);
+        // v0.67 (the owner's note): an important card — lit and larger; a pinned one — a section of its own on top.
+        const firstCard = p.locator('.desk-grid.board-cards > .job-card').first();
+        await firstCard.hover();
+        await firstCard.locator('[data-tool="important"]').click();
+        await settle(500);
+        const imp = await p.evaluate(() => ({
+          w: document.querySelector('.job-card[data-important]')?.getBoundingClientRect().width ?? 0,
+          other: document.querySelector('.desk-grid.board-cards > .job-card:not([data-important])')?.getBoundingClientRect().width ?? 0,
+          ring: getComputedStyle(document.querySelector('.job-card[data-important]')).boxShadow,
+        }));
+        check('board: an important card is lit and larger', imp.w > imp.other * 1.6 && /rgb/.test(imp.ring), imp);
+        const toPin = p.locator('.desk-grid.board-cards > .job-card:not([data-important])').last();
+        await toPin.hover();
+        await toPin.locator('[data-tool="pin"]').click();
+        await settle(500);
+        const lanes = await p.evaluate(() => [...document.querySelectorAll('.desk-lane')].map((l) => l.getAttribute('data-lane')));
+        check('board: a pinned card — a section of its own, on top', lanes[0] === 'pinned' && (await p.locator('[data-lane="pinned"] .job-card').count()) === 1, lanes);
+        await shot('01e-board-marks');
+        // The canvas: a card dragged anywhere stays there (and is not opened by the drag); its corner drawn out — larger.
+        await p.locator('[data-desk-canvas]').click();
+        await settle(900);
+        // The leftmost card that is neither pinned nor important (room to its right to be dragged into).
+        const candidates = p.locator('.desk-canvas-card:not([data-pinned]):not([data-important])');
+        const xs = await candidates.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().x));
+        const moving = candidates.nth(xs.indexOf(Math.min(...xs)));
+        check('canvas: every card within the canvas', await p.evaluate(() => { const c = document.querySelector('.desk-canvas').getBoundingClientRect(); return [...document.querySelectorAll('.desk-canvas-card')].every((e) => e.getBoundingClientRect().right <= c.right + 1); }));
+        const id = await moving.getAttribute('data-card');
+        // Measured on the canvas (the page may scroll to show a card).
+        const onCanvas = async (q) => p.evaluate((sel) => { const c = document.querySelector('.desk-canvas').getBoundingClientRect(); const r = document.querySelector(sel).getBoundingClientRect(); return { x: r.x - c.x, y: r.y - c.y, width: r.width, height: r.height }; }, q);
+        const at = await moving.boundingBox();
+        await p.mouse.move(at.x + 70, at.y + 70);
+        await p.mouse.down();
+        await p.mouse.move(at.x + 170, at.y + 150, { steps: 6 });
+        await p.mouse.move(at.x + 270, at.y + 230, { steps: 6 });
+        await p.mouse.up();
+        await settle(600);
+        const moved = p.locator(`.desk-canvas-card[data-card="${id}"]`);
+        const to = await moved.boundingBox();
+        check('canvas: a card dragged anywhere stays there; the drag does not open it', Math.abs(to.x - at.x - 200) <= 12 && Math.abs(to.y - at.y - 160) <= 12 && (await p.evaluate(() => location.hash)) === '#/', { at, to });
+        await moved.hover();
+        const corner = await moved.locator('.desk-resize').boundingBox();
+        await p.mouse.move(corner.x + 9, corner.y + 9);
+        await p.mouse.down();
+        await p.mouse.move(corner.x + 69, corner.y + 40, { steps: 5 });
+        await p.mouse.move(corner.x + 129, corner.y + 70, { steps: 5 });
+        await p.mouse.up();
+        await settle(600);
+        const big = await moved.boundingBox();
+        const bigOn = await onCanvas(`.desk-canvas-card[data-card="${id}"]`);
+        check('canvas: the corner drawn out — the card larger, 2 : 1 still', big.width - to.width >= 110 && big.width - to.width <= 130 && Math.abs(big.height - big.width / 2) <= 3, { to, big });
+        await shot('01f-canvas');
+        // Kept on this computer: a reload — the same canvas, the card where it was put.
+        await p.reload();
+        await settle(1500);
+        const kept = await onCanvas(`.desk-canvas-card[data-card="${id}"]`);
+        check('canvas: kept after a reload', Math.abs(kept.x - bigOn.x) <= 2 && Math.abs(kept.y - bigOn.y) <= 2 && Math.abs(kept.width - bigOn.width) <= 2, { bigOn, kept });
+        check('canvas: the page never scrolls sideways', (await p.evaluate(() => document.scrollingElement.scrollWidth - innerWidth)) <= 1);
+        // A click (no drag) opens the job as before.
+        await p.locator(`.desk-canvas-card[data-card="${id}"] .job-card-open`).click({ position: { x: 40, y: 60 } });
+        await settle(900);
+        check('canvas: a click opens the job', (await p.evaluate(() => location.hash)).startsWith('#/orders/'));
+        // Back to the board by step, its marks taken off (the other sizes' pictures as before).
+        await p.evaluate(() => localStorage.removeItem('mygarage.deskBoard'));
+        await go('#/', 300);
+        await p.reload();
+        await settle(1200);
       }
       await p.getByRole('button', { name: /^Архив/ }).click();
       await settle(900);
@@ -167,6 +233,35 @@ async function launchBrowser() {
           check('sheets: 520 px wide on a PC', !!sheet && Math.abs(sheet.width - 520) <= 2, sheet);
           await p.keyboard.press('Escape');
           await settle(500);
+          // v0.67 (the owner's note): the job shown to its customer — the lock: no side menu, nothing opens, no keys, no
+          // other screen; held, the lock opens.
+          await p.locator('[data-client-lock-btn]').click();
+          await settle(700);
+          const lockedView = await p.evaluate(() => ({
+            view: !!document.querySelector('[data-client-view]'),
+            side: getComputedStyle(document.querySelector('.desk-side')).display,
+            clickable: document.querySelectorAll('[data-client-view] .list-row.clickable, [data-client-view] .action-tile').length,
+            rows: document.querySelectorAll('[data-client-view] .list-row').length,
+          }));
+          check('client lock: the job alone, nothing to open, no side menu', lockedView.view && lockedView.side === 'none' && lockedView.clickable === 0 && lockedView.rows > 1, lockedView);
+          await shot('03c-client-lock');
+          const jobHash = await p.evaluate(() => location.hash);
+          await p.keyboard.press('KeyN');
+          await settle(600);
+          await p.evaluate(() => (location.hash = '#/money'));
+          await settle(900);
+          check('client lock: no keys, no other screen — back on the job', (await p.evaluate(() => location.hash)) === jobHash && (await p.locator('[data-client-view]').count()) === 1);
+          // A click on the lock only says how; held, it opens.
+          await p.locator('.client-unlock').click();
+          await settle(500);
+          check('client lock: a click does not open it', (await p.locator('[data-client-view]').count()) === 1);
+          const lockBox = await p.locator('.client-unlock').boundingBox();
+          await p.mouse.move(lockBox.x + lockBox.width / 2, lockBox.y + lockBox.height / 2);
+          await p.mouse.down();
+          await p.waitForTimeout(1500);
+          await p.mouse.up();
+          await settle(700);
+          check('client lock: held — the job as before', (await p.locator('[data-client-view]').count()) === 0 && (await p.evaluate(() => getComputedStyle(document.querySelector('.desk-side')).display)) !== 'none');
         }
         if (k === 'b') {
           // A line under the mouse: its swipes as buttons at its end.
@@ -267,6 +362,6 @@ async function launchBrowser() {
   await browser.close();
   if (fails.length || errors.length) process.exit(1);
 })().catch((e) => {
-  console.error('DESK SHOTS FAILED:', String((e && e.message) || e).split('\n')[0]);
+  console.error('DESK SHOTS FAILED:', String((e && e.message) || e).split('\n').slice(0, process.env.FULL_ERR ? 30 : 1).join('\n'));
   process.exit(1);
 });

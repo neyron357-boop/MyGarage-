@@ -1811,6 +1811,27 @@ export const en: typeof ru = {
       update: 'Update the app: close it and open it again',
     },
   },
+  // v0.67: a job shown to its customer — locked to its customer's view.
+  client: {
+    lock: 'Show to the customer',
+    unlock: 'Lock: hold to leave',
+    hold: 'Hold the lock to leave',
+  },
+  // v0.67: the PC board's canvas, important and pinned cards.
+  deskBoard: {
+    steps: 'Steps',
+    canvas: 'Canvas',
+    arrange: 'Arrange',
+    arranged: 'Cards arranged',
+    pinned: 'Pinned',
+    important: 'Important',
+    notImportant: 'Not important',
+    pin: 'Pin',
+    unpin: 'Unpin',
+    bigger: 'Bigger',
+    smaller: 'Smaller',
+    resize: 'Drag to resize',
+  },
   // v0.65: a part number's fitment to the car (domain/fitment.ts) — green for verified only.
   fit: {
     verified: 'Fits',

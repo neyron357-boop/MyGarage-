@@ -59,6 +59,17 @@ html.desk .desk-main {
   margin-left: calc(var(--desk-side-w) + 2 * var(--desk-side-gap));
   min-width: 0;
 }
+/* A job shown to its customer (v0.67): no side menu — the job in the middle of the window. */
+html.desk[data-client-lock] .desk-main {
+  margin-left: var(--desk-side-gap);
+}
+html.desk[data-client-lock] .client-view-body {
+  margin: 0 auto;
+}
+/* On a big screen the car stands in the middle, over its lines. */
+html.desk[data-client-lock] .client-car {
+  justify-items: center;
+}
 
 /* The garage on top: its logo and name (or MyGarage), a click — the board. */
 html.desk .desk-brand {
@@ -743,6 +754,156 @@ html.desk .list.desk-grid.mini-list > .job-mini > .job-card-open::before {
   html.desk[data-mantine-color-scheme='dark'] .desk-grid > .job-mini:hover {
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
   }
+}
+
+/* ---------- The board's canvas, important and pinned cards (v0.67, ui/deskBoard.ts) ----------
+   «Шаги | Холст» at the end of the steps' strip; important — a warm ring, two columns wide among the steps; pinned — a
+   section of its own on top, fixed on the canvas; star and pin at a card's top, under the mouse (always, when on). */
+html.desk .desk-modes {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--app-fill);
+}
+html.desk .desk-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--app-label-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+html.desk .desk-mode[data-active] {
+  background: var(--app-card);
+  color: var(--mantine-color-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+html.desk .job-card[data-important] {
+  box-shadow:
+    0 0 0 2px var(--mantine-color-yellow-5),
+    0 8px 28px color-mix(in srgb, var(--mantine-color-yellow-5) 32%, transparent);
+}
+html.desk .list.desk-grid.board-cards {
+  grid-auto-flow: row dense;
+}
+html.desk .list.desk-grid.board-cards > .job-card[data-important] {
+  grid-column: span 2;
+}
+html.desk .desk-card-tools {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  gap: 4px;
+}
+html.desk .desk-card-tool {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-1) ease, transform var(--dur-1) var(--spring);
+}
+html.desk .job-card:hover .desk-card-tool,
+html.desk .desk-card-tool:focus-visible,
+html.desk .desk-card-tool[data-on] {
+  opacity: 1;
+}
+html.desk .desk-card-tool:active {
+  transform: scale(0.92);
+}
+html.desk .desk-card-tool[data-tool='important'][data-on] {
+  background: var(--mantine-color-yellow-5);
+  color: #3a2c00;
+}
+html.desk .desk-card-tool[data-tool='pin'][data-on] {
+  background: var(--mantine-color-cobalt-6);
+}
+html.desk .desk-lane-pin {
+  color: var(--mantine-color-cobalt-6);
+}
+html.desk .desk-lane-pinned .desk-lane-count {
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 14%, transparent);
+  color: var(--mantine-color-cobalt-light-color);
+}
+/* The canvas: a dotted sheet the window wide, each card where it was put. */
+html.desk .desk-canvas-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: -8px 0 12px;
+}
+html.desk .desk-canvas {
+  position: relative;
+  /* A card left wider than the window (the window made narrower): scrolled inside the canvas, not the page. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 20px;
+  background-color: color-mix(in srgb, var(--app-card) 45%, transparent);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--app-label-3) 40%, transparent) 1px, transparent 1.4px);
+  background-size: 24px 24px;
+  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
+}
+html.desk .desk-canvas-card {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html.desk .desk-canvas-card > .job-card {
+  width: 100%;
+}
+html.desk .desk-canvas-card[data-dragging] {
+  cursor: grabbing;
+}
+html.desk .desk-canvas-card[data-dragging] > .job-card {
+  transform: scale(1.02);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
+}
+html.desk .desk-canvas-card[data-dragging][data-important] > .job-card {
+  box-shadow:
+    0 0 0 2px var(--mantine-color-yellow-5),
+    0 18px 40px rgba(0, 0, 0, 0.3);
+}
+html.desk .desk-canvas-card[data-pinned] {
+  cursor: default;
+}
+/* The corner drawn out: the card larger or smaller (its height half its width). */
+html.desk .desk-resize {
+  position: absolute;
+  z-index: 6;
+  right: -7px;
+  bottom: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--mantine-color-cobalt-6);
+  box-shadow: 0 0 0 2px var(--app-card), 0 2px 6px rgba(0, 0, 0, 0.25);
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--dur-1) ease;
+}
+html.desk .desk-canvas-card:hover .desk-resize,
+html.desk .desk-canvas-card[data-dragging] .desk-resize {
+  opacity: 1;
 }
 
 /* ---------- Keys: the PC's own (ui/desk.tsx → DeskKeys) ---------- */

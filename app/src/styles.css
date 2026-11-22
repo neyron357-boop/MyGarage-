@@ -6641,6 +6641,81 @@ html.desk .ai-scan-pill {
 .fit-photo-read[data-unsure] {
   color: var(--mantine-color-orange-light-color);
 }
+/* ---------- A job shown to its customer (v0.67, ui/clientLock.ts, features/job/ClientView.tsx) ----------
+   The app's chrome away — the tab bar and «＋», the PC's side menu, «Назад», the notes' pencil; the job's own view only. */
+html[data-client-lock] .tab-bar-wrap,
+html[data-client-lock] .desk-side,
+html[data-client-lock] .nav-back,
+html[data-client-lock] .desk-back,
+html[data-client-lock] .fb-fab {
+  display: none !important;
+}
+.client-view-body {
+  max-width: 760px;
+}
+.client-car-photo {
+  position: relative;
+  width: min(100%, 520px);
+  aspect-ratio: 2 / 1;
+  border-radius: var(--radius-group);
+  overflow: hidden;
+  background: var(--app-fill);
+}
+.client-car {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  margin-bottom: 16px;
+}
+/* The lock: held — a ring of the accent fills round it, then the job opens again. */
+@property --hold-p {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+.client-unlock {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--app-fill);
+  color: var(--mantine-color-text);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.client-unlock-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: conic-gradient(var(--mantine-color-cobalt-6) var(--hold-p), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  opacity: 0;
+  pointer-events: none;
+}
+.client-unlock[data-holding] .client-unlock-ring {
+  opacity: 1;
+  animation: client-hold var(--hold, 1200ms) linear forwards;
+}
+@keyframes client-hold {
+  to {
+    --hold-p: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .client-unlock[data-holding] .client-unlock-ring {
+    animation: none;
+    --hold-p: 100%;
+  }
+}
 /* The AI's numbers' row with nothing in it (no server, nothing looked up): not an empty band in the sheet. */
 .ios-row.ai-row:empty {
   display: none;

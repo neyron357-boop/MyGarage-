@@ -1811,6 +1811,27 @@ export const ru = {
       update: 'Обновите приложение: закройте его и откройте снова',
     },
   },
+  // v0.67: a job shown to its customer — locked to its customer's view.
+  client: {
+    lock: 'Показать клиенту',
+    unlock: 'Замок: удерживайте, чтобы выйти',
+    hold: 'Удерживайте замок, чтобы выйти',
+  },
+  // v0.67: the PC board's canvas, important and pinned cards.
+  deskBoard: {
+    steps: 'Шаги',
+    canvas: 'Холст',
+    arrange: 'Расставить',
+    arranged: 'Карточки расставлены',
+    pinned: 'Закреплено',
+    important: 'Важная',
+    notImportant: 'Не важная',
+    pin: 'Закрепить',
+    unpin: 'Открепить',
+    bigger: 'Крупнее',
+    smaller: 'Мельче',
+    resize: 'Потяните, чтобы изменить размер',
+  },
   // v0.65: a part number's fitment to the car (domain/fitment.ts) — green for verified only.
   fit: {
     verified: 'Подходит',

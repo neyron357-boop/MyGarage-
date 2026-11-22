@@ -576,7 +576,8 @@ export function PhoneStack({ render, onTop }: { render: Render; onTop?: (locatio
       if (id !== -1 || e.touches.length !== 1 || browserSwipes()) return;
       const m = modelRef.current;
       const t = e.touches[0];
-      if (t.clientX > EDGE || m.anim || m.entries.length < 2) return;
+      // A job shown to its customer (v0.67, the lock): no screen beneath to be uncovered.
+      if (t.clientX > EDGE || m.anim || m.entries.length < 2 || document.documentElement.hasAttribute('data-client-lock')) return;
       const topEntry = m.entries[m.entries.length - 1];
       if (isModal(topEntry.location.pathname) || layers.open > 0 || document.querySelector('.mantine-Modal-content, .mantine-Drawer-content')) return;
       // A signature, a slider or a drawing owns its strokes.

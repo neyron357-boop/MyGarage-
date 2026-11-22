@@ -75,7 +75,8 @@ export function useDeskHotkeys(keys: [string, () => void][], enabled = true) {
     ? keys.map(([key, fn]) => [
         key,
         () => {
-          if (!sheetOpen()) fn();
+          // A job shown to its customer (v0.67): the keys do nothing — no new job, no search over the lock.
+          if (!sheetOpen() && !document.documentElement.hasAttribute('data-client-lock')) fn();
         },
         // Letters and signs by their place (KeyN, Slash — the same keys in the Russian layout); digits by what they
         // type (a digit is a digit in every layout, and Mantine names their places Digit1…).

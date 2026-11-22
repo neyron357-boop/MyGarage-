@@ -36,6 +36,8 @@ import { useSwipeRow } from '../../ui/swipe';
 import { PHASE_META } from '../job/phase';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { orderFlags } from '../orders/flags';
+import { IconArrowsMaximize, IconArrowsMinimize, IconPin, IconPinnedFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { resizeStep, toggleImportant, togglePinned } from '../../ui/deskBoard';
 
 /** What the job is worth now: the amount due on its invoice, or the total of its lines. */
 export function jobAmount(b: OrderBundle): number {
@@ -71,6 +73,11 @@ type RowProps = {
   variant?: 'card' | 'row';
   /** A row of the archive: the day the job left the board instead of its step and time. */
   dated?: boolean;
+  /** The PC board's marks (v0.67, ui/deskBoard.ts): important — lit and larger; pinned — first, fixed on the canvas. */
+  important?: boolean;
+  pinned?: boolean;
+  /** On the PC board's canvas: its size a step larger or smaller from the menu. */
+  canvas?: boolean;
 };
 
 /**
@@ -83,10 +90,20 @@ const EDGE = 40;
 
 export const JobRow = memo(
   JobRowView,
-  (a, z) => a.b === z.b && a.phase === z.phase && a.cover === z.cover && a.tick === z.tick && a.swipe?.label === z.swipe?.label && a.variant === z.variant && a.dated === z.dated,
+  (a, z) =>
+    a.b === z.b &&
+    a.phase === z.phase &&
+    a.cover === z.cover &&
+    a.tick === z.tick &&
+    a.swipe?.label === z.swipe?.label &&
+    a.variant === z.variant &&
+    a.dated === z.dated &&
+    a.important === z.important &&
+    a.pinned === z.pinned &&
+    a.canvas === z.canvas,
 );
 
-function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProps) {
+function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important, pinned, canvas }: RowProps) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
@@ -247,6 +264,8 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
         data-swiping={sw.dragging || undefined}
         data-past={sw.past || undefined}
         data-doc={!row && doc ? '' : undefined}
+        data-important={important || undefined}
+        data-pinned={pinned || undefined}
       >
         {wa && (
           <span className="swipe-action lead" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden={sw.open !== 'leading'}>
@@ -330,6 +349,17 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
             </>
           )}
         </button>
+        {!phone && !dated && !row && (
+          // The PC board (v0.67): important and pinned a click away, at the card's top — shown when on, else under the mouse.
+          <span className="desk-card-tools" onPointerDown={own()} onClick={own()} onContextMenu={own()}>
+            <button type="button" className="desk-card-tool" data-on={important || undefined} data-tool="important" aria-pressed={!!important} aria-label={t(important ? 'deskBoard.notImportant' : 'deskBoard.important')} title={t(important ? 'deskBoard.notImportant' : 'deskBoard.important')} onClick={() => toggleImportant(b.order.id)}>
+              {important ? <IconStarFilled size={15} aria-hidden /> : <IconStar size={15} stroke={2} aria-hidden />}
+            </button>
+            <button type="button" className="desk-card-tool" data-on={pinned || undefined} data-tool="pin" aria-pressed={!!pinned} aria-label={t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin')} title={t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin')} onClick={() => togglePinned(b.order.id)}>
+              {pinned ? <IconPinnedFilled size={15} aria-hidden /> : <IconPin size={15} stroke={2} aria-hidden />}
+            </button>
+          </span>
+        )}
         {!row && doc && (
           // The job's paper a tap away, on the card: its touches are its own (the card neither opens nor swipes).
           <button
@@ -399,6 +429,19 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated }: RowProp
             ...(doc ? [{ key: 'doc', label: t(doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote'), icon: doc === 'invoice' ? IconFileInvoice : IconFileTypePdf, onClick: () => void openDoc() }] : []),
             ...(wa ? [{ key: 'wa', label: 'WhatsApp', icon: IconBrandWhatsapp, onClick: openWa }] : []),
             ...(swipe ? [{ key: 'swipe', label: swipe.label, icon: swipe.icon, onClick: () => swipe.onCommit() }] : []),
+            // The PC board's own (v0.67): important, pinned, and on the canvas — the card's size.
+            ...(!dated
+              ? [
+                  { key: 'important', label: t(important ? 'deskBoard.notImportant' : 'deskBoard.important'), icon: important ? IconStarFilled : IconStar, divided: true, onClick: () => toggleImportant(b.order.id) },
+                  { key: 'pin', label: t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin'), icon: pinned ? IconPinnedFilled : IconPin, onClick: () => togglePinned(b.order.id) },
+                ]
+              : []),
+            ...(canvas
+              ? [
+                  { key: 'bigger', label: t('deskBoard.bigger'), icon: IconArrowsMaximize, onClick: () => resizeStep(b.order.id, 1) },
+                  { key: 'smaller', label: t('deskBoard.smaller'), icon: IconArrowsMinimize, onClick: () => resizeStep(b.order.id, -1) },
+                ]
+              : []),
             { key: 'delete', label: t('order.delete'), icon: IconTrash, color: 'red', divided: true, onClick: () => setRemove(true) },
           ]}
         />

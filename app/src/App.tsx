@@ -56,6 +56,7 @@ import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 // The developer's feedback tool (temporary): removed with src/devtools/feedback and this line and the one below.
 import { FeedbackTool } from './devtools/feedback';
 import { AiNotices } from './features/ai/AiNotices';
+import { useClientLockGuard } from './ui/clientLock';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
 function AppRoutes({ location }: { location: Location }) {
@@ -347,6 +348,8 @@ function PhoneShell() {
 
 function Shell() {
   const mobile = usePhone();
+  // A job shown to its customer (v0.67): the app's chrome hidden, every other address back to the job.
+  useClientLockGuard();
   useSheetSwipe(mobile);
   useBackClosesSheets(mobile);
   useEscapeClosesTopSheet();

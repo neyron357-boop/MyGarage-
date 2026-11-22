@@ -17,6 +17,7 @@ import {
   IconCopy,
   IconDiscount,
   IconDots,
+  IconLock,
   IconEngine,
   IconFileInvoice,
   IconFileTypePdf,
@@ -114,6 +115,8 @@ import { LineSheet, PART_COLOR, PART_STATES, partStateOf, useSuggestions, type L
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
 import { ShareJobButton } from './ShareJob';
+import { ClientView } from './ClientView';
+import { lockForClient, useClientLock } from '../../ui/clientLock';
 
 /** What a line is to the job right now, as one symbol. */
 function LineMark({ item }: { item: OrderItem }) {
@@ -530,6 +533,8 @@ export function JobPage() {
   const stackBack = useStackBack();
   const { run, busy } = useAction();
   const b = useOrderBundle(id);
+  // Shown to the customer (v0.67): the job locked to its customer's view until the lock is held.
+  const locked = useClientLock();
   // Quick lines in the language of this job's documents (English by default), as they will be printed.
   // Read a moment after the job slid in, and only while lines can still be added.
   const suggestions = useSuggestions(b?.order.docLanguage ?? 'en', b?.order.complaint, !!b && !['closed', 'cancelled'].includes(b.order.stage) && !activeInvoice(b.invoices));
@@ -611,6 +616,7 @@ export function JobPage() {
 
   if (b === undefined) return <PageSkeleton variant="detail" />;
   if (!b || !phase) return <EmptyState title={t('err.notFound')} />;
+  if (locked === b.order.id) return <ClientView b={b} />;
 
   const oid = b.order.id;
   const docLang = b.order.docLanguage;
@@ -1294,6 +1300,21 @@ export function JobPage() {
         }
         right={
           <>
+            {/* Shown to the customer (v0.67): the lock — only the work and its prices on screen, nothing opens. */}
+            <ActionIcon
+              variant="default"
+              size={40}
+              radius={phone ? 'xl' : 'md'}
+              aria-label={t('client.lock')}
+              title={t('client.lock')}
+              data-client-lock-btn
+              onClick={() => {
+                haptic('light');
+                lockForClient(b.order.id);
+              }}
+            >
+              <IconLock size={20} />
+            </ActionIcon>
             {/* The job to the garage's group: the car's photo, the car, the customer's name, the lines. */}
             <ShareJobButton b={b} />
             {/* On a wide PC its tiles are beside the job already: the button goes (desk.css). */}

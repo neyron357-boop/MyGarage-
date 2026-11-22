@@ -1,6 +1,7 @@
 import { ActionIcon, Box, Button, Group, Stack, Tooltip } from '@mantine/core';
-import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCar, IconExternalLink, IconLayoutBoardSplit, IconLayoutGrid, IconLayoutKanban, IconPinnedFilled, IconPlus, IconSparkles, IconUserDollar } from '@tabler/icons-react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { arrange, CARD, clampWidth, placeNew, setDeskBoard, setPlace, useDeskBoard, type Place } from '../../ui/deskBoard';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -107,8 +108,27 @@ function DeskBoard({
   onStep: (f: Filter) => void;
 }) {
   const { t } = useTranslation();
+  const desk = useDeskBoard();
+  const pinnedSet = new Set(desk.pinned);
+  const importantSet = new Set(desk.important);
   const lanes = (order.filter((k) => isStep(k)) as Phase[]).map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
-  const shown = lanes.filter((l) => l.list.length && (!step || l.p === step));
+  // v0.67: pinned cards in a section of their own on top (their step's section does not repeat them).
+  const pinnedJobs = jobs.filter((j) => pinnedSet.has(j.b.order.id) && (!step || j.phase === step));
+  const shown = lanes.map((l) => ({ ...l, list: l.list.filter((j) => !pinnedSet.has(j.b.order.id)) })).filter((l) => l.list.length && (!step || l.p === step));
+  const canvas = desk.mode === 'canvas';
+  const card = (j: Job) => (
+    <JobRow
+      key={j.b.order.id}
+      b={j.b}
+      phase={j.phase}
+      cover={covers?.get(j.b.vehicle.id)}
+      tick={tick}
+      swipe={swipe(j.b)}
+      variant={compact ? 'row' : 'card'}
+      important={importantSet.has(j.b.order.id)}
+      pinned={pinnedSet.has(j.b.order.id)}
+    />
+  );
   return (
     <>
       <div className="desk-steps" role="toolbar" aria-label={t('board.title')}>
@@ -136,8 +156,35 @@ function DeskBoard({
             </button>
           );
         })}
+        {/* v0.67: the board by step, or a canvas laid out by hand. */}
+        <span className="desk-modes" role="group" aria-label={t('board.view')}>
+          <button type="button" className="desk-mode" data-active={!canvas || undefined} aria-pressed={!canvas} onClick={() => setDeskBoard({ mode: 'steps' })}>
+            <IconLayoutBoardSplit size={15} stroke={2.2} aria-hidden />
+            {t('deskBoard.steps')}
+          </button>
+          <button type="button" className="desk-mode" data-active={canvas || undefined} aria-pressed={canvas} data-desk-canvas onClick={() => setDeskBoard({ mode: 'canvas' })}>
+            <IconLayoutGrid size={15} stroke={2.2} aria-hidden />
+            {t('deskBoard.canvas')}
+          </button>
+        </span>
       </div>
-      {!shown.length && <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />}
+      {canvas ? (
+        <DeskCanvas jobs={step ? jobs.filter((j) => j.phase === step) : jobs} all={jobs} covers={covers} swipe={swipe} tick={tick} />
+      ) : (
+        <>
+      {!shown.length && !pinnedJobs.length && <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />}
+      {pinnedJobs.length > 0 && (
+        <section className="desk-lane desk-lane-pinned" data-lane="pinned" aria-label={t('deskBoard.pinned')}>
+          <header className="desk-lane-head">
+            <IconPinnedFilled size={16} className="desk-lane-pin" aria-hidden />
+            <span className="desk-lane-name">{t('deskBoard.pinned')}</span>
+            <span className="desk-lane-count">{pinnedJobs.length}</span>
+          </header>
+          <List animate className={compact ? 'desk-grid mini-list' : 'desk-grid board-cards'}>
+            {pinnedJobs.map(card)}
+          </List>
+        </section>
+      )}
       {shown.map(({ p, list }) => {
         const sum = list.reduce((s, j) => s + jobAmount(j.b), 0);
         return (
@@ -153,13 +200,137 @@ function DeskBoard({
               )}
             </header>
             <List animate className={compact ? 'desk-grid mini-list' : 'desk-grid board-cards'}>
-              {list.map((j) => (
-                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} variant={compact ? 'row' : 'card'} />
-              ))}
+              {list.map(card)}
             </List>
           </section>
         );
       })}
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * The board as a canvas (v0.67, the owner: «двигать, перемещать карточки, увеличивать, размещать где угодно, выделить
+ * важных, увеличить важные, закреплять»): every card where the manager put it — dragged anywhere, its corner drawn out
+ * for a larger card (its height half its width, as every card's), important ones lit and larger, pinned ones fixed where
+ * they are. A new car finds a free place by itself; «Расставить» lays them all out again (pinned and important first),
+ * with «Отменить». A click still opens the job; a drag does not.
+ */
+function DeskCanvas({ jobs, all, covers, swipe, tick }: { jobs: Job[]; all: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe; tick: number }) {
+  const { t } = useTranslation();
+  const desk = useDeskBoard();
+  const box = useRef<HTMLDivElement>(null);
+  // Measured before anything is placed (a guess would lay the first cards out past the canvas's edge).
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    // The room for cards: the canvas less its margin on each side (12 px).
+    setWidth(Math.floor(el.clientWidth) - 24);
+    const ro = new ResizeObserver(([e]) => setWidth(Math.floor(e.contentRect.width) - 24));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const pinned = new Set(desk.pinned);
+  const important = new Set(desk.important);
+  const widthOf = (id: string) => (important.has(id) ? CARD.l : CARD.s);
+  // Pinned first, then important, then the board's own order (the freshest first).
+  const ordered = [...all].sort((x, y) => Number(pinned.has(y.b.order.id)) - Number(pinned.has(x.b.order.id)) || Number(important.has(y.b.order.id)) - Number(important.has(x.b.order.id)));
+  const ids = ordered.map((j) => j.b.order.id);
+  const missing = ids.filter((id) => !desk.places[id]);
+  // A car new on the board: a free place found and kept — the others do not move, and none is let go here (a board read
+  // a moment short of its cars must not lose their places; «Расставить» starts afresh).
+  useEffect(() => {
+    if (!width || !missing.length) return;
+    const had = Object.keys(desk.places).length > 0;
+    // The first time on the canvas: all laid out in rows; later a new car takes a free place, the others stay.
+    setDeskBoard({ places: had ? { ...desk.places, ...placeNew(missing, desk.places, width, widthOf) } : arrange(ids, width, widthOf) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids.join(','), width]);
+
+  // A card under the mouse: moved (or its corner drawn out) — written to the store once let go, on the canvas's step.
+  const [live, setLive] = useState<{ id: string; p: Place } | null>(null);
+  const dragged = useRef(false);
+  const begin = (id: string, kind: 'move' | 'size') => (e: ReactPointerEvent) => {
+    if (e.button !== 0 || e.pointerType === 'touch') return;
+    if ((e.target as Element).closest('.job-card-doc, .desk-card-tools, .swipe-action') && kind === 'move') return;
+    const from = desk.places[id];
+    if (!from || (pinned.has(id) && kind === 'move')) return;
+    if (kind === 'size') e.stopPropagation();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let moved = false;
+    let now: Place = from;
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - sx;
+      const dy = ev.clientY - sy;
+      if (!moved && Math.hypot(dx, dy) < 5) return;
+      moved = true;
+      // Within the canvas's width (it grows downwards only: the page never scrolls sideways).
+      now = kind === 'move' ? { ...from, x: Math.min(Math.max(0, width - from.w), Math.max(0, from.x + dx)), y: Math.max(0, from.y + dy) } : { ...from, w: Math.min(clampWidth(from.w + dx), Math.max(CARD.min, width - from.x)) };
+      setLive({ id, p: now });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (moved) {
+        dragged.current = true;
+        setPlace(id, now);
+      }
+      setLive(null);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+  const tidy = () => {
+    const before = desk.places;
+    setDeskBoard({ places: arrange(ids, width, widthOf) });
+    undoToast(t('deskBoard.arranged'), t('common.undo'), () => setDeskBoard({ places: before }));
+  };
+  const placed = jobs.map((j) => ({ j, p: live?.id === j.b.order.id ? live.p : desk.places[j.b.order.id] })).filter((x): x is { j: Job; p: Place } => !!x.p);
+  // Where cards cover each other: the one put down last on top (pinned above them all, the one under the mouse above all).
+  const stack = placed.map(({ j, p }) => ({ id: j.b.order.id, z: p.z ?? 0 })).sort((a, b) => a.z - b.z).map((x) => x.id);
+  const layer = (id: string) => (live?.id === id ? stack.length + 20 : pinned.has(id) ? stack.length + 10 : stack.indexOf(id) + 1);
+  const height = Math.max(420, ...placed.map(({ p }) => p.y + p.w / 2 + 60));
+  return (
+    <>
+      <div className="desk-canvas-bar">
+        <Button variant="default" size="sm" leftSection={<IconSparkles size={16} />} onClick={tidy} data-desk-arrange>
+          {t('deskBoard.arrange')}
+        </Button>
+      </div>
+      <div className="desk-canvas" ref={box} style={{ height }} data-desk-canvas-area>
+        {placed.map(({ j, p }) => {
+          const id = j.b.order.id;
+          return (
+            <div
+              key={id}
+              className="desk-canvas-card"
+              data-dragging={live?.id === id || undefined}
+              data-pinned={pinned.has(id) || undefined}
+              data-important={important.has(id) || undefined}
+              data-card={id}
+              style={{ transform: `translate(${p.x}px, ${p.y}px)`, width: p.w, zIndex: layer(id) }}
+              onPointerDown={begin(id, 'move')}
+              onClickCapture={(e) => {
+                // A card let go after a drag: not opened.
+                if (!dragged.current) return;
+                dragged.current = false;
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDragStart={(e) => e.preventDefault()}
+            >
+              <JobRow b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} variant="card" important={important.has(id)} pinned={pinned.has(id)} canvas />
+              {!pinned.has(id) && <span className="desk-resize" title={t('deskBoard.resize')} aria-hidden onPointerDown={begin(id, 'size')} />}
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }
