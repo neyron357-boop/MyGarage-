@@ -373,6 +373,11 @@ export interface Order {
    * in the list of drivers later; the job keeps them). Not the customer: the job, its invoices and debts stay theirs.
    */
   driver?: JobDriver;
+  /**
+   * Its lines deleted (drafts — nothing was told of them), the newest first, the last 30 (v0.68, the user: «корзина в
+   * каждой карточке заказа — вернуть удалённые позиции или посмотреть их»): as they were, to bring back (domain/bin.ts).
+   */
+  removedLines?: { item: OrderItem; at: string }[];
   /** The car's mileage on this visit, km (v0.44): read off the odometer's photo when sure, or typed / looked at. */
   mileageKm?: number;
   /** What the odometer's photo was read as when not sure, best first ([] — nothing read): waits to be looked at. */
@@ -694,6 +699,8 @@ export interface OrderItem {
   employeeId?: string;
   /** Where the line stands among the job's lines once they were moved by hand (0 — first); the invoice keeps it. */
   position?: number;
+  /** A cancelled line brought back from the bin as a new draft (v0.68): the bin lists it no more. */
+  restoredAt?: string;
   createdAt: string;
 }
 

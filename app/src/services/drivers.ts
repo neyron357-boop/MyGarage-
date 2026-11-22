@@ -1,6 +1,6 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
-import { driverUse, rankDrivers, sameDriver, type DriverTyped, type DriverUse } from '../domain/drivers';
+import { driverUse, lastCarDriver, rankDrivers, sameDriver, type DriverTyped, type DriverUse } from '../domain/drivers';
 import { normalizePhone } from '../domain/phone';
 import type { Driver, JobDriver, Order, Vehicle } from '../domain/types';
 import { AppError } from './errors';
@@ -153,6 +153,16 @@ export async function archiveDriver(id: string): Promise<void> {
 /** Back on the list («Отменить»). */
 export async function restoreDriver(id: string): Promise<void> {
   await db.drivers.update(id, { archivedAt: undefined });
+}
+
+/**
+ * The driver who brought this car last time for its company, as he is in the list now — offered on «Новый заказ»
+ * (v0.68). None: no job of the car had one, or he is off the list.
+ */
+export async function carDriver(vehicleId: string, customerId?: string): Promise<DriverDraft | undefined> {
+  const id = lastCarDriver(await db.orders.where('vehicleId').equals(vehicleId).toArray(), vehicleId, customerId);
+  const d = id ? await db.drivers.get(id) : undefined;
+  return d && !d.archivedAt ? { id: d.id, name: d.name, phone: d.phone } : undefined;
 }
 
 export interface DriverJob {

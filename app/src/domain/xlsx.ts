@@ -42,6 +42,10 @@ export interface XChart {
   cats: { ref: string; values: (string | number)[]; fmt?: string };
   values: { ref: string; values: number[]; name: string };
   color: string;
+  /** More series beside the first — bars side by side, each its own colour, a legend above (the money in and out by month). */
+  more?: { ref: string; values: number[]; name: string; color: string }[];
+  /** No values on the bars (many of them): the value axis and its light lines instead. */
+  noLabels?: boolean;
   /** Of the values on the bars. */
   fmt?: string;
   /** From the top-left cell to the bottom-right one: column and row, counted from 0. */
@@ -68,6 +72,8 @@ export interface XSheet {
   landscape?: boolean;
   /** Cells whose numbers are text on purpose (invoice numbers): Excel does not mark them. */
   textNumbers?: string;
+  /** Cells whose formulas count part of a column on purpose (a running balance): Excel does not mark them. */
+  partialRanges?: string;
   tab?: string;
 }
 
@@ -151,7 +157,10 @@ const text = (s: string) => `<a:t>${esc(s)}</a:t>`;
 const font = (sz: number, color: string, bold = false) => `<a:defRPr sz="${sz}"${bold ? ' b="1"' : ''}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:defRPr>`;
 const txPr = (sz: number, color: string) => `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>${font(sz, color)}</a:pPr><a:endParaRPr lang="en-GB"/></a:p></c:txPr>`;
 
-/** A chart's part: one series of bars over a sheet's cells, its values on the bars, no value axis. */
+/**
+ * A chart's part: a series of bars over a sheet's cells (or several side by side, with a legend), their values on the
+ * bars and no value axis — or, `noLabels`, the value axis and its lines.
+ */
 function chartXml(ch: XChart, n: number): string {
   const [catId, valId] = [50000 + n * 2, 50001 + n * 2];
   const catNumeric = ch.cats.values.every((v) => typeof v === 'number');
@@ -160,6 +169,18 @@ function chartXml(ch: XChart, n: number): string {
     ? `<c:numRef><c:f>${esc(ch.cats.ref)}</c:f><c:numCache><c:formatCode>${esc(ch.cats.fmt ?? 'General')}</c:formatCode><c:ptCount val="${ch.cats.values.length}"/>${pts(ch.cats.values)}</c:numCache></c:numRef>`
     : `<c:strRef><c:f>${esc(ch.cats.ref)}</c:f><c:strCache><c:ptCount val="${ch.cats.values.length}"/>${pts(ch.cats.values)}</c:strCache></c:strRef>`;
   const bar = ch.type === 'bar';
+  const series = [{ ...ch.values, color: ch.color }, ...(ch.more ?? [])];
+  const several = series.length > 1;
+  const labels =
+    `<c:dLbls><c:numFmt formatCode="${esc(ch.fmt ?? '#,##0')}" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${txPr(800, '404040')}` +
+    '<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>';
+  const ser = (s: (typeof series)[number], i: number) =>
+    `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:v>${esc(s.name)}</c:v></c:tx>` +
+    `<c:spPr><a:solidFill><a:srgbClr val="${s.color}"/></a:solidFill></c:spPr><c:invertIfNegative val="0"/>` +
+    (ch.noLabels ? '' : labels) +
+    `<c:cat>${cat}</c:cat>` +
+    `<c:val><c:numRef><c:f>${esc(s.ref)}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${s.values.length}"/>${pts(s.values)}</c:numCache></c:numRef></c:val>` +
+    '</c:ser>';
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
     '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
@@ -167,22 +188,21 @@ function chartXml(ch: XChart, n: number): string {
     `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr>${font(1100, '1F3864', true)}</a:pPr><a:r><a:rPr lang="en-GB" sz="1100" b="1"><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr>${text(ch.title)}</a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>` +
     '<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>' +
     `<c:barChart><c:barDir val="${bar ? 'bar' : 'col'}"/><c:grouping val="clustered"/><c:varyColors val="0"/>` +
-    `<c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>${esc(ch.values.name)}</c:v></c:tx>` +
-    `<c:spPr><a:solidFill><a:srgbClr val="${ch.color}"/></a:solidFill></c:spPr><c:invertIfNegative val="0"/>` +
-    `<c:dLbls><c:numFmt formatCode="${esc(ch.fmt ?? '#,##0')}" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${txPr(800, '404040')}` +
-    '<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>' +
-    `<c:cat>${cat}</c:cat>` +
-    `<c:val><c:numRef><c:f>${esc(ch.values.ref)}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${ch.values.values.length}"/>${pts(ch.values.values)}</c:numCache></c:numRef></c:val>` +
-    `</c:ser><c:gapWidth val="${bar ? 40 : 60}"/><c:axId val="${catId}"/><c:axId val="${valId}"/></c:barChart>` +
+    series.map(ser).join('') +
+    `<c:gapWidth val="${bar ? 40 : 60}"/>${several ? '<c:overlap val="-10"/>' : ''}<c:axId val="${catId}"/><c:axId val="${valId}"/></c:barChart>` +
     // Bars from the top in the table's order; month labels as the table shows them (a text axis, not dates).
     `<c:catAx><c:axId val="${catId}"/><c:scaling><c:orientation val="${bar ? 'maxMin' : 'minMax'}"/></c:scaling><c:delete val="0"/><c:axPos val="${bar ? 'l' : 'b'}"/>` +
     `<c:numFmt formatCode="${esc(ch.cats.fmt ?? 'General')}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>` +
     `<c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="BFBFBF"/></a:solidFill></a:ln></c:spPr>${txPr(800, '404040')}` +
     `<c:crossAx val="${valId}"/><c:crosses val="autoZero"/><c:auto val="0"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>` +
-    `<c:valAx><c:axId val="${valId}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="1"/><c:axPos val="${bar ? 'b' : 'l'}"/>` +
+    `<c:valAx><c:axId val="${valId}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="${ch.noLabels ? 0 : 1}"/><c:axPos val="${bar ? 'b' : 'l'}"/>` +
+    (ch.noLabels ? '<c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="E3E7ED"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>' : '') +
     `<c:numFmt formatCode="#,##0" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>` +
+    (ch.noLabels ? `<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr(800, '404040')}` : '') +
     `<c:crossAx val="${catId}"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>` +
-    '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>' +
+    '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea>' +
+    (several ? `<c:legend><c:legendPos val="t"/><c:overlay val="0"/>${txPr(900, '404040')}</c:legend>` : '') +
+    '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>' +
     '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="D9DEE8"/></a:solidFill></a:ln></c:spPr>' +
     `${txPr(900, '404040')}</c:chartSpace>`
   );
@@ -269,7 +289,12 @@ export function buildWorkbook(sheets: XSheet[], meta: { title?: string; author?:
       (sh.merges?.length ? `<mergeCells count="${sh.merges.length}">${sh.merges.map((m) => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : '') +
       '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>' +
       `<pageSetup paperSize="9" orientation="${sh.landscape ? 'landscape' : 'portrait'}" fitToWidth="1" fitToHeight="0"/>` +
-      (sh.textNumbers ? `<ignoredErrors><ignoredError sqref="${sh.textNumbers}" numberStoredAsText="1"/></ignoredErrors>` : '') +
+      (sh.textNumbers || sh.partialRanges
+        ? '<ignoredErrors>' +
+          (sh.textNumbers ? `<ignoredError sqref="${sh.textNumbers}" numberStoredAsText="1"/>` : '') +
+          (sh.partialRanges ? `<ignoredError sqref="${sh.partialRanges}" formulaRange="1" emptyCellReference="1"/>` : '') +
+          '</ignoredErrors>'
+        : '') +
       (charts.length ? '<drawing r:id="rId1"/>' : '') +
       '</worksheet>';
     files.push({ name: `xl/worksheets/sheet${n}.xml`, content: xml });

@@ -1,14 +1,15 @@
 import { ActionIcon, Autocomplete, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
-import { IconBuildingFactory2, IconCheck, IconListDetails, IconMinus, IconPlus, IconX } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconCar, IconCheck, IconListDetails, IconMinus, IconPlus, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
 import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
 import { itemAmounts, itemCostPaid, itemTitle, lineName } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
-import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '../../domain/types';
+import { buildSuggestions, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
+import type { OrderItem, Outsource, PartOffer } from '../../domain/types';
 import { aiAfterPart } from '../../services/ai';
 import { AiPartNumbers, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
@@ -25,11 +26,12 @@ import { typedOnly, useAction, useLang, useScreenLiveQuery } from '../../ui/hook
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
 
-/** What is added: work, a part, or a service — work done by others (a wash, a tow, paint) that the garage pays for. */
+/**
+ * What is added: work (the labour charge), a part, or a service — anything done to the car (a change of oil, a wash),
+ * in the garage or by others it pays (v0.68: a service with whom or what we pay is done outside).
+ */
 export type LineKind = 'labor' | 'part' | 'service';
-/** A line typed before: its latest net price, VAT-inclusive price if typed with VAT, and VAT rate (0 — no VAT). */
-export type Suggestion = { titleRu: string; titleEn: string; price: number; gross?: number; rate?: number; uses: number };
-export type Suggestions = { list: Map<string, Suggestion>; top: string[] };
+export type { Suggestion, Suggestions } from '../../domain/linePrices';
 
 /** Where a part of the job stands: to find, ordered, here — or the customer's own. */
 export type PartState = 'needed' | 'ordered' | 'received' | 'customer';
@@ -39,18 +41,18 @@ export const PART_COLOR: Record<PartState, string> = { needed: 'orange', ordered
 export const partStateOf = (i: Pick<OrderItem, 'customerSupplied' | 'procurementStatus'>): PartState =>
   i.customerSupplied ? 'customer' : i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit' ? 'ordered' : i.procurementStatus === 'received' || i.procurementStatus === 'installed' ? 'received' : 'needed';
 
-const words = (s: string) => s.toLowerCase().split(/[^a-zа-яё0-9]+/i).filter((w) => w.length >= 4);
-
 /**
- * Titles typed before and from the price list, for one-tap entry: the latest price of each title.
- * The quick chips are the most used ones — first those that went with a similar complaint before
- * ("brake noise" → brake pads).
+ * Titles typed before and from the price list, for one-tap entry — each at the price it had on the job nearest to this
+ * one (this car, this customer, the same model — domain/linePrices.ts, v0.68). The quick chips are the ones this car
+ * and this customer had, then the usual ones (those that went with a similar complaint first).
  */
-export function useSuggestions(lang: Lang, complaint = '', enabled = true) {
+export function useSuggestions(ctx: PriceContext, enabled = true) {
   // Read once (not a live query over every line of every job), once the screen has slid in (its slide
   // is not shared with reading every line of every job), and kept for a minute: the next job has them at once.
-  const key = `${lang}|${complaint}`;
+  const key = [ctx.lang, ctx.orderId, ctx.vehicleId, ctx.customerId, ctx.make, ctx.model, ctx.complaint].join('|');
   const [value, setValue] = useState(() => cachedSuggestions(key));
+  const latest = useRef(ctx);
+  latest.current = ctx;
   useEffect(() => {
     if (!enabled) return;
     const hit = cachedSuggestions(key);
@@ -60,7 +62,7 @@ export function useSuggestions(lang: Lang, complaint = '', enabled = true) {
     }
     let alive = true;
     const id = window.setTimeout(() => {
-      void loadSuggestions(lang, complaint).then((v) => {
+      void loadSuggestions(latest.current).then((v) => {
         suggestionCache.set(key, { at: Date.now(), v });
         if (alive) setValue(v);
       });
@@ -69,11 +71,10 @@ export function useSuggestions(lang: Lang, complaint = '', enabled = true) {
       alive = false;
       window.clearTimeout(id);
     };
-  }, [key, lang, complaint, enabled]);
+  }, [key, enabled]);
   return enabled ? value : undefined;
 }
 
-type SuggestionSet = Record<LineKind, Suggestions>;
 const suggestionCache = new Map<string, { at: number; v: SuggestionSet }>();
 function cachedSuggestions(key: string): SuggestionSet | undefined {
   const hit = suggestionCache.get(key);
@@ -87,54 +88,37 @@ export function forgetSuggestions(): void {
 
 /*
  * What the suggestions are made of — every line ever typed (thousands, with the history carried over),
- * newest first, the price list and the jobs' complaints — read once a minute, not for every job opened.
+ * newest first, each line's job (its car, customer, make and model, complaint) and the price list — read once a
+ * minute, not for every job opened.
  */
-type Sources = { at: number; templates: JobTemplate[]; items: OrderItem[]; orders: Pick<Order, 'id' | 'complaint'>[] };
+type Sources = { at: number; priceList: PriceListLine[]; items: OrderItem[]; jobs: Map<string, HistJob> };
 let sources: Sources | undefined;
 async function suggestionSources(): Promise<Sources> {
   if (sources && Date.now() - sources.at < 60_000) return sources;
-  const [templates, items, orders] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray(), db.orders.toArray()]);
+  const [templates, items, orders, vehicles] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray(), db.orders.toArray(), db.vehicles.toArray()]);
   items.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-  sources = { at: Date.now(), templates, items, orders: orders.map((o) => ({ id: o.id, complaint: o.complaint })) };
+  const cars = new Map(vehicles.map((v) => [v.id, v]));
+  const jobs = new Map<string, HistJob>(
+    orders.map((o) => {
+      const v = cars.get(o.vehicleId);
+      return [o.id, { vehicleId: o.vehicleId, customerId: o.customerId, make: v?.make, model: v?.model, complaint: o.complaint }];
+    }),
+  );
+  sources = { at: Date.now(), priceList: templates.flatMap((t) => t.items), items, jobs };
   return sources;
 }
 
-async function loadSuggestions(lang: Lang, complaint: string): Promise<SuggestionSet> {
-  const { templates, items, orders } = await suggestionSources();
-  const maps: Record<LineKind, Map<string, Suggestion>> = { labor: new Map(), part: new Map(), service: new Map() };
-  const mine = new Set(words(complaint));
-  const alike = new Set(mine.size ? orders.filter((o) => words(o.complaint ?? '').some((w) => mine.has(w))).map((o) => o.id) : []);
-  const put = (kind: LineKind, s: Omit<Suggestion, 'uses'>, uses: number) => {
-    // In capitals, as lines are named: the same name typed in any case is one suggestion.
-    const title = lineName((lang === 'ru' ? s.titleRu || s.titleEn : s.titleEn || s.titleRu).trim());
-    if (!title) return;
-    const had = maps[kind].get(title);
-    if (had) had.uses += uses;
-    else maps[kind].set(title, { ...s, uses });
-  };
-  // Newest first, so a title keeps its latest price.
-  for (const it of items)
-    if (it.kind === 'labor' || it.kind === 'part') {
-      const s = { titleRu: it.titleRu ?? '', titleEn: it.titleEn ?? '', price: it.unitPriceFils, gross: it.unitGrossFils, rate: it.vatRateBp };
-      const uses = alike.has(it.orderId) ? 50 : 1;
-      put(it.kind, s, uses);
-      // A service offers what was done outside before (a wash, a tow) — not the garage's own work.
-      if (it.kind === 'labor' && it.outsource) put('service', s, uses);
-    }
-  for (const tpl of templates)
-    for (const ti of tpl.items)
-      if (ti.kind === 'labor' || ti.kind === 'part') {
-        put(ti.kind, { titleRu: ti.titleRu, titleEn: ti.titleEn, price: ti.unitPriceFils }, 0);
-      }
-  const pack = (m: Map<string, Suggestion>): Suggestions => ({
-    list: m,
-    top: [...m.entries()]
-      .filter(([, s]) => s.price > 0)
-      .sort((a, b) => b[1].uses - a[1].uses)
-      .slice(0, 12)
-      .map(([k]) => k),
-  });
-  return { labor: pack(maps.labor), part: pack(maps.part), service: pack(maps.service) };
+async function loadSuggestions(ctx: PriceContext): Promise<SuggestionSet> {
+  const { priceList, items, jobs } = await suggestionSources();
+  return buildSuggestions(items, jobs, priceList, ctx);
+}
+
+/** Where a suggestion's price is from, as a mark beside it: this car, this customer (nothing for the rest). */
+export function PriceFromMark({ from }: { from: Suggestion['from'] }) {
+  const { t } = useTranslation();
+  if (from !== 'car' && from !== 'customer') return null;
+  const I = from === 'car' ? IconCar : IconUser;
+  return <I size={14} stroke={2.2} className="price-from" data-from={from} aria-label={t(`qi.from.${from}`)} />;
 }
 
 /** Add or edit one line: what was done (or which part), quantity and price; for a part — where it stands. */
@@ -196,8 +180,12 @@ export function LineSheet({
   const order = useOrderGuard();
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
-  useEffect(() => {
-    if (!opened) return;
+  // Lines added one after another in this sheet (v0.68, the user: «механик диктует 10 деталей — я быстро заполняю
+  // список, цены потом»): «＋ Ещё» or the keyboard's «next» saves the name and clears the sheet for the next one.
+  const [added, setAdded] = useState<{ id: string; title: string }[]>([]);
+  const nameRef = useRef<HTMLInputElement>(null);
+  /** The sheet as it opens: the line's own values, or empty for a new one. */
+  const fill = () => {
     setTitle(item ? itemTitle(item, lang) : '');
     setPicked(undefined);
     setQty(item?.qty ?? 1);
@@ -219,6 +207,11 @@ export function LineSheet({
       prev.forEach((p) => URL.revokeObjectURL(p.src));
       return [];
     });
+  };
+  useEffect(() => {
+    if (!opened) return;
+    fill();
+    setAdded([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, lang, incl, service]);
   // A number the AI proved (two catalogues) while the sheet is open, into an empty field: the save keeps it. Only this
@@ -249,9 +242,13 @@ export function LineSheet({
   /** The customer's price from the purchase cost and the garage's markup, as prices are typed now. */
   const fromCost = (c: number | undefined) => (c === undefined ? undefined : enteredPrice({ unitPriceFils: roundFils(c * (1 + b.settings.defaultMarkupBp / 10000)) }, taxRate, mode));
   const own = kind === 'part' && part === 'customer';
+  // Work is one (an edited line keeps the quantity it has); a part and a service — as many as typed (v0.68: a service's
+  // quantity, the user: «по услугам добавить количество»).
+  const counts = kind !== 'labor' || (!!item && item.qty !== 1);
+  const lineQty = counts ? qty || 1 : (item?.qty ?? 1);
   const priced = { ...priceFromEntered(own ? 0 : price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
-  const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: kind === 'part' ? qty || 1 : 1, ...priced } as OrderItem) : undefined;
-  const save = async () => {
+  const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: lineQty, ...priced } as OrderItem) : undefined;
+  const save = async (next = false) => {
     // Ordered with a number the search found and not verified (v0.65): the manager's reason first — or not ordered.
     if (kind === 'part' && item && part === 'ordered' && partStateOf(item) !== 'ordered' && !(await order.guard([item.id], { [item.id]: partNumber }))) {
       setPart(partStateOf(item));
@@ -261,7 +258,7 @@ export function LineSheet({
       const typed = lineName(title.trim());
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
       const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
-      const patch: Partial<OrderItem> = { ...titles, qty: kind === 'part' ? qty || 1 : 1, ...priced };
+      const patch: Partial<OrderItem> = { ...titles, qty: lineQty, ...priced };
       const status = kind === 'part' && !own ? (part as Exclude<PartState, 'customer'>) : undefined;
       if (kind === 'part') {
         patch.costPriceFils = own ? undefined : cost;
@@ -271,9 +268,11 @@ export function LineSheet({
         patch.offers = !own && offers.length ? offers : undefined;
       } else {
         patch.employeeId = who;
-        // Work outside: to whom, back when; what they charge is the line's cost.
-        patch.outsource = outsource ? { ...outsource, dueAt: outDays !== undefined ? shiftDay(dubaiDate(), outDays) : outsource.dueAt } : undefined;
-        patch.costPriceFils = outsource ? cost : undefined;
+        // Work outside: to whom, back when; what they charge is the line's cost. A service is done outside only when it
+        // says by whom or what we pay (v0.68): a change of oil, a wash done here is the garage's own work.
+        const outside = service ? !!outsource && (!!outsource.supplierId || (cost ?? 0) > 0 || outsource.state !== 'todo') : !!outsource;
+        patch.outsource = outside && outsource ? { ...outsource, dueAt: outDays !== undefined ? shiftDay(dubaiDate(), outDays) : outsource.dueAt } : undefined;
+        patch.costPriceFils = outside ? cost : undefined;
       }
       let itemId = item?.id;
       if (item) {
@@ -287,13 +286,21 @@ export function LineSheet({
       await syncStage(b.order.id);
       forgetSuggestions();
       haptic('light');
-      onClose();
       // A part saved: the garage's AI looks at its name and looks up its number (v0.48) — in the background.
       if (kind === 'part' && itemId) aiAfterPart(itemId);
       // A belt's new photo: its marking read for the fitment (v0.65) — in the background.
       if (kind === 'part' && itemId && fresh.length) readMarkingLater(itemId);
+      if (!next || !itemId) return onClose();
+      // The next one: the sheet empty again, the keyboard still up in the name.
+      setAdded((a) => [...a, { id: itemId!, title: typed }]);
+      fill();
+      nameRef.current?.focus();
     });
   };
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const titleRef = useRef(title);
+  titleRef.current = title;
   const rate = taxRate / 100;
   // The total under the price is for the manager: in the app's language (the line itself is in the documents' one).
   const totalNote =
@@ -315,8 +322,10 @@ export function LineSheet({
       cells.push({ key: 'cost', label: t('qi.sumCost'), fils: paid });
       cells.push({ key: 'margin', label: t('qi.sumMargin'), fils: lineTotal.gross - paid, tone: lineTotal.gross >= paid ? 'good' : 'bad' });
     } else if (out && cost !== undefined) {
-      cells.push({ key: 'cost', label: t('outsource.cost'), fils: cost });
-      cells.push({ key: 'margin', label: t('qi.sumLeft'), fils: lineTotal.gross - cost, tone: lineTotal.gross >= cost ? 'good' : 'bad' });
+      // What we pay them is per one, as the price (a service's quantity — v0.68).
+      const paid = roundFils(cost * lineQty);
+      cells.push({ key: 'cost', label: t('outsource.cost'), fils: paid });
+      cells.push({ key: 'margin', label: t('qi.sumLeft'), fils: lineTotal.gross - paid, tone: lineTotal.gross >= paid ? 'good' : 'bad' });
     }
     return { cells, label: totalNote };
   })();
@@ -352,11 +361,29 @@ export function LineSheet({
         {!item && (suggestions?.top.length ?? 0) > 0 && (
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
           <div className="line-quick" aria-label={t('qi.frequent')}>
-            {suggestions!.top.slice(0, 6).map((name) => (
-              <button key={name} type="button" className="chip" data-active={lineName(title.trim()) === name} onClick={() => pick(name)}>
-                <span className="quick-name">{name}</span>
-                <span className="chip-note">{formatAed(suggested(suggestions!.list.get(name)!).price, uiLang, false)}</span>
-              </button>
+            {suggestions!.top.slice(0, 6).map((name) => {
+              const s = suggestions!.list.get(name)!;
+              return (
+                <button key={name} type="button" className="chip" data-active={lineName(title.trim()) === name} onClick={() => pick(name)}>
+                  <span className="quick-name">{name}</span>
+                  <span className="chip-note">
+                    {formatAed(suggested(s).price, uiLang, false)}
+                    <PriceFromMark from={s.from} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {added.length > 0 && (
+          // What this sheet added so far: the list grows as the mechanic dictates.
+          <div className="line-added" aria-label={t('qi.addedN', { n: added.length })}>
+            {added.map((a) => (
+              <span key={a.id} className="line-added-name">
+                <IconCheck size={14} stroke={2.6} aria-hidden />
+                {a.title}
+              </span>
             ))}
           </div>
         )}
@@ -398,6 +425,7 @@ export function LineSheet({
                     {!!p && (
                       <Text size="sm" c="dimmed" className="tnum" style={{ flexShrink: 0 }}>
                         {formatAed(p)}
+                        <PriceFromMark from={s!.from} />
                       </Text>
                     )}
                   </Group>
@@ -417,6 +445,17 @@ export function LineSheet({
               // The keyboard waits for a tap when the chips are on screen (it would cover them) and when a line is
               // edited (it is the price or the state that changes, not the name).
               data-autofocus={!item && !suggestions?.top.length ? true : undefined}
+              ref={nameRef}
+              // A new line: the keyboard's «next» saves this one and the field waits for the next (v0.68). After the
+              // list's own handling (an option picked with the keys is the name then).
+              enterKeyHint={item ? 'done' : 'next'}
+              onKeyDown={(e) => {
+                if (item || e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                window.setTimeout(() => {
+                  if (titleRef.current.trim()) void saveRef.current(true);
+                }, 0);
+              }}
             />
           </div>
           {kind === 'part' && (
@@ -472,7 +511,7 @@ export function LineSheet({
         {/* How much: rows as in the iPhone's settings — the label on the left, the value on the right. */}
         {!own && (
           <RowGroup mt={0}>
-            {kind === 'part' && (
+            {counts && (
               <FormRow label={t('qi.qty')}>
                 <QtyStepper value={qty} onChange={setQty} label={t('qi.qty')} />
               </FormRow>
@@ -642,9 +681,32 @@ export function LineSheet({
         {/* A line may be saved without a price (a part still to find): it cannot go to the customer until it has one. */}
         {/* Pinned to the bottom of the sheet: "Save" is in reach however long the form is. */}
         <div className="sheet-footer">
-          <Button size="lg" fullWidth loading={busy} disabled={!title.trim()} onClick={save}>
-            {t('common.save')}
-          </Button>
+          {item ? (
+            <Button size="lg" fullWidth loading={busy} disabled={!title.trim()} onClick={() => void save()}>
+              {t('common.save')}
+            </Button>
+          ) : (
+            // A new line: «＋ Ещё» keeps the sheet for the next one (prices later — v0.68); the name typed is saved
+            // with «Сохранить» too, and with nothing typed after a few added it is «Готово».
+            <Group gap={8} wrap="nowrap" grow>
+              <Button
+                size="lg"
+                variant="light"
+                disabled={!title.trim() || busy}
+                leftSection={<IconPlus size={20} stroke={2.2} />}
+                onClick={() => {
+                  // In the tap: the keyboard stays up for the next name.
+                  nameRef.current?.focus();
+                  void save(true);
+                }}
+              >
+                {t('qi.next')}
+              </Button>
+              <Button size="lg" loading={busy} disabled={!title.trim() && !added.length} onClick={() => (title.trim() ? void save() : onClose())}>
+                {title.trim() || !added.length ? t('common.save') : t('common.done')}
+              </Button>
+            </Group>
+          )}
         </div>
         {item && onDelete && (
           <Button variant="subtle" color="red" onClick={onDelete}>

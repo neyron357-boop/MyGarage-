@@ -1041,6 +1041,10 @@ export const ru = {
     work: 'Работы',
     parts: 'Запчасти',
     frequent: 'Частые',
+    // v0.68: одна за другой — «＋ Ещё» сохраняет и ждёт следующую; цена подсказки — этой машины или этого клиента.
+    next: 'Ещё',
+    addedN: 'Добавлено: {{n}}',
+    from: { car: 'Цена этой машины', customer: 'Цена этого клиента' },
     sendQuotation: 'Отправить смету',
     quotationPdf: 'Смета PDF',
     addWork: 'Добавить работу',
@@ -1162,7 +1166,9 @@ export const ru = {
     noMoney: 'Денег не будет',
     changePrice: 'Изменить цену',
     accept: 'Принять',
-    more: { quote: 'Смета', invoice: 'Инвойс', prepay: 'Предоплата', refuse: 'Отказ', customer: 'Клиент', car: 'Машина', claim: 'Гарантия', select: 'Править', amend: 'Изменить', scanner: 'Сканер', remove: 'Удалить', report: 'Отчёт', due: 'Срок', day: 'День', owner: 'Владельцу', driver: 'Водитель' },
+    more: { quote: 'Смета', invoice: 'Инвойс', prepay: 'Предоплата', refuse: 'Отказ', customer: 'Клиент', car: 'Машина', claim: 'Гарантия', select: 'Править', amend: 'Изменить', scanner: 'Сканер', remove: 'Удалить', report: 'Отчёт', due: 'Срок', day: 'День', owner: 'Владельцу', driver: 'Водитель', bin: 'Корзина' },
+    // v0.68: корзина заказа — удалённые и снятые строки, вернуть одним касанием.
+    bin: { title: 'Корзина', deleted: 'Удалена', cancelled: 'Снята', restore: 'Вернуть', restoreAll: 'Вернуть все · {{n}}', restored_one: 'Возвращена {{count}} строка', restored_few: 'Возвращены {{count}} строки', restored_many: 'Возвращено {{count}} строк', restored_other: 'Возвращено {{count}} строк', empty: 'Пусто' },
     partPhoto: 'Фото запчасти',
     setParts: 'Поставщик и наличие',
     partsN: 'Запчасти · {{n}}',
@@ -1339,6 +1345,8 @@ export const ru = {
   },
   money: { book: 'Учёт', cash: 'Касса', expenses: 'Расходы', salaries: 'Зарплаты', debts: 'Долги' },
   ledger: {
+    // v0.68: операция владельцу — текст, фото (чек) и инвойс заказа одним «Поделиться».
+    shareOwed: 'Должны: {{name}}',
     cashBalance: 'Наличные',
     start: 'начало',
     opening: 'Начальные остатки',
@@ -1999,6 +2007,8 @@ export const ru = {
     already: 'Уже в базе',
     forJob: 'Поставщики',
     askAll: 'Спросить',
+    // v0.68: список и схемы без номеров деталей — магазин ищет сам.
+    noNumbers: 'Без номеров',
     partsSellers: 'Запчасти',
     contractors: 'Подрядчики',
     rating: 'Рейтинг',

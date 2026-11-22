@@ -638,7 +638,8 @@ export async function deleteJob(orderId: string, opts: { withRecords?: boolean }
       db.notes.where('orderId').equals(orderId).toArray(),
     ]);
     const inspIds = inspections.map((i) => i.id);
-    const owners = [orderId, ...inspIds, ...items.map((i) => i.id), ...incidents.map((i) => i.id), ...notes.map((n) => n.id)];
+    // The bin's lines (v0.68) keep their photos until the job goes.
+    const owners = [orderId, ...inspIds, ...items.map((i) => i.id), ...(order.removedLines ?? []).map((r) => r.item.id), ...incidents.map((i) => i.id), ...notes.map((n) => n.id)];
     if (records) {
       // Their papers: invoices' and estimates' PDFs, a debt's signature and paper, a receipt, a claim's photos.
       const r = records;

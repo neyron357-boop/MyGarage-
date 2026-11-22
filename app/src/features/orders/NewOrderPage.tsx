@@ -14,7 +14,7 @@ import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domai
 import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
 import { setCover } from '../../services/cover';
 import { checkIn } from '../../services/orders';
-import type { DriverDraft } from '../../services/drivers';
+import { carDriver, type DriverDraft } from '../../services/drivers';
 import { DriverFields, PickedDriver } from '../job/Driver';
 import type { PlateFound } from '../../services/plateReader';
 import { haptic } from '../../ui/haptics';
@@ -356,6 +356,32 @@ export function NewOrderPage() {
   const known = picked ?? auto;
   const owner = known?.owner ?? pickedCustomer;
 
+  // The driver who brought this car last time (v0.68, the user: «завтра этот же автомобиль приезжает — имя водителя
+  // должно выставляться само»): in by itself, as if picked; × takes him off and another is typed. Only into an empty
+  // driver (or over the one put in for another car).
+  const autoDriver = useRef<string>();
+  const driverOff = useRef(false);
+  const carId = known?.vehicle.id;
+  const ownerId = owner?.id;
+  const ownerCompany = owner?.type === 'company';
+  useEffect(() => {
+    if (!carId || !ownerCompany) return;
+    let alive = true;
+    void carDriver(carId, ownerId).then((d) => {
+      if (!alive) return;
+      setDriver((cur) => {
+        const untouched = !cur.id && !cur.name.trim() && !cur.phone.trim();
+        const ours = !!autoDriver.current && cur.id === autoDriver.current;
+        if (!untouched && !ours) return cur;
+        autoDriver.current = d?.id;
+        return d ?? (ours ? { name: '', phone: '' } : cur);
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [carId, ownerId, ownerCompany]);
+
   // Complaint chips: the garage's list (Settings → Lists) — English by default, as it goes on the documents.
   const complaints = useMemo(() => quickList(settings, 'complaints'), [settings]);
   const addQuick = useCallback((phrase: string) => {
@@ -368,6 +394,8 @@ export function NewOrderPage() {
       const fresh = lookup === plate ? known : await findVehicleForCheckIn(plate);
       const car = picked ?? fresh;
       const company = (car?.owner ?? pickedCustomer)?.type === 'company';
+      // Tapped before the driver came in by himself: the car's last one — unless he was taken off.
+      const typedDriver = driver.id || driver.name.trim() || driver.phone.trim() || !company || !car || driverOff.current ? driver : ((await carDriver(car.vehicle.id, car.owner?.id)) ?? driver);
       const o = await checkIn({
         vehicleId: car?.vehicle.id,
         plate,
@@ -380,7 +408,7 @@ export function NewOrderPage() {
         complaint,
         arrivedNow: target !== 'book',
         bookedFor: target === 'book' ? bookedFor : undefined,
-        driver: company ? driver : undefined,
+        driver: company ? typedDriver : undefined,
         day: target === 'book' ? undefined : day,
       });
       if (!picked) rememberEmirate(plate.emirate);
@@ -593,7 +621,13 @@ export function NewOrderPage() {
                     {t('driver.title')}
                   </div>
                   {driver.id ? (
-                    <PickedDriver driver={driver} onClear={() => setDriver({ name: '', phone: '' })} />
+                    <PickedDriver
+                      driver={driver}
+                      onClear={() => {
+                        driverOff.current = true;
+                        setDriver({ name: '', phone: '' });
+                      }}
+                    />
                   ) : (
                     <DriverFields value={driver} onChange={setDriver} onPick={(d) => setDriver({ id: d.id, name: d.name, phone: d.phone })} customerId={owner.id} vehicleId={known?.vehicle.id} />
                   )}

@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreLines, syncStage, takeBack } from './flow';
+import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreFromBin, restoreLines, syncStage, takeBack } from './flow';
+import { binOf } from '../domain/bin';
 import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -179,6 +180,32 @@ describe('lazy flow', () => {
 
     await restoreLines(removed);
     expect((await db.items.get(draft.id))!.approvalState).toBe('draft');
+    // Undone: out of the bin again.
+    expect((await db.orders.get(o.id))!.removedLines).toBeUndefined();
+  });
+
+  it('keeps what was taken off in the job’s bin, and brings it back (v0.68)', async () => {
+    const o = await job();
+    const agreed = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000, qty: 2 });
+    await approveAll(o.id);
+    const draft = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Filter', unitPriceFils: 3000, partNumber: '90915-YZZD4' });
+    await removeLines([agreed.id, draft.id]);
+    const bin = () => db.orders.get(o.id).then(async (order) => binOf(order!, await db.items.where('orderId').equals(o.id).toArray()));
+    expect((await bin()).map((l) => [l.item.titleEn, l.how])).toEqual([['FILTER', 'deleted'], ['OIL CHANGE', 'cancelled']]);
+
+    expect(await restoreFromBin(o.id, [draft.id, agreed.id])).toBe(2);
+    // The deleted one is itself again (its number); the cancelled one stays cancelled, a new draft like it beside it.
+    expect((await db.items.get(draft.id))!).toMatchObject({ approvalState: 'draft', partNumber: '90915-YZZD4' });
+    expect((await db.items.get(agreed.id))!).toMatchObject({ approvalState: 'cancelled' });
+    const copy = (await db.items.where('orderId').equals(o.id).toArray()).find((i) => i.titleEn === 'OIL CHANGE' && i.id !== agreed.id)!;
+    expect(copy).toMatchObject({ approvalState: 'draft', qty: 2, unitPriceFils: 10000, done: false });
+    expect(await bin()).toEqual([]);
+    expect(await restoreFromBin(o.id, [agreed.id])).toBe(0);
+    // After the invoice nothing comes back.
+    await removeLines([copy.id]);
+    await approveAll(o.id);
+    await quickInvoice(o.id);
+    await expect(restoreFromBin(o.id, [copy.id])).rejects.toThrow();
   });
 
   it('reopens a closed job: invoiced — back to "ready", refused — back in the workshop, history — a job of the app', async () => {

@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { liveCameraAvailable } from '../../ui/camera';
-import { haptic } from '../../ui/haptics';
+import { haptic, slideTicksAvailable, useHaptics } from '../../ui/haptics';
 import { LiveCamera } from '../../ui/LiveCamera';
 import { PlateScan, type ScanTally } from './PlateScan';
 import { SheetFor } from '../../ui/lazy';
@@ -27,7 +27,8 @@ import { notifications } from '@mantine/notifications';
  *     where a slide lets go); the photo goes to "New job", which reads the plate off it (services/plateReader.ts);
  *   - «Приход», «Расход»: the money sheet;
  *   - «Заметка»: the workshop's notes.
- * The actions run right in the finger's lift (touchend).
+ * The actions run right in the finger's lift (touchend). On an iPhone each action the finger slides onto ticks (v0.68,
+ * the user: «вибро отклик должен быть оригинальный iPhone»): a hidden switch under the finger (`slideTicksAvailable`).
  */
 
 export type QuickKey = 'photo' | 'in' | 'out' | 'note';
@@ -177,6 +178,8 @@ const SWIPE = 16;
 const SLOP = 10;
 /** How far (px) a finger may be from an action, above or below, and still be on it. */
 const REACH = 14;
+/** How far (px) the hidden switch is put from the finger, to one side or the other (well past where its thumb turns). */
+const SIDE = 320;
 
 interface Press {
   x: number;
@@ -206,6 +209,34 @@ export function QuickPlus() {
   const pending = useRef<QuickKey | null>(null);
   /** Until when a click is the end of a press that brought the actions up, not a tap. */
   const swallow = useRef(0);
+  /** When the last tap opened a new job (a tap's click may come twice: the switch's own and the browser's). */
+  const tapped = useRef(0);
+  /*
+   * The iPhone's tick as the finger slides (v0.68). WebKit follows a finger held on a switch and ticks each time the
+   * finger is on the other side of the switch's middle; the switch lies over «＋» where the finger lands, then, held, it is
+   * moved so the finger is far on its left (an even count of ticks) or far on its right (odd): each new action under the
+   * finger moves it across — one tick, the switch's own. Anywhere else nothing of it shows or changes.
+   */
+  const [hapticsOn] = useHaptics();
+  const ticking = hapticsOn && slideTicksAvailable();
+  const tick = useRef<HTMLInputElement | null>(null);
+  const ticks = useRef(0);
+  const ticked = useRef<QuickKey | null>(null);
+  const placeTick = (x: number) => {
+    const sw = tick.current;
+    const r = button.current?.getBoundingClientRect();
+    if (!sw || !r) return;
+    const dx = ticks.current % 2 === 0 ? x - r.left + SIDE : x - r.left - sw.offsetWidth - SIDE;
+    sw.style.transform = `translateX(${Math.round(dx)}px)`;
+  };
+  const resetTick = () => {
+    ticks.current = 0;
+    ticked.current = null;
+    // After the browser's own handling of the lift (the switch ends its following there).
+    window.setTimeout(() => {
+      if (tick.current) tick.current.style.transform = '';
+    }, 0);
+  };
 
   const show = (how: 'drag' | 'sticky') => {
     const r = button.current?.getBoundingClientRect();
@@ -222,7 +253,13 @@ export function QuickPlus() {
     if (k === hovered.current) return;
     hovered.current = k;
     setHover(k);
-    if (k) haptic('selection');
+    if (!k) return;
+    haptic('selection');
+    // A new action under the finger: the hidden switch goes to the finger's other side (iPhone).
+    if (k !== ticked.current) {
+      ticked.current = k;
+      ticks.current++;
+    }
   };
   /** The action under a finger: in the column of actions (a little wider), the nearest within reach above or below. */
   const at = (x: number, y: number): QuickKey | null => {
@@ -264,10 +301,19 @@ export function QuickPlus() {
           if (open === 'sticky') return;
           const p: Press = { x: e.clientX, y: e.clientY, id: e.pointerId, touch: e.pointerType !== 'mouse' };
           press.current = p;
+          // The switch starts from «off», over the button.
+          if (tick.current) {
+            tick.current.checked = false;
+            tick.current.style.transform = '';
+          }
+          ticks.current = 0;
+          ticked.current = null;
           // A mouse keeps its moves here when it leaves the button (a finger does by itself).
           if (!p.touch) e.currentTarget.setPointerCapture?.(e.pointerId);
           p.timer = window.setTimeout(() => {
             p.opened = true;
+            // Held until they come up: a tick with them (the switch moves at the finger's next stir).
+            if (p.touch) ticks.current++;
             show('drag');
           }, HOLD_MS);
         }}
@@ -285,11 +331,14 @@ export function QuickPlus() {
             } else if (Math.hypot(dx, dy) > SLOP) {
               window.clearTimeout(p.timer);
               press.current = null;
+              // A finger that went sideways is no tap: the switch's own click at its lift opens nothing.
+              swallow.current = performance.now() + 800;
             }
             return;
           }
           if (Math.hypot(dx, dy) > SLOP) p.moved = true;
           point(at(e.clientX, e.clientY));
+          if (p.touch) placeTick(e.clientX);
         }}
         onPointerUp={(e) => {
           const p = press.current;
@@ -312,13 +361,16 @@ export function QuickPlus() {
           press.current = null;
           const k = pending.current;
           pending.current = null;
-          // No click after a press that brought the actions up — it would land on what they opened.
-          if (p?.opened && e.cancelable) e.preventDefault();
+          // No click after a press that brought the actions up — it would land on what they opened. With the switch
+          // (iPhone) the lift is its own to end (prevented, it would keep following the finger): its click is swallowed.
+          if (p?.opened && e.cancelable && !tick.current) e.preventDefault();
+          resetTick();
           if (k) go(k, true);
         }}
         onPointerCancel={() => {
           const p = press.current;
           press.current = null;
+          resetTick();
           if (!p) return;
           window.clearTimeout(p.timer);
           if (p.opened && !p.moved) setOpen('sticky');
@@ -334,10 +386,25 @@ export function QuickPlus() {
         onClick={() => {
           if (performance.now() < swallow.current) return;
           if (open) return close();
+          if (performance.now() - tapped.current < 600) return;
+          tapped.current = performance.now();
           navigate('/orders/new');
         }}
       >
         <IconPlus size={28} stroke={2.2} aria-hidden />
+        {ticking && (
+          <input
+            ref={(el) => {
+              tick.current = el;
+              el?.setAttribute('switch', '');
+            }}
+            type="checkbox"
+            className="quick-tick"
+            tabIndex={-1}
+            aria-hidden
+            defaultChecked={false}
+          />
+        )}
       </button>
       {open &&
         createPortal(

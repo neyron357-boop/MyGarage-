@@ -38,6 +38,7 @@ import {
   IconSteeringWheel,
   IconTool,
   IconTrash,
+  IconArrowBackUp,
   IconUser,
   IconUserDollar,
   IconUserPlus,
@@ -111,7 +112,10 @@ import { NotesChat } from './Notes';
 import { OutsourceActions, ReceivedRow, ReturnTerms } from './LineExtras';
 import { RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { ObdLine, useObdImport } from './ObdScan';
-import { LineSheet, PART_COLOR, PART_STATES, partStateOf, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
+import { LineSheet, PART_COLOR, PART_STATES, partStateOf, PriceFromMark, useSuggestions, type LineKind, type PartState, type Suggestion } from './LineSheet';
+import { isLabourCharge } from '../../domain/linePrices';
+import { binOf } from '../../domain/bin';
+import { BinSheet } from './BinSheet';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
 import { ShareJobButton } from './ShareJob';
@@ -537,12 +541,16 @@ export function JobPage() {
   const locked = useClientLock();
   // Quick lines in the language of this job's documents (English by default), as they will be printed.
   // Read a moment after the job slid in, and only while lines can still be added.
-  const suggestions = useSuggestions(b?.order.docLanguage ?? 'en', b?.order.complaint, !!b && !['closed', 'cancelled'].includes(b.order.stage) && !activeInvoice(b.invoices));
+  // Each at the price this car, this customer, this model had (v0.68).
+  const suggestions = useSuggestions(
+    { lang: b?.order.docLanguage ?? 'en', orderId: b?.order.id, vehicleId: b?.vehicle.id, customerId: b?.order.customerId, make: b?.vehicle.make, model: b?.vehicle.model, complaint: b?.order.complaint },
+    !!b && !['closed', 'cancelled'].includes(b.order.stage) && !activeInvoice(b.invoices),
+  );
   const sv = useSendVersion(b);
   const mechanics = useScreenLiveQuery(() => db.employees.filter((e) => e.active).toArray(), []) ?? [];
   const [sheet, setSheet] = useState<{ kind: LineKind; item?: OrderItem } | null>(null);
-  // A line handed outside opens as a service (work done by others); a part as a part.
-  const sheetKind = (i: OrderItem): LineKind => (i.kind === 'part' ? 'part' : i.outsource ? 'service' : 'labor');
+  // A part as a part; the labour charge as work; anything else done to the car — a service (v0.68), outside or here.
+  const sheetKind = (i: OrderItem): LineKind => (i.kind === 'part' ? 'part' : i.outsource || !isLabourCharge(itemTitle(i, i.titleEn ? 'en' : 'ru')) ? 'service' : 'labor');
   // While the sheet slides away it keeps showing what it showed (not "Add labour" for a part).
   const lastSheet = useRef(sheet);
   if (sheet) lastSheet.current = sheet;
@@ -573,6 +581,8 @@ export function JobPage() {
   const [profitShown, setProfitShown] = useState(false);
   // The job for the owner to check (v0.29): its picture — parts bought and sold, from whom, the profit.
   const [ownerOpen, setOwnerOpen] = useState(false);
+  // The job's bin (v0.68): the lines deleted and taken off, to see and bring back.
+  const [binOpen, setBinOpen] = useState(false);
   // The parts picked when it opened (they stay its parts while it slides away).
   const [batch, setBatch] = useState<OrderItem[] | null>(null);
   // A scanner report (PDF) read into the job: codes, odometer, what the car card is missing.
@@ -682,10 +692,10 @@ export function JobPage() {
 
   // The usual jobs (those that went with a similar complaint first) for one-tap adding.
   const onJob = new Set(live.map((i) => itemTitle(i, docLang)));
-  const quick = (suggestions?.labor.top ?? [])
+  const quick = (suggestions?.work.top ?? [])
     .filter((name) => !onJob.has(name))
     .slice(0, 8)
-    .map((name) => [name, suggestions!.labor.list.get(name)!] as const);
+    .map((name) => [name, suggestions!.work.list.get(name)!] as const);
   const quickAdd = (s: Suggestion) =>
     run(async () => {
       await addItem(oid, { kind: 'labor', block: 'A', titleRu: s.titleRu || undefined, titleEn: s.titleEn || undefined, qty: 1, unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) });
@@ -900,6 +910,7 @@ export function JobPage() {
   if (lines.some(canPick)) tiles.push({ key: 'select', icon: IconListCheck, onClick: () => setPicked(new Set()) });
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
   if (editable && phase !== 'booked' && !reissue) tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
+  if (binOf(b.order, b.items).length) tiles.push({ key: 'bin', icon: IconArrowBackUp, color: 'gray', onClick: () => setBinOpen(true) });
   tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
   let bar: ReactNode = null;
@@ -1244,7 +1255,10 @@ export function JobPage() {
             {quick.map(([name, s]) => (
               <button key={name} type="button" className="chip" onClick={() => quickAdd(s)}>
                 {name}
-                <span className="chip-note">{formatAed(s.gross ?? s.price, lang, false)}</span>
+                <span className="chip-note">
+                  {formatAed(s.gross ?? s.price, lang, false)}
+                  <PriceFromMark from={s.from} />
+                </span>
               </button>
             ))}
           </div>
@@ -1362,6 +1376,7 @@ export function JobPage() {
           <MoreSheet opened={o} onClose={() => setMore(false)} tiles={tiles} />
         )}
       </LazySheet>
+      <LazySheet opened={binOpen}>{(o) => <BinSheet b={b} opened={o} onClose={() => setBinOpen(false)} canRestore={editable && !reissue} />}</LazySheet>
       <DueSheet order={b.order} lang={lang} opened={dueOpen} onClose={() => setDueOpen(false)} />
       <JobDaySheet job={b} opened={dayOpen} onClose={() => setDayOpen(false)} />
       <DriverSheet order={b.order} opened={driverOpen} onClose={() => setDriverOpen(false)} />

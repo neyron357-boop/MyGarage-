@@ -4,8 +4,9 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { buildMoneyWorkbook, excelSerial, fromExcelSerial, readMoneyWorkbook, sheetBalances, type MoneySheet } from '../domain/moneySheet';
 import { unzip } from '../domain/zip';
 import { addIncome, loadLedger, setOpeningBalances } from './ledger';
+import { payCredit } from './debts';
 import { addExpense, closeCashDay } from './money';
-import { importMoneyPlan, moneySheetOfBook, planMoneyImport } from './moneySheet';
+import { exportMoneySheet, importMoneyPlan, moneySheetOfBook, planMoneyImport } from './moneySheet';
 import { ensureSeed } from './seed';
 
 const cat = async (code: string) => (await db.expenseCategories.where('code').equals(code).first())!.id;
@@ -145,5 +146,37 @@ describe('the money sheet and the credits (v0.61, the user: «тот, кто з�
     expect(lenders.map((l) => l.name).sort()).toEqual(['Ahmed', 'Rashid']);
     const oil = (await db.expenses.toArray()).find((e) => e.amountFils === 4_000)!;
     expect([oil.method, oil.note, lenders.find((l) => l.id === oil.lenderId)?.name]).toEqual(['credit', 'oil', 'Ahmed']);
+  });
+});
+
+describe('the export by ways (the owner: «журнал по листам — общий и по способу: карта, перевод, в кредит»)', () => {
+  it('Transactions holds the whole book and reads back as it; a sheet per way — the transfer apart from the card; the credit with what is left; imports as nothing new', async () => {
+    await setOpeningBalances(10_000, 0);
+    await addIncome({ date: '2026-11-10', category: 'service', amountFils: 50_000, method: 'cash', note: 'alternator' });
+    await addIncome({ date: '2026-11-10', category: 'service', amountFils: 120_000, method: 'transfer', note: 'fleet' });
+    await addExpense({ date: '2026-11-11', categoryId: await cat('tools'), amountFils: 1_500, vatFils: 0, method: 'card', note: 'gloves' });
+    const credit = await addExpense({ date: '2026-11-11', categoryId: await cat('parts'), amountFils: 30_000, vatFils: 0, vendor: 'Al Noor Auto', method: 'credit', note: 'pads', owedTo: { kind: 'new', name: 'Ahmed' } });
+    await payCredit(credit.id, { amountFils: 10_000, method: 'cash', date: '2026-11-12' });
+
+    const file = await exportMoneySheet();
+    expect(file.name).toMatch(/^Money Tracker — \d{4}-\d{2}-\d{2}\.xlsx$/);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const back = await readMoneyWorkbook(bytes);
+    expect(back.rows).toEqual((await moneySheetOfBook()).rows);
+    expect(back.rows.map((r) => r.payment)).toEqual(['Cash', 'Card', 'Card', 'Credit', 'Cash']);
+    expect(back.cashStartFils).toBe(10_000);
+
+    const files = await unzip(bytes);
+    const dec = new TextDecoder();
+    const names = [...dec.decode(files.get('xl/workbook.xml')).matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1]);
+    expect(names).toEqual(['Transactions', 'Cash', 'Card', 'Transfer', 'Credit', 'By month']);
+    const strings = dec.decode(files.get('xl/sharedStrings.xml'));
+    expect(strings).toContain('<t>Transfer</t>');
+    // The Credit sheet: taken 300, paid back 100, still owed 200.
+    const creditSheet = dec.decode(files.get('xl/worksheets/sheet5.xml'));
+    expect(['A5', 'B5', 'C5'].map((r) => new RegExp(`<c r="${r}"[^>]*>(?:<f>[^<]*</f>)?<v>([^<]*)</v>`).exec(creditSheet)?.[1])).toEqual(['300', '100', '200']);
+    // Out and back in: nothing new.
+    const plan = await planMoneyImport(bytes);
+    expect([plan.rows.length, plan.existing, plan.skipped]).toEqual([0, 5, 0]);
   });
 });

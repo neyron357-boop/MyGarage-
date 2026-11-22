@@ -123,6 +123,16 @@ export function hapticsAvailable(): boolean {
 }
 
 /**
+ * Whether a switch under a held finger can tick as the finger slides (v0.68, iPhone only). WebKit follows a finger held
+ * on a switch control (200 ms after it lands) and plays the switch's own haptic each time the thumb's side flips
+ * (CheckboxSwitch::updateIsSwitchVisuallyOnFromAbsoluteLocation → performSwitchHapticFeedback, PointerTracking) — so a
+ * hidden switch under the finger, moved so the finger is on its other side, ticks once per move (the «＋» quick actions).
+ */
+export function slideTicksAvailable(): boolean {
+  return enabled && isApple() && hapticsAvailable();
+}
+
+/**
  * A haptic started by the app itself (after a payment is saved, a photo taken). Android only: on an
  * iPhone a page cannot start one — there the user's taps tick through the labels.
  */

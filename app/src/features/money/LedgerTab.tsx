@@ -19,6 +19,7 @@ import { haptic } from '../../ui/haptics';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { CreditSheet } from './Debts';
+import { ShareEntryButton } from './ShareEntry';
 import { EntrySheet, IncomeChips, LinkPicker, PURSE_ICON, PursePicker, SplitParts, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
 import { ExpenseOwedTo, OwedName } from './OwedTo';
 import { Proofs } from './Proofs';
@@ -294,6 +295,8 @@ export function EntryDetails({
           entry.note && <Text size="sm">{entry.note}</Text>
         )}
         <Proofs entry={entry} />
+        {/* To the owner (v0.68): what it was, its photos and — money for a job — the job's invoice. */}
+        {entry.source !== 'closing' && <ShareEntryButton entry={entry} label={label} />}
         <Group justify="space-between">
           {entry.orderId ? (
             <Button variant="light" onClick={() => navigate(`/orders/${entry.orderId}`)}>

@@ -1,4 +1,5 @@
-import { db } from '../db/db';
+import { db, uid } from '../db/db';
+import { binOf, draftLike, withoutRemoved, withRemoved } from '../domain/bin';
 import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { discountBase, discountLines, grossOf } from '../domain/discount';
@@ -239,6 +240,11 @@ export async function removeLines(itemIds: string[]): Promise<OrderItem[]> {
     const r = await removeItem(i.id);
     if (r) removed.push(r);
   }
+  // Into the job's bin, as they were (v0.68): to bring back or to see their prices later.
+  if (removed.length) {
+    const order = await db.orders.get(orderId);
+    if (order) await db.orders.update(orderId, { removedLines: withRemoved(order, removed, nowIso()) });
+  }
   const waiting = items.filter((x) => x.approvalState === 'pending').map((x) => x.id);
   if (waiting.length) await withdrawItems(waiting, { cancel: true });
   for (const i of items.filter((x) => x.approvalState === 'approved')) await dropLine(i.id);
@@ -247,12 +253,42 @@ export async function removeLines(itemIds: string[]): Promise<OrderItem[]> {
   return removed;
 }
 
-/** "Undo" for removeLines: the drafts come back. */
+/** "Undo" for removeLines: the drafts come back (out of the bin). */
 export async function restoreLines(items: OrderItem[]): Promise<void> {
   if (!items.length) return;
   for (const i of items) await restoreItem(i);
+  const order = await db.orders.get(items[0].orderId);
+  if (order?.removedLines) await db.orders.update(order.id, { removedLines: withoutRemoved(order, items.map((i) => i.id)) });
   await syncDiscount(items[0].orderId);
   await syncStage(items[0].orderId);
+}
+
+/**
+ * Lines back from the job's bin (v0.68), drafts again: a deleted one as itself (its photos, its number, its price), a
+ * cancelled one as a new line like it (the cancelled one stays in the history, out of the bin). Not after the invoice —
+ * as lines are not removed then. Returns how many came back.
+ */
+export async function restoreFromBin(orderId: string, ids: string[]): Promise<number> {
+  const order = await db.orders.get(orderId);
+  if (!order) throw new AppError('err.notFound');
+  if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
+  const wanted = new Set(ids);
+  const back = binOf(order, await db.items.where('orderId').equals(orderId).toArray()).filter((l) => wanted.has(l.id));
+  if (!back.length) return 0;
+  const now = nowIso();
+  await db.transaction('rw', db.orders, db.items, async () => {
+    for (const l of back)
+      if (l.how === 'deleted') await db.items.put({ ...l.item, approvalState: 'draft' });
+      else {
+        await db.items.add(draftLike(l.item, uid(), now));
+        await db.items.update(l.id, { restoredAt: now });
+      }
+    const deleted = back.filter((l) => l.how === 'deleted').map((l) => l.id);
+    if (deleted.length) await db.orders.update(orderId, { removedLines: withoutRemoved(order, deleted) });
+  });
+  await syncDiscount(orderId);
+  await syncStage(orderId);
+  return back.length;
 }
 
 /**

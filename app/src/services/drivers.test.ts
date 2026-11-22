@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { companyDrivers, driverJobs, setJobDriver, suggestDrivers, updateDriver, archiveDriver, clearJobDriver, restoreJobDriver } from './drivers';
+import { carDriver, companyDrivers, driverJobs, setJobDriver, suggestDrivers, updateDriver, archiveDriver, clearJobDriver, restoreJobDriver } from './drivers';
 import { createCustomer, createVehicle } from './customers';
 import { loadDebtors } from './debts';
 import { addItem } from './estimate';
@@ -207,5 +207,26 @@ describe('drivers of company customers (v0.43)', () => {
     const b = await setJobDriver(o.id, { name: 'Ahmed', phone: '055 222 3344' });
     await expect(updateDriver(b.id, { name: 'Ahmed', phone: '050 111 2233' })).rejects.toThrow();
     expect((await db.drivers.get(a.id))!.phone).toBe('+971501112233');
+  });
+});
+
+describe('the car’s last driver comes by himself (v0.68)', () => {
+  it('the same car again: the driver of its latest job that had one, as he is in the list now', async () => {
+    const abc = await company();
+    const hiace = await car(abc.id, '22222');
+    const other = await car(abc.id, '33333');
+    expect(await carDriver(hiace.id, abc.id)).toBeUndefined();
+    const first = await visit(hiace.id, { name: 'Salman', phone: '050 123 4567' });
+    await visit(other.id, { name: 'Noman', phone: '050 765 4321' });
+    // A visit without a driver does not take him away.
+    await visit(hiace.id);
+    const salman = (await db.orders.get(first.id))!.driver!;
+    expect(await carDriver(hiace.id, abc.id)).toEqual({ id: salman.id, name: 'Salman', phone: '+971501234567' });
+    // His phone changed in the list: the new one.
+    await updateDriver(salman.id, { name: 'Salman K', phone: '050 123 4567' });
+    expect((await carDriver(hiace.id, abc.id))?.name).toBe('Salman K');
+    // Taken off the list: not offered.
+    await archiveDriver(salman.id);
+    expect(await carDriver(hiace.id, abc.id)).toBeUndefined();
   });
 });

@@ -45,6 +45,21 @@ export function driverUse(jobs: JobLike[], customerId?: string, vehicleId?: stri
   return out;
 }
 
+/**
+ * Who brought this car last time for this company (v0.68, the user: «завтра этот же автомобиль приезжает — при номере
+ * машины имя водителя должно выставляться само»): the driver of its latest job that had one. None — none of its jobs did.
+ */
+export function lastCarDriver(jobs: JobLike[], vehicleId: string, customerId?: string): string | undefined {
+  let best: { id: string; at: string } | undefined;
+  for (const o of jobs) {
+    const id = o.driver?.id;
+    if (!id || o.vehicleId !== vehicleId || (customerId && o.customerId !== customerId)) continue;
+    const at = o.arrivedAt || o.createdAt;
+    if (!best || at > best.at) best = { id, at };
+  }
+  return best?.id;
+}
+
 /** What is typed into the driver's two fields. */
 export interface DriverTyped {
   name: string;

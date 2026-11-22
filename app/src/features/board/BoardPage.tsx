@@ -1,6 +1,9 @@
 import { ActionIcon, Box, Button, Group, Stack, Tooltip } from '@mantine/core';
 import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCar, IconExternalLink, IconLayoutBoardSplit, IconLayoutGrid, IconLayoutKanban, IconPinnedFilled, IconPlus, IconSparkles, IconUserDollar } from '@tabler/icons-react';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { stepMainTab } from '../../ui/mainSwipe';
+import { hintNavigation } from '../../ui/stack';
+import { useTabSwipe } from '../../ui/tabSwipe';
 import { arrange, CARD, clampWidth, placeNew, setDeskBoard, setPlace, useDeskBoard, type Place } from '../../ui/deskBoard';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -479,6 +482,12 @@ export function BoardPage() {
   // A step picked: the screen glows in its colours, as a job on that step does (debts — in red).
   const glowRef = useRef<HTMLSpanElement>(null);
   usePhaseGlow(glowRef, debtsTab ? 'debt' : phaseFilter);
+  // The tabs are pages (v0.68, the user: «свайпы должны быть между этими вкладками»): a sideways swipe — the next tab, in
+  // the strip's order; past the first or the last — the tab bar's place beside the board (as Money's pages). A card's
+  // own swipes stay at its edges.
+  const tabOrder = view.order.filter((k) => k === 'all' || k === 'debts' || k === 'archive' || (isStep(k) && stepShown(k)));
+  const tabNow = archive ? 'archive' : debtsTab ? 'debts' : (phaseFilter ?? 'all');
+  const sw = useTabSwipe(tabOrder, tabNow, (v) => setFilter(v as Filter), (dir) => void stepMainTab(navigate, hintNavigation, '/', dir));
   if (!data) return <PageSkeleton />;
   const { bundles, covers } = data;
   const closed = live?.closed;
@@ -630,20 +639,22 @@ export function BoardPage() {
       {mobile ? (
         <>
           {/* A long press on a tab opens «Вид» — where the tabs are dragged into another order. */}
-          <ScrollTabs value={archive ? 'archive' : debtsTab ? 'debts' : phaseFilter ?? 'all'} onChange={(v) => setFilter(v as Filter)} onHold={() => setViewOpen(true)} items={tabs} />
-          {debtsTab ? (
-            debtList
-          ) : archive ? (
-            archiveList
-          ) : shown.length ? (
-            <List animate className={compact ? 'mini-list' : 'board-cards'}>
-              {shown.map((j) => (
-                <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={toArchive(j.b)} variant={compact ? 'row' : 'card'} />
-              ))}
-            </List>
-          ) : (
-            <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />
-          )}
+          <ScrollTabs value={tabNow} onChange={(v) => setFilter(v as Filter)} onHold={() => setViewOpen(true)} items={tabs} />
+          <div key={tabNow} ref={sw.panel} className="tab-panel">
+            {debtsTab ? (
+              debtList
+            ) : archive ? (
+              archiveList
+            ) : shown.length ? (
+              <List animate className={compact ? 'mini-list' : 'board-cards'}>
+                {shown.map((j) => (
+                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={toArchive(j.b)} variant={compact ? 'row' : 'card'} />
+                ))}
+              </List>
+            ) : (
+              <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />
+            )}
+          </div>
         </>
       ) : debtsTab ? (
         <Box maw={920}>{debtList}</Box>

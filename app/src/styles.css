@@ -1877,6 +1877,40 @@ html.kb .tab-bar-wrap {
   margin: 0;
   font-size: 13px;
 }
+/* v0.68: a hint's price from this car or this customer — a small mark after it, in the accent (the note is dim). */
+.price-from {
+  display: inline-block;
+  margin-left: 4px;
+  vertical-align: -2px;
+  color: var(--mantine-color-cobalt-6);
+}
+.chip[data-active='true'] .price-from {
+  color: inherit;
+}
+/* v0.68: the lines a sheet added one after another — their names, ticked, above the field for the next. */
+.line-added {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.line-added-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--mantine-color-green-light);
+  color: var(--mantine-color-green-8);
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-mantine-color-scheme='dark'] .line-added-name {
+  color: var(--mantine-color-green-4);
+}
 .qty-stepper .mantine-Input-input {
   text-align: center !important;
 }
@@ -3106,7 +3140,9 @@ html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] .count {
   top: 0;
   z-index: 60;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* The ends keep their buttons whole; the small title takes what is left between them and ends in "…" — centred
+     while it fits, never under a button (v0.68: the job's 🔒 · share · … covered «Toyota HiLux 2026»). */
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
   align-items: center;
   gap: 8px;
   height: calc(var(--app-nav-h) + env(safe-area-inset-top, 0px));
@@ -3910,6 +3946,21 @@ html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] .count {
 }
 .tab-plus > svg {
   transition: transform var(--dur-3) var(--spring);
+}
+/* v0.68: the hidden switch over «＋» (iPhone) — where the finger lands; held, it is moved beside the finger so each
+   action slid onto ticks (features/quick/QuickActions.tsx). Never seen. */
+.quick-tick {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  border-radius: 50%;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 .tab-plus[data-open] > svg {
   transform: rotate(45deg);
@@ -7264,4 +7315,12 @@ html.desk .mark-layer-body {
 /* A long list drawn as it is scrolled (v0.60.1, ui/moreRows.tsx): the end it watches takes no room. */
 .more-rows {
   height: 1px;
+}
+
+/* v0.68: the job's bin — the price and «Вернуть» side by side at a row's end. */
+.bin-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }

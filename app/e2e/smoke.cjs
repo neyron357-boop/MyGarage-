@@ -1089,14 +1089,18 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     const row = page.locator('.job-row', { hasText: '31415' }).first();
     await row.waitFor();
-    // v0.36: begun in the middle of a card (a scroll drifting sideways) the card is not swiped — v0.38: the drag is the
-    // board's, the tab beside (Search) opens; the card stays on the board, nothing uncovered. (The board in front, its
-    // transition over: while screens move, a swipe is nobody's.)
+    // v0.36: begun in the middle of a card (a scroll drifting sideways) the card is not swiped — v0.68 (the user: «свайпы
+    // должны быть между этими вкладками»): the drag is the board's tabs', the next tab opens (past the last — the tab bar's
+    // place beside); the card stays on the board, nothing uncovered. (The board in front, its transition over: while
+    // screens move, a swipe is nobody's.)
     await front('.job-row').filter({ hasText: '31415' }).first().waitFor();
     await page.waitForTimeout(700);
+    const tabNow = () => page.evaluate(() => document.querySelector('.screen[data-role="top"] .scroll-tabs [aria-selected="true"]')?.textContent ?? '');
+    if (!/^Все/.test(await tabNow())) throw new Error('the board does not open on «Все»: ' + (await tabNow()));
     await swipeLeft(row, true);
-    await page.waitForURL(/#\/search$/, { timeout: 5000 });
-    await page.goto(BASE + '#/');
+    await page.waitForFunction(() => !/^Все/.test(document.querySelector('.screen[data-role="top"] .scroll-tabs [aria-selected="true"]')?.textContent ?? 'Все'), null, { timeout: 5000 });
+    if (!/#\/$/.test(page.url())) throw new Error('a swipe on the board left it: ' + page.url());
+    await page.getByRole('tab', { name: /^Все/ }).click();
     await front('.job-row').filter({ hasText: '31415' }).first().waitFor();
     await page.waitForTimeout(700);
     if ((await row.evaluate((el) => el.style.getPropertyValue('--swipe'))) !== '0px') throw new Error('a swipe begun in the middle of a card moved it');

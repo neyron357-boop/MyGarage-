@@ -1,7 +1,8 @@
 import { db } from '../db/db';
 import { dubaiDate } from '../domain/dates';
 import { noteBesides, type LedgerEntry, type Purse } from '../domain/ledger';
-import { buildMoneyWorkbook, owedInNotes, readMoneyWorkbook, type MoneyPayment, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
+import { buildMoneyBook, type MoneyBookRow, type MoneyWay } from '../domain/moneyBook';
+import { owedInNotes, readMoneyWorkbook, type MoneyPayment, type MoneyRow, type MoneySheet } from '../domain/moneySheet';
 import { incomeCategoryNamed } from '../domain/incomeCategories';
 import { sameLender, type OwedPick } from '../domain/lenders';
 import { sellerKey } from '../domain/suppliers';
@@ -10,13 +11,18 @@ import type { ExpenseCategory, IncomeCategory } from '../domain/types';
 import { AppError } from './errors';
 import { addIncome, loadLedger, setOpeningBalances } from './ledger';
 import { addExpense, categoryMonthSpent } from './money';
+import { getSettings } from './settings';
 
 /*
- * The money book in and out of the garage's own money sheet ("Money Tracker — Income & Expenses",
- * domain/moneySheet.ts). Out: every entry of the book, oldest first, with the opening cash and card.
- * In: the sheet's rows become incomes and expenses — rows the book already has (same day, in/out,
- * purse and amount) are left out, so a sheet exported from here or imported twice adds nothing.
+ * The money book in and out of the garage's money sheet ("Money Tracker"). Out (domain/moneyBook.ts): every entry of
+ * the book, oldest first, with the opening cash — the Transactions sheet with all of them, a sheet per way (cash, card,
+ * transfer, owner, credit), By month. In (domain/moneySheet.ts — the garage's own sheet, or one exported from here): the
+ * sheet's rows become incomes and expenses — rows the book already has (same day, in/out, purse and amount) are left
+ * out, so a sheet exported from here or imported twice adds nothing.
  */
+
+/** The way of a book entry: its purse, a card purse by its method — the card or a bank transfer. */
+const wayOf = (e: LedgerEntry): MoneyWay => (e.purse === 'credit' ? 'credit' : e.purse === 'outside' ? 'owner' : e.purse === 'cash' ? 'cash' : e.method === 'transfer' ? 'transfer' : 'card');
 
 /** The sheet's category of a book entry. */
 function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>, incomeCats: Map<string, IncomeCategory>): string {
@@ -44,8 +50,8 @@ function sheetCategory(e: LedgerEntry, cats: Map<string, ExpenseCategory>, incom
   }
 }
 
-/** The whole money book as the money sheet. */
-export async function moneySheetOfBook(): Promise<MoneySheet> {
+/** The whole money book as rows of the sheet, each with its way (and, taken on credit, what is still owed on it). */
+async function bookRows(): Promise<{ cashStartFils: number; cardStartFils: number; rows: (MoneyRow & Pick<MoneyBookRow, 'way' | 'leftFils'>)[] }> {
   const [book, cats, incomeCats, orders, vehicles, customers] = await Promise.all([
     loadLedger(),
     db.expenseCategories.toArray(),
@@ -61,7 +67,7 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
   const customerBy = new Map(customers.map((c) => [c.id, c]));
   // The money that moved, and (v0.61, the user: «тот, кто заплатил в долг, должен отображаться… в таблице при экспорте»)
   // each expense taken on credit — Payment «Credit», in no balance and no total, whom it is owed to first in its notes.
-  const rows: MoneyRow[] = book.entries.map((e) => {
+  const rows = book.entries.map((e) => {
     const o = e.orderId ? orderBy.get(e.orderId) : undefined;
     const v = e.vehicleId ? carBy.get(e.vehicleId) : undefined;
     // The sheet's notes say what the money was for: the job and its car, then the note typed.
@@ -74,22 +80,41 @@ export async function moneySheetOfBook(): Promise<MoneySheet> {
     // The seller owed is named once (its name before the note goes — `noteBesides`).
     const what = e.source === 'closing' ? 'Day closing difference' : e.source === 'credit' ? [paidTo, noteBesides(e)].filter(Boolean).join(': ') : noteBesides(e) ?? '';
     const credit = e.purse === 'credit';
-    return {
+    const row: MoneyRow & Pick<MoneyBookRow, 'way' | 'leftFils'> = {
       date: e.date,
       type: e.kind === 'in' ? 'Income' : 'Expense',
       amountFils: e.amountFils,
       payment: credit ? 'Credit' : e.purse === 'cash' ? 'Cash' : e.purse === 'outside' ? 'Owner' : 'Card',
       category: sheetCategory(e, catBy, incomeBy),
       notes: [credit && e.owedTo ? `Owed to ${e.owedTo}` : '', about, what].filter(Boolean).join(' — '),
+      way: wayOf(e),
+      leftFils: credit ? e.leftFils : undefined,
     };
+    return row;
   });
   return { cashStartFils: book.cashStartFils, cardStartFils: book.cardStartFils, rows };
 }
 
-/** The money sheet file of the whole book (.xlsx). */
+/** The whole money book as the money sheet. */
+export async function moneySheetOfBook(): Promise<MoneySheet> {
+  const book = await bookRows();
+  return { ...book, rows: book.rows.map(({ date, type, amountFils, payment, category, notes }) => ({ date, type, amountFils, payment, category, notes })) };
+}
+
+/**
+ * The money sheet file of the whole book (.xlsx, the owner: «журнал по листам — общий и по способу»): Transactions (read
+ * back by the import), a sheet per way, By month.
+ */
 export async function exportMoneySheet(): Promise<File> {
-  const bytes = buildMoneyWorkbook(await moneySheetOfBook());
-  return new File([bytes.slice()], `Money Tracker — ${dubaiDate()}.xlsx`, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const [book, settings] = await Promise.all([bookRows(), getSettings()]);
+  const today = dubaiDate();
+  const bytes = buildMoneyBook({
+    garage: (settings.name || '').trim(),
+    today,
+    cashStartFils: book.cashStartFils,
+    rows: book.rows.map(({ date, type, amountFils, way, category, notes, leftFils }) => ({ date, type, amountFils, way, category, notes, leftFils })),
+  });
+  return new File([bytes.slice()], `Money Tracker — ${today}.xlsx`, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
 /* ---------------- Import ---------------- */

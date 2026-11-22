@@ -1041,6 +1041,10 @@ export const en: typeof ru = {
     work: 'Labour',
     parts: 'Parts',
     frequent: 'Frequent',
+    // v0.68: one after another — «＋ Next» saves and waits for the next; a hint's price — this car's or this customer's.
+    next: 'Next',
+    addedN: 'Added: {{n}}',
+    from: { car: 'This car’s price', customer: 'This customer’s price' },
     sendQuotation: 'Send quotation',
     quotationPdf: 'Quotation PDF',
     addWork: 'Add labour',
@@ -1162,7 +1166,9 @@ export const en: typeof ru = {
     noMoney: 'No money coming',
     changePrice: 'Change the price',
     accept: 'Accept',
-    more: { quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', refuse: 'Refused', customer: 'Customer', car: 'Car', claim: 'Warranty', select: 'Edit', amend: 'Change', scanner: 'Scanner', remove: 'Delete', report: 'Report', due: 'Due', day: 'Day', owner: 'To the owner', driver: 'Driver' },
+    more: { quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', refuse: 'Refused', customer: 'Customer', car: 'Car', claim: 'Warranty', select: 'Edit', amend: 'Change', scanner: 'Scanner', remove: 'Delete', report: 'Report', due: 'Due', day: 'Day', owner: 'To the owner', driver: 'Driver', bin: 'Bin' },
+    // v0.68: the job's bin — lines deleted and taken off, back in one tap.
+    bin: { title: 'Bin', deleted: 'Deleted', cancelled: 'Taken off', restore: 'Restore', restoreAll: 'Restore all · {{n}}', restored_one: '{{count}} line restored', restored_few: '{{count}} lines restored', restored_many: '{{count}} lines restored', restored_other: '{{count}} lines restored', empty: 'Empty' },
     partPhoto: 'Part photo',
     setParts: 'Supplier and stock',
     partsN: 'Parts · {{n}}',
@@ -1339,6 +1345,8 @@ export const en: typeof ru = {
   },
   money: { book: 'Book', cash: 'Cash', expenses: 'Expenses', salaries: 'Salaries', debts: 'Debts' },
   ledger: {
+    // v0.68: an operation to the owner — the text, the photos (a receipt) and the job's invoice in one «Share».
+    shareOwed: 'Owed to: {{name}}',
     cashBalance: 'Cash',
     start: 'start',
     opening: 'Opening balances',
@@ -1998,6 +2006,8 @@ export const en: typeof ru = {
     already: 'Already in the base',
     forJob: 'Suppliers',
     askAll: 'Ask',
+    // v0.68: the list and the diagrams without the part numbers — the shop finds the right one.
+    noNumbers: 'Without numbers',
     partsSellers: 'Parts',
     contractors: 'Contractors',
     rating: 'Rating',

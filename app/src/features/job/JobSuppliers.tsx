@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Group } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconClipboardCheck, IconPhone, IconSend, IconStarFilled, IconTruck } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconClipboardCheck, IconBarcodeOff, IconPhone, IconSend, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -71,7 +71,12 @@ export function JobSuppliersPage() {
   const [card, setCard] = useState<Supplier | null>(null);
   // What is still to buy (all the parts, once every one is ordered) — the list asked about, and its diagrams' sheets.
   const needed = data ? data.partLines.filter((i) => !i.procurementStatus || i.procurementStatus === 'needed') : [];
-  const asked = data ? (needed.length ? needed : data.partLines) : [];
+  const lines = data ? (needed.length ? needed : data.partLines) : [];
+  // Without the part numbers (v0.68, the user: «убрать номера деталей, чтобы отправился только список и схема — магазин
+  // сам ищет правильную»): the list, the sheets and the chats as the supplier gets them — names and diagrams only.
+  const [plain, setPlain] = useState(false);
+  const numbered = lines.some((i) => i.partNumber?.trim());
+  const asked = plain ? lines.map((i) => ({ ...i, partNumber: undefined })) : lines;
   const sheets = useDiagramSheets(asked);
   if (data === undefined) return <PageSkeleton />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
@@ -167,13 +172,21 @@ export function JobSuppliersPage() {
         title={t('suppliers.forJob')}
         right={
           ask ? (
-            <Button variant="light" leftSection={<IconSend size={18} />} onClick={() => void share()}>
+            <Button variant="light" leftSection={<IconSend size={18} />} loading={sheets.making} onClick={() => void share()}>
               {t('suppliers.askAll')}
             </Button>
           ) : undefined
         }
       />
       <div className="job-suppliers">
+        {numbered && (
+          <div className="chip-row">
+            <button type="button" className="chip" data-active={plain} aria-pressed={plain} onClick={() => setPlain((p) => !p)} data-plain-ask>
+              <IconBarcodeOff size={16} stroke={2} style={{ verticalAlign: -3, marginRight: 6 }} aria-hidden />
+              {t('suppliers.noNumbers')}
+            </button>
+          </div>
+        )}
         <DiagramParts items={asked} sheets={sheets} />
         {data.parts.length ? (
           <>
