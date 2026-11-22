@@ -783,10 +783,11 @@ html.kb .tab-bar-wrap {
   }
   .stage-btn,
   .search-clear,
-  .day-pill-input {
+  .day-pill-input,
+  .fit-badge {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .fit-badge)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -6526,6 +6527,197 @@ html.desk .ai-scan-pill {
   .ai-ring[data-ai-busy]::before {
     animation: none;
   }
+}
+
+/* ---------- A part number's fitment (v0.65, features/fitment/Fitment.tsx) ----------
+   Its status as a word in its colour — green for verified only; partly — yellow, not checked — orange, a conflict and
+   «does not fit» — red; how many independent sources have it — grey, apart (its existence, not its fitting). */
+.fit-badge {
+  --c: var(--mantine-color-orange-light-color);
+  --b: var(--mantine-color-orange-light);
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--b);
+  color: var(--c);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform var(--dur-1) var(--spring);
+  -webkit-tap-highlight-color: transparent;
+}
+.fit-badge:active {
+  transform: scale(0.95);
+}
+.fit-badge[data-status='verified'] {
+  --c: var(--mantine-color-green-light-color);
+  --b: var(--mantine-color-green-light);
+}
+.fit-badge[data-status='partial'] {
+  --c: var(--mantine-color-yellow-light-color);
+  --b: var(--mantine-color-yellow-light);
+}
+.fit-badge[data-status='conflict'],
+.fit-badge[data-status='rejected'] {
+  --c: var(--mantine-color-red-light-color);
+  --b: var(--mantine-color-red-light);
+}
+.fit-sources {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+  color: var(--app-label-3);
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: -0.1em;
+}
+/* A number's row: the number whole on top (never cut by the badge), its status under it, the globe on the right. */
+.ai-num[data-fit] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+}
+.ai-num[data-fit] > .ai-pick {
+  grid-column: 1;
+  grid-row: 1;
+}
+.ai-num[data-fit] > :not(.ai-pick):not(.fit-badge) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.ai-num[data-fit] > .fit-badge {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  margin: -6px 0 8px 32px;
+}
+.ai-num[data-fit='conflict'] .ai-num-no,
+.ai-num[data-fit='rejected'] .ai-num-no {
+  color: var(--mantine-color-red-light-color);
+}
+.ai-num[data-fit='rejected'] .ai-num-no {
+  text-decoration: line-through;
+}
+.ai-num[data-fit='verified'] .ai-num-no {
+  color: var(--mantine-color-green-light-color);
+}
+/* The line's own number under «Номер»: its status, in a few words why it is not green. */
+.fit-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fit-hint {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--app-label-2);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+.fit-current[data-fit-current='conflict'] .fit-hint,
+.fit-current[data-fit-current='rejected'] .fit-hint {
+  color: var(--mantine-color-red-light-color);
+}
+.fit-marking .value {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+.fit-photo-read[data-unsure] {
+  color: var(--mantine-color-orange-light-color);
+}
+/* «Почему этот номер?» */
+.fit-head {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.fit-section-title {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-label-2);
+}
+.fit-line {
+  padding: 6px 0;
+  border-top: 0.5px solid var(--app-hairline);
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.fit-line[data-tone='bad'] {
+  color: var(--mantine-color-red-light-color);
+}
+.fit-line[data-tone='warn'] {
+  color: var(--mantine-color-orange-light-color);
+}
+.fit-line[data-tone='good'] {
+  color: var(--mantine-color-green-light-color);
+}
+.fit-ev {
+  padding: 8px 0;
+  border-top: 0.5px solid var(--app-hairline);
+}
+.fit-ev-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.fit-ev-weight {
+  font-weight: 500;
+  color: var(--app-label-3);
+  white-space: nowrap;
+}
+.fit-ev[data-weight='fits'] .fit-ev-weight {
+  color: var(--mantine-color-green-light-color);
+}
+.fit-ev[data-weight='against'] .fit-ev-weight {
+  color: var(--mantine-color-red-light-color);
+}
+.fit-ev-body {
+  font-size: 13px;
+  color: var(--app-label-2);
+  overflow-wrap: anywhere;
+}
+.fit-ev-body a {
+  color: var(--mantine-color-cobalt-6);
+}
+/* Ordering with a number not verified: each part, its number and status. */
+.fit-risk {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 0.5px solid var(--app-hairline);
+}
+.fit-risk-main {
+  display: grid;
+  min-width: 0;
+}
+.fit-risk-name {
+  font-size: 13px;
+  color: var(--app-label-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* A line's pictures on top of its sheet (v0.52): one row, one size — «Фото», its own, then the AI's (marked). */

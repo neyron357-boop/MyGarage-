@@ -1,6 +1,7 @@
 import { canonicalMake, canonicalModel } from './carCatalog';
 import { lineName } from './items';
 import { numberPlausible } from './partNumbers';
+import { independentSources, type NumberCheck } from './fitment';
 import type { Vehicle, VehicleType } from './types';
 import { isVin, makeMatches, vinYear } from './vin';
 
@@ -63,6 +64,8 @@ export interface FoundNumber {
   name?: string;
   model?: string;
   replaces?: string[];
+  /** What the garage's server found out about it (v0.65): the catalogue's word, the pages, the sizes — domain/fitment.ts judges. */
+  check?: NumberCheck;
 }
 /** A place on a picture, in its own pixels. */
 export interface PictureMark {
@@ -209,20 +212,23 @@ export function findNote(find: Pick<AiFind, 'search' | 'numbers' | 'note'>): str
   if (!list.length) return undefined;
   const said = find.note?.replace(/\s+/g, ' ').trim();
   if (said) return said;
+  // v0.65: what the app knows is said as it is — a page that has a number proves it exists, the model's diagram is not
+  // the car's engine or trim; whether it fits is the fitment's (domain/fitment.ts), shown by each number.
   const out: string[] = [];
   const fits = list.filter((n) => n.fits);
-  const sure = list.filter((n) => catalogCount(n.seen) + ((n.garage ?? 0) > 0 ? 1 : 0) >= 2);
-  if (find.search === 'garage') out.push(list.length > 1 ? 'Numbers fitted on this car before — the most used first.' : 'Fitted on this car before.');
+  const web = (n: (typeof list)[number]) => independentSources(n.check ? n.check.web.map((w) => w.url) : n.seen);
+  const sure = list.filter((n) => web(n) + ((n.garage ?? 0) > 0 ? 1 : 0) >= 2);
+  if (find.search === 'garage') out.push(list.length > 1 ? 'Numbers fitted on cars of this model before — the most used first.' : 'Fitted on a car of this model before.');
   else if (find.search === 'model') out.push("From the AI's memory, not checked online — confirm by VIN before ordering.");
-  else if (fits.length === 1) out.push(`${fits[0].number} is on this car's diagram in the maker's catalogue.`);
-  else if (fits.length > 1) out.push(`${fits.length} numbers on this car's diagram — variants: check the VIN or build date.`);
-  else if (sure.length === 1) out.push(`${sure[0].number} is confirmed in ${catalogCount(sure[0].seen) || 1} catalogue${catalogCount(sure[0].seen) > 1 ? 's' : ''}${(sure[0].garage ?? 0) > 0 ? ' and the garage’s jobs' : ''}.`);
-  else if (sure.length > 1) out.push(`${sure.length} confirmed variants — check the VIN or build date before ordering.`);
-  else out.push(list.length > 1 ? 'None confirmed twice — check the VIN with the supplier.' : 'Seen in one place only — confirm with the supplier.');
+  else if (fits.length === 1) out.push(`${fits[0].number} is on the maker's diagram for this model and years — not the engine or the trim.`);
+  else if (fits.length > 1) out.push(`${fits.length} numbers on the model's diagram — variants: check the VIN or build date.`);
+  else if (sure.length === 1) out.push(`${sure[0].number} is listed by several sources — it exists; its fitment is not proven.`);
+  else if (sure.length > 1) out.push(`${sure.length} numbers are listed by several sources — check the VIN or build date before ordering.`);
+  else out.push(list.length > 1 ? 'None is listed twice — check the VIN with the supplier.' : 'Seen in one place only — confirm with the supplier.');
   const replaced = list.find((n) => n.replaces?.length);
   const firm = fits.length ? fits : sure;
   if (replaced) out.push(`${replaced.number} supersedes ${replaced.replaces!.slice(0, 2).join(', ')} — the same part.`);
-  else if (find.search === 'web' && firm.length && list.length > firm.length) out.push(fits.length ? 'The others are not on its diagram.' : 'The others are unconfirmed.');
+  else if (find.search === 'web' && firm.length && list.length > firm.length) out.push(fits.length ? 'The others are not on its diagram.' : 'The others are seen once or not at all.');
   return out.join(' ');
 }
 

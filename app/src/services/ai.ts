@@ -1,9 +1,10 @@
 import { db, uid } from '../db/db';
-import { type AiFind, type AiName, type AiVin, boughtBySpec, carKnown, catalogCount, type FoundNumber, nameFix, provenNumber, soleNumber, vinFill } from '../domain/ai';
+import { type AiFind, type AiName, type AiVin, boughtBySpec, carKnown, type FoundNumber, nameFix, vinFill } from '../domain/ai';
+import { carFacts, fitmentsOf, verifiedOnly } from '../domain/fitment';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { formatNumber, sameNumber } from '../domain/partNumbers';
-import { partsMemory, type Memory, type PriorPart } from '../domain/partsMemory';
+import { garageUses, partsMemory, type Memory, type PriorPart } from '../domain/partsMemory';
 import { matchPartName } from '../domain/partsVocab';
 import type { Order, OrderItem, Vehicle } from '../domain/types';
 import { isVin, vinBuilt } from '../domain/vin';
@@ -344,6 +345,8 @@ function priorLine(i: OrderItem, o: Order | undefined, v: Vehicle | undefined): 
     name: i.titleEn || i.titleRu || '',
     number: i.partNumber,
     fitted: i.done || i.procurementStatus === 'received' || i.procurementStatus === 'installed',
+    vehicleId: o.vehicleId,
+    installed: i.done || i.procurementStatus === 'installed',
     car: { make: v.make, model: v.model, year: v.year, engine: v.engine },
     web: i.aiFind?.search === 'web' && i.aiFind.numbers.length ? { at: i.aiFind.at, numbers: i.aiFind.numbers } : undefined,
     diagramIds: i.diagramIds,
@@ -351,7 +354,8 @@ function priorLine(i: OrderItem, o: Order | undefined, v: Vehicle | undefined): 
   };
 }
 let priorRead: Promise<PriorPart[]> | undefined;
-async function priorParts(): Promise<PriorPart[]> {
+/** The garage's own part lines as the memory reads them (v0.65: the fitment's evidence of the garage's own jobs too). */
+export async function priorParts(): Promise<PriorPart[]> {
   if (priorCache && Date.now() - priorCache.at < 30_000) return priorCache.lines;
   // Five parts asking at once read it once.
   priorRead ??= (async () => {
@@ -456,15 +460,20 @@ export function aiFindPart(
       if (!quiet) notify({ kind: 'needCar' });
       return undefined;
     }
-    const mem = partsMemory((await priorParts()).filter((p) => p.id !== itemId), carKey, part);
-    const write = async (r: Pick<AiFind, 'search' | 'numbers' | 'note'>, pics: { diagrams: string[]; samples: string[] }, proven: string | undefined) => {
+    const prior = (await priorParts()).filter((p) => p.id !== itemId);
+    const mem = partsMemory(prior, carKey, part);
+    const garage = garageUses(prior, carKey, car?.id, part);
+    // `single` (v0.52) is what every number now is (v0.65): written only when it alone is verified.
+    void single;
+    const write = async (r: Pick<AiFind, 'search' | 'numbers' | 'note'>, pics: { diagrams: string[]; samples: string[] }) => {
       const now = await db.items.get(itemId);
       if (!now) return;
-      // `single` (v0.52, the user: «номера добавлять, если они точные; если вышли сразу несколько — не добавлять»): written
-      // only when it stands alone — the one that came, or (v0.55, `soleNumber`) the one on this car's diagram.
-      const others = r.numbers.filter((x) => x.seen.length > 0 || (x.garage ?? 0) > 0).length > 1;
-      const alone = r.search === 'web' ? soleNumber(r, carKey.make) === proven : !others;
-      const fill = proven && !now.partNumber && (!single || alone) ? proven : undefined;
+      // v0.65 (the user: «система должна предпочесть результат «Не удалось подтвердить», а не выдать ошибочный OEM-номер»):
+      // a number goes on the line by itself only when it fits this very car by the fitment's rules (domain/fitment.ts) and
+      // is the only one that does — found on pages, on the model's diagrams, by the AI: a candidate, a tap away.
+      const fits = fitmentsOf({ part, car: carFacts(car), search: r.search, numbers: r.numbers, marking: now.fitment?.marking, garage });
+      const verified = verifiedOnly(fits);
+      const fill = verified && !now.partNumber ? verified : undefined;
       // The AI's note (v0.64) kept with what it found: shown under the numbers (none — the app's own, domain/ai.ts `findNote`).
       const note = r.note?.trim() ? { note: r.note.trim().slice(0, 240) } : {};
       await db.items.update(itemId, { aiFind: { at: nowIso(), search: r.search, part, numbers: r.numbers, filled: fill, ...note }, ...(await keepPictures(now, pics)), ...(fill ? { partNumber: fill } : {}) });
@@ -475,7 +484,7 @@ export function aiFindPart(
           kind: 'number',
           itemId,
           number: fill,
-          catalogs: catalogCount(n?.seen ?? []),
+          catalogs: 0,
           garage: n?.garage ?? 0,
           undo: async () => {
             const cur = await db.items.get(itemId);
@@ -514,19 +523,18 @@ export function aiFindPart(
     // 1. Fitted before on this car: the garage's number, no question.
     if (mem.proven && !again) {
       const numbers: FoundNumber[] = mem.numbers.map((n) => ({ number: n.number, seen: [], garage: n.times }));
-      await write({ search: 'garage', numbers }, await picturesOf(mem.proven, mem.numbers[0].from), mem.proven);
+      await write({ search: 'garage', numbers }, await picturesOf(mem.proven, mem.numbers[0].from));
       return { search: 'garage', numbers };
     }
     // 2. The web looked at lately for the same part on the same car: that answer again.
     if (mem.web?.web && !again) {
       const numbers = merged(mem.web.web.numbers, mem, carKey.make);
-      const proven = provenNumber({ search: 'web', numbers }, carKey.make);
-      await write({ search: 'web', numbers }, await picturesOf(proven ?? numbers[0]?.number ?? '', mem.web), proven);
+      await write({ search: 'web', numbers }, await picturesOf(numbers[0]?.number ?? '', mem.web));
       return { search: 'web', numbers };
     }
     // 3. The AI — or, without it, what the garage used before as candidates.
     if (!aiOn()) {
-      if (mem.numbers.length) await write({ search: 'garage', numbers: mem.numbers.map((n) => ({ number: n.number, seen: [], garage: n.times })) }, { diagrams: [], samples: [] }, undefined);
+      if (mem.numbers.length) await write({ search: 'garage', numbers: mem.numbers.map((n) => ({ number: n.number, seen: [], garage: n.times })) }, { diagrams: [], samples: [] });
       return undefined;
     }
     const r = await askAi<AiFind>(
@@ -553,11 +561,13 @@ export function aiFindPart(
         ...(n.name ? { name: n.name } : {}),
         ...(n.model ? { model: n.model } : {}),
         ...(n.replaces?.length ? { replaces: n.replaces } : {}),
+        // What the server found out about it (v0.65): the fitment's evidence.
+        ...(n.check ? { check: n.check } : {}),
       })),
       mem,
       carKey.make,
     );
-    await write({ search: r.search, numbers, note: r.note }, pics, provenNumber({ search: r.search, numbers }, carKey.make));
+    await write({ search: r.search, numbers, note: r.note }, pics);
     return { ...r, numbers };
   });
 }

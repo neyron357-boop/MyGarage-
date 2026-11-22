@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createAi, parseFound } from '../src/ai.mjs';
 import { catalogHtml } from './catalog-page.mjs';
-import { noteFor } from '../src/partfind.mjs';
+import { beltAsked, beltSpecsIn, noteFor, textNear } from '../src/partfind.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-find-'));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -106,9 +106,20 @@ describe('a part looked for: the cheapest way first', () => {
     assert.deepEqual(asked.map(how), ['low']);
     assert.match(asked[0].text, /From your own knowledge/);
     assert.deepEqual([r.search, r.stage, r.frames], ['web', 0, ['KXA10']]);
-    assert.deepEqual(r.numbers, [
-      { number: '11111-22221', brand: 'Toyota', note: '1.5, with pulley', seen: ['https://www.megazip.net/parts/toyota-1111122221'], fits: true, name: 'Compressor Assy, W/Pulley', model: 'Verso KXA10 · 2005–2011', replaces: ['11111-22220'] },
-    ]);
+    assert.deepEqual(
+      r.numbers.map(({ check, ...n }) => n),
+      [{ number: '11111-22221', brand: 'Toyota', note: '1.5, with pulley', seen: ['https://www.megazip.net/parts/toyota-1111122221'], fits: true, name: 'Compressor Assy, W/Pulley', model: 'Verso KXA10 · 2005–2011', replaces: ['11111-22220'] }],
+    );
+    // v0.65: what was found out, kept with it — the catalogue's word (the model's diagrams in its years: not the engine or
+    // the drive), named by the model's memory, met on no page: the app's rules decide from this, not «seen».
+    const { at, ...check } = r.numbers[0].check;
+    assert.ok(at);
+    assert.deepEqual(check, {
+      epc: { state: 'read', url: 'https://www.megazip.net/parts/toyota-1111122221', name: 'Compressor Assy, W/Pulley', kind: true, diagrams: 2, fit: 'model', headings: ['Verso KXA10 · 2005–2011', 'Verso KXA11 · 2005–2011'], via: 'own' },
+      web: [],
+      specs: [],
+      named: 'memory',
+    });
     // The diagram first — this frame's, its callout's place with it; then a photo. No model looked at them.
     assert.deepEqual(r.images.map((i) => [i.kind, i.url]), [['diagram', 'https://epc.partsbooster.com/schemas/toyota/kxa10.png'], ['photo', 'https://partsouq.com/assets/tesseract/assets/partsimages/Toyota/1111122221.jpg']]);
     assert.deepEqual(r.images[0].marks, [{ x1: 10, y1: 20, x2: 30, y2: 40 }]);
@@ -361,5 +372,36 @@ describe('the note for the garage and how far a search has got (v0.64)', () => {
     // The same search asked again under a new mark (kept): done at once.
     await ai.partFind({ ...verso, part: 'AC COMPRESSOR', track: 't-2' });
     assert.equal(ai.progress('t-2')['t-2'], 100);
+  });
+});
+
+describe('what is found out about a number, for the app to judge (v0.65)', () => {
+  it('a belt’s size near its number on a page, in the catalogue’s name, in the AI’s note — each kept with who said it', () => {
+    assert.deepEqual(beltSpecsIn('Honda belt 7PK1535 (Bando), also fits as 7 PK 1540; 7PK9999 is no belt; PK2164 lacks ribs'), ['7PK1535', '7PK1540']);
+    const text = 'Gates K071535 = Honda 31110-RSA-G01 / 31110RSAG02 — size 7PK1535. Far below: '.padEnd(900, '.') + ' 7PK2164 for 56992-RNA-A02';
+    assert.deepEqual(beltSpecsIn(textNear(text, '31110-RSA-G01')), ['7PK1535']);
+    assert.deepEqual(beltSpecsIn(textNear(text, '56992RNAA02')), ['7PK2164']);
+    assert.ok(beltAsked('ENGINE BELT') && beltAsked('ремень генератора'));
+    assert.ok(!beltAsked('TIMING BELT') && !beltAsked('SEAT BELT') && !beltAsked('ремень ГРМ'));
+  });
+
+  it('ENGINE BELT (the real case): the page’s size and the AI’s, a catalogue that did not answer — kept apart, nothing decided here', async () => {
+    const routes = [
+      [/megazip\.net/, () => new Response('busy', { status: 503 })],
+      [/belts\.example\/x/, () => html('<p>Honda 31110-RSA-G01 alternator belt, size 7PK1535, Civic 2006-2011</p>')],
+    ];
+    const { ai } = world(routes, () =>
+      grounded('N | 31110-RSA-G01 | Honda | 7PK1535 | https://belts.example/x\nN | 31110-RNA-004 | Honda | 7PK2164 |\nS | Two belts differ by A/C.', { sites: ['belts.example'], backs: [['N | 31110-RSA-G01 | Honda', [0]]] }),
+    );
+    const r = await ai.partFind({ part: 'ENGINE BELT', make: 'Honda', model: 'Civic', year: 2008 });
+    const g01 = r.numbers.find((n) => n.number === '31110-RSA-G01');
+    assert.ok(g01, JSON.stringify(r.numbers.map((n) => n.number)));
+    assert.equal(g01.check.epc.state, 'unreachable');
+    assert.deepEqual(g01.check.web.map((w) => w.how).sort(), ['page', 'search']);
+    assert.deepEqual(
+      g01.check.specs.map((s) => [s.text, s.by]),
+      [['7PK1535', 'page'], ['7PK1535', 'ai']],
+    );
+    assert.equal(g01.check.named, 'search');
   });
 });

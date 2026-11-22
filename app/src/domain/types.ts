@@ -1,3 +1,4 @@
+import type { FitStatus, Marking, NumberCheck } from './fitment';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
 // Money is always integer fils (1 AED = 100 fils). VAT rates are basis points (500 = 5%).
 
@@ -637,7 +638,7 @@ export interface OrderItem {
      * `garage` — on how many of the garage's own lines for this car the number was (v0.49); `fits`, `name`, `model`,
      * `replaces` — the maker's catalogue's word on it (v0.55, domain/ai.ts `FoundNumber`).
      */
-    numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number; fits?: boolean; name?: string; model?: string; replaces?: string[] }[];
+    numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number; fits?: boolean; name?: string; model?: string; replaces?: string[]; check?: NumberCheck }[];
     filled?: string;
     /** The AI's note on the numbers (v0.64, domain/ai.ts `findNote`): why they differ, what to check — in English. */
     note?: string;
@@ -654,6 +655,16 @@ export interface OrderItem {
    * pieces to show (an engine mount complete — three); `diagramMark` above — v0.59's one ring, read when these are none.
    */
   diagramMarks?: { id: string; x: number; y: number; rx: number; ry: number }[];
+  /**
+   * The part's fitment to the car (v0.65, domain/fitment.ts): the marking of the part on the car (typed, or read off the
+   * line's photo — a belt's «7PK2164»), the photos already read for it, and a risk taken knowingly — ordered with a number
+   * not verified, the manager's reason (it does not make the number verified).
+   */
+  fitment?: {
+    marking?: Marking;
+    read?: string[];
+    ack?: { number: string; status: FitStatus; reason: string; at: string };
+  };
   /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */
   sampleIds?: string[];
   brand?: string;

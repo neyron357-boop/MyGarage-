@@ -2186,29 +2186,41 @@ async function launchBrowser() {
         return { no: i.partNumber, find: !!i.aiFind, asked: window.__aiAsked.join() };
       }, job.id);
       if (quiet.no || quiet.find || quiet.asked !== 'vin') throw new Error('the AI looked the part up by itself: ' + JSON.stringify(quiet));
-      // «Найти номер» in its sheet: the number seen in two catalogues written by itself; the diagram kept with the line.
+      // «Найти номер» in its sheet: the numbers offered — none written by itself (v0.65: seen on pages is that it exists,
+      // not that it fits); the diagram kept with the line.
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
       await dlg.locator('[data-ai-numbers] .ai-find').click();
       // v0.64: while it searches — how far it has got, in percent, and a bar of the AI's colours.
       await dlg.locator('[data-ai-numbers] .ai-pct').filter({ hasText: '%' }).waitFor({ timeout: 5000 });
       await dlg.locator('[data-ai-numbers] .ai-progress').waitFor();
-      await page.locator('[data-ai-notice="number"]').filter({ hasText: '04465-12610' }).waitFor({ timeout: 20000 });
-      // …and once found, a short note in English (no note from the AI here: the app's own, from what it knows).
+      const rows = dlg.locator('[data-ai-numbers] .ai-num');
+      await rows.nth(1).waitFor({ timeout: 20000 });
+      // …and once found, a short note in English (no note from the AI here: the app's own, from what it knows): two mirrors
+      // of one catalogue are one source.
       const findNote = await dlg.locator('[data-ai-numbers] [data-ai-note]').textContent();
-      if (findNote !== '04465-12610 is confirmed in 2 catalogues. The others are unconfirmed.') throw new Error('the note: ' + findNote);
+      if (findNote !== 'None is listed twice — check the VIN with the supplier.') throw new Error('the note: ' + findNote);
       if (await dlg.locator('[data-ai-numbers] .ai-pct').count()) throw new Error('the percent stays after the search');
       const no = dlg.getByLabel('Номер', { exact: true });
-      await page.waitForFunction(() => document.querySelector('[role="dialog"] input[aria-label="Номер"]')?.value === '04465-12610', null, { timeout: 5000 }).catch(() => undefined);
-      if ((await no.inputValue()) !== '04465-12610') throw new Error('the number written by the AI: ' + (await no.inputValue()));
-      // The catalogues' rows: the proven number taken (✓, green «2»), the other orange; a globe looks each up on Yandex.
-      const rows = dlg.locator('[data-ai-numbers] .ai-num');
-      await rows.first().waitFor();
+      await page.waitForTimeout(400);
+      if ((await no.inputValue()) !== '' || (await page.locator('[data-ai-notice="number"]').count())) throw new Error('a number written with nothing proving it fits: ' + (await no.inputValue()));
+      // v0.65: each row's fitment — none green (not one is shown to fit this car); its sources apart.
       if ((await rows.count()) !== 2) throw new Error('number rows: ' + (await rows.count()));
-      if ((await rows.nth(0).locator('.ai-pick').getAttribute('aria-pressed')) !== 'true' || (await rows.nth(0).locator('.ai-seen').textContent()) !== '2') throw new Error('the proven row: ' + (await rows.nth(0).textContent()));
+      const statuses = await rows.locator('.fit-badge').evaluateAll((bs) => bs.map((b) => b.dataset.status));
+      if (statuses.join() !== 'unverified,unverified') throw new Error('the numbers’ fitment: ' + statuses.join());
+      if ((await rows.nth(0).locator('.ai-pick').getAttribute('aria-pressed')) !== 'false' || (await rows.nth(0).locator('.fit-sources').textContent()) !== '1') throw new Error('the first row: ' + (await rows.nth(0).textContent()));
+      // Why: what is missing for it to be verified — said, with the evidence it has.
+      await rows.nth(0).locator('.fit-badge').click();
+      const sheet = page.locator('[data-fit-sheet]');
+      await sheet.waitFor();
+      const missing = await sheet.locator('[data-missing]').evaluateAll((ms) => ms.map((m) => m.dataset.missing));
+      if (!missing.includes('epc') || !missing.includes('frame')) throw new Error('what is missing: ' + missing.join());
+      await shot('38f-fit-why');
+      await page.keyboard.press('Escape');
+      await sheet.waitFor({ state: 'detached' });
       const other = dlg.locator('.ai-num[data-unsure] .ai-pick').filter({ hasText: '04465-02220' });
       await other.waitFor();
       const yandex = await dlg.locator('a[aria-label="Найти в Яндексе"]').evaluateAll((as) => as.map((a) => [a.getAttribute('href'), a.getAttribute('target')]));
-      if (JSON.stringify(yandex[0]) !== JSON.stringify(['https://yandex.ru/search/?text=04465-12610', '_blank']) || yandex.length !== 3) throw new Error('Yandex: ' + JSON.stringify(yandex));
+      if (JSON.stringify(yandex[0]) !== JSON.stringify(['https://yandex.ru/search/?text=04465-12610', '_blank']) || yandex.length !== 2) throw new Error('Yandex: ' + JSON.stringify(yandex));
       // v0.52: every picture on top of the sheet, one row of one size — the AI's sample and diagram marked as its.
       await dlg.locator('[data-line-media] .line-media-tile[data-kind="diagram"] .line-media-ai').waitFor();
       await dlg.locator('[data-line-media] .line-media-tile[data-kind="sample"] .line-media-ai').waitFor();
@@ -2259,7 +2271,7 @@ async function launchBrowser() {
         const i = (await db.items.where('orderId').equals(id).toArray())[0];
         return { ru: i.titleRu, en: i.titleEn, no: i.partNumber, diagrams: i.diagramIds?.length, samples: i.sampleIds?.length, photos: i.mediaIds?.length ?? 0, asked: window.__aiAsked };
       }, job.id);
-      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== '04465-12610' || line.diagrams !== 1 || line.samples !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-find')
+      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== undefined || line.diagrams !== 1 || line.samples !== 1 || line.photos !== 0 || line.asked.join() !== 'vin,part-find')
         throw new Error('the line after the AI: ' + JSON.stringify(line));
       // The line's preview on the job: its diagram, outlined.
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb img.part-thumb-outlined').waitFor();
@@ -2287,7 +2299,7 @@ async function launchBrowser() {
         const i = lines[lines.length - 1];
         return { id: i.id, n: lines.length, no: i.partNumber, search: i.aiFind?.search, garage: i.aiFind?.numbers.find((x) => x.number === '04465-12610')?.garage, diagrams: i.diagramIds?.length, samples: i.sampleIds?.length, asked: window.__aiAsked };
       }, job.id);
-      if (again.n !== 2 || again.no !== '04465-12610' || again.search !== 'web' || again.garage !== 1 || again.diagrams !== 1 || again.samples !== 1 || again.asked.join() !== 'vin,part-find')
+      if (again.n !== 2 || again.no !== undefined || again.search !== 'web' || again.diagrams !== 1 || again.samples !== 1 || again.asked.join() !== 'vin,part-find')
         throw new Error('the second line from the garage’s memory: ' + JSON.stringify(again));
       // The job goes on with one line of the kind (the steps after pick parts by their names).
       await page.evaluate(async (id) => void (await (await import('/src/services/estimate.ts')).removeItem(id)), again.id);
@@ -3577,7 +3589,7 @@ async function launchBrowser() {
       for (const o of await db.orders.where('vehicleId').equals(v).toArray()) await deleteJob(o.id, { withRecords: true });
     }, made.vehicleId);
   });
-  await step('v0.55: the AI’s search by the maker’s catalogue — no car: «Укажите машину», nothing asked; a number on this car’s diagram written itself and marked in the sheet; the diagram first, the part’s place drawn on it', async () => {
+  await step('v0.55: the AI’s search by the maker’s catalogue — no car: «Укажите машину», nothing asked; a number on the model’s diagram offered — «Частично», not written (v0.65); the diagram first, the part’s place drawn on it', async () => {
     const dlg = page.getByRole('dialog');
     const made = await page.evaluate(async () => {
       const ai = await import('/src/services/ai.ts');
@@ -3642,7 +3654,7 @@ async function launchBrowser() {
         const at = (x, y) => [...g.getImageData(x, y, 1, 1).data].slice(0, 3);
         return { number: pads.partNumber, fits: pads.aiFind.numbers[0].fits, oil: !!oil.aiFind, type: blob.type, size: [bmp.width, bmp.height], inMark: at(50, 30), away: at(250, 180), asked: window.__asked.filter((x) => x === 'part-find').length };
       }, made.known);
-      if (got.number !== '04465-60280' || !got.fits || got.oil || got.asked !== 1) throw new Error('the number on the diagram: ' + JSON.stringify(got));
+      if (got.number !== undefined || !got.fits || got.oil || got.asked !== 1) throw new Error('the number on the diagram: ' + JSON.stringify(got));
       const yellow = got.inMark[0] > 200 && got.inMark[1] > 180 && got.inMark[2] < 200;
       if (got.type !== 'image/png' || got.size.join() !== '300,200' || !yellow || got.away.join() !== '255,255,255') throw new Error('the mark on the diagram: ' + JSON.stringify(got));
       // The line's preview is the diagram; its sheet: the diagram first of the AI's pictures, the number's row says the
@@ -3650,7 +3662,8 @@ async function launchBrowser() {
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb[data-ai-preview]').waitFor();
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
       const row = dlg.locator('[data-ai-numbers] .ai-num').first();
-      await row.locator('.ai-seen[data-fits]').waitFor();
+      // v0.65: on the model's diagram in its years — partly (yellow): not the car's engine, trim or frame.
+      await row.locator('.fit-badge[data-status="partial"]').waitFor();
       const sub = await row.locator('.ai-num-sub').textContent();
       if (!/Pad Kit, Disc Brake, Front/.test(sub) || !/Land Cruiser GRJ200/.test(sub) || !/вместо 04465-60270/.test(sub)) throw new Error('the catalogue’s word on the number: ' + sub);
       const kinds = await dlg.locator('[data-line-media] .line-media-tile[data-kind]').evaluateAll((ts) => ts.map((t) => t.dataset.kind));
@@ -3664,6 +3677,83 @@ async function launchBrowser() {
         ai.setAiTransport(undefined);
         const { deleteJob } = await import('/src/services/orders.ts');
         for (const id of Object.values(ids)) await deleteJob(id, { withRecords: true }).catch(() => undefined);
+      }, made);
+    }
+  });
+  await step('v0.65: a belt’s number against the belt on the car (the real case) — 7PK2164 typed: 31110-RSA-G01 / G02 (7PK1535) a conflict, never green; ordered only with a reason, its status unchanged', async () => {
+    const dlg = page.getByRole('dialog');
+    const made = await page.evaluate(async () => {
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { updateVehicle } = await import('/src/services/customers.ts');
+      const { db } = await import('/src/db/db.ts');
+      const o = await checkIn({ plate: { emirate: 'DXB', code: 'H', number: '21640' }, make: 'Honda', model: 'Civic', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await updateVehicle(o.vehicleId, { year: 2008, engine: '1.8L' });
+      // As v0.64 left it: the number written by itself on «seen in two catalogues».
+      const it = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'ENGINE BELT', qty: 1, unitPriceFils: 0, partNumber: '31110-RSA-G01' });
+      const at = new Date().toISOString();
+      const check = (url) => ({
+        at,
+        epc: { state: 'read', url, name: 'Belt, Alternator (Bando)', kind: true, diagrams: 2, fit: 'model', headings: ['Civic · 2006–2011'] },
+        web: [{ url: 'https://www.amayama.com/x', how: 'search' }, { url: 'https://partsouq.com/y', how: 'search' }],
+        specs: [{ text: '7PK1535', by: 'page', from: 'https://belts.example/x' }],
+        named: 'search',
+      });
+      await db.items.update(it.id, {
+        aiFind: {
+          at,
+          search: 'web',
+          part: 'ENGINE BELT',
+          filled: '31110-RSA-G01',
+          numbers: [
+            { number: '31110-RSA-G01', brand: 'Honda', seen: ['https://www.amayama.com/x', 'https://partsouq.com/y'], fits: true, name: 'Belt, Alternator (Bando)', check: check('https://www.megazip.net/parts/honda-31110rsag01') },
+            { number: '31110-RSA-G02', brand: 'Honda', seen: ['https://www.amayama.com/x'], check: check('https://www.megazip.net/parts/honda-31110rsag02') },
+          ],
+        },
+      });
+      return { job: o.id, item: it.id };
+    });
+    try {
+      await page.goto(BASE + '#/orders/' + made.job);
+      await front('.list-row').filter({ hasText: 'ENGINE BELT' }).click();
+      // Judged again: on the model's diagram in its years — partly; what it lacks said under the number.
+      await dlg.locator('[data-fit-current="partial"]').waitFor();
+      if (await dlg.locator('.fit-badge[data-status="verified"]').count()) throw new Error('a green tick with no proof');
+      // The belt on the car: 7PK2164 — both numbers are 7PK1535 belts: a conflict.
+      const marking = dlg.getByLabel('Маркировка', { exact: true });
+      await marking.fill('7pk2164');
+      await marking.press('Enter');
+      await dlg.locator('[data-fit-current="conflict"]').waitFor({ timeout: 5000 });
+      const statuses = await dlg.locator('[data-ai-numbers] .ai-num .fit-badge').evaluateAll((bs) => bs.map((b) => b.dataset.status));
+      if (statuses.join() !== 'conflict,conflict') throw new Error('the belt numbers: ' + statuses.join());
+      const hint = await dlg.locator('[data-fit-current] .fit-hint').textContent();
+      if (!/7PK2164/.test(hint) || !/7PK1535/.test(hint)) throw new Error('the conflict said: ' + hint);
+      await shot('48a-fit-conflict');
+      // «Заказано» and save: asked for the reason first; without one — nothing.
+      await dlg.locator('.mantine-SegmentedControl-label').filter({ hasText: 'Заказано' }).click();
+      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      const risk = page.locator('[data-order-risk]');
+      await risk.waitFor();
+      await risk.locator('.fit-badge[data-status="conflict"]').waitFor();
+      const anyway = risk.getByRole('button', { name: 'Заказать всё равно' });
+      if (!(await anyway.isDisabled())) throw new Error('ordered with no reason');
+      await shot('48b-fit-order-reason');
+      await risk.locator('textarea').fill('Supplier checked by VIN, belt 7PK2164 on hand');
+      await anyway.click();
+      await risk.waitFor({ state: 'detached' });
+      await page.waitForFunction(async (id) => (await (await import('/src/db/db.ts')).db.items.get(id))?.procurementStatus === 'ordered', made.item, { timeout: 5000 });
+      const after = await page.evaluate(async (id) => {
+        const { loadFitment } = await import('/src/services/fitment.ts');
+        const { db } = await import('/src/db/db.ts');
+        const i = await db.items.get(id);
+        return { status: i.procurementStatus, ack: i.fitment?.ack, marking: i.fitment?.marking?.text, fit: (await loadFitment(id))?.current?.fit?.status };
+      }, made.item);
+      if (after.status !== 'ordered' || after.ack?.reason !== 'Supplier checked by VIN, belt 7PK2164 on hand' || after.ack?.status !== 'conflict' || after.marking !== '7PK2164' || after.fit !== 'conflict')
+        throw new Error('ordered with the risk: ' + JSON.stringify(after));
+    } finally {
+      await page.evaluate(async (ids) => {
+        const { deleteJob } = await import('/src/services/orders.ts');
+        await deleteJob(ids.job, { withRecords: true }).catch(() => undefined);
       }, made);
     }
   });

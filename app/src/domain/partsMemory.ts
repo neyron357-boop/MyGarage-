@@ -1,4 +1,5 @@
 import { canonicalMake, canonicalModel } from './carCatalog';
+import type { GarageUse } from './fitment';
 import { formatNumber, sameNumber } from './partNumbers';
 import { partKey } from './partsVocab';
 
@@ -29,6 +30,10 @@ export interface PriorPart {
   /** The part came (received / installed) or the line was done: the number was bought and fitted. */
   fitted: boolean;
   car: CarKey;
+  /** The car itself (v0.65: fitted on this very car is proof; on another car of the model — not). */
+  vehicleId?: string;
+  /** Fitted for certain (v0.65): the work done or the part installed — not merely bought. */
+  installed?: boolean;
   /** A web search the AI made on that line: when, and what it found (with where each number was seen). */
   web?: { at: string; numbers: { number: string; brand?: string; note?: string; seen: string[] }[] };
   /** The pictures the AI kept on that line. */
@@ -99,4 +104,16 @@ export function partsMemory(prior: PriorPart[], car: CarKey, name: string, now =
   const proven = fitted.length === 1 ? fitted[0].number : undefined;
   const web = mine.find((p) => p.web && p.web.numbers.length && now.getTime() - new Date(p.web.at).getTime() <= webDays * DAY);
   return { numbers, proven, web };
+}
+
+/**
+ * The garage's own uses of this part on cars of the model (v0.65, domain/fitment.ts): each line's number, on this very car
+ * or another, fitted or only bought. Left and right are told apart here (the memory's key is not).
+ */
+export function garageUses(prior: PriorPart[], car: CarKey, vehicleId: string | undefined, name: string): GarageUse[] {
+  const key = partKey(name);
+  if (!key) return [];
+  return prior
+    .filter((p) => !!p.number?.trim() && sameCar(p.car, car) && partKey(p.name) === key)
+    .map((p) => ({ number: formatNumber(car.make, p.number!), name: p.name, sameVehicle: !!vehicleId && p.vehicleId === vehicleId, installed: !!p.installed, ...(p.jobNo ? { jobNo: p.jobNo } : {}), at: p.at }));
 }

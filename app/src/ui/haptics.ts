@@ -151,6 +151,7 @@ const TAPPABLE = [
   'button.money-card-main',
   'button.job-card-open',
   'button.action-tile',
+  'button.fit-badge',
   '.scroll-tabs > button',
   '.tab-bar button',
   'button.tab-plus',

@@ -109,17 +109,19 @@ describe('the note on what was found (v0.64)', () => {
   });
   it('else the app’s own: the catalogue’s diagram, a newer number for an older one, the others', () => {
     expect(findNote({ search: 'web', numbers: [n('04465-60320', { fits: true, replaces: ['04465-60280'] }), n('04465-0K290')] })).toBe(
-      "04465-60320 is on this car's diagram in the maker's catalogue. 04465-60320 supersedes 04465-60280 — the same part.",
+      "04465-60320 is on the maker's diagram for this model and years — not the engine or the trim. 04465-60320 supersedes 04465-60280 — the same part.",
     );
-    expect(findNote({ search: 'web', numbers: [n('04465-60320', { fits: true }), n('04465-0K290')] })).toBe("04465-60320 is on this car's diagram in the maker's catalogue. The others are not on its diagram.");
-    expect(findNote({ search: 'web', numbers: [n('A', { fits: true }), n('B', { fits: true })] })).toBe("2 numbers on this car's diagram — variants: check the VIN or build date.");
+    expect(findNote({ search: 'web', numbers: [n('04465-60320', { fits: true }), n('04465-0K290')] })).toBe("04465-60320 is on the maker's diagram for this model and years — not the engine or the trim. The others are not on its diagram.");
+    expect(findNote({ search: 'web', numbers: [n('A', { fits: true }), n('B', { fits: true })] })).toBe("2 numbers on the model's diagram — variants: check the VIN or build date.");
   });
   it('how sure: two catalogues, one place only, the AI’s memory, the garage’s own jobs', () => {
-    expect(findNote({ search: 'web', numbers: [n('04465-12610', { seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] }), n('04465-02220')] })).toBe(
-      '04465-12610 is confirmed in 2 catalogues. The others are unconfirmed.',
+    // v0.65: two mirrors of one catalogue are one source; two sources say the number exists, not that it fits.
+    expect(findNote({ search: 'web', numbers: [n('04465-12610', { seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] }), n('04465-02220')] })).toBe('None is listed twice — check the VIN with the supplier.');
+    expect(findNote({ search: 'web', numbers: [n('04465-12610', { seen: ['https://www.amayama.com/p/1', 'https://www.toyota-parts.example/p/2'] }), n('04465-02220')] })).toBe(
+      '04465-12610 is listed by several sources — it exists; its fitment is not proven. The others are seen once or not at all.',
     );
     expect(findNote({ search: 'web', numbers: [n('04465-12610', { seen: ['https://www.amayama.com/p/1'] })] })).toBe('Seen in one place only — confirm with the supplier.');
     expect(findNote({ search: 'model', numbers: [n('04465-12610')] })).toBe("From the AI's memory, not checked online — confirm by VIN before ordering.");
-    expect(findNote({ search: 'garage', numbers: [n('90915-YZZE1', { garage: 2 })] })).toBe('Fitted on this car before.');
+    expect(findNote({ search: 'garage', numbers: [n('90915-YZZE1', { garage: 2 })] })).toBe('Fitted on a car of this model before.');
   });
 });

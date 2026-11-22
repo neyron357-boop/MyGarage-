@@ -12,6 +12,8 @@ import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '
 import { aiAfterPart } from '../../services/ai';
 import { AiPartNumbers, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
+import { FitCurrent, MarkingRow, readMarkingLater, useLineFitment, useOrderGuard } from '../fitment/Fitment';
+import { sameNumber } from '../../domain/partNumbers';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
@@ -187,6 +189,10 @@ export function LineSheet({
   const [fresh, setFresh] = useState<{ id: string; file: File; src: string }[]>([]);
   // What the garage's AI found for the part (v0.48), as it comes: read live — the form itself keeps what is typed.
   const live = useScreenLiveQuery(() => (item ? db.items.get(item.id) : undefined), [item?.id]);
+  // Each number's fitment to the car (v0.65): the one typed or taken under «Номер», the belt's marking.
+  const fitment = useLineFitment(kind === 'part' ? item?.id : undefined);
+  const typedFit = partNumber.trim() ? fitment?.rows.find((r) => sameNumber(r.number, partNumber)) : undefined;
+  const order = useOrderGuard();
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
   useEffect(() => {
@@ -244,8 +250,13 @@ export function LineSheet({
   const own = kind === 'part' && part === 'customer';
   const priced = { ...priceFromEntered(own ? 0 : price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
   const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: kind === 'part' ? qty || 1 : 1, ...priced } as OrderItem) : undefined;
-  const save = () =>
-    run(async () => {
+  const save = async () => {
+    // Ordered with a number the search found and not verified (v0.65): the manager's reason first — or not ordered.
+    if (kind === 'part' && item && part === 'ordered' && partStateOf(item) !== 'ordered' && !(await order.guard([item.id], { [item.id]: partNumber }))) {
+      setPart(partStateOf(item));
+      return;
+    }
+    return run(async () => {
       const typed = lineName(title.trim());
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
       const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
@@ -278,7 +289,10 @@ export function LineSheet({
       onClose();
       // A part saved: the garage's AI looks at its name and looks up its number (v0.48) — in the background.
       if (kind === 'part' && itemId) aiAfterPart(itemId);
+      // A belt's new photo: its marking read for the fitment (v0.65) — in the background.
+      if (kind === 'part' && itemId && fresh.length) readMarkingLater(itemId);
     });
+  };
   const rate = taxRate / 100;
   // The total under the price is for the manager: in the app's language (the line itself is in the documents' one).
   const totalNote =
@@ -332,6 +346,7 @@ export function LineSheet({
     });
   return (
     <Modal opened={opened} onClose={onClose} title={item ? t(service ? 'job.addService' : kind === 'labor' ? 'job.addWork' : 'job.addPart') : service ? t('qi.addService') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
+      {order.node}
       <Stack gap="lg">
         {!item && (suggestions?.top.length ?? 0) > 0 && (
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
@@ -424,6 +439,8 @@ export function LineSheet({
               </div>
             </div>
           )}
+          {kind === 'part' && typedFit && <FitCurrent number={typedFit.number} fit={typedFit.fit} />}
+          {kind === 'part' && item && fitment?.marked && <MarkingRow itemId={item.id} fitment={fitment} hasPhotos={kept.length > 0} />}
           {kind === 'part' && item && (
             // The garage's AI (v0.48): the part's numbers from the catalogues — a tap takes one into «Номер».
             <div className="ios-row" style={{ display: 'block' }}>

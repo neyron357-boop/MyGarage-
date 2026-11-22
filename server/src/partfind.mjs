@@ -115,7 +115,38 @@ export function noteFor(text, numbers) {
 
 const carWords = (car, vin, built) => `${car || 'unknown'}${vin ? `, VIN ${vin}` : ''}${built ? ` (built in ${built})` : ''}, in the UAE — GCC specification unless the VIN says otherwise`;
 const FRAME = `F | this car's frame (chassis) codes as the maker's catalogue has them (like NCP91, UZJ200, E26), the likeliest first`;
-const LINES = `N | number as the catalogue writes it | maker | what tells the variants apart (market, dates, engine, side; replaces …), under 60 characters`;
+const LINES = `N | number as the catalogue writes it | maker | what tells the variants apart (market, dates, engine, side, with A/C or without; replaces …; a belt — its size like 7PK2164), under 60 characters`;
+
+/*
+ * A ribbed belt's size (v0.65): «7PK2164» — ribs, profile, length. Said by a page next to a number, by the catalogue's
+ * name or by the AI's note, it is kept with the number — the app compares it with the belt on the car (domain/fitment.ts).
+ */
+const BELT_LENGTHS = { PK: [500, 3000], PJ: [300, 2500], PL: [600, 4000], PM: [1000, 6000], PH: [500, 2500] };
+export function beltSpecsIn(text) {
+  const out = [];
+  for (const m of String(text ?? '').toUpperCase().matchAll(/(?<![A-Z0-9])(\d{1,2})\s?-?\s?(P[KJLMH])\s?-?\s?(\d{3,4})(?![0-9])/g)) {
+    const [lo, hi] = BELT_LENGTHS[m[2]];
+    const ribs = Number(m[1]);
+    const len = Number(m[3]);
+    const s = `${ribs}${m[2]}${len}`;
+    if (ribs >= 2 && ribs <= 20 && len >= lo && len <= hi && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+/** The text round each place a number is written on a page (with its dashes and spaces or without): what is said of it. */
+export function textNear(text, number, span = 260) {
+  const plain = plainNumber(number);
+  if (plain.length < 5) return '';
+  const re = new RegExp(plain.split('').map((ch) => ch.replace(/[^A-Z0-9]/g, '')).join('[\\s.\\-]?'), 'gi');
+  const out = [];
+  for (const m of String(text ?? '').matchAll(re)) {
+    out.push(text.slice(Math.max(0, m.index - span), m.index + m[0].length + span));
+    if (out.length >= 6) break;
+  }
+  return out.join(' … ');
+}
+/** A belt is asked for (not a timing belt, not a seat belt): its size is looked for on the pages. */
+export const beltAsked = (part) => /\bbelts?\b|ремен|ремн/i.test(part) && !/timing|cam ?belt|seat|грм|безопасн/i.test(part);
 /** The note for the garage (v0.64): one line of a few words — in the answer given anyway, no question of its own. */
 const NOTE = `S | a note for the garage, under 20 words: why the numbers differ, what to check before ordering`;
 
@@ -210,7 +241,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
       if (plain.length < 5 || !/\d/.test(plain)) return undefined;
       let c = all.get(plain);
       if (!c) {
-        c = { number: written, plain, brand: String(n.brand ?? '').trim().slice(0, 40), note: String(n.note ?? '').trim().slice(0, 80), pages: [], backed: [], opened: [], catalog: undefined, kind: undefined, fits: false, from, web: 0, order: order++, replaces: [], into: undefined };
+        c = { number: written, plain, brand: String(n.brand ?? '').trim().slice(0, 40), note: String(n.note ?? '').trim().slice(0, 80), pages: [], backed: [], opened: [], catalog: undefined, kind: undefined, fits: false, from, web: 0, order: order++, replaces: [], into: undefined, specs: [] };
         all.set(plain, c);
       } else {
         if (!c.note && n.note) c.note = String(n.note).trim().slice(0, 80);
@@ -243,7 +274,13 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
         if (!todo.length) break;
         await Promise.all(
           todo.map(async (c) => {
-            c.catalog = inCatalog ? ((await catalogPage(make, c.number).catch(() => null)) ?? null) : null;
+            // v0.65: a catalogue that did not answer is not «no such number» — the app says it was not checked.
+            c.catalog = inCatalog
+              ? ((await catalogPage(make, c.number).catch(() => {
+                  c.catalogDown = true;
+                  return null;
+                })) ?? null)
+              : null;
             if (!c.catalog) return;
             c.kind = sameKind(part, c.catalog.name);
             c.fits = c.catalog.diagrams.some((d) => diagramFits(d, carKey, c.catalog.brand));
@@ -278,6 +315,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
         const old = c.catalog?.number ?? c.number;
         if (!to.replaces.includes(old)) to.replaces.push(old);
         for (const k of ['pages', 'backed', 'opened']) for (const x of c[k]) if (!to[k].includes(x)) to[k].push(x);
+        for (const s of c.specs) if (!to.specs.some((x) => x.text === s.text && x.from === s.from)) to.specs.push(s);
         if (c.fits && c.kind !== false && !to.fitBy) to.fitBy = c;
         if (c.fits && c.kind !== false) to.fits = true;
         if (to.kind === undefined) to.kind = c.kind;
@@ -452,13 +490,23 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
     if ([...all.values()].some((c) => c.catalog)) search = 'web';
 
     // The pages named (public addresses only) are opened here when the catalogue did not speak: a number seen on them counts.
+    // A belt's (v0.65): opened all the same — what size each page says the number is (free: no question, no search).
     const spoken = live().some((c) => c.catalog && c.kind !== false);
+    const belt = beltAsked(part);
     let pages = [];
-    if (!spoken && search === 'web') {
+    if ((!spoken || belt) && search === 'web') {
       const urls = [...new Set([...live().flatMap((c) => c.pages), ...named.map((i) => i.from).filter(Boolean), ...sources.map((x) => x.url)])].slice(0, 8);
       step('pages');
       pages = (await within(urls.map(page), fetchMs)).filter(Boolean);
-      for (const c of live()) for (const pg of pages) if (plainNumber(pageText(pg.html)).includes(c.plain) && !c.opened.includes(pg.url)) c.opened.push(pg.url);
+      for (const pg of pages) {
+        const text = pageText(pg.html);
+        const flat = plainNumber(text);
+        for (const c of live()) {
+          if (!flat.includes(c.plain)) continue;
+          if (!c.opened.includes(pg.url)) c.opened.push(pg.url);
+          if (belt) for (const s of beltSpecsIn(textNear(text, c.number))) if (!c.specs.some((x) => x.text === s && x.from === pg.url)) c.specs.push({ text: s, by: 'page', from: pg.url });
+        }
+      }
     }
 
     // The numbers, the surest first: on this car's diagram; in the catalogue as this part; seen on the web. Left out:
@@ -472,6 +520,44 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
       .filter((c) => fit.has(c) || c.own || c.web || evidence(c) > 0 || !inCatalog || (c.catalog && !fit.size))
       .sort((a, b) => rank(a) - rank(b) || evidence(b) - evidence(a) || a.order - b.order)
       .slice(0, 5);
+    /*
+     * What this computer found out about a number, kept with it (v0.65 — the app decides from it whether the number fits,
+     * domain/fitment.ts): the maker's catalogue's word (read, not there, not answering; its name; is it on this model's
+     * diagrams in these years — or only on other models'); the pages that have it and the search results it came from (that
+     * it exists — no more); the sizes said of it and by whom; who named it. Nothing of it is the AI's judgement.
+     */
+    const at = new Date().toISOString();
+    const checkOf = (c, mine) => {
+      const headings = (list) => [...new Set(list.map((d) => headingOf(d, d.brand)).filter(Boolean))].slice(0, 3);
+      const onModel = mine.filter((d) => d.fit);
+      const epc = !inCatalog
+        ? { state: 'no-make' }
+        : c.catalog
+          ? {
+              state: 'read',
+              url: c.catalog.url,
+              name: c.catalog.name,
+              ...(c.kind === undefined ? {} : { kind: c.kind }),
+              diagrams: mine.length,
+              // On a diagram of the model in its years (the frame the AI named does not count here); only on other models'.
+              fit: onModel.length ? 'model' : mine.length && carKey.model && carKey.year ? 'other' : 'unknown',
+              headings: headings(onModel.length ? onModel : mine),
+              via: c.fitBy && !c.catalog.diagrams.some((d) => diagramFits(d, carKey, c.catalog.brand)) ? 'older' : 'own',
+            }
+          : c.catalogDown
+            ? { state: 'unreachable' }
+            : c.catalog === null
+              ? { state: 'none' }
+              : { state: 'unread' };
+      const web = [...new Set(c.opened)].map((url) => ({ url, how: 'page' }));
+      if (search === 'web') for (const url of c.backed) if (!web.some((w) => w.url === url)) web.push({ url, how: 'search' });
+      const specs = belt ? [...c.specs] : [];
+      if (belt) {
+        for (const s of beltSpecsIn(c.catalog?.name)) specs.push({ text: s, by: 'epc', from: c.catalog.url });
+        for (const s of beltSpecsIn(c.note)) specs.push({ text: s, by: 'ai' });
+      }
+      return { at, epc, web: web.slice(0, 12), specs: specs.slice(0, 8), named: c.own ? 'garage' : c.web ? 'search' : 'memory' };
+    };
     const numbers = out.map((c) => {
       const mine = diagramsOf(c);
       const shown = mine.find((d) => d.exact) ?? mine.find((d) => d.fit) ?? mine[0];
@@ -487,6 +573,7 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
         ...(c.catalog ? { name: c.catalog.name } : {}),
         ...(shown ? { model: headingOf(shown, shown.brand) } : {}),
         ...(c.replaces.length ? { replaces: c.replaces.slice(0, 4) } : {}),
+        check: checkOf(c, mine),
       };
     });
 

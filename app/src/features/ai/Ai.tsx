@@ -1,11 +1,12 @@
 import { ActionIcon, Text } from '@mantine/core';
-import { IconChecks, IconCircle, IconCircleCheckFilled, IconHelpCircleFilled, IconHistory, IconInfoCircle, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
-import { useSyncExternalStore, type CSSProperties } from 'react';
+import { IconCircle, IconCircleCheckFilled, IconInfoCircle, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
+import { useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
-import { catalogCount, findNote } from '../../domain/ai';
+import { findNote } from '../../domain/ai';
 import { aiAllParts, aiFindPart, aiOn, aiPartsPercent, aiPartsProgress, aiProgress, aiProgressVersion, aiWorking, aiWorkVersion, subscribeAiProgress, subscribeAiWork, yandexUrl } from '../../services/ai';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
+import { FitBadge, FitSheet, FitSources, useLineFitment } from '../fitment/Fitment';
 
 /*
  * How the garage's AI looks (v0.48.1, the user: «улучши дизайн под ИИ, качественно и профессионально»): one mark — a
@@ -163,6 +164,8 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
   const live = useScreenLiveQuery(() => db.items.get(itemId), [itemId]);
   const busy = useAiWorking(`find:${itemId}`, `name:${itemId}`);
   const p = useAiProgress(`find:${itemId}`);
+  const fits = useLineFitment(itemId);
+  const [why, setWhy] = useState<string | null>(null);
   const on = aiOn();
   const find = live?.aiFind;
   if (!live || (!find && !on)) return null;
@@ -199,51 +202,35 @@ export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chos
         </Text>
       )}
       {find?.numbers.map((n) => {
-        const count = find.search !== 'model' ? catalogCount(n.seen) : 0;
         const garage = n.garage ?? 0;
-        // Not seen in a catalogue nor used by the garage: a guess — orange.
-        const unsure = count === 0 && garage === 0;
+        // v0.65: its status by the fitment's rules (domain/fitment.ts) — green only when it fits this very car; how many
+        // independent sources have it, apart (its existence, not its fitting).
+        const fit = fits?.rows.find((r) => r.number === n.number)?.fit;
         const taken = !!chosen.trim() && plain(chosen) === plain(n.number);
         return (
-          <div key={n.number} className="ai-num" data-unsure={unsure || undefined} data-garage={garage || undefined}>
+          <div key={n.number} className="ai-num" data-fit={fit?.status} data-unsure={fit?.status === 'unverified' || undefined} data-garage={garage || undefined}>
             <button type="button" className="ai-pick" aria-pressed={taken} onClick={() => onPick(n.number)}>
               {taken ? <IconCircleCheckFilled size={22} color="var(--mantine-color-cobalt-6)" aria-hidden /> : <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />}
               <span className="ai-num-main">
                 <span className="ai-num-no">{n.number}</span>
                 {/* The maker's catalogue's word (v0.55): its own name of the part, the model and years of its diagram, the
                     older numbers it stands for. */}
-                {(n.brand || n.note || n.name || n.model || garage > 0) && (
+                {(n.brand || n.note || n.name || n.model || garage > 0 || (fit?.sources ?? 0) > 0) && (
                   <span className="ai-num-sub">
+                    {fit && <FitSources count={fit.sources} />}
                     {[garage > 0 ? t('ai.usedIn', { count: garage }) : '', n.name || n.brand, n.model, n.replaces?.length ? t('ai.replaces', { numbers: n.replaces.join(', ') }) : '', n.note].filter(Boolean).join(' · ')}
                   </span>
                 )}
               </span>
-              {n.fits ? (
-                <span className="ai-seen" data-fits title={t('ai.onDiagram')} aria-label={t('ai.onDiagram')}>
-                  <IconChecks size={18} stroke={2.4} aria-hidden />
-                </span>
-              ) : garage > 0 && count === 0 ? (
-                <span className="ai-seen" title={t('ai.usedIn', { count: garage })} aria-label={t('ai.usedIn', { count: garage })}>
-                  <IconHistory size={16} stroke={2.2} aria-hidden />
-                  {garage}
-                </span>
-              ) : unsure ? (
-                <span className="ai-seen" data-unsure title={t('ai.unsure')} aria-label={t('ai.unsure')}>
-                  <IconHelpCircleFilled size={17} aria-hidden />
-                </span>
-              ) : (
-                <span className="ai-seen" title={t('ai.seenIn', { count })} aria-label={t('ai.seenIn', { count })}>
-                  <IconCircleCheckFilled size={15} aria-hidden />
-                  {count}
-                </span>
-              )}
             </button>
+            {fit && <FitBadge fit={fit} onClick={() => setWhy(n.number)} />}
             <YandexButton number={n.number} />
           </div>
         );
       })}
       {/* v0.64: a short note in English — why the numbers differ, what to check (the AI's line, else the app's own). */}
       {find && !busy && <FindNote find={find} />}
+      <FitSheet number={why ?? ''} fit={fits?.rows.find((r) => r.number === why)?.fit} opened={!!why} onClose={() => setWhy(null)} />
     </div>
   );
 }
