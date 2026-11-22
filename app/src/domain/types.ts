@@ -1,4 +1,4 @@
-import type { FitStatus, Marking, NumberCheck } from './fitment';
+import type { FitStatus, Marking, NumberCheck, VinCheck } from './fitment';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
 // Money is always integer fils (1 AED = 100 fils). VAT rates are basis points (500 = 5%).
 
@@ -664,6 +664,8 @@ export interface OrderItem {
     marking?: Marking;
     read?: string[];
     ack?: { number: string; status: FitStatus; reason: string; at: string };
+    /** The number found by the car's VIN in a catalogue — the manager's word (v0.66, domain/vinCatalogs.ts). */
+    vinCheck?: VinCheck;
   };
   /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */
   sampleIds?: string[];

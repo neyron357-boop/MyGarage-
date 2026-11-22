@@ -150,6 +150,20 @@ export const beltAsked = (part) => /\bbelts?\b|ремен|ремн/i.test(part) 
 /** The note for the garage (v0.64): one line of a few words — in the answer given anyway, no question of its own. */
 const NOTE = `S | a note for the garage, under 20 words: why the numbers differ, what to check before ordering`;
 
+/**
+ * The catalogues the search goes to first (v0.66, the user's own list: «каталоги авто GCC со схемами… для образцов авто
+ * США и Канады — rockauto… японские и корейские — catcar»): by where the car was built — for North America RockAuto,
+ * showmetheparts, PartsGeek; in Japan or Korea — EMEX DWC, then catcar (most are GCC cars built there); the rest (the GCC's) — EMEX DWC, EXIST, 7zap, elcats; then the
+ * maker's catalogue's mirrors the search used before. The manager opens the same ones by the VIN (domain/vinCatalogs.ts).
+ */
+export function catalogSites(built) {
+  const us = /^(USA|Canada|Mexico)$/.test(String(built ?? ''));
+  const jk = /^(Japan|Korea)$/.test(String(built ?? ''));
+  const first = us ? ['rockauto.com', 'showmetheparts.com', 'partsgeek.com'] : jk ? ['emexdwc.ae', 'catcar.info', '7zap.com', 'exist.ru'] : ['emexdwc.ae', 'exist.ru', '7zap.com', 'elcats.ru'];
+  const then = us ? ['emexdwc.ae', '7zap.com', 'partsouq.com', 'megazip.net'] : jk ? ['elcats.ru', 'partsouq.com', 'amayama.com', 'megazip.net'] : ['catcar.info', 'partsouq.com', 'amayama.com', 'megazip.net', 'showmetheparts.com', 'partsgeek.com'];
+  return { first, then };
+}
+
 /** The questions («заготовки»): short, what is known already put in front of the model. */
 export const PF = {
   guess: (part, car, vin, built, hints, tried) =>
@@ -168,7 +182,8 @@ Not sure of any number: NONE`,
   search: (part, car, vin, built, hints, { tried = '', deep = false, steps = false, query = '' } = {}) => {
     const known = `${hints.length ? `\nThe garage used ${hints.join(', ')} for this part on this car before: confirm or correct.` : ''}${tried ? `\nThe maker's catalogue was read for these already — do not repeat what it refused, find the right one:\n${tried}` : ''}`;
     const newer = 'The car may be newer than what you know — its parts are in the catalogues all the same: search, do not answer from memory.';
-    const sites = "partsouq.com, amayama.com, megazip.net, 7zap.com, the maker's, dealers' parts shops";
+    const list = catalogSites(built);
+    const sites = `${list.first.join(', ')} first, then ${list.then.join(', ')}, the maker's and dealers' parts shops`;
     const answer = `${FRAME}
 ${LINES} | page address
 D | address of a catalogue diagram picture showing the part | page address
@@ -354,7 +369,8 @@ export function createPartFind({ ask, json, page, image, lookAt, catalogPage, pa
      */
     const decided = () => wellKnown && (deep ? fresh().some((c) => c.fits) : fitting().some((c) => c.own) || firstStands());
 
-    const query = [make, model, String(engine ?? '').trim(), part.toLowerCase(), 'genuine part number partsouq'].filter(Boolean).join(' ');
+    // The step's own search names the first catalogue for this car (v0.66: EMEX DWC for the GCC's, RockAuto for North America's…).
+    const query = [make, model, String(engine ?? '').trim(), part.toLowerCase(), 'genuine part number', catalogSites(built).first[0].replace(/.[a-z]+$/, '')].filter(Boolean).join(' ');
     let search = 'model';
     let stage = 0;
     let sources = [];

@@ -1831,6 +1831,7 @@ export const en: typeof ru = {
       rejected: 'Shown not to fit.',
     },
     reasons: {
+      vinCatalogue: "Found by this car's VIN in the {{site}} catalogue",
       fittedHere: 'Fitted on this car{{job}}',
       replacesFittedHere: "The maker's replacement for {{number}}, fitted on this car",
       epcFrame: "Maker's catalogue: the diagram of frame {{frame}}",
@@ -1850,6 +1851,7 @@ export const en: typeof ru = {
     },
     by: { page: 'a page', epc: 'the catalogue', ai: 'the AI' },
     missing: {
+      vinCheck: "The number checked by this car's VIN in a catalogue (EMEX, EXIST…) — «Found by VIN»",
       vin: "The car's VIN",
       model: 'The model typed by hand (not the AI)',
       year: 'The year',
@@ -1865,6 +1867,7 @@ export const en: typeof ru = {
       oem: "An analog — the maker's number is needed",
     },
     short: {
+      vinCheck: 'VIN check',
       vin: 'VIN',
       model: 'model',
       year: 'year',
@@ -1885,7 +1888,7 @@ export const en: typeof ru = {
     missingTitle: 'Missing',
     evidenceTitle: 'Evidence',
     noEvidence: 'None',
-    ev: { epc: "Maker's catalogue", supersession: "Maker's number replacement", garage: "The garage's jobs", web: 'The number on a page', spec: 'Size', marking: 'Marking on the car', ai: 'Named by the AI' },
+    ev: { vin: 'Found by VIN (the manager)', epc: "Maker's catalogue", supersession: "Maker's number replacement", garage: "The garage's jobs", web: 'The number on a page', spec: 'Size', marking: 'Marking on the car', ai: 'Named by the AI' },
     how: { page: 'the number is on the page', search: 'a Google search result' },
     weight: { fits: 'fitment', exists: 'only that the number exists', against: 'against', none: 'no proof' },
     src: { garage: 'The garage', ai: 'The AI', typed: 'Typed by hand', photo: 'From the photo' },
@@ -1901,6 +1904,13 @@ export const en: typeof ru = {
     orderReason: 'Reason',
     orderAnyway: 'Order anyway',
     reasonNeeded: 'Give a reason',
+    catalogs: 'Catalogues by VIN',
+    noVinShort: 'No VIN',
+    vinCopied: 'VIN {{vin}} copied — paste it into the search',
+    foundByVin: 'Found by VIN',
+    foundWhere: 'Found by VIN where?',
+    foundIn: 'Found by VIN · {{site}}',
+    noVin: "The car's VIN first",
   },
   diagrams: {
     pasteCaption: 'List copied — send it to the supplier in the chat as its own message',

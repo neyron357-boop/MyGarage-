@@ -3757,6 +3757,50 @@ async function launchBrowser() {
       }, made);
     }
   });
+  await step('v0.66: the catalogues by the car’s VIN — a Honda built in Japan: EMEX DWC first, then catcar; EMEX and EXIST open on its VIN; the number found there by the VIN — «Найден по VIN · EMEX», green, ordered with nothing asked', async () => {
+    const dlg = page.getByRole('dialog');
+    const made = await page.evaluate(async () => {
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { updateVehicle } = await import('/src/services/customers.ts');
+      const o = await checkIn({ plate: { emirate: 'DXB', code: 'H', number: '21660' }, make: 'Honda', model: 'Civic', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await updateVehicle(o.vehicleId, { year: 2008, engine: '1.8L', vin: 'JHMFD16408S200000' });
+      const it = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'ENGINE BELT', qty: 1, unitPriceFils: 0 });
+      return { job: o.id, item: it.id };
+    });
+    try {
+      await page.goto(BASE + '#/orders/' + made.job);
+      await front('.list-row').filter({ hasText: 'ENGINE BELT' }).click();
+      const cats = dlg.locator('[data-vin-catalogs] a[data-catalog]');
+      await cats.first().waitFor();
+      const ids = await cats.evaluateAll((as) => as.map((a) => a.dataset.catalog));
+      if (ids[0] !== 'emex' || ids[1] !== 'catcar' || ids.length !== 8) throw new Error('the catalogues’ order: ' + ids.join());
+      const emex = await dlg.locator('[data-vin-catalogs] a[data-catalog="emex"]').evaluate((a) => [a.getAttribute('href'), a.getAttribute('target')]);
+      if (emex[0] !== 'https://emexdwc.ae/Vehicles.aspx?ft=findByVIN&c=&ssd=&vin=JHMFD16408S200000' || emex[1] !== '_blank') throw new Error('EMEX on the VIN: ' + emex.join(' '));
+      // The number the manager found on EMEX by the VIN: typed, and said where.
+      await dlg.getByLabel('Номер', { exact: true }).fill('56992-RNA-A02');
+      await dlg.locator('[data-vin-found-open]').click();
+      await page.locator('[data-found-in="emex"]').click();
+      await dlg.locator('[data-vin-found="emexdwc.ae"]').waitFor({ timeout: 5000 });
+      await dlg.locator('[data-fit-current="verified"]').waitFor({ timeout: 5000 });
+      await shot('49-vin-catalogs');
+      // Ordered: verified — nothing asked.
+      await dlg.locator('.mantine-SegmentedControl-label').filter({ hasText: 'Заказано' }).click();
+      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await dlg.waitFor({ state: 'detached' });
+      if (await page.locator('[data-order-risk]').count()) throw new Error('asked for a reason for a verified number');
+      const after = await page.evaluate(async (id) => {
+        const i = await (await import('/src/db/db.ts')).db.items.get(id);
+        return { status: i.procurementStatus, no: i.partNumber, by: i.fitment?.vinCheck?.source, ack: i.fitment?.ack };
+      }, made.item);
+      if (after.status !== 'ordered' || after.no !== '56992-RNA-A02' || after.by !== 'emexdwc.ae' || after.ack) throw new Error('ordered: ' + JSON.stringify(after));
+    } finally {
+      await page.evaluate(async (ids) => {
+        const { deleteJob } = await import('/src/services/orders.ts');
+        await deleteJob(ids.job, { withRecords: true }).catch(() => undefined);
+      }, made);
+    }
+  });
   await step('v0.39: the developer’s feedback tool — the pencil; an element picked (its own action does not run), two words, saved; «Мои замечания»; one ZIP for an agent (TASKS.md, annotations.json, the screenshot with its frame)', async () => {
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '1'));
     await page.goto(BASE + '#/');

@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { carFacts, FIT_ORDER, fitmentsOf, partCategory, readBeltMarking, RULES, type CarFacts, type Fitment, type FitStatus, type Marking, type PartCategory } from '../domain/fitment';
+import { formatNumber } from '../domain/partNumbers';
 import { garageUses } from '../domain/partsMemory';
 import { sameNumber } from '../domain/partNumbers';
 import type { OrderItem, Vehicle } from '../domain/types';
@@ -27,6 +28,11 @@ export interface LineFitment {
   marking?: Marking;
   /** The line's kind of part has a marking to compare (belts). */
   marked: boolean;
+  /** The car as the catalogues need it (v0.66: the VIN catalogues' addresses). */
+  vehicle: { vin?: string; make?: string; model?: string; year?: number };
+  /** The number found by the VIN in a catalogue (v0.66), and that number judged — typed in the sheet, not saved yet. */
+  vinCheck?: NonNullable<OrderItem['fitment']>['vinCheck'];
+  vinFit?: { number: string; fit: Fitment };
 }
 
 /** The line's car (none — no job or no car). */
@@ -49,11 +55,25 @@ export async function fitmentOfLine(item: OrderItem, vehicle: Vehicle | undefine
   const prior = (await priorParts().catch(() => [])).filter((p) => p.id !== item.id);
   const garage = garageUses(prior, carKey, vehicle?.id, part);
   const marking = item.fitment?.marking;
-  const rows = item.aiFind ? fitmentsOf({ part, car, search: item.aiFind.search, numbers: item.aiFind.numbers, marking, garage }) : [];
+  const vinCheck = item.fitment?.vinCheck;
+  const rows = item.aiFind ? fitmentsOf({ part, car, search: item.aiFind.search, numbers: item.aiFind.numbers, marking, garage, vinCheck }) : [];
   const no = item.partNumber?.trim();
-  const found = no ? rows.find((r) => sameNumber(r.number, no)) : undefined;
+  // The line's own number: as the search judged it — or, not one it found, judged when the manager found it by the VIN.
+  const vinFit = vinCheck ? (rows.find((r) => sameNumber(r.number, vinCheck.number)) ?? fitmentsOf({ part, car, search: 'web', numbers: [{ number: vinCheck.number, seen: [] }], marking, garage, vinCheck })[0]) : undefined;
+  const found = no ? (rows.find((r) => sameNumber(r.number, no)) ?? (vinFit && sameNumber(vinFit.number, no) ? vinFit : undefined)) : undefined;
   const category = partCategory(part);
-  return { part, category, car, rows, current: no ? { number: no, fit: found?.fit } : undefined, marking, marked: RULES[category].spec === 'belt' };
+  return {
+    part,
+    category,
+    car,
+    rows,
+    current: no ? { number: no, fit: found?.fit } : undefined,
+    marking,
+    marked: RULES[category].spec === 'belt',
+    vehicle: { vin: vehicle?.vin, make: vehicle?.make, model: vehicle?.model, year: vehicle?.year },
+    vinCheck,
+    vinFit,
+  };
 }
 
 /** The marking of the part on the car, as the manager typed it (empty — none). Typed, it is the manager's word: sure. */
@@ -63,6 +83,24 @@ export async function setMarking(itemId: string, text: string): Promise<void> {
   const t = text.trim().toUpperCase().slice(0, 40);
   const fitment = { ...item.fitment, marking: t ? { text: t, from: 'typed' as const, confidence: 1, at: nowIso() } : undefined };
   await db.items.update(itemId, { fitment });
+}
+
+/**
+ * The number found by this car's VIN in a catalogue (v0.66): the manager says where — kept with the number and the VIN
+ * (another number typed, another VIN in the card — it no longer holds). None — taken back.
+ */
+export async function setVinCheck(itemId: string, number: string | undefined, source?: string): Promise<void> {
+  const item = await db.items.get(itemId);
+  if (!item) throw new AppError('err.notFound');
+  if (!number?.trim() || !source) {
+    await db.items.update(itemId, { fitment: { ...item.fitment, vinCheck: undefined } });
+    return;
+  }
+  const order = await db.orders.get(item.orderId);
+  const v = order ? await db.vehicles.get(order.vehicleId) : undefined;
+  const vin = carFacts(v).vinCode;
+  if (!vin) throw new AppError('fit.noVin');
+  await db.items.update(itemId, { fitment: { ...item.fitment, vinCheck: { number: formatNumber(v?.make ?? '', number.trim().toUpperCase()), vin, source, at: nowIso() } } });
 }
 
 /** A marking off a photo — how the reading went: one clean reading is said; several, or letters put right, are less sure. */

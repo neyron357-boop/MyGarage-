@@ -471,7 +471,7 @@ export function aiFindPart(
       // v0.65 (the user: «система должна предпочесть результат «Не удалось подтвердить», а не выдать ошибочный OEM-номер»):
       // a number goes on the line by itself only when it fits this very car by the fitment's rules (domain/fitment.ts) and
       // is the only one that does — found on pages, on the model's diagrams, by the AI: a candidate, a tap away.
-      const fits = fitmentsOf({ part, car: carFacts(car), search: r.search, numbers: r.numbers, marking: now.fitment?.marking, garage });
+      const fits = fitmentsOf({ part, car: carFacts(car), search: r.search, numbers: r.numbers, marking: now.fitment?.marking, garage, vinCheck: now.fitment?.vinCheck });
       const verified = verifiedOnly(fits);
       const fill = verified && !now.partNumber ? verified : undefined;
       // The AI's note (v0.64) kept with what it found: shown under the numbers (none — the app's own, domain/ai.ts `findNote`).

@@ -6641,6 +6641,52 @@ html.desk .ai-scan-pill {
 .fit-photo-read[data-unsure] {
   color: var(--mantine-color-orange-light-color);
 }
+/* The AI's numbers' row with nothing in it (no server, nothing looked up): not an empty band in the sheet. */
+.ios-row.ai-row:empty {
+  display: none;
+}
+/* The catalogues by the car's VIN (v0.66): a row of chips, each opening a catalogue on this car. */
+.ios-row.vin-cats {
+  display: block;
+}
+.vin-cats-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.vin-cats-novin {
+  font-size: 13px;
+  color: var(--mantine-color-orange-light-color);
+}
+.vin-cat-row {
+  flex-wrap: wrap;
+}
+a.chip.vin-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  color: inherit;
+}
+a.chip.vin-cat svg {
+  color: var(--app-label-3);
+}
+.vin-found {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.vin-found-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mantine-color-green-light-color);
+}
 /* «Почему этот номер?» */
 .fit-head {
   display: grid;

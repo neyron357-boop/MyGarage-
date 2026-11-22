@@ -1831,6 +1831,7 @@ export const ru = {
       rejected: 'Установлено несоответствие.',
     },
     reasons: {
+      vinCatalogue: 'Найден по VIN этой машины в каталоге {{site}}',
       fittedHere: 'Ставили на эту машину{{job}}',
       replacesFittedHere: 'Замена производителя для {{number}}, который стоял на этой машине',
       epcFrame: 'Каталог производителя: схема кузова {{frame}}',
@@ -1850,6 +1851,7 @@ export const ru = {
     },
     by: { page: 'страница', epc: 'каталог', ai: 'ИИ' },
     missing: {
+      vinCheck: 'Проверка номера по VIN этой машины в каталоге (EMEX, EXIST…) — «Найден по VIN»',
       vin: 'VIN машины',
       model: 'Модель, набранная вручную (не от ИИ)',
       year: 'Год',
@@ -1865,6 +1867,7 @@ export const ru = {
       oem: 'Это аналог — нужен номер производителя',
     },
     short: {
+      vinCheck: 'проверка по VIN',
       vin: 'VIN',
       model: 'модель',
       year: 'год',
@@ -1885,7 +1888,7 @@ export const ru = {
     missingTitle: 'Чего не хватает',
     evidenceTitle: 'Доказательства',
     noEvidence: 'Нет',
-    ev: { epc: 'Каталог производителя', supersession: 'Замена номера производителем', garage: 'Заказы мастерской', web: 'Номер на странице', spec: 'Размер', marking: 'Маркировка на машине', ai: 'Назвал ИИ' },
+    ev: { vin: 'Найден по VIN (менеджер)', epc: 'Каталог производителя', supersession: 'Замена номера производителем', garage: 'Заказы мастерской', web: 'Номер на странице', spec: 'Размер', marking: 'Маркировка на машине', ai: 'Назвал ИИ' },
     how: { page: 'номер есть на странице', search: 'результат поиска Google' },
     weight: { fits: 'применимость', exists: 'только что номер существует', against: 'против', none: 'не доказательство' },
     src: { garage: 'Мастерская', ai: 'ИИ', typed: 'Введено вручную', photo: 'С фото' },
@@ -1901,6 +1904,14 @@ export const ru = {
     orderReason: 'Причина',
     orderAnyway: 'Заказать всё равно',
     reasonNeeded: 'Укажите причину',
+    // v0.66: the catalogues by the car's VIN.
+    catalogs: 'Каталоги по VIN',
+    noVinShort: 'VIN нет',
+    vinCopied: 'VIN {{vin}} скопирован — вставьте в поиск',
+    foundByVin: 'Найден по VIN',
+    foundWhere: 'Где нашли по VIN?',
+    foundIn: 'Найден по VIN · {{site}}',
+    noVin: 'Сначала VIN машины',
   },
   diagrams: {
     pasteCaption: 'Список скопирован — отправьте его в чат поставщика отдельным сообщением',

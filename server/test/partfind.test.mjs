@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createAi, parseFound } from '../src/ai.mjs';
 import { catalogHtml } from './catalog-page.mjs';
-import { beltAsked, beltSpecsIn, noteFor, textNear } from '../src/partfind.mjs';
+import { beltAsked, beltSpecsIn, catalogSites, noteFor, PF, textNear } from '../src/partfind.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-find-'));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -166,7 +166,7 @@ describe('a part looked for: the cheapest way first', () => {
     // The second time it is told its answer came without a search.
     assert.match(asked[0].text, /^Use Google Search now to find/);
     assert.match(asked[1].text, /^Search first — your last answer came without a search\.\nA garage needs the genuine/);
-    assert.match(asked[1].text, /\nStep 1 — call Google Search with: GMC Terrain 2\.4L ac condenser genuine part number partsouq\n/);
+    assert.match(asked[1].text, /\nStep 1 — call Google Search with: GMC Terrain 2\.4L ac condenser genuine part number emexdwc\n/);
     assert.match(asked[4].text, /Step 2 — it is hard to find: search again, in other words/);
     assert.deepEqual([r.search, r.stage], ['web', 3]);
     // Seen on the pages this computer opened (the one it named, the search's result); the memory's number is shown
@@ -403,5 +403,29 @@ describe('what is found out about a number, for the app to judge (v0.65)', () =>
       [['7PK1535', 'page'], ['7PK1535', 'ai']],
     );
     assert.equal(g01.check.named, 'search');
+  });
+});
+
+describe('the catalogues the search goes to first (v0.66, the user’s list)', () => {
+  it('by where the car was built: North America — RockAuto; Japan or Korea — EMEX DWC, then catcar; the GCC’s — EMEX DWC, EXIST, 7zap, elcats', () => {
+    assert.deepEqual(catalogSites('USA').first, ['rockauto.com', 'showmetheparts.com', 'partsgeek.com']);
+    assert.deepEqual(catalogSites('Canada').first[0], 'rockauto.com');
+    assert.deepEqual(catalogSites('Japan').first.slice(0, 2), ['emexdwc.ae', 'catcar.info']);
+    assert.deepEqual(catalogSites('Korea').first[1], 'catcar.info');
+    assert.deepEqual(catalogSites('Thailand').first, ['emexdwc.ae', 'exist.ru', '7zap.com', 'elcats.ru']);
+    assert.deepEqual(catalogSites('').first[0], 'emexdwc.ae');
+    // Every catalogue of the list is in the question, the car's first ones first.
+    const q = PF.search('ENGINE BELT', '2008 Honda Civic 1.8L', '', 'UAE', []);
+    for (const site of ['emexdwc.ae', 'exist.ru', '7zap.com', 'elcats.ru', 'catcar.info', 'showmetheparts.com', 'partsgeek.com']) assert.ok(q.includes(site), site);
+    assert.ok(q.indexOf('emexdwc.ae') < q.indexOf('partsouq.com'));
+    assert.match(PF.search('BRAKE PADS', '2015 Ford F-150', '1FTFW1EF5FFA00000', 'USA', []), /catalogues: rockauto\.com, showmetheparts\.com, partsgeek\.com first/);
+  });
+
+  it('the search a step makes names the first catalogue for the car', async () => {
+    const { ai, asked } = world([], (q, n) => (n === 1 ? said('N | 31110-RNA-004 | Honda | x') : grounded('NONE', { sites: ['x.example'] })));
+    await ai.partFind({ part: 'ENGINE BELT', make: 'Honda', model: 'Civic', year: 2008 }).catch(() => undefined);
+    const stepped = asked.find((q) => /Step 1 — call Google Search with/.test(q.text));
+    assert.ok(stepped, asked.map((q) => q.text.slice(0, 40)).join(' | '));
+    assert.match(stepped.text, /Step 1 — call Google Search with: Honda Civic engine belt genuine part number emexdwc/);
   });
 });

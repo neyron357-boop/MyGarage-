@@ -5,7 +5,7 @@ import type { NumberCheck } from '../domain/fitment';
 import { forgetPriorParts } from './ai';
 import { updateVehicle } from './customers';
 import { addItem, updateItem } from './estimate';
-import { ackOrderRisks, loadFitment, markingOfText, orderRisks, readMarking, setMarking } from './fitment';
+import { ackOrderRisks, loadFitment, markingOfText, orderRisks, readMarking, setMarking, setVinCheck } from './fitment';
 import { addMedia } from './media';
 import { checkIn } from './orders';
 import { setProcurement } from './parts';
@@ -155,5 +155,30 @@ describe('the belt’s marking off the line’s photo (v0.65)', () => {
     expect(markingOfText('7PK2l64', 'm1', AT)).toMatchObject({ text: '7PK2164', confidence: 0.5 });
     expect(markingOfText('7PK2164 7PK2154', 'm1', AT)).toMatchObject({ text: '7PK2164', confidence: 0.4, alternatives: ['7PK2154'] });
     expect(markingOfText('MADE IN JAPAN', 'm1', AT)).toBeUndefined();
+  });
+});
+
+describe('a number found by the car’s VIN in a catalogue (v0.66)', () => {
+  it('the manager says where: the number typed is verified for this car — nothing asked when ordered; no VIN — not taken; taken back — as before', async () => {
+    const o = await civic();
+    const it = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'ENGINE BELT', qty: 1, unitPriceFils: 0 });
+    // No VIN in the card: there is nothing it was found by.
+    await expect(setVinCheck(it.id, '56992-RNA-A02', 'emexdwc.ae')).rejects.toMatchObject({ code: 'fit.noVin' });
+    await updateVehicle(o.vehicleId, { vin: 'JHMFD16408S200000' });
+    await setVinCheck(it.id, '56992rnaa02', 'emexdwc.ae');
+    let f = (await loadFitment(it.id))!;
+    expect(f.vinCheck).toMatchObject({ number: '56992-RNA-A02', vin: 'JHMFD16408S200000', source: 'emexdwc.ae' });
+    // Typed in the sheet, not saved yet: judged already.
+    expect(f.vinFit?.fit.status).toBe('verified');
+    await updateItem(it.id, { partNumber: '56992-RNA-A02' });
+    f = (await loadFitment(it.id))!;
+    expect(f.current?.fit?.status).toBe('verified');
+    expect(f.vehicle).toMatchObject({ vin: 'JHMFD16408S200000', make: 'Honda', model: 'Civic', year: 2008 });
+    expect(await orderRisks([it.id])).toEqual([]);
+    // Another number typed: it does not hold for it.
+    expect((await orderRisks([it.id], { [it.id]: '31110-RSA-G01' })).length).toBe(0);
+    await setVinCheck(it.id, undefined);
+    f = (await loadFitment(it.id))!;
+    expect([f.vinCheck, f.current?.fit]).toEqual([undefined, undefined]);
   });
 });

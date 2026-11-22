@@ -12,7 +12,7 @@ import type { JobTemplate, Lang, Order, OrderItem, Outsource, PartOffer } from '
 import { aiAfterPart } from '../../services/ai';
 import { AiPartNumbers, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
-import { FitCurrent, MarkingRow, readMarkingLater, useLineFitment, useOrderGuard } from '../fitment/Fitment';
+import { FitCurrent, MarkingRow, readMarkingLater, useLineFitment, useOrderGuard, VinCatalogsRow, VinFound } from '../fitment/Fitment';
 import { sameNumber } from '../../domain/partNumbers';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
@@ -191,7 +191,8 @@ export function LineSheet({
   const live = useScreenLiveQuery(() => (item ? db.items.get(item.id) : undefined), [item?.id]);
   // Each number's fitment to the car (v0.65): the one typed or taken under «Номер», the belt's marking.
   const fitment = useLineFitment(kind === 'part' ? item?.id : undefined);
-  const typedFit = partNumber.trim() ? fitment?.rows.find((r) => sameNumber(r.number, partNumber)) : undefined;
+  // The number typed: as the search judged it — or found by the VIN in a catalogue (v0.66), saved or not yet.
+  const typedFit = partNumber.trim() ? (fitment?.rows.find((r) => sameNumber(r.number, partNumber)) ?? (fitment?.vinFit && sameNumber(fitment.vinFit.number, partNumber) ? fitment.vinFit : undefined)) : undefined;
   const order = useOrderGuard();
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
@@ -440,13 +441,19 @@ export function LineSheet({
             </div>
           )}
           {kind === 'part' && typedFit && <FitCurrent number={typedFit.number} fit={typedFit.fit} />}
+          {/* Found by the car's VIN in a catalogue (v0.66): the manager's proof — unless the number is verified otherwise. */}
+          {kind === 'part' && item && fitment && !(typedFit?.fit.status === 'verified' && !typedFit.fit.reasons.some((r) => r.code === 'vinCatalogue')) && (
+            <VinFound itemId={item.id} number={partNumber} fitment={fitment} />
+          )}
           {kind === 'part' && item && fitment?.marked && <MarkingRow itemId={item.id} fitment={fitment} hasPhotos={kept.length > 0} />}
           {kind === 'part' && item && (
             // The garage's AI (v0.48): the part's numbers from the catalogues — a tap takes one into «Номер».
-            <div className="ios-row" style={{ display: 'block' }}>
+            <div className="ios-row ai-row" style={{ display: 'block' }}>
               <AiPartNumbers itemId={item.id} chosen={partNumber} onPick={setPartNumber} />
             </div>
           )}
+          {/* The catalogues by this car's VIN (v0.66): where the manager finds what the search did not. */}
+          {kind === 'part' && <VinCatalogsRow car={{ vin: b.vehicle.vin, make: b.vehicle.make, model: b.vehicle.model, year: b.vehicle.year }} />}
           {kind === 'part' && (
             <div className="ios-row">
               <SegmentedControl

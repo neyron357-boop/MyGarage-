@@ -1,10 +1,15 @@
-import { ActionIcon, Button, Group, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
-import { IconAlertTriangleFilled, IconCircleCheckFilled, IconCircleXFilled, IconHelpCircleFilled, IconPhotoScan, IconProgressCheck, IconWorld } from '@tabler/icons-react';
+import { ActionIcon, Button, Group, Menu, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { IconAlertTriangleFilled, IconCircleCheckFilled, IconCircleXFilled, IconExternalLink, IconHelpCircleFilled, IconPhotoScan, IconProgressCheck, IconScan, IconWorld, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { hostOf, readBeltMarking, type Evidence, type Fitment, type FitStatus, type Why } from '../../domain/fitment';
 import { formatDate } from '../../domain/dates';
-import { ackOrderRisks, loadFitment, orderRisks, readMarking, setMarking, type LineFitment, type OrderRisk } from '../../services/fitment';
+import { sameNumber } from '../../domain/partNumbers';
+import { isVin } from '../../domain/vin';
+import { vinCatalogs } from '../../domain/vinCatalogs';
+import { copyText } from '../../ui/clipboard';
+import { ackOrderRisks, loadFitment, orderRisks, readMarking, setMarking, setVinCheck, type LineFitment, type OrderRisk } from '../../services/fitment';
 import { readCardLines } from '../../services/vinReader';
 import { haptic } from '../../ui/haptics';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
@@ -336,6 +341,94 @@ export function FitCurrent({ number, fit }: { number: string; fit: Fitment }) {
         </button>
       )}
       <FitSheet number={number} fit={fit} opened={open} onClose={() => setOpen(false)} />
+    </div>
+  );
+}
+
+type CarForCatalogs = LineFitment['vehicle'];
+const vinOf = (car: CarForCatalogs) => {
+  const v = (car.vin ?? '').toUpperCase().replace(/s/g, '');
+  return isVin(v) ? v : '';
+};
+
+/**
+ * The parts catalogues by this car's VIN (v0.66, domain/vinCatalogs.ts), the likeliest for where it was built first: a tap
+ * opens one on this car — the VIN in the address (EMEX, EXIST), else copied for pasting into its search.
+ */
+export function VinCatalogsRow({ car }: { car: CarForCatalogs }) {
+  const { t } = useTranslation();
+  const vin = vinOf(car);
+  const list = vinCatalogs(car);
+  return (
+    <div className="ios-row vin-cats" data-vin-catalogs>
+      <div className="vin-cats-head">
+        <span className="label">{t('fit.catalogs')}</span>
+        {!vin && <span className="vin-cats-novin">{t('fit.noVinShort')}</span>}
+      </div>
+      <div className="chip-row wrap vin-cat-row">
+        {list.map((c) => (
+          <a
+            key={c.id}
+            className="chip vin-cat"
+            href={c.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-catalog={c.id}
+            data-vin={c.vinInUrl || undefined}
+            onClick={() => {
+              haptic('selection');
+              // A site that does not take the VIN in its address: the VIN copied, to paste into its search.
+              if (!c.vinInUrl && vin) void copyText(vin).then((ok) => ok && notifications.show({ message: t('fit.vinCopied', { vin }), autoClose: 2500 }));
+            }}
+          >
+            {c.name}
+            <IconExternalLink size={13} stroke={2} aria-hidden />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * «Найден по VIN»: the manager found the number typed under «Номер» by this car's VIN in a catalogue — says where (a
+ * menu of them); the number is then verified for this car (domain/fitment.ts). Found so — said, with × to take it back.
+ */
+export function VinFound({ itemId, number, fitment }: { itemId: string; number: string; fitment: LineFitment }) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  const vin = vinOf(fitment.vehicle);
+  const check = fitment.vinCheck;
+  if (!vin || !number.trim()) return null;
+  if (check && sameNumber(check.number, number) && check.vin === vin)
+    return (
+      <div className="ios-row vin-found" data-vin-found={check.source}>
+        <span className="vin-found-text">
+          <IconScan size={16} stroke={2} aria-hidden />
+          {t('fit.foundIn', { site: check.source })}
+        </span>
+        <ActionIcon variant="subtle" color="gray" radius="xl" size={32} aria-label={t('common.delete')} onClick={() => void run(async () => void (await setVinCheck(itemId, undefined)))}>
+          <IconX size={16} />
+        </ActionIcon>
+      </div>
+    );
+  return (
+    <div className="ios-row vin-found">
+      <Menu position="bottom-start" withinPortal>
+        <Menu.Target>
+          <Button variant="light" color="green" radius="xl" size="compact-md" leftSection={<IconScan size={16} />} data-vin-found-open>
+            {t('fit.foundByVin')}
+          </Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>{t('fit.foundWhere')}</Menu.Label>
+          {vinCatalogs(fitment.vehicle).map((c) => (
+            <Menu.Item key={c.id} data-found-in={c.id} onClick={() => void run(async () => (await setVinCheck(itemId, number, c.host), haptic('success')))}>
+              {c.name}
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu>
     </div>
   );
 }

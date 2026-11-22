@@ -104,6 +104,20 @@ export interface Candidate {
   check?: NumberCheck;
 }
 
+/**
+ * The manager found the number by this car's VIN in a parts catalogue (v0.66, domain/vinCatalogs.ts — EMEX DWC, EXIST, 7zap…):
+ * the catalogue's own answer for this very car — its configuration, its market, its options — the proof the garage's
+ * server cannot get itself (those catalogues are closed to programs). Holds only for the number and the VIN it was found
+ * by.
+ */
+export interface VinCheck {
+  number: string;
+  vin: string;
+  /** The catalogue's site: «emexdwc.ae». */
+  source: string;
+  at: string;
+}
+
 /** A use of this part by the garage before: the number on a line of this kind of part for a car of the model. */
 export interface GarageUse {
   number: string;
@@ -124,6 +138,8 @@ export interface Fact<T> {
 }
 export interface CarFacts {
   vehicleId?: string;
+  /** The VIN itself, when it is one (a number found by it must have been found by this one). */
+  vinCode?: string;
   make: Fact<string>;
   model: Fact<string>;
   year: Fact<number>;
@@ -150,6 +166,7 @@ export function carFacts(v: Pick<Vehicle, 'id' | 'make' | 'model' | 'year' | 'en
   const frames = model.by === 'typed' ? frameCodesIn(String(model.value)) : [];
   return {
     vehicleId: v?.id,
+    ...(valid ? { vinCode: vin } : {}),
     make: fact(v?.make?.trim(), 'make'),
     model,
     year: fact(v?.year, 'year'),
@@ -174,7 +191,7 @@ export function frameCodesIn(model: string): string[] {
  * a number to be verified, whether its side or axle must agree, whether its marking can be read and compared.
  */
 export type PartCategory = 'belt' | 'timing' | 'filter' | 'brake' | 'sensor' | 'suspension' | 'cooling' | 'body' | 'lighting' | 'electrical' | 'engine' | 'other';
-export type Need = 'vin' | 'model' | 'year' | 'engine' | 'frame' | 'drive' | 'transmission' | 'marking' | 'candidateSpec' | 'markingUnclear' | 'position' | 'epc' | 'oem';
+export type Need = 'vinCheck' | 'vin' | 'model' | 'year' | 'engine' | 'frame' | 'drive' | 'transmission' | 'marking' | 'candidateSpec' | 'markingUnclear' | 'position' | 'epc' | 'oem';
 
 interface Rule {
   /** What of the car must be known (not guessed) to verify a number of this kind. */
@@ -322,7 +339,7 @@ export function compareBelts(a: BeltSpec, b: BeltSpec): 'same' | 'close' | 'conf
 /*
  * Sources. Many parts sites show one catalogue's data (the maker's EPC, mirrored): they are one source, not several.
  */
-const EPC_MIRRORS = /(^|\.)(megazip\.net|partsouq\.com|amayama\.com|7zap\.com|epc-data\.com|partsbooster\.com|catcar\.info|toyodiy\.com|nissan-catalog|hondapartsnow\.com|hondapartsonline\.net|parts\.honda\.com|realoem\.com|elcats\.ru|exist\.ru|emex\.ru|autodoc\.ru|catalogs-parts\.com|japancats\.ru|partslink24\.com)$/;
+const EPC_MIRRORS = /(^|\.)(megazip\.net|partsouq\.com|amayama\.com|7zap\.com|epc-data\.com|partsbooster\.com|catcar\.info|toyodiy\.com|nissan-catalog|hondapartsnow\.com|hondapartsonline\.net|parts\.honda\.com|realoem\.com|elcats\.ru|exist\.ru|emex\.ru|autodoc\.ru|catalogs-parts\.com|japancats\.ru|partslink24\.com|emexdwc\.ae|emex\.ae)$/;
 export const hostOf = (url: string): string => {
   try {
     return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
@@ -354,7 +371,7 @@ export interface Why {
 }
 /** One piece of evidence, as the screen lists it. */
 export interface Evidence {
-  kind: 'epc' | 'supersession' | 'garage' | 'web' | 'spec' | 'marking' | 'ai';
+  kind: 'vin' | 'epc' | 'supersession' | 'garage' | 'web' | 'spec' | 'marking' | 'ai';
   /** Where: a page's address, «garage», «photo», «typed», «ai». */
   source: string;
   url?: string;
@@ -386,6 +403,8 @@ export interface FitInput {
   marking?: Marking;
   /** The garage's own uses of this part on cars of the model. */
   garage?: GarageUse[];
+  /** The number the manager found by this car's VIN in a catalogue (v0.66). */
+  vinCheck?: VinCheck;
 }
 
 /** The maker's catalogue's word on a number: kept by the server since v0.65, read from the older fields before it. */
@@ -433,6 +452,10 @@ export function fitmentOf(input: FitInput): Fitment {
   const rejected: Why[] = [];
   const missing = new Set<Need>();
   const at = c.check?.at;
+
+  // Found by this car's VIN in a catalogue, by the manager (v0.66) — for this number and this VIN only.
+  const byVin = input.vinCheck && sameNumber(input.vinCheck.number, c.number) && !!car.vinCode && input.vinCheck.vin === car.vinCode ? input.vinCheck : undefined;
+  if (byVin) evidence.push({ kind: 'vin', source: byVin.source, at: byVin.at, detail: byVin.vin, weight: 'fits' });
 
   // The maker's catalogue.
   if (epc.state === 'read') {
@@ -502,8 +525,12 @@ export function fitmentOf(input: FitInput): Fitment {
   if (rejected.length) return done('rejected');
   if (conflicts.length) return done('conflict');
 
-  // Verified: fitted on this car; the maker's replacement of the number fitted on it; the maker's catalogue on the car's
-  // own configuration code, with what the kind of part needs known.
+  // Verified: found by this car's VIN in a catalogue; fitted on this car; the maker's replacement of the number fitted on it;
+  // the maker's catalogue on the car's own configuration code, with what the kind of part needs known.
+  if (byVin) {
+    reasons.push({ code: 'vinCatalogue', params: { site: byVin.source } });
+    return done('verified');
+  }
   if (fittedHere) {
     reasons.push({ code: 'fittedHere', params: { job: fittedHere.jobNo ?? '' } });
     return done('verified');
@@ -527,6 +554,8 @@ export function fitmentOf(input: FitInput): Fitment {
   const fittedModel = own.find((u) => u.installed && !u.sameVehicle);
   if (fittedModel) reasons.push({ code: 'fittedModel', params: { job: fittedModel.jobNo ?? '' } });
   if (!frameHit) missing.add('frame');
+  // The surest way left: the number looked up by this car's VIN in a catalogue (v0.66).
+  if (car.vinCode) missing.add('vinCheck');
   if (reasons.length) return done('partial');
   if (specMatch === 'ai') reasons.push({ code: 'aiSpecMatches', params: { marking: sure?.text ?? '' } });
   return done('unverified');
@@ -542,8 +571,8 @@ export function verifiedOnly(fits: { number: string; fit: Fitment }[]): string |
 }
 
 /** Every number found for a line, judged (the line's numbers in their order). */
-export function fitmentsOf(args: { part: string; car: CarFacts; search: FitInput['search']; numbers: Candidate[]; marking?: Marking; garage?: GarageUse[] }): { number: string; fit: Fitment }[] {
-  return args.numbers.map((candidate) => ({ number: candidate.number, fit: fitmentOf({ part: args.part, car: args.car, candidate, search: args.search, marking: args.marking, garage: args.garage }) }));
+export function fitmentsOf(args: { part: string; car: CarFacts; search: FitInput['search']; numbers: Candidate[]; marking?: Marking; garage?: GarageUse[]; vinCheck?: VinCheck }): { number: string; fit: Fitment }[] {
+  return args.numbers.map((candidate) => ({ number: candidate.number, fit: fitmentOf({ part: args.part, car: args.car, candidate, search: args.search, marking: args.marking, garage: args.garage, vinCheck: args.vinCheck }) }));
 }
 
 /** Green — verified only; the rest by how far from it (for the screen's order and colour). */
