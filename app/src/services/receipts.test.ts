@@ -128,6 +128,38 @@ describe('a receipt scanned', () => {
     expect(await db.expenses.get(r.expense!.id)).toBeUndefined();
   });
 
+  // v0.73 (the user: «независимо в каком статусе находится заказ… даже если в архиве»): the paper of a job closed weeks
+  // ago, taken off the board, found and put on it; a cancelled one too; a job opened over a year before is not looked at.
+  it('a job in any state is looked through — closed weeks before the paper and in the archive, cancelled; its lines priced', async () => {
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER', 'AIR FILTER']);
+    await db.orders.update(lc.id, { stage: 'closed', createdAt: day(40), closedAt: day(30), stageChangedAt: day(30), archivedAt: day(29) });
+    await job('Nissan', 'Patrol', ['FRONT BRAKE PADS']);
+    const r = await scanReceipt(PHOTO());
+    expect(r.expense!.orderId).toBe(lc.id);
+    expect(r.job).toMatchObject({ orderId: lc.id, close: false });
+    expect((await db.items.get(lc.lines[0]))!.costPriceFils).toBe(3500);
+    // Cancelled: found as well.
+    await removeEntry({ source: 'expense', id: r.expense!.id });
+    await db.orders.update(lc.id, { stage: 'cancelled' });
+    expect((await scanReceipt(PHOTO())).expense!.orderId).toBe(lc.id);
+    // Opened over a year before the paper: not looked at.
+    await db.orders.update(lc.id, { stage: 'closed', createdAt: day(400), closedAt: day(390) });
+    expect((await scanReceipt(PHOTO())).expense!.orderId).toBeUndefined();
+  });
+
+  it('a job of a closed month gets the expense, its lines are left as they are', async () => {
+    const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER', 'AIR FILTER']);
+    const order = (await db.orders.get(lc.id))!;
+    const month = dubaiDate(order.createdAt).slice(0, 7);
+    await db.orders.update(lc.id, { stage: 'closed', closedAt: order.createdAt });
+    await db.customers.update(order.customerId, { lockedMonths: [month] });
+    const r = await scanReceipt(PHOTO());
+    expect(r.expense!.orderId).toBe(lc.id);
+    expect(r.costed).toBe(0);
+    expect((await db.items.get(lc.lines[0]))!.costPriceFils ?? 0).toBe(0);
+  });
+
   it('a contractor’s bill: in «Подрядчики», the contractor added as one, the outsourced line paid by it', async () => {
     const o = await checkIn({ plate: { emirate: 'DXB', code: 'R', number: '70707' }, make: 'Nissan', model: 'Patrol', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
     const line = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'FRONT BUMPER PAINT', qty: 1, unitPriceFils: 80000, outsource: { state: 'out' } });

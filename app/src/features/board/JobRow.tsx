@@ -41,7 +41,7 @@ import { PHASE_META } from '../job/phase';
 import { BOARD_STATUSES, boardStatusOf, STATUS_PHASE, type BoardStatus } from '../../domain/boardStatus';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { orderFlags } from '../orders/flags';
-import { IconArrowsMaximize, IconArrowsMinimize, IconPin, IconPinnedFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconArrowsMaximize, IconArrowsMinimize, IconPin, IconPinnedFilled, IconPinnedOff, IconStar, IconStarFilled } from '@tabler/icons-react';
 import { resizeStep, toggleImportant, togglePinned } from '../../ui/deskBoard';
 
 /** What the job is worth now: the amount due on its invoice, or the total of its lines. */
@@ -185,6 +185,8 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
   // What else to know at a glance, each as its own coloured symbol.
   type Mark = { key: string; icon: Icon; color: string; label: string };
   const marks = ([
+    // Pinned to the top on a phone (v0.73; the PC shows it at the card's top, under the mouse).
+    phone && pinned && { key: 'pin', icon: IconPinnedFilled, color: 'cobalt', label: t('deskBoard.pinned') },
     find > 0 && { key: 'find', icon: IconPackage, color: 'orange', label: t('flags.waitingParts') },
     coming && { key: 'coming', icon: IconTruckDelivery, color: 'cobalt', label: t('flags.partsComing') },
     outside && { key: 'outside', icon: IconBuildingFactory2, color: 'teal', label: t('flags.outside') },
@@ -418,6 +420,18 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
               open();
             }}
           />
+          {/* Pinned to the top of the board (v0.73, the owner's note: «закреплять автомобили первой позиции»). */}
+          {!dated && (
+            <ListRow
+              title={<span data-pin-toggle={pinned ? 'off' : 'on'}>{t(pinned ? 'deskBoard.unpin' : 'deskBoard.pinTop')}</span>}
+              left={pinned ? <IconPinnedOff size={20} stroke={1.8} color="var(--mantine-color-cobalt-6)" /> : <IconPin size={20} stroke={1.8} color="var(--mantine-color-cobalt-6)" />}
+              onClick={() => {
+                setMenu(false);
+                togglePinned(b.order.id);
+                haptic('success');
+              }}
+            />
+          )}
           {/* The board's tab it is in (v0.70): one tap puts it in another. */}
           {status &&
             BOARD_STATUSES.map((st) => {

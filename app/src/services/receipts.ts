@@ -19,6 +19,7 @@ import { getSettings } from './settings';
 import { removeEntry } from './entries';
 import { updateItem } from './estimate';
 import { addExpense } from './money';
+import { assertJobOpen } from './monthLock';
 import { saveSupplier, subcontractCategory } from './parts';
 import { shrinkPhoto } from './photoSize';
 
@@ -81,20 +82,23 @@ interface Jobs {
 }
 
 /**
- * The jobs the paper may be for: the ones in the garage, and the ones closed in the three days before the receipt's day
- * (parts on credit are often scanned after the car has gone) — with their part lines, their work done outside, their cars.
+ * The jobs the paper may be for — with their part lines, their work done outside, their cars: the ones in the garage
+ * (on the board or taken off it), and (v0.73, the user: «независимо в каком статусе находится заказ… даже если в архиве»)
+ * the closed and cancelled ones opened in the year before the receipt's day, however long ago they left — not only the
+ * three days before it, as until now. Which one it is, is the ranking's (domain/receipt.ts: a job in work first among
+ * equals; one gone long before is put on only when it alone fits).
  */
 async function jobsFor(day: string): Promise<Jobs> {
-  const since = new Date(Date.parse(`${day}T00:00:00+04:00`) - 3 * DAY).toISOString();
-  const [open, closed] = await Promise.all([
+  const since = new Date(Date.parse(`${day}T00:00:00+04:00`) - 365 * DAY).toISOString();
+  const [open, gone] = await Promise.all([
     db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray(),
     db.orders
-      .where('stage')
-      .equals('closed')
-      .filter((o) => (o.closedAt ?? o.updatedAt ?? o.createdAt) >= since)
+      .where('createdAt')
+      .aboveOrEqual(since)
+      .filter((o) => o.stage === 'closed' || o.stage === 'cancelled')
       .toArray(),
   ]);
-  const orders = [...open, ...closed];
+  const orders = [...open, ...gone];
   const links = new Map<string, { vehicleId: string; customerId: string; car: string }>();
   if (!orders.length) return { list: [], links };
   const [items, vehicles] = await Promise.all([db.items.where('orderId').anyOf(orders.map((o) => o.id)).toArray(), db.vehicles.bulkGet(orders.map((o) => o.vehicleId))]);
@@ -106,6 +110,7 @@ async function jobsFor(day: string): Promise<Jobs> {
       number: o.number,
       changedAt: o.updatedAt ?? o.createdAt,
       openedOn: dubaiDate(o.createdAt),
+      goneOn: o.stage === 'closed' || o.stage === 'cancelled' ? dubaiDate(o.closedAt ?? o.stageChangedAt ?? o.updatedAt ?? o.createdAt) : undefined,
       lines: items
         .filter((i) => i.orderId === o.id && (i.kind === 'part' || !!i.outsource) && i.approvalState !== 'declined')
         .map((i) => ({ id: i.id, name: i.titleEn || i.titleRu || '', partNumber: i.partNumber, costFils: i.costPriceFils, supplierId: i.supplierId })),
@@ -252,7 +257,9 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
   let costed = 0;
   const linked: string[] = [];
   const paid: { id: string; supplier: boolean }[] = [];
-  if (guess && job && !guess.close) {
+  // A job gone in a closed month of its customer (v0.69) keeps its lines as they are: the expense is on it, nothing more.
+  const locked = guess ? await assertJobOpen(guess.orderId).then(() => false, () => true) : false;
+  if (guess && job && !guess.close && !locked) {
     for (const m of guess.matched) {
       const it = fields.items[m.item];
       const cur = await db.items.get(m.lineId);

@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { arrange, CARD, clampWidth, DEFAULT_DESK, normalizeDeskBoard, overlaps, placeNew, snap } from './deskBoard';
+import { arrange, CARD, clampWidth, DEFAULT_DESK, normalizeDeskBoard, overlaps, pinnedFirst, placeNew, snap } from './deskBoard';
+
+describe('cars pinned to the top (v0.73, a phone too)', () => {
+  it('pinned first — the one pinned last on top — the rest in their own order; nothing pinned, the list as it was', () => {
+    const list = ['a', 'b', 'c', 'd', 'e'];
+    const id = (x: string) => x;
+    expect(pinnedFirst(list, id, [])).toBe(list);
+    expect(pinnedFirst(list, id, ['d'])).toEqual(['d', 'a', 'b', 'c', 'e']);
+    expect(pinnedFirst(list, id, ['d', 'b'])).toEqual(['b', 'd', 'a', 'c', 'e']);
+    // A pinned job not in this tab (another step, gone off the board): nothing changes for it.
+    expect(pinnedFirst(list, id, ['z'])).toBe(list);
+  });
+});
 
 describe('the PC board laid out by hand (v0.67)', () => {
   it('nothing stored, or nonsense: the board by step, nothing placed', () => {

@@ -682,6 +682,10 @@ export const ru = {
     inCard: 'В карточке',
     adds: 'Контрольная цифра сходится',
   },
+  vinType: {
+    open: 'Ввести VIN',
+    placeholder: 'VIN — 17 знаков',
+  },
   photos: {
     share: 'Поделиться',
     save: 'Сохранить',
@@ -1891,6 +1895,7 @@ export const ru = {
     important: 'Важная',
     notImportant: 'Не важная',
     pin: 'Закрепить',
+    pinTop: 'Закрепить наверху',
     unpin: 'Открепить',
     bigger: 'Крупнее',
     smaller: 'Мельче',

@@ -4625,6 +4625,98 @@ html.kb .screen-bottom > .sticky-bar {
   justify-content: center;
   gap: 10px;
 }
+/* The VIN typed by hand in the photo's view (v0.73, features/job/VinRead.tsx → VinTypeIn): the view keeps within what
+   the keyboard leaves (ui/stack.tsx sets --vv-top / --vv-h while it is up) — the photo above, the field right over the
+   keys; the home bar's room goes to the keyboard. */
+.viewer[data-typing] {
+  bottom: auto;
+  top: var(--vv-top, 0px);
+  height: var(--vv-h, 100%);
+}
+html.kb .viewer[data-typing] {
+  padding-bottom: 0;
+}
+.viewer[data-typing] .viewer-bottom {
+  padding-bottom: 12px;
+}
+.viewer[data-typing] .viewer-caption {
+  width: 100%;
+  max-width: 520px;
+}
+.vin-type {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+.vin-type-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 14px 0 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: box-shadow var(--dur-1) ease;
+}
+.vin-type-field:focus-within {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+.vin-type-field[data-ok] {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-green-5);
+}
+.vin-type-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: #fff;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.vin-type-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+  font-family: var(--mantine-font-family);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.vin-type-count {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  font-weight: 600;
+}
+.vin-type-field[data-ok] .vin-type-count {
+  color: var(--mantine-color-green-4);
+}
+.vin-type-field[data-bad] {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-orange-5);
+}
+.vin-type-field[data-bad] .vin-type-count {
+  color: var(--mantine-color-orange-4);
+}
+.vin-type-card {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13px;
+  text-align: start;
+  padding: 0 4px;
+}
+.vin-type-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
 
 /* Notifications: under the navigation bar, not over its buttons (‹, ×, …). No coloured stripe at the
    side: a banner says it in its icon and words. */

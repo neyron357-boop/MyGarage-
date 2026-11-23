@@ -134,7 +134,8 @@ export function PhotoViewer({
   onClose,
   actions,
   onRotate,
-  paused,
+  paused: pausedByLayer,
+  typing,
 }: {
   items: ViewerItem[];
   index: number;
@@ -145,8 +146,15 @@ export function PhotoViewer({
   onRotate?: (item: ViewerItem) => Promise<unknown>;
   /** A layer over the viewer has the keys (v0.64: outlining a diagram) — Escape and the arrows are its. */
   paused?: boolean;
+  /**
+   * A field of the view's own is being typed into (v0.73: the VIN by hand, looking at the photo): the view keeps within
+   * what the phone's keyboard leaves (the photo above the field), its bars stay, a drag down does not close it, and its
+   * keys are the field's.
+   */
+  typing?: boolean;
 }) {
   const { t } = useTranslation();
+  const paused = pausedByLayer || typing;
   const item = items[index];
   const stored = useFullUrl(item?.src ? undefined : item?.id);
   const [turn, setTurn] = useState<Turn | null>(null);
@@ -333,7 +341,8 @@ export function PhotoViewer({
     if (g.view.scale > 1) return;
     const fast = Date.now() - g.t < 260;
     if (g.axis === 'y') {
-      if (slide.y > 140 || (fast && slide.y > 50)) return close();
+      // (Typing the VIN: a drag down only pulls the photo, it does not throw what was typed away.)
+      if (!typing && (slide.y > 140 || (fast && slide.y > 50))) return close();
       setSlide({ x: 0, y: 0, animate: true });
       return;
     }
@@ -345,10 +354,11 @@ export function PhotoViewer({
   };
 
   if (!item) return null;
+  const acts = actions?.(item);
   const fade = slide.y > 0 ? Math.max(0.3, 1 - slide.y / 420) : 1;
   const shrink = slide.y > 0 ? Math.max(0.82, 1 - slide.y / 1400) : 1;
   return createPortal(
-    <div className="viewer" role="dialog" aria-modal="true" aria-label={item.title} style={{ background: `rgba(0, 0, 0, ${fade})` }} data-chrome={chrome && slide.y === 0}>
+    <div className="viewer" role="dialog" aria-modal="true" aria-label={item.title} style={{ background: `rgba(0, 0, 0, ${fade})` }} data-chrome={(chrome || !!typing) && slide.y === 0} data-typing={typing || undefined}>
       <div className="viewer-top">
         {/* Both sides as wide, so the title stays in the middle. */}
         <div className="viewer-side">
@@ -404,7 +414,8 @@ export function PhotoViewer({
       {(item.caption || actions) && (
         <div className="viewer-bottom">
           {item.caption && <div className="viewer-caption">{item.caption}</div>}
-          {actions && <div className="viewer-actions">{actions(item)}</div>}
+          {/* Typing in the view's own field (v0.73): the field alone at the foot. */}
+          {actions && !typing && <div className="viewer-actions">{acts}</div>}
         </div>
       )}
     </div>,

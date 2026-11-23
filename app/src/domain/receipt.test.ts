@@ -133,6 +133,29 @@ describe('the job the parts were bought for', () => {
     expect(ranked[0].score).toBe(1);
   });
 
+  // v0.73 (the user: «независимо в каком статусе находится заказ… даже если в архиве программа нашла совпадение и добавила»).
+  it('a job closed or cancelled long before the receipt is found when it alone fits; among equals a job still in work comes first; two old ones alike — none put, both offered', () => {
+    const gone = (id: string, number: number, lines: string[], car = camry.car, goneOn = '2026-10-20', changedAt = goneOn): JobForGuess => ({ ...job(id, number, lines, car, changedAt, '2026-10-01'), goneOn });
+    const pajeroOld = gone('g', 290, ['CLUTCH SET', 'CLUTCH COVER ASSY'], { make: 'Mitsubishi', model: 'Pajero', plateNumber: '84264' });
+    // Closed a month before the paper: still found — and its lines matched.
+    const g = guess([{ name: 'CLUTCH SET GP' }, { name: 'COC ASSY', part: 'CLUTCH COVER' }], [camry, patrol, pajeroOld], { date: '2026-11-23' });
+    expect(g).toMatchObject({ orderId: 'g', number: 290, close: false });
+    expect(g!.matched.map((m) => m.lineId)).toContain('g-0');
+    // Closed up to three days before: as a job in work.
+    expect(rankJobs([{ name: 'CLUTCH SET' }], [gone('h', 291, ['CLUTCH SET'], camry.car, '2026-11-21')], { date: '2026-11-23' })[0].gone).toBeUndefined();
+    expect(rankJobs([{ name: 'CLUTCH SET' }], [pajeroOld], { date: '2026-11-23' })[0].gone).toBe(true);
+    // The same part on a job in work and on an old one (fresher, even): the one in work first.
+    const oldCamry = gone('k', 300, ['OIL FILTER'], camry.car, '2026-10-20', '2026-11-22');
+    const ranked = rankJobs([{ name: 'OIL FILTER' }], [oldCamry, camry], { date: '2026-11-23' });
+    expect(ranked.map((r) => r.orderId)).toEqual(['a', 'k']);
+    expect(guessJob(ranked)).toMatchObject({ orderId: 'a', close: true });
+    // Only old ones, alike: none put on the expense (it would be a guess among many), both a tap away.
+    const twoOld = rankJobs([{ name: 'OIL FILTER' }], [oldCamry, gone('m', 301, ['OIL FILTER'])], { date: '2026-11-23' });
+    expect(twoOld.map((r) => r.score)).toEqual([1, 1]);
+    expect(guessJob(twoOld)).toBeUndefined();
+    // A cancelled one counts too; one opened after the paper still does not.
+    expect(guess([{ name: 'CLUTCH SET' }], [{ ...pajeroOld, openedOn: '2026-11-24' }], { date: '2026-11-23' })).toBeUndefined();
+  });
 });
 
 describe('a receipt’s day', () => {

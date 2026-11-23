@@ -1,6 +1,6 @@
 import { Button, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconScan } from '@tabler/icons-react';
+import { IconCheck, IconPencil, IconScan } from '@tabler/icons-react';
 import { useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { checkDigitOk, isVin, vinChars, vinYear } from '../../domain/vin';
@@ -114,6 +114,102 @@ export function VinButton({ vehicleId, onLook }: { vehicleId: string; onLook: ()
     <Button radius="xl" size="compact-md" variant="white" color="dark" loading={s.reading} leftSection={<IconScan size={16} />} onClick={() => readVin(vehicleId, t, { manual: true })}>
       {t('vinRead.read')}
     </Button>
+  );
+}
+
+/** In a VIN or Mulkiya photo's full view (v0.73): the VIN typed by hand, looking at the photo — this opens the field. */
+export function TypeVinButton({ onOpen }: { onOpen: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <Button radius="xl" size="compact-md" variant="white" color="dark" leftSection={<IconPencil size={16} />} onClick={onOpen} data-vin-type-open>
+      {t('vinType.open')}
+    </Button>
+  );
+}
+
+/**
+ * The VIN typed by hand while the photo stays in sight (v0.73, the owner's note on the Mulkiya's full view: «возможность
+ * написать вручную VIN-код смотря на фотографию, не выходя из режима просмотра фотографий»). The field sits at the
+ * viewer's foot, right above the phone's keyboard (the viewer keeps within what the keyboard leaves — `typing` of
+ * `PhotoViewer`); the photo above it still zooms with two fingers and goes to the Mulkiya's other side. The VIN is
+ * written as the manager typed it — over the card's, the card's shown under the field when it differs — with «Отменить»;
+ * the year, when the card has none, is the one a VIN that adds up says. A read waiting to be looked at is let go.
+ */
+export function VinTypeIn({ vehicleId, current, onDone }: { vehicleId: string; current?: { vin?: string; year?: number }; onDone: () => void }) {
+  const { t } = useTranslation();
+  const { run, busy } = useAction();
+  const [vin, setVin] = useState(() => current?.vin?.toUpperCase() ?? '');
+  const typed = vinChars(vin).slice(0, 17);
+  const ok = isVin(typed);
+  const adds = ok && checkDigitOk(typed);
+  const before = { vin: current?.vin, year: current?.year };
+  const same = !!before.vin && before.vin.toUpperCase() === typed;
+  const save = () => {
+    if (!ok || busy) return;
+    if (same) return onDone();
+    void run(async () => {
+      const { setCarVin } = await import('../../services/vinReader');
+      const year = before.year ?? (adds ? vinYear(typed) : undefined);
+      await setCarVin(vehicleId, { vin: typed, year }, { learn: true });
+      // What was read and waits to be looked at is answered by the hand.
+      opened.delete(vehicleId);
+      toCheck.delete(vehicleId);
+      emit();
+      haptic('success');
+      undoToast(`VIN ${typed}`, t('common.undo'), () => void setCarVin(vehicleId, before));
+      onDone();
+    });
+  };
+  return (
+    <form
+      className="vin-type"
+      data-vin-type
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+    >
+      {/* 17 characters that are no VIN (its last places are digits, no I, O, Q): orange — the photo is looked at again. */}
+      <label className="vin-type-field" data-ok={ok || undefined} data-bad={(typed.length === 17 && !ok) || undefined}>
+        <input
+          className="vin-type-input"
+          aria-label="VIN"
+          placeholder={t('vinType.placeholder')}
+          value={vin}
+          autoFocus
+          onChange={(e) => setVin(e.currentTarget.value.toUpperCase())}
+          onKeyDown={(e) => {
+            // Escape puts the field away, not the whole view (the view's keys wait while it is open).
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              onDone();
+            }
+          }}
+          maxLength={20}
+          autoCapitalize="characters"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          enterKeyHint="done"
+        />
+        <span className="vin-type-count tnum" aria-live="polite">
+          {adds ? <IconCheck size={18} stroke={2.6} aria-label={t('vinRead.adds')} /> : `${typed.length}/17`}
+        </span>
+      </label>
+      {before.vin && !same && (
+        <div className="vin-type-card">
+          {t('vinRead.inCard')}: <span className="vin-text">{before.vin}</span>
+        </div>
+      )}
+      <div className="vin-type-row">
+        <Button type="button" radius="xl" size="md" variant="white" color="dark" onClick={onDone}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" radius="xl" size="md" disabled={!ok} loading={busy} data-vin-type-save>
+          {t('common.save')}
+        </Button>
+      </div>
+    </form>
   );
 }
 

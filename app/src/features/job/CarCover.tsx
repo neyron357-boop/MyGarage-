@@ -2,13 +2,14 @@ import { ActionIcon, Button, Group, Stack } from '@mantine/core';
 import { useAiWorking } from '../ai/Ai';
 import { IconCamera, IconCameraPlus, IconCar, IconPhoto, IconTrash } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
+import { db } from '../../db/db';
 import { useTranslation } from 'react-i18next';
 import { carOwned, coverOf, MULKIYA_SIDES, mulkiyaOf, removeCarPhoto, restoreCarPhoto, rotateCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type CarSlot, type MulkiyaSide } from '../../services/cover';
 import { MediaImage, undoToast } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { usePhotoPick } from '../../ui/photoPick';
-import { readVin, useVinState, VinButton, VinCheckSheet } from './VinRead';
+import { readVin, TypeVinButton, useVinState, VinButton, VinCheckSheet, VinTypeIn } from './VinRead';
 
 /**
  * In the photo's full-screen view: take it again, choose another one from the phone's photos, or take a wrong
@@ -121,6 +122,16 @@ export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: n
   );
 }
 
+/** Under a VIN or Mulkiya photo: read the VIN off it, or (v0.73) type it by hand looking at it. */
+function VinCaption({ vehicleId, onLook, onType }: { vehicleId: string; onLook: () => void; onType: () => void }) {
+  return (
+    <Group gap="sm" justify="center" wrap="nowrap">
+      <VinButton vehicleId={vehicleId} onLook={onLook} />
+      <TypeVinButton onOpen={onType} />
+    </Group>
+  );
+}
+
 /**
  * The car's VIN photo as a small tile in the job's card: without one, a tap opens the camera and a long
  * press the phone's photos; with one, the thumbnail — a tap shows it full screen (the VIN typed on the car
@@ -134,6 +145,8 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
   const { run } = useAction();
   const photo = useScreenLiveQuery(async () => ({ id: await vinPhotoOf(vehicleId) }), [vehicleId]);
   const [viewing, setViewing] = useState(false);
+  // The VIN typed by hand right in the photo's view (v0.73).
+  const [typing, setTyping] = useState(false);
   const pick = usePhotoPick(
     ([file]) =>
       void run(async () => {
@@ -182,12 +195,26 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
       {sheet}
       {viewing && photo?.id && (
         <PhotoViewer
-          items={[{ id: photo.id, title: vin ? `VIN ${vin}` : 'VIN', caption: <VinButton vehicleId={vehicleId} onLook={() => setViewing(false)} /> }]}
+          items={[
+            {
+              id: photo.id,
+              title: vin ? `VIN ${vin}` : 'VIN',
+              caption: typing ? (
+                <VinTypeIn vehicleId={vehicleId} current={{ vin, year }} onDone={() => setTyping(false)} />
+              ) : (
+                <VinCaption vehicleId={vehicleId} onLook={() => setViewing(false)} onType={() => setTyping(true)} />
+              ),
+            },
+          ]}
           index={0}
           onIndex={() => undefined}
-          onClose={() => setViewing(false)}
+          onClose={() => {
+            setTyping(false);
+            setViewing(false);
+          }}
+          typing={typing}
           onRotate={(it) => edits.rotate('vin', it.id)}
-          actions={(it) => (
+          actions={(it) => typing ? null : (
             <ReplaceButtons
               camera={pick.camera}
               gallery={pick.gallery}
@@ -238,6 +265,10 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
   const photos = found?.sides;
   const edits = useCarPhotoEdits(vehicleId);
   const [viewing, setViewing] = useState<number | null>(null);
+  // The VIN typed by hand right in the Mulkiya's view (v0.73): the card's VIN and year to start from — read as the view
+  // opens, so the field comes in the tap itself (an iPhone gives the keyboard only to a field focused in the tap).
+  const [typing, setTyping] = useState(false);
+  const car = useScreenLiveQuery(async () => (viewing !== null ? { v: await db.vehicles.get(vehicleId) } : undefined), [viewing !== null, vehicleId]);
   const present = MULKIYA_SIDES.filter((s) => photos?.[s]);
   const missing = MULKIYA_SIDES.filter((s) => !photos?.[s]);
   /** Photos into the sides in this order (several picked at once: one side each). */
@@ -253,7 +284,11 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
   const sidePick = usePhotoPick((files) => store([shown.current])(files));
   const vinState = useVinState(vehicleId);
   if (hideEmpty && !present.length) return null;
-  const caption = <VinButton vehicleId={vehicleId} onLook={() => setViewing(null)} />;
+  const caption = typing ? (
+    <VinTypeIn vehicleId={vehicleId} current={{ vin: car?.v?.vin, year: car?.v?.year }} onDone={() => setTyping(false)} />
+  ) : (
+    <VinCaption vehicleId={vehicleId} onLook={() => setViewing(null)} onType={() => car && setTyping(true)} />
+  );
   const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s, caption }));
   return (
     <>
@@ -295,9 +330,15 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
           items={items}
           index={Math.min(viewing, items.length - 1)}
           onIndex={setViewing}
-          onClose={() => setViewing(null)}
+          onClose={() => {
+            setTyping(false);
+            setViewing(null);
+          }}
+          typing={typing}
           onRotate={(item) => edits.rotate(items.find((x) => x.id === item.id)?.side ?? 'mulkiya', item.id)}
           actions={(item) => {
+            // Typing the VIN: the field alone at the foot, the photo above it.
+            if (typing) return null;
             const side = items.find((x) => x.id === item.id)?.side ?? 'mulkiya';
             const replace = (
               <ReplaceButtons

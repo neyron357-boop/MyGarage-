@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { stepMainTab } from '../../ui/mainSwipe';
 import { hintNavigation } from '../../ui/stack';
 import { useTabSwipe } from '../../ui/tabSwipe';
-import { arrange, CARD, clampWidth, placeNew, setDeskBoard, setPlace, useDeskBoard, type Place } from '../../ui/deskBoard';
+import { arrange, CARD, clampWidth, pinnedFirst, placeNew, setDeskBoard, setPlace, useDeskBoard, type Place } from '../../ui/deskBoard';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -450,6 +450,8 @@ export function BoardPage() {
   const [filter, setFilter] = useState<Filter>('all');
   // How the board looks on this device: large cards or rows, the tabs' order and the steps left out («Вид»).
   const view = useBoardView();
+  // Cars pinned to the top on this phone (v0.73): first in every tab, the one pinned last on top.
+  const pins = useDeskBoard().pinned;
   const [viewOpen, setViewOpen] = useState(false);
   const compact = view.size === 'compact';
   // Pull to refresh (the phone): the board read again, and a new version of the app looked for — it shows
@@ -661,7 +663,8 @@ export function BoardPage() {
       </>
     );
 
-  const shown = statusFilter ? jobs.filter((j) => statusOf(j) === statusFilter) : phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs;
+  const shown = pinnedFirst(statusFilter ? jobs.filter((j) => statusOf(j) === statusFilter) : phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs, (j) => j.b.order.id, mobile ? pins : []);
+  const pinnedIds = new Set(mobile ? pins : []);
   // The strip in the order of «Вид»: «Все», the steps that have cars and are not left out, «Долги», «Архив».
   const tabItem = (k: BoardTab): TabItem | null => {
     if (k === 'all') return { value: 'all', label: t('board.all'), count: jobs.length };
@@ -693,7 +696,7 @@ export function BoardPage() {
             ) : shown.length ? (
               <List animate className={compact ? 'mini-list' : 'board-cards'}>
                 {shown.map((j) => (
-                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={picking ? undefined : toArchive(j.b)} variant={compact ? 'row' : 'card'} picking={picking} picked={picked.has(j.b.order.id)} onPick={pick} status={statusOf(j)} />
+                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={picking ? undefined : toArchive(j.b)} variant={compact ? 'row' : 'card'} picking={picking} picked={picked.has(j.b.order.id)} onPick={pick} status={statusOf(j)} pinned={pinnedIds.has(j.b.order.id) || undefined} />
                 ))}
               </List>
             ) : (

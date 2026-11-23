@@ -147,6 +147,18 @@ export function toggleImportant(id: string): void {
   const p = s.places[id];
   setDeskBoard({ important: toggle(s.important, id), ...(on && p && p.w < CARD.l ? { places: { ...s.places, [id]: { ...p, w: CARD.l } } } : {}) });
 }
+/**
+ * The cars pinned to the top (v0.73 — on a phone too, the owner's note: «добавить в мобильной версии возможность закреплять
+ * автомобили первой позиции»; the same pins of this device as the PC's): the pinned ones first — the one pinned last on
+ * top, as the iPhone's own apps pin — then the rest in their own order.
+ */
+export function pinnedFirst<T>(list: T[], idOf: (x: T) => string, pinned: string[]): T[] {
+  if (!pinned.length) return list;
+  const rank = new Map(pinned.map((id, i) => [id, i]));
+  const top = list.filter((x) => rank.has(idOf(x))).sort((a, b) => rank.get(idOf(b))! - rank.get(idOf(a))!);
+  return top.length ? [...top, ...list.filter((x) => !rank.has(idOf(x)))] : list;
+}
+
 /** Pinned: first on the board; on the canvas fixed where it is. */
 export function togglePinned(id: string): void {
   const s = deskBoardNow();

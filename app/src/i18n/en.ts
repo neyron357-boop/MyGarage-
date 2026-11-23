@@ -682,6 +682,10 @@ export const en: typeof ru = {
     inCard: 'In the card',
     adds: 'Check digit adds up',
   },
+  vinType: {
+    open: 'Type VIN',
+    placeholder: 'VIN — 17 characters',
+  },
   photos: {
     share: 'Share',
     save: 'Save',
@@ -1891,6 +1895,7 @@ export const en: typeof ru = {
     important: 'Important',
     notImportant: 'Not important',
     pin: 'Pin',
+    pinTop: 'Pin to the top',
     unpin: 'Unpin',
     bigger: 'Bigger',
     smaller: 'Smaller',

@@ -256,6 +256,11 @@ export interface JobForGuess {
   changedAt: string;
   /** The day it was opened (YYYY-MM-DD, Dubai): no part is bought for a job before it is there. */
   openedOn?: string;
+  /**
+   * The day it left the garage, closed or cancelled (YYYY-MM-DD, Dubai); none — still in work (v0.73: a job in any state
+   * is looked through, the archive too — «чтобы программа нашла его в любом статусе, даже если в архиве»).
+   */
+  goneOn?: string;
   lines: { id: string; name: string; partNumber?: string; costFils?: number; supplierId?: string }[];
   car: { make: string; model: string; plateNumber: string; year?: number };
 }
@@ -292,6 +297,8 @@ export interface JobScore {
   /** The car on the paper is this job's model, its make, or the paper names no car. */
   car: 'model' | 'make' | 'none';
   changedAt: string;
+  /** It had left the garage more than three days before the receipt's day (closed, cancelled): a job in work goes first. */
+  gone?: boolean;
 }
 export interface JobGuess {
   orderId: string;
@@ -320,6 +327,9 @@ const carIn = (text: string, words: Set<string>) =>
  * The car: the paper's (its car, or a car a line names) is the job's model +0.6, its make +0.3; the paper names another
  * car — not this job; a line naming another car pairs with none of its lines; the plate's digits on the paper +1. A
  * job opened after the receipt's day is not it.
+ *
+ * v0.73: jobs in any state are ranked — closed, cancelled, taken off the board. One that had left the garage more than
+ * three days before the receipt's day (`gone`) scores as any other, but among equal scores a job still in work is first.
  */
 export function rankJobs(items: ReceiptLine[], jobs: JobForGuess[], ctx: GuessContext = {}): JobScore[] {
   const carWords = new Set([...CAR_MAKES, ...jobs.flatMap((j) => carWordsOf(j.car.make, j.car.model))]);
@@ -369,17 +379,27 @@ export function rankJobs(items: ReceiptLine[], jobs: JobForGuess[], ctx: GuessCo
     let score = matched.reduce((t, m) => t + m.s, 0) + (car === 'model' ? 0.6 : car === 'make' ? 0.3 : 0);
     const plate = job.car.plateNumber.replace(/\D/g, '');
     if (plate.length >= 4 && digits.includes(` ${plate} `)) score += 1;
-    out.push({ orderId: job.id, number: job.number, score: Math.round(score * 100) / 100, matched: matched.sort((x, y) => x.item - y.item), car, changedAt: job.changedAt });
+    const gone = !!ctx.date && !!job.goneOn && dayGap(job.goneOn, ctx.date) > GONE_DAYS;
+    out.push({ orderId: job.id, number: job.number, score: Math.round(score * 100) / 100, matched: matched.sort((x, y) => x.item - y.item), car, changedAt: job.changedAt, ...(gone ? { gone } : {}) });
   }
-  return out.sort((a, b) => b.score - a.score || b.changedAt.localeCompare(a.changedAt));
+  return out.sort((a, b) => b.score - a.score || Number(!!a.gone) - Number(!!b.gone) || b.changedAt.localeCompare(a.changedAt));
 }
+
+/** Parts on credit are often scanned after the car has gone: a job closed up to three days before the receipt is still «in work» for it. */
+const GONE_DAYS = 3;
+/** Days from one YYYY-MM-DD to another (the later minus the earlier). */
+const dayGap = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 /**
  * The job the parts were bought for, by the app itself: the likeliest at 1 and more (a part of it on the paper, or its
  * model and a part, or its plate); another within 0.5 of it — `close`. Below 1 — none.
+ * v0.73: a job gone long before the receipt is taken only when it alone fits — with another as close (one more of the
+ * many old jobs with the same part) the expense is not put on it; it is offered, a tap away.
  */
 export function guessJob(ranked: JobScore[]): JobGuess | undefined {
   const [best, second] = ranked;
   if (!best || best.score < 1) return undefined;
-  return { orderId: best.orderId, number: best.number, score: best.score, matched: best.matched, close: !!second && best.score - second.score < 0.5, by: 'app' };
+  const close = !!second && best.score - second.score < 0.5;
+  if (close && best.gone) return undefined;
+  return { orderId: best.orderId, number: best.number, score: best.score, matched: best.matched, close, by: 'app' };
 }
