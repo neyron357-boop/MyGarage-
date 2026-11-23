@@ -1159,19 +1159,13 @@ export function JobPage() {
       <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
       <ObdLine orderId={b.order.id} scans={b.order.obdScans ?? []} open={open} />
       {/* One flow of chips: when the car was promised, the car's own papers (VIN, Mulkiya, Job card, the mileage),
-          who does the job (one or several — each chip on or off by itself), its suppliers. On a phone one row that
-          scrolls sideways (v0.57, the Apple audit: in three rows they pushed the job's lines below the screen) — the
+          who does the job (one or several — each chip on or off by itself), its suppliers. On a phone two rows that
+          scroll sideways (v0.71, «2 ряда — поместить капсулы»; v0.57: three rows pushed the job's lines below the screen) — the
           papers first, they are taken as the car comes in; on a PC, beside the lines, they wrap. */}
       <div className={phone ? 'chip-row job-foot' : 'chip-row wrap job-foot'} aria-label={t('order.mechanic')}>
         <JobDayChip job={b} fixed={!!lockedMonth} />
         {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
         <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
-        {vin && (
-          <button type="button" className="chip vin-copy" onClick={() => void copyVin()} aria-label={t('job.copyVin')} data-vin-copy>
-            <IconCopy size={16} stroke={2} aria-hidden />
-            <span className="vin-copy-text tnum">{vin}</span>
-          </button>
-        )}
         <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
         <JobCardChip orderId={oid} open={open} />
         {/* The car's mileage on this visit (v0.44): the odometer's photo, read on the phone. */}
@@ -1360,6 +1354,15 @@ export function JobPage() {
       <PageHeader
         back="/"
         eyebrow={`№${b.order.number}`}
+        // The VIN alone, one tap (v0.70) — small, under the car's name (v0.71, «переместить наверх под названием авто мелко»).
+        subtitle={
+          vin ? (
+            <button type="button" className="vin-line" onClick={() => void copyVin()} aria-label={t('job.copyVin')} data-vin-copy>
+              <span className="vin-line-text">VIN {vin}</span>
+              <IconCopy size={14} stroke={2} aria-hidden />
+            </button>
+          ) : undefined
+        }
         title={
           <>
             {[b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ') || t('order.title')}{' '}

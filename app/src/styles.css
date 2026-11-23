@@ -7436,13 +7436,33 @@ html.desk .mark-layer-body {
   cursor: pointer;
 }
 
-/* v0.70: the VIN alone, copied in one tap — the chip says it in full. */
-.chip.vin-copy {
+/* v0.70–v0.71: the VIN alone, copied in one tap — small, under the car's name. */
+.vin-line {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-}
-.vin-copy-text {
-  font-weight: 500;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
   letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-label-2);
+  cursor: pointer;
+}
+.vin-line svg {
+  color: var(--mantine-color-cobalt-6);
+}
+/* v0.71 («2 ряда сделать — поместить капсулы»): the job card's capsules in two rows on a phone, sideways if more. */
+.chip-row.job-foot:not(.wrap) {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-columns: max-content;
+  justify-content: start;
+  align-items: center;
+  gap: 8px;
 }
 
 /* v0.70: the board picking jobs to put in a tab — a round mark on each card, filled once picked. */
@@ -7477,4 +7497,46 @@ html.desk .mark-layer-body {
 /* While picking, a card's document chip steps aside for the mark. */
 .job-row[data-picking] .job-card-doc {
   visibility: hidden;
+}
+
+/* v0.71: a supplier's mark beside why it fits — good in green, «не отвечает» in orange. */
+.supplier-why {
+  display: inline;
+}
+.supplier-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.supplier-mark[data-mark='good'] {
+  background: var(--mantine-color-green-light);
+  color: var(--mantine-color-green-light-color);
+}
+.supplier-mark[data-mark='silent'] {
+  background: var(--mantine-color-orange-light);
+  color: var(--mantine-color-orange-light-color);
+}
+/* A group of the job's suppliers (new, used): its name, how many, its «Спросить» at the end. */
+.group-title.supplier-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* «Убранные · N»: a fold, quiet. */
+.group-title.supplier-off-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--app-label-2);
+  cursor: pointer;
 }

@@ -3,6 +3,7 @@ import { nowIso } from '../domain/dates';
 import { byPosition, itemTitle, lineName } from '../domain/items';
 import { rankForJob, rankSuppliers, supplierUse, type BoughtLine, type Ranked, type SupplierUse } from '../domain/supplierRank';
 import type { Lang, OrderItem, Supplier, Vehicle } from '../domain/types';
+import { AppError } from './errors';
 
 /*
  * What the garage bought from whom (v0.38): every line with a supplier (a part bought, a line handed to a contractor),
@@ -40,7 +41,7 @@ export async function suppliersRanked(): Promise<{ list: Supplier[]; use: Map<st
 }
 
 /** The suppliers for a job (its parts sellers; its contractors when it has work done outside), best fit first. */
-export async function suppliersForJob(orderId: string, lang: Lang): Promise<{ parts: Ranked[]; contractors: Ranked[]; partLines: OrderItem[]; vehicle?: Vehicle } | null> {
+export async function suppliersForJob(orderId: string, lang: Lang): Promise<{ parts: Ranked[]; contractors: Ranked[]; off: Supplier[]; partLines: OrderItem[]; vehicle?: Vehicle } | null> {
   const order = await db.orders.get(orderId);
   if (!order) return null;
   const [vehicle, items, all, lines, returns] = await Promise.all([
@@ -64,7 +65,17 @@ export async function suppliersForJob(orderId: string, lang: Lang): Promise<{ pa
   return {
     parts: rankForJob(sellers, use, history, { make: vehicle?.make, parts: partLines.map(named), onJob }, now),
     contractors: handed.length ? rankForJob(doers, use, history, { make: vehicle?.make, parts: handed.map(named), onJob }, now) : [],
+    // Taken off the list by the manager (v0.71): folded under it, to bring back.
+    off: all.filter((s) => s.mark === 'off').sort((a, b) => a.name.localeCompare(b.name)),
     partLines,
     vehicle,
   };
+}
+
+/** The manager's mark on a supplier (v0.71: good, silent, off — or none). Returns the one it had (for «Отменить»). */
+export async function setSupplierMark(supplierId: string, mark: Supplier['mark']): Promise<Supplier['mark']> {
+  const s = await db.suppliers.get(supplierId);
+  if (!s) throw new AppError('err.notFound');
+  await db.suppliers.update(supplierId, { mark });
+  return s.mark;
 }

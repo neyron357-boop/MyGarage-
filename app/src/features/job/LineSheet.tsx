@@ -22,7 +22,7 @@ import type { OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
 import { FormRow, Money, MoneyInput, RowGroup } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { typedOnly, useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { typedOnly, useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { QtyAsk } from './QtyCheck';
@@ -188,6 +188,18 @@ export function LineSheet({
   // список, цены потом»): «＋ Ещё» or the keyboard's «next» saves the name and clears the sheet for the next one.
   const [added, setAdded] = useState<{ id: string; title: string }[]>([]);
   const nameRef = useRef<HTMLInputElement>(null);
+  // A new line's name typed on a phone (v0.71, the user: «нажимаю на поле — открывается клавиатура, поле уходит вверх, мне
+  // каждый раз приходится прокручивать, чтобы видеть, что пишу»): while it has the keyboard, the tiles and the photos above
+  // it step aside — the field stays right under the sheet's title, in sight above the keyboard.
+  const phone = usePhone();
+  const [typing, setTyping] = useState(false);
+  const blurTimer = useRef<number | undefined>(undefined);
+  const inSight = () => {
+    const go = () => nameRef.current?.scrollIntoView({ block: 'nearest' });
+    requestAnimationFrame(go);
+    // Again once the keyboard has come up (its own slide).
+    window.setTimeout(go, 380);
+  };
   /** The sheet as it opens: the line's own values, or empty for a new one. */
   const fill = () => {
     setTitle(item ? itemTitle(item, lang) : '');
@@ -217,6 +229,7 @@ export function LineSheet({
     if (!opened) return;
     fill();
     setAdded([]);
+    setTyping(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, lang, incl, service]);
   // A number the AI proved (two catalogues) while the sheet is open, into an empty field: the save keeps it. Only this
@@ -364,7 +377,7 @@ export function LineSheet({
     <Modal opened={opened} onClose={onClose} title={item ? t(service ? 'job.addService' : kind === 'labor' ? 'job.addWork' : 'job.addPart') : service ? t('qi.addService') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
       {order.node}
       <Stack gap="lg">
-        {!item && (suggestions?.top.length ?? 0) > 0 && (
+        {!item && !typing && (suggestions?.top.length ?? 0) > 0 && (
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
           <div className="line-quick" aria-label={t('qi.frequent')}>
             {suggestions!.top.slice(0, 6).map((name) => {
@@ -394,7 +407,8 @@ export function LineSheet({
           </div>
         )}
 
-        {/* Every picture first (v0.52): the line's own, then the AI's — one row, one size. */}
+        {/* Every picture first (v0.52): the line's own, then the AI's — one row, one size (not while the name is typed). */}
+        {!typing && (
         <LineMedia
           own={[...kept.map((id) => ({ id, removable: true })), ...fresh.map((p) => ({ id: p.id, src: p.src, removable: true }))]}
           onAdd={(files) => setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))])}
@@ -408,6 +422,7 @@ export function LineSheet({
           diagramIds={kind === 'part' ? live?.diagramIds : undefined}
           sampleIds={kind === 'part' ? live?.sampleIds : undefined}
         />
+        )}
 
         {/* What it is: the name, large; for a part — where it stands. */}
         <div className="ios-group">
@@ -455,6 +470,16 @@ export function LineSheet({
               // A new line: the keyboard's «next» saves this one and the field waits for the next (v0.68). After the
               // list's own handling (an option picked with the keys is the name then).
               enterKeyHint={item ? 'done' : 'next'}
+              onFocus={() => {
+                if (item || !phone) return;
+                window.clearTimeout(blurTimer.current);
+                setTyping(true);
+                inSight();
+              }}
+              onBlur={() => {
+                // A moment later: «＋ Ещё» takes the keyboard straight back (no tiles flashing in between).
+                blurTimer.current = window.setTimeout(() => setTyping(false), 220);
+              }}
               onKeyDown={(e) => {
                 if (item || e.key !== 'Enter' || e.nativeEvent.isComposing) return;
                 e.preventDefault();

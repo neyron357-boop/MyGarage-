@@ -1,6 +1,6 @@
-import { ActionIcon, Button, Group } from '@mantine/core';
+import { Button } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconClipboardCheck, IconBarcodeOff, IconPhone, IconSend, IconStarFilled, IconTruck } from '@tabler/icons-react';
+import { IconBarcodeOff, IconChevronDown, IconClipboardCheck, IconSend, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -10,12 +10,14 @@ import type { Supplier } from '../../domain/types';
 import { partsRequestText, whatsappUrl } from '../../services/messages';
 import { suppliersForJob } from '../../services/supplierRank';
 import { copyText } from '../../ui/clipboard';
-import { EmptyState, List, ListRow, PageHeader, PageSkeleton, PersonAvatar } from '../../ui/components';
+import { EmptyState, List, PageHeader, PageSkeleton } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { SupplierSheet } from '../parts/Suppliers';
 import { DiagramParts, useDiagramSheets } from './DiagramSheets';
+import { OffRow, SupplierRow, useUsedFiles } from './SupplierMarks';
+import { partsType } from '../../domain/supplierTidy';
 import { downloadFile } from '../../ui/share';
 
 /** The manager's stars of a supplier, small: "★ 4" (not rated — nothing). */
@@ -78,6 +80,9 @@ export function JobSuppliersPage() {
   const numbered = lines.some((i) => i.partNumber?.trim());
   const asked = plain ? lines.map((i) => ({ ...i, partNumber: undefined })) : lines;
   const sheets = useDiagramSheets(asked);
+  // The car's and the parts' photos for a used-parts seller (v0.71), ready before the tap.
+  const usedFiles = useUsedFiles(data?.vehicle?.id, lines);
+  const [showOff, setShowOff] = useState(false);
   if (data === undefined) return <PageSkeleton />;
   if (data === null) return <EmptyState title={t('err.notFound')} />;
   const v = data.vehicle;
@@ -124,45 +129,67 @@ export function JobSuppliersPage() {
     }
     if (await copyText(text)) haptic('selection');
   };
-  const rows = (list: Ranked[]) => (
-    <List>
-      {list.map((r) => {
-        const s = r.supplier;
-        // The chat with the list by lines in its box — also on the supplier's own WhatsApp number (v0.61.1: the
-        // workbook's link opened the chat empty); a business link opens as it is.
-        const own = supplierChatLink(s);
-        const ownNumber = own ? chatLinkNumber(own) : undefined;
-        const chat = own ? (ownNumber ? whatsappUrl(ownNumber, ask) : own) : s.phone ? whatsappUrl(s.phone, ask) : undefined;
-        return (
-          <ListRow
-            key={s.id}
-            onClick={() => setCard(s)}
-            left={<PersonAvatar name={s.name} company size={36} />}
-            title={
-              <span className="supplier-name">
-                <span className="supplier-name-text">{s.name}</span>
-                <StarsPill s={s} />
-              </span>
-            }
-            subtitle={why(r) || undefined}
-            right={
-              <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
-                {chat && (
-                  <ActionIcon component="a" href={chat} target="_blank" rel="noopener" variant="light" color="green" size={36} radius="xl" aria-label="WhatsApp" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                    <IconBrandWhatsapp size={19} />
-                  </ActionIcon>
-                )}
-                {s.phone && (
-                  <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                    <IconPhone size={18} />
-                  </ActionIcon>
-                )}
-              </Group>
-            }
-          />
-        );
-      })}
+  // Asking a seller of used parts (v0.71): the car's and the parts' photos with the words — one send.
+  const usedText = v && asked.length ? partsRequestText(v, asked, { used: true }) : '';
+  const shareUsed = async () => {
+    haptic('light');
+    const files = usedFiles ?? [];
+    if (files.length && typeof navigator.canShare === 'function' && navigator.canShare({ files, text: usedText })) {
+      try {
+        await navigator.share({ files, text: usedText });
+      } catch (e) {
+        if ((e as Error)?.name !== 'AbortError' && (await copyText(usedText))) copied();
+      }
+      return;
+    }
+    // Where files cannot be shared (a PC): the photos saved, the words to send with them.
+    if (files.length) files.forEach(downloadFile);
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ text: usedText });
+        return;
+      } catch (e) {
+        if ((e as Error)?.name === 'AbortError') return;
+      }
+    }
+    if (await copyText(usedText)) haptic('selection');
+  };
+  const chatOf = (sup: Supplier, text: string) => {
+    // The chat with the list by lines in its box — also on the supplier's own WhatsApp number (v0.61.1: the workbook's
+    // link opened the chat empty); a business link opens as it is.
+    const own = supplierChatLink(sup);
+    const ownNumber = own ? chatLinkNumber(own) : undefined;
+    return own ? (ownNumber ? whatsappUrl(ownNumber, text) : own) : sup.phone ? whatsappUrl(sup.phone, text) : undefined;
+  };
+  const rows = (list: Ranked[], used = false) => (
+    <List animate>
+      {list.map((r) => (
+        <SupplierRow
+          key={r.supplier.id}
+          r={r}
+          why={why(r)}
+          stars={<StarsPill s={r.supplier} />}
+          chat={chatOf(r.supplier, used ? usedText : ask)}
+          used={used}
+          onUsedAsk={used ? () => void shareUsed() : undefined}
+          onCard={() => setCard(r.supplier)}
+        />
+      ))}
     </List>
+  );
+  // New parts and used ones (v0.71, «разделять поставщиков, которые продают б/у, от новых»): a seller of both is in both.
+  const usedOnes = data.parts.filter((r) => ['used', 'both'].includes(partsType(r.supplier) ?? ''));
+  const newOnes = data.parts.filter((r) => partsType(r.supplier) !== 'used');
+  const groupHead = (title: string, n: number, onAsk?: () => void, busy?: boolean, mark?: string) => (
+    <div className="group-title supplier-group" data-supplier-group={mark}>
+      <span>{title}</span>
+      <span className="count">{n}</span>
+      {onAsk && (
+        <Button size="compact-md" variant="light" ml="auto" leftSection={<IconSend size={15} />} loading={busy} onClick={onAsk}>
+          {t('suppliers.askAll')}
+        </Button>
+      )}
+    </div>
   );
   return (
     <>
@@ -189,10 +216,21 @@ export function JobSuppliersPage() {
         )}
         <DiagramParts items={asked} sheets={sheets} />
         {data.parts.length ? (
-          <>
-            {(data.contractors.length > 0 || asked.length > 0) && <div className="group-title">{t('suppliers.partsSellers')}</div>}
-            {rows(data.parts)}
-          </>
+          usedOnes.length ? (
+            <>
+              {/* New parts: the list, the VIN, the diagrams' sheets (as «Спросить» above). */}
+              {groupHead(t('suppliers.groupNew'), newOnes.length, ask ? () => void share() : undefined, sheets.making, 'new')}
+              {rows(newOnes)}
+              {/* Used parts: the list with the car's and the parts' photos. */}
+              {groupHead(t('suppliers.groupUsed'), usedOnes.length, usedText ? () => void shareUsed() : undefined, !usedFiles, 'used')}
+              {rows(usedOnes, true)}
+            </>
+          ) : (
+            <>
+              {(data.contractors.length > 0 || asked.length > 0) && <div className="group-title">{t('suppliers.partsSellers')}</div>}
+              {rows(data.parts)}
+            </>
+          )
         ) : (
           <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} action={<Button onClick={() => navigate('/parts?tab=suppliers')}>{t('suppliers.all')}</Button>} />
         )}
@@ -200,6 +238,22 @@ export function JobSuppliersPage() {
           <>
             <div className="group-title">{t('suppliers.contractors')}</div>
             {rows(data.contractors)}
+          </>
+        )}
+        {/* Taken off the list by the manager (v0.71): folded, to bring back. */}
+        {data.off.length > 0 && (
+          <>
+            <button type="button" className="group-title supplier-off-head" onClick={() => setShowOff((x) => !x)} aria-expanded={showOff} data-suppliers-off>
+              {t('suppliers.mark.offList', { n: data.off.length })}
+              <IconChevronDown size={16} style={{ transform: showOff ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} aria-hidden />
+            </button>
+            {showOff && (
+              <List>
+                {data.off.map((sup) => (
+                  <OffRow key={sup.id} s={sup} />
+                ))}
+              </List>
+            )}
           </>
         )}
       </div>

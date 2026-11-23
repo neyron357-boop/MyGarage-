@@ -807,6 +807,12 @@ export interface Supplier {
   address?: string;
   notes?: string;
   reliability?: number;
+  /**
+   * The manager's mark (v0.71, the user: «некоторые вообще не отвечают, некоторых нужно убрать, а некоторые прям хорошие —
+   * отмечать прямо отсюда, чтобы самые хорошие были наверху»): good — first in a job's list; silent — does not answer, at
+   * its end; off — not in a job's list (folded under it, to bring back).
+   */
+  mark?: 'good' | 'silent' | 'off';
   /** Car makes they work with ("Toyota", "Nissan"…); empty — any. */
   makes?: string[];
   /** New parts, used ones, or both. */

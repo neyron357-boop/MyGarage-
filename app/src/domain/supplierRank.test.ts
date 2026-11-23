@@ -61,3 +61,16 @@ describe('suppliers by what was bought from them (v0.38)', () => {
     expect(r.map((x) => x.supplier.id).sort()).toEqual(['rated', 'used']);
   });
 });
+
+describe('the manager’s marks (v0.71)', () => {
+  it('good first whatever else, «does not answer» last, removed out of the job’s list', () => {
+    const use = supplierUse([line('busy', 'o1', 'Brake pads'), line('busy', 'o2', 'Brake pads'), line('mute', 'o3', 'Brake pads'), line('gone', 'o4', 'Brake pads')]);
+    const list = [sup('busy'), sup('fresh', { mark: 'good' }), sup('mute', { mark: 'silent' }), sup('gone', { mark: 'off' })];
+    const r = rankForJob(list, use, [line('busy', 'o1', 'Brake pads'), line('mute', 'o3', 'Brake pads'), line('gone', 'o4', 'Brake pads')], { make: 'Toyota', parts: [{ name: 'BRAKE PADS', title: 'Brake pads' }], onJob: new Set() }, NOW);
+    expect(r.map((x) => x.supplier.id)).toEqual(['fresh', 'busy', 'mute']);
+    expect(r[0].why[0]).toEqual({ kind: 'good' });
+  });
+  it('in the whole list: a good one up, one that does not answer down', () => {
+    expect(rankSuppliers([sup('b'), sup('a', { mark: 'silent' }), sup('c', { mark: 'good' })], supplierUse([]), NOW).map((s) => s.id)).toEqual(['c', 'b', 'a']);
+  });
+});

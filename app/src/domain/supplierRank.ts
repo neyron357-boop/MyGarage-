@@ -87,6 +87,9 @@ function standing(s: Supplier, u: SupplierUse, now: string): number {
     score += days <= 30 ? 8 : days <= 120 ? 4 : 0;
   }
   score -= Math.min(15, 5 * u.returns);
+  // The manager's mark (v0.71): a good one up, one that does not answer down — in every list.
+  if (s.mark === 'good') score += 20;
+  else if (s.mark === 'silent') score -= 20;
   return score;
 }
 
@@ -102,7 +105,10 @@ export type Why =
   | { kind: 'boughtFor'; make: string; jobs: number }
   | { kind: 'sold'; part: string; times: number }
   | { kind: 'make'; make: string }
-  | { kind: 'sells'; part: string };
+  | { kind: 'sells'; part: string }
+  /** The manager's mark (v0.71): good — first, silent — does not answer, last. */
+  | { kind: 'good' }
+  | { kind: 'silent' };
 
 export interface Ranked {
   supplier: Supplier;
@@ -147,10 +153,19 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
     if (!a) sold.set(l.supplierId, (a = []));
     a.push({ x: indexText(l.title), name: l.name });
   }
-  const ranked = list.map((s): Ranked => {
+  // Taken off by the manager (v0.71): not in a job's list (`offOf` — folded under it).
+  const ranked = list.filter((s) => s.mark !== 'off').map((s): Ranked => {
     const u = useOf(use, s.id);
     const why: Why[] = [];
     let score = standing(s, u, now);
+    // Marked good — first, whatever else; marked silent — last (v0.71, «самые хорошие наверху»).
+    if (s.mark === 'good') {
+      score += 1000;
+      why.push({ kind: 'good' });
+    } else if (s.mark === 'silent') {
+      score -= 1000;
+      why.push({ kind: 'silent' });
+    }
     if (job.onJob.has(s.id)) {
       score += 100;
       why.push({ kind: 'onJob' });

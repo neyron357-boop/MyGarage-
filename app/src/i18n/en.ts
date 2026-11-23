@@ -2064,6 +2064,10 @@ export const en: typeof ru = {
     askAll: 'Ask',
     // v0.68: the list and the diagrams without the part numbers — the shop finds the right one.
     noNumbers: 'Without numbers',
+    // v0.71: new and used apart; suppliers marked right from the list.
+    groupNew: 'New',
+    groupUsed: 'Used',
+    mark: { good: 'Good', silent: 'No answer', off: 'Remove', none: 'No mark', back: 'Bring back', removed: '{{name}} — off the list', offList: 'Removed · {{n}}' },
     partsSellers: 'Parts',
     contractors: 'Contractors',
     rating: 'Rating',

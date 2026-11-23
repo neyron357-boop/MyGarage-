@@ -169,7 +169,8 @@ export function partRequestText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year'
 export function partsRequestText(
   vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'vin' | 'engine'>,
   items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'partNumber' | 'qty'>[],
-  opts: { diagrams?: boolean } = {},
+  /** `used` (v0.71): to a seller of used parts — the car's and the parts' photos with it, its own last line. */
+  opts: { diagrams?: boolean; used?: boolean } = {},
 ): string {
   // «*» would break WhatsApp's bold (and a car never has one)
   const car = [vehicle.make, vehicle.model, vehicle.year, vehicle.engine].filter(Boolean).join(' ').replace(/\*/g, '').trim();
@@ -181,7 +182,9 @@ export function partsRequestText(
     const number = i.partNumber?.trim();
     return `${k + 1}. ${name}${i.qty > 1 ? ` × ${i.qty}` : ''}${number ? ` (${number})` : ''}`;
   });
-  const end = [...(opts.diagrams ? ['Diagrams in the photos — the same numbers.'] : []), 'Price and availability, please: original / aftermarket?'];
+  const end = opts.used
+    ? ['Photos of the car and the parts attached.', 'Used parts — price and availability, please?']
+    : [...(opts.diagrams ? ['Diagrams in the photos — the same numbers.'] : []), 'Price and availability, please: original / aftermarket?'];
   return [...head, ...(head.length ? [''] : []), ...parts, '', ...end].join('\n');
 }
 
