@@ -86,6 +86,9 @@ export function useDeskHotkeys(keys: [string, () => void][], enabled = true) {
   useHotkeys(items);
 }
 
+/** The key that goes with a letter, as this computer's keyboard names it (v0.72): ⌘ on a Mac, Ctrl elsewhere. */
+export const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl';
+
 /** The PC's own keys, everywhere: a new job, the search, this list («?»). */
 export function DeskKeys() {
   const { t } = useTranslation();
@@ -100,7 +103,7 @@ export function DeskKeys() {
     [<Kbd key="n">N</Kbd>, t('nav.newOrder')],
     [
       <>
-        <Kbd>/</Kbd> <Kbd>Ctrl</Kbd>+<Kbd>K</Kbd>
+        <Kbd>/</Kbd> <Kbd>{MOD_KEY}</Kbd>+<Kbd>K</Kbd>
       </>,
       t('nav.search'),
     ],
@@ -114,7 +117,8 @@ export function DeskKeys() {
     [<Kbd key="q">?</Kbd>, t('desk.keys')],
   ];
   return (
-    <Modal opened={help} onClose={() => setHelp(false)} title={t('desk.keys')} size="sm">
+    // (Asked for by a key: it is there at once — what the keyboard opens does not travel.)
+    <Modal opened={help} onClose={() => setHelp(false)} title={t('desk.keys')} size="sm" transitionProps={{ duration: 0 }}>
       <div className="desk-keys">
         {rows.map(([k, label]) => (
           <div key={label} className="desk-keys-row">
@@ -168,7 +172,8 @@ export interface DeskMenuItem {
 export function DeskMenu({ at, items, onClose, label }: { at: { x: number; y: number } | null; items: DeskMenuItem[]; onClose: () => void; label?: string }) {
   if (!at) return null;
   return createPortal(
-    <Menu opened onChange={(o) => !o && onClose()} position="bottom-start" offset={2} width={240} withinPortal closeOnItemClick returnFocus={false}>
+    // (No fade: a right click's menu is there at once, as the system's own.)
+    <Menu opened onChange={(o) => !o && onClose()} position="bottom-start" offset={2} width={240} withinPortal closeOnItemClick returnFocus={false} transitionProps={{ duration: 0 }}>
       <Menu.Target>
         <span aria-hidden className="desk-menu-anchor" style={{ left: at.x, top: at.y }} />
       </Menu.Target>

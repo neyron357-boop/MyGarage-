@@ -169,6 +169,8 @@ export function DeskPalette({ opened, onClose }: { opened: boolean; onClose: () 
         padding={0}
         classNames={{ content: 'desk-pal' }}
         aria-label={t('nav.search')}
+        // Opened by a key a hundred times a day: there at once, the field ready — no travel to wait for.
+        transitionProps={{ duration: 0 }}
       >
         <TextInput
           data-autofocus

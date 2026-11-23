@@ -1,4 +1,4 @@
-import { Box, Button, Collapse, Group, Modal, SegmentedControl, Select, SimpleGrid, Stack, Text, Textarea, TextInput, UnstyledButton } from '@mantine/core';
+import { Box, Button, Group, Modal, SegmentedControl, Select, SimpleGrid, Stack, Text, Textarea, TextInput, UnstyledButton } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
 import { formatPhone } from '../../domain/phone';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -8,6 +8,7 @@ import { VEHICLE_TYPES, vehicleTypeOf } from '../../domain/vehicleType';
 import { createCustomer, createVehicle, suggestCustomers, updateCustomer, updateVehicle, type CustomerInput, type VehicleInput } from '../../services/customers';
 import { setJobCustomer } from '../../services/orders';
 import { PersonAvatar } from '../../ui/components';
+import { Fold } from '../../ui/Fold';
 import { haptic } from '../../ui/haptics';
 import { PlateInput } from '../../ui/PlateInput';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
@@ -43,9 +44,9 @@ function More({ label, children, open: initial = false }: { label: string; child
           <IconChevronDown size={16} color="var(--mantine-color-cobalt-6)" style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }} />
         </Group>
       </UnstyledButton>
-      <Collapse in={open}>
+      <Fold open={open}>
         <Box pt="sm">{children}</Box>
-      </Collapse>
+      </Fold>
     </Box>
   );
 }

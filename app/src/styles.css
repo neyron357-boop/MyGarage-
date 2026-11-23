@@ -909,6 +909,34 @@ html.kb .tab-bar-wrap {
 .pop-in {
   animation: mg-pop var(--dur-3) var(--ease-out) both;
 }
+/* What folds away and back (ui/Fold.tsx): a grid row from 0fr to 1fr — the height is the content's own the whole time,
+   never a number of pixels measured once; whatever comes into it later is in sight. Folding is quicker than unfolding;
+   folded, it is not painted and takes no key; standing open, it clips nothing. */
+.fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-2) var(--ease-out);
+}
+.fold[data-open] {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-3) var(--ease-ios);
+}
+.fold > .fold-in {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-2) var(--ease-out), visibility 0s linear var(--dur-2);
+}
+.fold[data-open] > .fold-in {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--dur-3) var(--ease-out), visibility 0s;
+}
+.fold[data-open][data-still] > .fold-in {
+  overflow: visible;
+}
 /* Staggered list entrance (first items only, so long lists do not wait). */
 .stagger > * {
   animation: mg-rise-in var(--dur-2) var(--ease-out) both;

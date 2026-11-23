@@ -126,6 +126,14 @@ const POP_OUT: TransitionStyles = {
   common: { transformOrigin: 'center center' },
   transitionProperty: 'transform, opacity',
 };
+/** A window of the PC: out of the middle, a little smaller — no travel. */
+const DESK_POP: TransitionStyles = {
+  in: { opacity: 1, transform: 'scale(1)' },
+  out: { opacity: 0, transform: 'scale(.97)', pointerEvents: 'none' },
+  common: { transformOrigin: 'center center' },
+  transitionProperty: 'transform, opacity',
+};
+const EASE_OUT = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
 const SHEET_OUT: TransitionStyles = {
   in: { opacity: 1, transform: 'translateY(0)' },
   out: { opacity: 0, transform: 'translateY(100%)', pointerEvents: 'none' },
@@ -283,10 +291,14 @@ const deskOverrides = createTheme({
       },
     }),
     Switch: Switch.extend({ defaultProps: { size: 'md' } }),
+    // A window of a desk (v0.72): it comes out of the middle a little smaller and is there in 160 ms, gone in 110 — it
+    // does not travel up from below as the phone's sheet does; a menu only fades in, quickly, where it was asked for.
     Modal: Modal.extend({
+      defaultProps: { transitionProps: { transition: DESK_POP, duration: 160, exitDuration: 110, timingFunction: EASE_OUT } },
       styles: { title: { fontWeight: 700, fontSize: rem(16), lineHeight: 1.3, letterSpacing: '-0.01em' }, header: { paddingBottom: rem(6) } },
     }),
     Menu: Menu.extend({
+      defaultProps: { transitionProps: { transition: 'fade', duration: 100 } },
       styles: { dropdown: { padding: 5 }, item: { fontSize: rem(14), padding: `${rem(8)} ${rem(10)}`, borderRadius: rem(10) }, divider: { marginBlock: 4 } },
     }),
     Tooltip: Tooltip.extend({ defaultProps: { radius: 'sm', withArrow: false, openDelay: 350, fz: 12 } }),

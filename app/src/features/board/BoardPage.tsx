@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Button, Group, Stack, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Stack } from '@mantine/core';
 import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutBoardSplit, IconLayoutGrid, IconLayoutKanban, IconPinnedFilled, IconPlus, IconSparkles, IconUserDollar } from '@tabler/icons-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { stepMainTab } from '../../ui/mainSwipe';
@@ -396,20 +396,18 @@ function DeskArchive({ jobs, byHand, covers, onBack }: { jobs: Job[]; byHand: Se
       align: 'right',
       cell: (j) =>
         byHand.has(j.b.order.id) ? (
-          <Tooltip label={t('board.unarchive')}>
-            <ActionIcon
-              variant="light"
-              size={34}
-              radius="xl"
-              aria-label={t('board.unarchive')}
-              onClick={(e) => {
-                e.stopPropagation();
-                onBack(j.b);
-              }}
-            >
-              <IconArrowBackUp size={18} />
-            </ActionIcon>
-          </Tooltip>
+          <ActionIcon
+            variant="light"
+            size={34}
+            radius="xl"
+            aria-label={t('board.unarchive')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onBack(j.b);
+            }}
+          >
+            <IconArrowBackUp size={18} />
+          </ActionIcon>
         ) : null,
     },
   ];

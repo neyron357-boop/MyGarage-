@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Collapse, Group, Progress, SimpleGrid, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Box, Group, Progress, SimpleGrid, Text, ThemeIcon, UnstyledButton } from '@mantine/core';
 import { IconBuildingStore, IconCheck, IconChevronDown, IconDeviceMobile, IconListCheck, IconListDetails, IconLockOpen, IconUsers, IconX, type Icon } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { PLACEHOLDER_STAFF } from '../../services/seed';
 import { Tip } from '../../ui/components';
+import { Fold } from '../../ui/Fold';
 import { useSettings } from '../../ui/hooks';
 import { insecureContext } from '../../ui/device';
 import { useInstall } from '../../ui/pwa';
@@ -75,7 +76,7 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
           <IconX size={16} stroke={2.4} />
         </ActionIcon>
       </div>
-      <Collapse in={open}>
+      <Fold open={open}>
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing={0} verticalSpacing={0} className="stagger" ml={42}>
         {items.map((i) => (
           <Group
@@ -106,7 +107,7 @@ export function SetupChecklist({ compact }: { compact?: boolean }) {
           </Group>
         ))}
       </SimpleGrid>
-      </Collapse>
+      </Fold>
     </Box>
   );
 }

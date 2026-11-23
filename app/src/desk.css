@@ -16,7 +16,54 @@ html.desk {
   --desk-side-gap: 10px;
   --desk-radius: 16px;
   --desk-row: 44px;
+  /* The window's scrollbar (v0.72): its room is always kept — a long screen after a short one moves nothing sideways. */
+  --desk-sb: 8px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--app-label-3) 70%, transparent) transparent;
+}
+/* Chrome and Edge (the garage's PC): a thin rounded thumb with no arrows and no track, as a desktop app's — not the
+   17 px bar of Windows 10. */
+@supports selector(::-webkit-scrollbar) {
+  html.desk {
+    --desk-sb: 12px;
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  html.desk::-webkit-scrollbar,
+  html.desk ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  html.desk::-webkit-scrollbar-track,
+  html.desk ::-webkit-scrollbar-track,
+  html.desk::-webkit-scrollbar-corner,
+  html.desk ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  html.desk::-webkit-scrollbar-thumb,
+  html.desk ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--app-label-3) 80%, transparent);
+    background-clip: content-box;
+  }
+  html.desk::-webkit-scrollbar-thumb:hover,
+  html.desk ::-webkit-scrollbar-thumb:hover {
+    background: var(--app-label-2);
+    background-clip: content-box;
+  }
+}
+/* A sheet open (Mantine locks the page's scroll): the scrollbar's room is given up — the sheet's shade then covers the
+   whole window, not all but a light strip at its right edge — and the page is padded by exactly that room, so nothing
+   under the sheet moves. Mantine's own padding is switched off: it measures the scrollbar, which a short screen does
+   not have, and would move a short screen and a long one differently. */
+html.desk:has(body[data-scroll-locked]) {
+  scrollbar-gutter: auto;
+}
+html.desk body[data-scroll-locked] {
+  margin-right: 0 !important;
+  padding-right: var(--desk-sb) !important;
 }
 /* A PC screen in the dark is not an OLED phone: a deep grey window, the panels a step lighter. */
 html.desk[data-mantine-color-scheme='dark'] {
@@ -50,6 +97,11 @@ html.desk .desk-side {
 }
 html.desk .desk-side::-webkit-scrollbar {
   display: none;
+}
+/* A low window (a laptop, a window not maximised): the menu scrolls — its rows are not squeezed («Новый заказ» was
+   pressed into a 2 px line at 560 px). */
+html.desk .desk-side > * {
+  flex-shrink: 0;
 }
 html.desk[data-mantine-color-scheme='dark'] .desk-side {
   background: #1c1c1e;
@@ -277,28 +329,40 @@ html.desk .page-shell {
 html.desk .page-shell::before {
   display: none;
 }
+/* The screen's column: its width is the page's (--page-max). `--page-off` — how far the column stands from the
+   toolbar's start (the toolbar reaches back over it, below). In the middle of the window only when that leaves at
+   least 80 px on each side — a column 20 px off its toolbar reads as a mistake, not as a column: then it starts
+   where the title does, and what is left over stays at its end. */
+html.desk .page-shell {
+  --page-max: 1320px;
+  --page-raw: calc((100vw - var(--desk-sb) - var(--desk-side-w) - 2 * var(--desk-side-gap) - 2 * var(--page-pad) - var(--page-max)) / 2);
+  --page-off: min(max(0px, var(--page-raw)), max(0px, calc((var(--page-raw) - 80px) * 1000)));
+}
 html.desk .desk-page {
-  max-width: 1320px;
-  margin-inline: auto;
+  max-width: var(--page-max);
+  margin-left: var(--page-off);
+  margin-right: 0;
 }
 /* The board is the work: the whole window. */
-html.desk .page-shell[data-page='board'] .desk-page {
-  max-width: none;
+html.desk .page-shell[data-page='board'] {
+  --page-max: 100000px;
 }
-/* A job (its lines and the car beside them) and the lists (their tables): wide, still read in one sweep. */
-html.desk .page-shell:is([data-page='job'], [data-page='customers'], [data-page='parts'], [data-page='money'], [data-page='search'], [data-page='reports'], [data-page='customers-one'], [data-page='vehicles-one']) .desk-page {
-  max-width: 1480px;
+/* A job (its lines and the car beside them) and the lists (their tables): wide, still read in one sweep — and as wide
+   as a 1920 window gives, so on the garage's screen they end where the toolbar's buttons do. */
+html.desk .page-shell:is([data-page='job'], [data-page='customers'], [data-page='parts'], [data-page='money'], [data-page='search'], [data-page='reports'], [data-page='customers-one'], [data-page='vehicles-one']) {
+  --page-max: 1600px;
 }
-/* The notes, a single screen of a job: a readable column. */
-html.desk .page-shell:is([data-page='notes'], [data-page='claim'], [data-page='suppliers'], [data-page='more']) .desk-page {
-  max-width: 1080px;
+/* The notes, a single screen of a job: a readable column. A new job is a form. */
+html.desk .page-shell:is([data-page='notes'], [data-page='claim'], [data-page='suppliers'], [data-page='more'], [data-page='new']) {
+  --page-max: 1080px;
 }
-/* A new job is a form. */
-html.desk .page-shell[data-page='new'] .desk-page {
-  max-width: 1080px;
+/* A job shown to its customer has no side menu: its column is in the middle of the window by itself. */
+html.desk[data-client-lock] .page-shell {
+  --page-off: 0px;
 }
+/* A screen opened from the menu a hundred times a day does not travel: it only comes out of the page's colour, fast. */
 html.desk .page-enter {
-  animation-duration: var(--dur-2);
+  animation: mg-fade-in var(--dur-1) ease-out both;
 }
 
 /* The toolbar: back, the title and its small line, the screen's own buttons — one row at the top. */
@@ -310,7 +374,10 @@ html.desk .desk-bar {
   align-items: center;
   gap: 12px;
   height: var(--app-nav-h);
-  margin: 0 calc(-1 * var(--page-pad)) 6px;
+  /* Across the whole window whatever the screen's own width (v0.72): the title starts at the same place and the
+     screen's buttons end at the window's edge on every screen — going from the board (the whole window) to a form
+     (a column in its middle) moves neither. */
+  margin: 0 calc(-1 * (var(--page-pad) + var(--page-off))) 6px;
   padding: 0 var(--page-pad);
 }
 html.desk .desk-bar::before {
@@ -1648,4 +1715,98 @@ html.desk .months-split .desk-split-side {
 }
 html.desk .month-panel .month-actions {
   max-width: 560px;
+}
+
+/* =====================================================================================================
+   v0.72 — the PC polished (the user: «отполируй компьютерную версию полностью по ux/ui»), checked against
+   Vercel's Web Interface Guidelines and Rauno Freiberg's «Interfaces»: the toolbar across the window and the
+   scrollbar's room kept (above) — nothing jumps sideways between screens; a button without words says what it
+   is; what is opened by a key or a right click is there at once; the search and the tools over a table at the
+   desk's size.
+   ===================================================================================================== */
+
+/* ---------- A button's name under the mouse (ui/deskTips.tsx) ---------- */
+.desk-tip {
+  position: fixed;
+  z-index: 10000;
+  top: 0;
+  left: 0;
+  max-width: 320px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--app-pill);
+  color: var(--app-pill-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.16);
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  opacity: 0;
+  visibility: hidden;
+  /* Gone at once (the mouse has moved on); it comes in 120 ms. */
+  transition: none;
+}
+.desk-tip[data-on] {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--dur-1) var(--ease-out);
+}
+/* One was up a moment ago: its neighbour's is there at once. */
+.desk-tip[data-on][data-instant] {
+  transition: none;
+}
+
+/* ---------- The search of a screen: a field of the desk (36 px, 14 px words, the fields' corners) ---------- */
+html.desk .search-field {
+  height: 36px;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border-radius: 10px;
+}
+html.desk .search-field > svg {
+  width: 16px;
+  height: 16px;
+}
+html.desk .search-field input {
+  font-size: 14px;
+}
+html.desk .search-clear {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- A row of tools over a table: the search at its start, the buttons at its end ---------- */
+html.desk .desk-toolrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+html.desk .desk-toolrow-search {
+  flex: 0 1 360px;
+  min-width: 200px;
+}
+html.desk .desk-toolrow-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* (Buttons as wide as their words: «Excel» is written to fill half a phone's row.) */
+html.desk .desk-toolrow-end .mantine-Button-root {
+  flex: 0 0 auto !important;
+}
+
+/* ---------- Under the mouse and under a key ---------- */
+@media (hover: hover) and (pointer: fine) {
+  html.desk .desk-mode:not([data-active]):hover {
+    color: var(--mantine-color-text);
+  }
+}
+html.desk .desk-mode:focus-visible,
+html.desk .desk-card-tool:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
 }

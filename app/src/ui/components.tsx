@@ -380,6 +380,15 @@ export function PageHeader(props: HeaderProps) {
 /** The PC's toolbar (v0.42): sticky at the top of the window; a hairline under it once the screen scrolls under it. */
 function DeskBar({ title, back, right, subtitle, eyebrow }: HeaderProps) {
   const ref = useRef<HTMLElement>(null);
+  const head = useRef<HTMLHeadingElement>(null);
+  // The window's own title follows the screen (v0.72): the task bar, Alt+Tab and a second window say which screen it
+  // is — «Honda Accord 2017», not «MyGarage» five times. The installed app's window puts its name before it itself.
+  useEffect(() => {
+    const text = head.current?.textContent?.replace(/\s+/g, ' ').trim();
+    const alone = window.matchMedia('(display-mode: standalone)').matches;
+    const next = text ? (alone ? text : `${text} — MyGarage`) : 'MyGarage';
+    if (document.title !== next) document.title = next;
+  });
   useEffect(() => {
     let shown = '';
     const update = () => {
@@ -395,7 +404,9 @@ function DeskBar({ title, back, right, subtitle, eyebrow }: HeaderProps) {
     <header className="desk-bar" ref={ref}>
       {back && <DeskBack to={typeof back === 'string' ? back : undefined} />}
       <div className="desk-bar-head">
-        <h1 className="desk-title">{title}</h1>
+        <h1 className="desk-title" ref={head}>
+          {title}
+        </h1>
         {sub.length > 0 && (
           <div className="desk-bar-sub">
             {sub.map((s, i) => (
@@ -409,7 +420,7 @@ function DeskBar({ title, back, right, subtitle, eyebrow }: HeaderProps) {
   );
 }
 
-/** Back on a PC: a round button with the name of where it goes in its tooltip. */
+/** Back on a PC: a round button; where it goes — its name, shown under the mouse (ui/deskTips.tsx). */
 function DeskBack({ to }: { to?: string }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -417,16 +428,9 @@ function DeskBack({ to }: { to?: string }) {
   const name = to ? title(to) : t('common.back');
   const label = typeof name === 'string' && name ? name : t('common.back');
   return (
-    <Tooltip label={label} position="bottom">
-      <button
-        type="button"
-        className="desk-back"
-        aria-label={label}
-        onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate(to ?? '/'))}
-      >
-        <IconChevronLeft size={20} stroke={2.2} aria-hidden />
-      </button>
-    </Tooltip>
+    <button type="button" className="desk-back" aria-label={label} onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate(to ?? '/'))}>
+      <IconChevronLeft size={20} stroke={2.2} aria-hidden />
+    </button>
   );
 }
 

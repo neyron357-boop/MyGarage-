@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Button, Collapse, Group, Modal, SegmentedControl, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
 import {
   IconArrowDownLeft,
   IconArrowsSplit2,
@@ -41,6 +41,7 @@ import { addExpense, categoryMonthSpent } from '../../services/money';
 import { CaptureButton } from '../../ui/CaptureButton';
 import { FormRow, Money, MoneyInput, PersonAvatar, PlateText, SelectCard, undoToast } from '../../ui/components';
 import { DateField } from '../../ui/DateFields';
+import { Fold } from '../../ui/Fold';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
@@ -933,7 +934,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
             <IconChevronDown size={16} style={{ transform: more ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} />
           </Group>
         </UnstyledButton>
-        <Collapse in={more}>
+        <Fold open={more}>
           <Stack gap="sm">
             <DateField label={t('common.date')} value={date} onChange={setDate} maxDate={dubaiDate()} />
             {kind === 'out' && (
@@ -957,7 +958,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
               </>
             )}
           </Stack>
-        </Collapse>
+        </Fold>
         {overLimit && (
           <TextInput
             label={t('expense.overLimitComment')}

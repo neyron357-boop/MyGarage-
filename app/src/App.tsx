@@ -47,7 +47,8 @@ import { useBackClosesSheets } from './ui/backCloses';
 import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useViewportSync } from './ui/stack';
-import { DeskContext, DeskKeys, deskPage, sheetOpen, useDeskShell, useDeskWheel } from './ui/desk';
+import { DeskContext, DeskKeys, MOD_KEY, deskPage, sheetOpen, useDeskShell, useDeskWheel } from './ui/desk';
+import { DeskTips } from './ui/deskTips';
 import { DeskPalette } from './features/search/DeskPalette';
 import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
@@ -109,7 +110,7 @@ function SideSearch() {
       <UnstyledButton className="desk-search-btn" aria-label={t('search.placeholder')} onClick={() => setOpen(true)}>
         <IconSearch size={16} stroke={2} aria-hidden />
         <span>{t('nav.search')}</span>
-        <Kbd size="xs">Ctrl K</Kbd>
+        <Kbd size="xs">{MOD_KEY} K</Kbd>
       </UnstyledButton>
       <DeskPalette opened={open} onClose={() => setOpen(false)} />
     </>
@@ -314,6 +315,7 @@ function DesktopShell() {
           </div>
         </main>
         <DeskKeys />
+        <DeskTips />
         <PwaUpdater />
         <UnsavedGuard />
       </div>

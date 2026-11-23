@@ -1,4 +1,4 @@
-import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Box, Button, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconBrandWhatsapp, IconCalendarCheck, IconCalendarDollar, IconCalendarMonth, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconLock, IconReceipt, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, memo, useEffect, useState } from 'react';
@@ -19,6 +19,7 @@ import { openPdf } from '../../services/documents';
 import { removeEntry, restoreEntry } from '../../services/entries';
 import { EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PersonAvatar, PlateLine, undoToast } from '../../ui/components';
 import { DayPill } from '../../ui/DateFields';
+import { Fold } from '../../ui/Fold';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
@@ -84,8 +85,6 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
   const navigate = useNavigate();
   const { run, busy } = useAction();
   const [open, setOpen] = useState(false);
-  // Unfolded to the end: what comes in after it (the months paid) is not cut by the fold still measuring its height.
-  const [settled, setSettled] = useState(false);
   const [past, setPast] = useState(false);
   const today = dubaiDate();
   const name = customerName(d.customer) || t('customer.noName');
@@ -98,12 +97,6 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
   const came = new Map((papers ?? []).map((m) => [m.month, m.totalFils]));
   const owing = new Set(d.months.map((m) => m.month));
   const paid = (papers ?? []).filter((m) => m.dueFils <= 0 && !owing.has(m.month)).reverse();
-  // (A timer, not the fold's own end: with motion reduced the fold does not move and says nothing.)
-  useEffect(() => {
-    if (!open) return setSettled(false);
-    const timer = window.setTimeout(() => setSettled(true), 280);
-    return () => window.clearTimeout(timer);
-  }, [open]);
   const statement = () => run(async () => openPdf(await statementPdf(d.customer.id)));
   const archive = () => run(async () => shareOrDownload(await debtInvoicesZip(d.customer.id)));
   return (
@@ -132,7 +125,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           </Group>
         }
       />
-      <Collapse in={open} transitionDuration={260}>
+      <Fold open={open}>
       {monthly
         ? d.months.map((m) => {
             const of = came.get(m.month) ?? 0;
@@ -164,7 +157,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           })
         : d.cars.map((car) => car.jobs.map((j) => <DebtJobRow key={j.order.id} j={j} />))}
       {/* The months paid (v0.62, «за некоторые месяцы инвойсы оплачены»): folded under the debts, the latest first. */}
-      {settled && paid.length > 0 && (
+      {paid.length > 0 && (
         <ListRow
           onClick={() => setPast((p) => !p)}
           title={
@@ -175,8 +168,8 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           right={<IconChevronDown size={18} color="var(--app-label-3)" style={{ transform: past ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} aria-hidden />}
         />
       )}
-      {/* Not a second Collapse inside the card's: the outer one would keep its old height and cut the tiles. */}
-      {settled && past && (
+      {/* (The card's fold pins no height — ui/Fold.tsx: the months unfolded here push its tiles down, nothing is cut.) */}
+      {past && (
         <div className="rise-enter">
           {paid.map((m) => (
             <ListRow
@@ -242,7 +235,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           <span>{t('debt.customerCard')}</span>
         </button>
       </div>
-      </Collapse>
+      </Fold>
     </List>
   );
 });
@@ -347,7 +340,7 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
           </Group>
         }
       />
-      <Collapse in={open} transitionDuration={260}>
+      <Fold open={open}>
         {months.length > 1
           ? months.map((m) => (
               <Fragment key={m.month}>
@@ -382,7 +375,6 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
             right={<IconChevronDown size={18} color="var(--app-label-3)" style={{ transform: past ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} aria-hidden />}
           />
         )}
-        {/* Not a second Collapse inside the card's: the outer one would keep its old height and cut the tiles. */}
         {past && (
           <div className="rise-enter">
             {c.settled.map(({ expense: e }) => (
@@ -432,7 +424,7 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
             </button>
           )}
         </div>
-      </Collapse>
+      </Fold>
     </List>
   );
 });

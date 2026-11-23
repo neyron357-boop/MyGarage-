@@ -121,7 +121,8 @@ export function DataTable<T>({
         data-row={onRow ? '' : undefined}
         data-dim={rowDim?.(r) || undefined}
         tabIndex={onRow ? 0 : undefined}
-        onClick={onRow ? () => onRow(r) : undefined}
+        // (A name or a phone drawn over with the mouse to copy it is not a click on the row.)
+        onClick={onRow ? () => !window.getSelection()?.toString() && onRow(r) : undefined}
         onKeyDown={onRow ? (e) => walk(e, () => onRow(r)) : undefined}
         onContextMenu={
           onRowMenu

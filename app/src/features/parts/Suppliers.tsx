@@ -415,13 +415,33 @@ export function SuppliersTab() {
   ];
   return (
     <Stack gap="md">
-      <Group gap={8} wrap="nowrap" maw={phone ? undefined : 560}>
-        <Button leftSection={<IconPlus size={18} />} onClick={() => setEdit({})} style={{ flex: 1 }} aria-label={t('parts.addSupplier')}>
-          {t('suppliers.new')}
-        </Button>
-        <SupplierBookActions />
-      </Group>
-      {(all.length > 6 || q) && (phone ? <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} /> : <div style={{ maxWidth: 560 }}><SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} /></div>)}
+      {phone ? (
+        <>
+          <Group gap={8} wrap="nowrap">
+            <Button leftSection={<IconPlus size={18} />} onClick={() => setEdit({})} style={{ flex: 1 }} aria-label={t('parts.addSupplier')}>
+              {t('suppliers.new')}
+            </Button>
+            <SupplierBookActions />
+          </Group>
+          {(all.length > 6 || q) && <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} />}
+        </>
+      ) : (
+        // A PC (v0.72): one row of tools over the table — the search at its start, the buttons as wide as their words
+        // at its end, the main one last (not two buttons across half the window).
+        <div className="desk-toolrow">
+          {(all.length > 6 || q) && (
+            <div className="desk-toolrow-search">
+              <SearchField value={q} onChange={setQ} placeholder={t('suppliers.search')} />
+            </div>
+          )}
+          <div className="desk-toolrow-end">
+            <SupplierBookActions />
+            <Button leftSection={<IconPlus size={18} />} onClick={() => setEdit({})} aria-label={t('parts.addSupplier')}>
+              {t('suppliers.new')}
+            </Button>
+          </div>
+        </div>
+      )}
       {all.length > 6 && <SupplierFilters all={all} api={filter} />}
       {all.length === 0 ? (
         <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} />
