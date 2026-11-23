@@ -37,6 +37,7 @@ import type {
 import { createCustomer, createVehicle, findCustomerByPhone, updateCustomer, updateVehicle } from './customers';
 import { restoreEntry, takeJobPayments, type RemovedEntry } from './entries';
 import { AppError } from './errors';
+import { assertDayOpen, assertJobOpen } from './monthLock';
 import { getSettings } from './settings';
 
 export async function logEvent(orderId: string, type: string, payload?: Record<string, unknown>): Promise<void> {
@@ -78,8 +79,9 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   const typed = nowIso();
   const today = dubaiDate(typed);
   if (input.day && input.day > today) throw new AppError('err.futureDate');
-  // Typed in after the fact (v0.53): the car came on that day, at the time it is typed.
+  // Typed in after the fact (v0.53): the car came on that day, at the time it is typed — not into a closed month (v0.69).
   const past = !!input.day && input.day < today && input.arrivedNow;
+  if (past) assertDayOpen(customer, input.day!);
   return db.transaction('rw', db.orders, db.counters, db.events, async () => {
     const now = past ? atDay(input.day, typed) : typed;
     const order: Order = {
@@ -472,6 +474,10 @@ export async function updateOrder(orderId: string, patch: Partial<Pick<Order, 'c
  * (those keep their days); its steps already stamped keep theirs.
  */
 export async function setJobDay(orderId: string, day: string): Promise<void> {
+  // A job of a closed month stays on its day; none goes onto a day of one (v0.69).
+  await assertJobOpen(orderId);
+  const job = await db.orders.get(orderId);
+  if (job) assertDayOpen(await db.customers.get(job.customerId), day);
   await db.transaction('rw', [db.orders, db.invoices, db.payments, db.events], async () => {
     const order = await db.orders.get(orderId);
     if (!order) throw new AppError('err.notFound');
@@ -621,6 +627,7 @@ export async function jobDeleteBlock(orderId: string): Promise<DeleteBlock | und
  * Returns what is needed to undo it.
  */
 export async function deleteJob(orderId: string, opts: { withRecords?: boolean } = {}): Promise<DeletedJob> {
+  await assertJobOpen(orderId);
   return db.transaction('rw', opts.withRecords ? db.tables : JOB_TABLES(), async () => {
     const order = await db.orders.get(orderId);
     if (!order) throw new AppError('err.notFound');

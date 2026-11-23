@@ -7324,3 +7324,65 @@ html.desk .mark-layer-body {
   gap: 8px;
   flex-shrink: 0;
 }
+
+/* ---------- A customer's works by month (v0.69, features/money/CustomerMonths.tsx) ---------- */
+/* What the customer owes in all, under the title. */
+.months-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 4px 16px;
+  font-size: 15px;
+  color: var(--app-label-2);
+}
+.months-total .money {
+  font-size: 22px;
+}
+.month-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* A month open: its tiles, then its works by day. */
+.month-panel {
+  margin: 2px 0 12px;
+}
+.month-panel .month-actions {
+  border-top: 0;
+  padding: 0 0 4px;
+}
+.debt-actions[data-n='3'] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+/* Six tiles (a customer's card with «По месяцам»): two rows of three on a phone. */
+.debt-actions[data-n='6'] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.month-locked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--app-fill);
+  color: var(--app-label-2);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.month-panel .month-day {
+  margin-top: 16px;
+}
+/* A work's sum, and under it what is left of it — or the day it was paid. */
+.work-sum {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.months-open-title {
+  margin: 0 4px 12px;
+}

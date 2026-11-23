@@ -1,5 +1,5 @@
 import { Box, Button, Collapse, Group, Modal, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconBrandWhatsapp, IconCalendarCheck, IconCalendarDollar, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconReceipt, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCalendarCheck, IconCalendarDollar, IconCalendarMonth, IconCash, IconChevronDown, IconClockDollar, IconFileInvoice, IconFileZip, IconLock, IconReceipt, IconTrash, IconUser, IconUserDollar } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -138,12 +138,14 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
             const of = came.get(m.month) ?? 0;
             return (
               <Fragment key={m.month}>
-                {/* A month: what is left of it; a tap — pay it (v0.62). Its invoices from before the app are in it. */}
+                {/* A month: what is left of it; a tap — its works by day (v0.69, «нажал — открылись все работы по
+                    датам»), where it is paid, closed, and a job forgotten added. Its invoices from before the app are in it. */}
                 <ListRow
-                  onClick={() => onPay(d.customer.id, m)}
+                  chevron
+                  onClick={() => navigate(`/money/months?who=${d.customer.id}&month=${m.month}`)}
                   left={
-                    <span className="row-icon" style={tint('green')} aria-hidden>
-                      <IconCalendarDollar size={19} stroke={2} />
+                    <span className="row-icon" style={tint(d.customer.lockedMonths?.includes(m.month) ? 'gray' : 'green')} aria-hidden>
+                      {d.customer.lockedMonths?.includes(m.month) ? <IconLock size={19} stroke={2} /> : <IconCalendarDollar size={19} stroke={2} />}
                     </span>
                   }
                   title={
@@ -179,6 +181,8 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           {paid.map((m) => (
             <ListRow
               key={m.month}
+              chevron
+              onClick={() => navigate(`/money/months?who=${d.customer.id}&month=${m.month}`)}
               left={
                 <span className="row-icon" style={tint('teal')} aria-hidden>
                   <IconCalendarCheck size={19} stroke={2} />
@@ -195,12 +199,19 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           ))}
         </div>
       )}
-      <div className="debt-actions" data-n={jobs > 0 ? 5 : 4}>
+      <div className="debt-actions" data-n={jobs > 0 ? 6 : 5}>
         <button type="button" className="action-tile" onClick={() => onPay(d.customer.id)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
             <IconCash size={21} stroke={1.9} aria-hidden />
           </span>
           <span>{t('debt.takeShort')}</span>
+        </button>
+        {/* Every month of its works (v0.69): open each, close a month, add a job forgotten. */}
+        <button type="button" className="action-tile" data-debtor-months onClick={() => navigate(`/money/months?who=${d.customer.id}`)}>
+          <span className="tile-icon" style={{ '--c': 'var(--mantine-color-indigo-6)' } as React.CSSProperties}>
+            <IconCalendarMonth size={21} stroke={1.9} aria-hidden />
+          </span>
+          <span>{t('months.tile')}</span>
         </button>
         {/* Its payments (v0.62.2): what it paid, when, for which months, what was left after each. */}
         <button type="button" className="action-tile" data-debtor-payments onClick={() => navigate(`/money/payments?side=owed&who=${d.customer.id}`)}>

@@ -3496,9 +3496,23 @@ async function launchBrowser() {
       return (await loadHistoryDebts(customerId))[0].dues.map((d) => [d.number, d.dueFils]);
     }, id);
     if (JSON.stringify(left) !== JSON.stringify([['302', 10500]])) throw new Error(`left: ${JSON.stringify(left)}`);
-    // v0.62: a month's row pays that month — the payment opens with it picked and what it owes; paid — the card is gone,
-    // and May is a month paid among the customer's months.
+    // v0.69: a month's row opens its works by day («По месяцам»): its two invoices from before the app; closed, nothing is
+    // added to it and it says so; opened again (confirmed). v0.62: paid from there — the payment opens with it picked and
+    // what it owes; paid — the card is gone, and May is a month paid among the customer's months.
     await card.locator('[data-debt-month="2026-05"]').click();
+    const may = front('[data-month-panel="2026-05"]');
+    await may.waitFor();
+    if ((await may.locator('.list-row').count()) !== 2) throw new Error('May’s works: ' + (await may.locator('.list-row').count()));
+    await may.locator('[data-month-lock="close"]').click();
+    await may.locator('[data-month-locked]').waitFor();
+    if (!(await may.locator('[data-month-add]').isDisabled())) throw new Error('a job can be added to a closed month');
+    const locked = await page.evaluate(async (customerId) => (await (await import('/src/db/db.ts')).db.customers.get(customerId)).lockedMonths, id);
+    if (JSON.stringify(locked) !== '["2026-05"]') throw new Error('locked months: ' + JSON.stringify(locked));
+    await shot('49a2-month-closed');
+    await may.locator('[data-month-lock="open"]').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Открыть месяц' }).click();
+    await may.locator('[data-month-locked]').waitFor({ state: 'detached' });
+    await may.locator('[data-month-pay]').click();
     const dlg = page.getByRole('dialog');
     await dlg.locator('.choice-card[data-active="true"] [data-debt-month="2026-05"]').waitFor();
     // v0.63: its invoice left (№302) is under it, picked with the month.
@@ -3507,7 +3521,10 @@ async function launchBrowser() {
     await shot('49b-pay-a-month');
     await dlg.getByRole('button', { name: /^Записать приход/ }).click();
     await dlg.waitFor({ state: 'hidden' });
-    await card.waitFor({ state: 'detached' });
+    // May paid: its works say so.
+    await may.locator('.list-row').filter({ hasText: 'оплачена' }).first().waitFor();
+    await page.goto(BASE + '#/money?tab=debts');
+    await page.waitForFunction(() => ![...document.querySelectorAll('.screen[data-role="top"] .debt-card')].some((c) => c.textContent.includes('ACME TEST CONTRACTING LLC')), null, { timeout: 15000 });
     const months = await page.evaluate(async (customerId) => (await (await import('/src/services/debts.ts')).loadCustomerMonths(customerId)).map((m) => [m.month, m.totalFils, m.dueFils]), id);
     if (JSON.stringify(months) !== JSON.stringify([['2026-05', 33600, 0]])) throw new Error(`months: ${JSON.stringify(months)}`);
     // v0.62.2: «Платежи» — its two payments of all time, the latest first, nothing left after it; a tap opens the operation.

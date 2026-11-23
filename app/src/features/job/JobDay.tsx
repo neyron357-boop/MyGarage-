@@ -49,14 +49,14 @@ export function JobDaySheet({ job, opened, onClose }: { job: Job; opened: boolea
   );
 }
 
-/** A job on an earlier day: its day — a chip on the card (a tap changes it). */
-export function JobDayChip({ job }: { job: Job }) {
+/** A job on an earlier day: its day — a chip on the card (a tap changes it; in a closed month — v0.69 — only says it). */
+export function JobDayChip({ job, fixed }: { job: Job; fixed?: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (!job.order.backdated) return null;
   return (
     <>
-      <button type="button" className="chip day-chip" onClick={() => setOpen(true)} aria-label={t('job.day')} data-job-day={jobDay(job.order)}>
+      <button type="button" className="chip day-chip" disabled={fixed} onClick={() => setOpen(true)} aria-label={t('job.day')} data-job-day={jobDay(job.order)}>
         <IconCalendar size={16} stroke={2} aria-hidden />
         {(() => {
           const d = dayShort(job.order.arrivedAt ?? job.order.createdAt);

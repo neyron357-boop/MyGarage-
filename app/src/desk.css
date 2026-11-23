@@ -1633,3 +1633,19 @@ html.desk .supplier-filters .chip-row {
   margin: 0;
   padding: 2px 0;
 }
+
+/* v0.69: a customer's card with six tiles — one row on a PC; «По месяцам» — the months beside the month open. */
+html.desk .debt-actions[data-n='6'] {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+html.desk .months-split.desk-split {
+  grid-template-columns: clamp(320px, 30%, 420px) minmax(0, 1fr);
+}
+html.desk .months-split .desk-split-side {
+  position: sticky;
+  top: calc(var(--app-nav-h) + 12px);
+  align-self: start;
+}
+html.desk .month-panel .month-actions {
+  max-width: 560px;
+}

@@ -9,6 +9,7 @@ import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } f
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { AppError } from './errors';
+import { assertJobOpen } from './monthLock';
 import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, setDone, updateItem, withdrawItems } from './estimate';
 import { createDebt, issueCreditNote } from './money';
 import { bundleAmountDue, changeStage, loadOrderBundle, logEvent, stageContext, type OrderBundle } from './orders';
@@ -142,6 +143,8 @@ export async function refuseAll(orderId: string): Promise<'closed' | 'open'> {
  * amount back.
  */
 export async function closeUnpaid(orderId: string, via?: 'owner'): Promise<void> {
+  // A month closed (v0.69): what its jobs owe is not written off.
+  await assertJobOpen(orderId);
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
   const due = bundleAmountDue(b);
@@ -299,6 +302,7 @@ export async function restoreFromBin(orderId: string, ids: string[]): Promise<nu
  * its invoice), and the parts of its done lines are taken as fitted.
  */
 export async function reopenJob(orderId: string): Promise<void> {
+  await assertJobOpen(orderId);
   const order = await db.orders.get(orderId);
   if (!order) throw new AppError('err.notFound');
   if (!canReopen(order)) throw new AppError('stageErr.notAllowed');
@@ -369,6 +373,7 @@ export async function reviseLine(itemId: string): Promise<void> {
  * (`canAmendInvoice`): a car gone on credit stays handed over (v0.34) — its debt is what the new invoice leaves.
  */
 export async function amendInvoice(orderId: string): Promise<void> {
+  await assertJobOpen(orderId);
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
   const inv = activeInvoice(b.invoices);

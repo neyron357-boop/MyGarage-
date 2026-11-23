@@ -11,6 +11,7 @@ import type { CashClosing, CashMovement, CashReason, Debt, Expense, ExpenseMetho
 import { placeInDay, recountClosing } from './cashDays';
 import { setDiscount } from './discount';
 import { AppError } from './errors';
+import { assertDayOpen, assertJobOpen } from './monthLock';
 import { recordDecisions, sendVersion, setDone } from './estimate';
 import { owedFields } from './lenders';
 import { addMedia } from './media';
@@ -120,6 +121,8 @@ export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 
   if (day && day > dubaiDate(typed)) throw new AppError('err.futureDate');
   if (day && day < jobDay(b.order)) throw new AppError('err.beforeJobDay');
   const issuedAt = atDay(day, typed);
+  // Not on a day of the customer's closed month (v0.69).
+  assertDayOpen(b.customer, dubaiDate(issuedAt));
   if (activeInvoice(b.invoices)) throw new AppError('err.invoiceExists');
   const lines = invoiceLines(b.items, 'en');
   if (lines.length === 0) throw new AppError('err.nothingToInvoice');
@@ -191,6 +194,7 @@ export async function issueCreditNote(invoiceId: string, reason: string): Promis
  * towards it. The total cannot drop below what was paid — that would be a refund.
  */
 export async function discountIssuedInvoice(orderId: string, spec: DiscountSpec | null): Promise<{ credit: Invoice; invoice: Invoice }> {
+  await assertJobOpen(orderId);
   const done = await db.transaction('rw', db.tables, async () => {
     const [invoices, items, payments] = await Promise.all([
       db.invoices.where('orderId').equals(orderId).toArray(),

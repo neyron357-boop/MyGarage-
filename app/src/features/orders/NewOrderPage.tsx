@@ -273,8 +273,13 @@ export function NewOrderPage() {
   const [complaint, setComplaint] = useState('');
   const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();
-  // The day the car came (v0.53): today — or an earlier day, for a job forgotten and typed in later.
-  const [day, setDay] = useState(() => dubaiDate());
+  // The day the car came (v0.53): today — or an earlier day, for a job forgotten and typed in later (v0.69: from a month
+  // of «По месяцам» — a day of that month comes with it, `?day=`).
+  const [day, setDay] = useState(() => {
+    const asked = params.get('day');
+    const today = dubaiDate();
+    return asked && /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked <= today ? asked : today;
+  });
 
   // The car's photo (v0.28): brought by «＋» → «Фото номера», or taken here. The plate is read off it; what was typed into
   // the plate meanwhile is not overwritten.
@@ -355,6 +360,18 @@ export function NewOrderPage() {
   const auto = !picked && match ? match : undefined;
   const known = picked ?? auto;
   const owner = known?.owner ?? pickedCustomer;
+
+  // A job forgotten, from «По месяцам» (v0.69): its customer comes with it (`?customerId=`), and its cars are offered a tap
+  // each — a company's dozen cars without typing a plate.
+  const askedCustomer = useLiveQuery(async () => {
+    const id = params.get('customerId');
+    return id ? db.customers.get(id) : undefined;
+  }, [params]);
+  useEffect(() => {
+    if (askedCustomer) setPickedCustomer((c) => c ?? askedCustomer);
+  }, [askedCustomer]);
+  const ownCars =
+    useLiveQuery(async () => (pickedCustomer && !picked ? (await db.vehicles.where('customerId').equals(pickedCustomer.id).toArray()).filter((v) => !v.archivedAt) : []), [pickedCustomer?.id, !!picked]) ?? [];
 
   // The driver who brought this car last time (v0.68, the user: «завтра этот же автомобиль приезжает — имя водителя
   // должно выставляться само»): in by itself, as if picked; × takes him off and another is typed. Only into an empty
@@ -546,6 +563,30 @@ export function NewOrderPage() {
                         </button>
                       ))}
                     </Stack>
+                  )}
+                  {!auto && ownCars.length > 0 && (
+                    // The customer's cars (v0.69): one tap — that car.
+                    <>
+                      <div className="group-title" style={{ marginTop: 22 }}>
+                        {t('newOrder.customerCars')}
+                      </div>
+                      <Stack gap={8} data-own-cars>
+                        {ownCars.map((v) => (
+                          <button key={v.id} type="button" className="suggest rise-enter" onClick={() => void findVehicleForCheckIn(v.plate).then((c) => c && setPicked(c))}>
+                            <CarThumb vehicleId={v.id} size={44} />
+                            <Group gap={8} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                              <PlateText plate={v.plate} size="sm" />
+                              <Text size="sm" fw={600} lineClamp={1}>
+                                {[v.make, v.model].filter(Boolean).join(' ')}
+                              </Text>
+                            </Group>
+                            <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                              {t('newOrder.useThis')}
+                            </Text>
+                          </button>
+                        ))}
+                      </Stack>
+                    </>
                   )}
                   {!auto && (
                     <>

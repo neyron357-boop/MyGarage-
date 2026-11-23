@@ -53,7 +53,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { mechanicsOf } from '../../domain/crew';
-import { formatDate, hoursBetween, shortDuration } from '../../domain/dates';
+import { formatDate, hoursBetween, monthLong, shortDuration } from '../../domain/dates';
+import { lockedMonthOf } from '../../domain/monthLock';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
 import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet } from '../../domain/invoice';
@@ -644,9 +645,11 @@ export function JobPage() {
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
   const open = phase !== 'closed' && phase !== 'cancelled';
   const editable = open && !inv;
+  // A job of a closed month of its customer (v0.69): nothing of it changes — the services refuse too.
+  const lockedMonth = lockedMonthOf(b.order, b.invoices, b.customer);
   // The invoice is out, the job open: its lines can be changed (credit note, then a new invoice) — the car here or
   // gone on credit (v0.34).
-  const amendable = canAmendInvoice(b.order.stage, b.invoices);
+  const amendable = !lockedMonth && canAmendInvoice(b.order.stage, b.invoices);
   // A car gone on credit whose invoice is being changed: it stays handed over, "Done" issues the new invoice.
   const reissue = phase === 'debt' && !inv;
   const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
@@ -855,6 +858,15 @@ export function JobPage() {
       <ListRow left={<IconCashOff size={20} stroke={1.8} color="var(--mantine-color-orange-6)" aria-hidden />} title={<Text span c="orange.7" inherit>{t('job.unpaid')}</Text>} right={<Money fils={b.order.waived.fils} c="orange.7" />} />
     )
   ) : null;
+  // In a closed month (v0.69): said under the total; a tap — the month among the customer's months.
+  const lockRow = lockedMonth ? (
+    <ListRow
+      chevron
+      left={<IconLock size={20} stroke={1.8} color="var(--mantine-color-gray-6)" aria-hidden />}
+      title={<Text span c="dimmed" inherit data-job-month-locked>{t('job.monthLocked', { month: monthLong(lockedMonth, lang) })}</Text>}
+      onClick={() => navigate(`/money/months?who=${b.order.customerId}&month=${lockedMonth}`)}
+    />
+  ) : null;
   // A signed debt, under the total: the date it is due, and its paper (the customer's signature) a tap away.
   const openDebt = b.debts.find((d) => d.status === 'open');
   const debtRow = openDebt ? (
@@ -899,7 +911,7 @@ export function JobPage() {
   // When the car was promised: rarely needed (the user's call, v0.17.3) — a tile here; once set, its chip on the card.
   if (open && phase !== 'booked') tiles.push({ key: 'due', icon: IconClock, onClick: () => setDueOpen(true) });
   // The day the car came (v0.53): a job typed in later is put on the day it was.
-  if (open && phase !== 'booked') tiles.push({ key: 'day', icon: IconCalendar, onClick: () => setDayOpen(true) });
+  if (open && phase !== 'booked' && !lockedMonth) tiles.push({ key: 'day', icon: IconCalendar, onClick: () => setDayOpen(true) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
@@ -911,7 +923,7 @@ export function JobPage() {
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
   if (editable && phase !== 'booked' && !reissue) tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   if (binOf(b.order, b.items).length) tiles.push({ key: 'bin', icon: IconArrowBackUp, color: 'gray', onClick: () => setBinOpen(true) });
-  tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
+  if (!lockedMonth) tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
   let bar: ReactNode = null;
   if (phase === 'booked')
@@ -993,7 +1005,7 @@ export function JobPage() {
         {t('job.handOver')}
       </Button>
     );
-  else if (canReopen(b.order))
+  else if (canReopen(b.order) && !lockedMonth)
     // Closed or cancelled: back on the board in one tap (the car came back, closed by mistake).
     bar = (
       <Button fullWidth variant="default" loading={busy} leftSection={<IconRestore size={20} />} onClick={() => run(async () => (await reopenJob(oid), haptic('success')), 'job.reopened')}>
@@ -1112,7 +1124,7 @@ export function JobPage() {
           scrolls sideways (v0.57, the Apple audit: in three rows they pushed the job's lines below the screen) — the
           papers first, they are taken as the car comes in; on a PC, beside the lines, they wrap. */}
       <div className={phone ? 'chip-row job-foot' : 'chip-row wrap job-foot'} aria-label={t('order.mechanic')}>
-        <JobDayChip job={b} />
+        <JobDayChip job={b} fixed={!!lockedMonth} />
         {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
         <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
         <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
@@ -1201,6 +1213,7 @@ export function JobPage() {
             <ListRow title={<Text span fw={700} inherit>{t('job.total')}</Text>} right={<Text fz={24} lh={1.1}><Money fils={inv.totalFils} display roll /></Text>} />
             {paid > 0 && <ListRow title={<Text span c="dimmed" inherit>{t('qi.paid')}</Text>} right={<Money fils={paid} c="green.7" />} />}
             {due > 0 && paid > 0 && !openDebt && <ListRow title={<Text span c="dimmed" inherit>{t('qi.due')}</Text>} right={<Money fils={due} c="red.7" />} />}
+            {lockRow}
             {debtRow}
             {waivedRow}
             {profitRow}

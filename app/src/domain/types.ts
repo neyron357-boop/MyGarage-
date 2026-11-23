@@ -78,6 +78,11 @@ export interface Customer {
   email?: string;
   source?: 'referral' | 'google_maps' | 'social' | 'signage' | 'repeat' | 'other';
   notes?: string;
+  /**
+   * Months of its account closed for changes (v0.69, the user: «замок на месяцы, которые нельзя редактировать»): YYYY-MM.
+   * A job of such a month (domain/monthLock.ts) is not changed, deleted, reopened or moved; no job or invoice goes in.
+   */
+  lockedMonths?: string[];
   createdAt: string;
   archivedAt?: string;
 }
