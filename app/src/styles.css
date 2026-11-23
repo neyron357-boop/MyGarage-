@@ -7386,3 +7386,95 @@ html.desk .mark-layer-body {
 .months-open-title {
   margin: 0 4px 12px;
 }
+
+/* v0.70: a part whose name asks for more than its quantity («LEFT & RIGHT» × 1) — asked in orange, two answers. */
+.qty-warn {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--mantine-color-orange-light);
+  color: var(--mantine-color-orange-light-color);
+  font-size: 15px;
+  line-height: 1.3;
+}
+.qty-warn-icon {
+  flex-shrink: 0;
+}
+.qty-warn-text {
+  flex: 1 1 140px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qty-warn-text b {
+  font-weight: 600;
+  color: var(--mantine-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qty-warn-buttons {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* On a job's line: «×2?» — orange, a tap asks. */
+.qty-short {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mantine-color-orange-light);
+  color: var(--mantine-color-orange-light-color);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* v0.70: the VIN alone, copied in one tap — the chip says it in full. */
+.chip.vin-copy {
+  gap: 6px;
+}
+.vin-copy-text {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* v0.70: the board picking jobs to put in a tab — a round mark on each card, filled once picked. */
+.job-row[data-picking] .job-pick {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+.job-row.job-mini[data-picking] .job-pick {
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--mantine-color-cobalt-6);
+  background: transparent;
+}
+.job-row[data-picked] .job-pick {
+  color: #fff;
+  background: var(--mantine-color-cobalt-6);
+}
+.job-row[data-picked] {
+  outline: 3px solid var(--mantine-color-cobalt-6);
+  outline-offset: -3px;
+}
+/* While picking, a card's document chip steps aside for the mark. */
+.job-row[data-picking] .job-card-doc {
+  visibility: hidden;
+}

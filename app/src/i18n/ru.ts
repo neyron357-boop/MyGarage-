@@ -240,6 +240,15 @@ export const ru = {
     approved: 'Согласовано',
     tabActive: 'Все в мастерской',
     tabDebts: 'Долги',
+    // v0.70: вкладки, в которые менеджер кладёт заказы сам; выбор нескольких.
+    status: { work: 'В работе', wait: 'Ожидание', request: 'Заявки' },
+    statusOne: { work: 'В работе', wait: 'Ожидание', request: 'Заявка' },
+    pick: 'Выбрать',
+    picked: 'Выбрано: {{n}}',
+    pickHint: 'Отметьте заказы',
+    stepTab: 'шаг заказа',
+    movedTo: '{{tab}} · {{n}}',
+    current: 'Сейчас здесь',
     view: 'Вид',
     tabs: 'Вкладки',
     sizeLarge: 'Крупно',
@@ -1155,6 +1164,9 @@ export const ru = {
     /** The copy's tile, under its symbol (v0.57). */
     copyWord: 'Копия',
     copiedLines: 'Запчасти скопированы',
+    // v0.70: только VIN, одним касанием.
+    copyVin: 'Скопировать VIN',
+    vinCopied: 'VIN скопирован',
     vinPhoto: 'Фото VIN',
     vinTake: 'Снять VIN',
     retakePhoto: 'Переснять',
@@ -1173,7 +1185,7 @@ export const ru = {
     accept: 'Принять',
     more: { quote: 'Смета', invoice: 'Инвойс', prepay: 'Предоплата', refuse: 'Отказ', customer: 'Клиент', car: 'Машина', claim: 'Гарантия', select: 'Править', amend: 'Изменить', scanner: 'Сканер', remove: 'Удалить', report: 'Отчёт', due: 'Срок', day: 'День', owner: 'Владельцу', driver: 'Водитель', bin: 'Корзина' },
     // v0.68: корзина заказа — удалённые и снятые строки, вернуть одним касанием.
-    bin: { title: 'Корзина', deleted: 'Удалена', cancelled: 'Снята', restore: 'Вернуть', restoreAll: 'Вернуть все · {{n}}', restored_one: 'Возвращена {{count}} строка', restored_few: 'Возвращены {{count}} строки', restored_many: 'Возвращено {{count}} строк', restored_other: 'Возвращено {{count}} строк', empty: 'Пусто' },
+    bin: { title: 'Корзина', deleted: 'Удалена', cancelled: 'Снята', declined: 'Отказ', restore: 'Вернуть', restoreAll: 'Вернуть все · {{n}}', restored_one: 'Возвращена {{count}} строка', restored_few: 'Возвращены {{count}} строки', restored_many: 'Возвращено {{count}} строк', restored_other: 'Возвращено {{count}} строк', empty: 'Пусто' },
     partPhoto: 'Фото запчасти',
     setParts: 'Поставщик и наличие',
     partsN: 'Запчасти · {{n}}',
@@ -1263,6 +1275,14 @@ export const ru = {
     monthsPaid: 'Оплаченные месяцы · {{count}}',
     pickedOf: '{{n}} из {{of}}',
     monthInvoices: 'Инвойсы месяца',
+  },
+  // v0.70: в названии детали больше, чем количество («LEFT & RIGHT» × 1).
+  qty: {
+    says: 'В названии — {{n}} шт.',
+    priceFor: 'Цена за {{n}}',
+    short: '×{{n}}?',
+    title: 'Проверьте количество',
+    allSet: 'Количество проверено',
   },
   // v0.69: работы клиента по месяцам — каждый месяц список работ по дням, замок месяца, «＋» для забытой работы.
   months: {

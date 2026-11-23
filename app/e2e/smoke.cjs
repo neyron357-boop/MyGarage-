@@ -346,8 +346,16 @@ async function launchBrowser() {
     });
     const cashNow = () => page.evaluate(async () => (await (await import('/src/services/money.ts')).cashState()).expected);
     const dlg = page.getByRole('dialog');
-    // The board: "Debts" beside "Archive" — one card for the customer with both cars.
+    // The board: "Debts" beside "Archive" — one card for the customer with both cars. v0.70: off the strip at first (the
+    // few tabs: «Все · В работе · Ожидание · Заявки · Архив») — switched on in «Вид».
     await page.goto(BASE + '#/');
+    await front('[role="tab"]').filter({ hasText: /^Все/ }).waitFor();
+    if (await front('[role="tab"]').filter({ hasText: 'Долги' }).count()) throw new Error('«Долги» on the board’s strip at first');
+    await page.getByRole('button', { name: 'Вид' }).click();
+    const viewSheet = page.getByRole('dialog', { name: 'Вид' });
+    await viewSheet.locator('.list-row').filter({ hasText: 'Долги' }).locator('.mantine-Switch-track').click();
+    await closeModal();
+    await viewSheet.waitFor({ state: 'hidden' });
     await front('[role="tab"]').filter({ hasText: 'Долги' }).click();
     const card = front('.debt-card').filter({ hasText: 'Rashid Debtor' });
     await card.filter({ hasText: '1 000,00' }).waitFor();
@@ -442,6 +450,8 @@ async function launchBrowser() {
     await front('.job-row').filter({ hasText: 'Altima' }).waitFor();
     await front('.job-row').filter({ hasText: 'Sunny' }).waitFor();
     await front('[role="tab"]').filter({ hasText: /^Все/ }).click();
+    // The board as it comes, for the steps after this one.
+    await page.evaluate(() => localStorage.removeItem('mygarage.board'));
   });
   await step('quick lists', async () => {
     // Settings → Lists: a line added to the complaints is a chip in "New job" (English by default).
@@ -734,7 +744,7 @@ async function launchBrowser() {
     await page.locator('.mantine-Modal-close').first().click();
     // The customer agrees in person: the work starts, the part is marked as here.
     await page.getByRole('button', { name: 'Согласен' }).click();
-    await page.getByText('В работе').first().waitFor();
+    await page.locator('.screen[data-role="top"]').getByText('В работе').first().waitFor();
     await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().click();
     await dlg.getByText('Есть', { exact: true }).click();
     await shot('31b-line-actions');
@@ -1464,7 +1474,7 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.locator('.list-row', { hasText: 'Bumper paint' }).getByText(/Отдать/).waitFor();
     await page.getByRole('button', { name: 'Согласен' }).click();
-    await page.getByText('В работе').first().waitFor();
+    await page.locator('.screen[data-role="top"]').getByText('В работе').first().waitFor();
     // Bought: the seller takes it back within 7 days, the receipt photo kept with the line.
     await page.locator('.list-row', { hasText: 'Headlight LH' }).first().click();
     await dlg.getByText('Заказано', { exact: true }).click();
@@ -1621,7 +1631,7 @@ async function launchBrowser() {
     if (await dlg.count()) throw new Error('a tap on an open row only closes it');
     // Agreed in person; a swipe right marks the work done, the line steps back.
     await page.getByRole('button', { name: 'Согласен' }).click();
-    await page.getByText('В работе').first().waitFor();
+    await page.locator('.screen[data-role="top"]').getByText('В работе').first().waitFor();
     await swipe(line('Oil change'), 1);
     await front('.list-row[data-done]').filter({ hasText: 'Oil change' }).waitFor();
     // An agreed line swiped left all the way is not dropped at once: the button waits for a tap.
@@ -1848,7 +1858,7 @@ async function launchBrowser() {
     // The strip's tabs by name (their counts come in as the board and the debtors are read).
     const strip = async () => (await front('.scroll-tabs > button').allInnerTexts()).map((x) => x.replace(/\s*\d+$/, '').trim());
     const before = await strip();
-    // The first step on the strip (it has cars): left out below.
+    // The first tab after «Все» (v0.70: «В работе», the manager's own): left out below.
     const step1 = before[1];
     // A long press on a tab opens «Вид».
     await front('.scroll-tabs > button').first().evaluate(async (el) => {
@@ -1866,10 +1876,12 @@ async function launchBrowser() {
     await v.waitFor();
     await v.locator('.mantine-SegmentedControl-label', { hasText: 'Компактно' }).click();
     await v.getByRole('radio', { name: 'Компактно', checked: true }).waitFor({ state: 'attached' });
-    await v.locator('.list-row').filter({ hasText: step1 }).locator('.mantine-Switch-track').click();
-    await v.locator('.list-row').filter({ hasText: step1 }).getByRole('switch', { checked: false }).waitFor({ state: 'attached' });
+    // (By its key: «В работе» is a step too, v0.70.)
+    const row1 = v.locator('.list-row').filter({ has: page.locator('[data-sort-id="inwork"]') });
+    await row1.locator('.mantine-Switch-track').click();
+    await row1.getByRole('switch', { checked: false }).waitFor({ state: 'attached' });
     // «Архив» moved up to right after «Все» by its grip (its keys; the finger's drag of a grip — motion §16).
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 12; i++) {
       await v.locator('[data-sort-id="archive"]').press('ArrowUp');
       await page.waitForTimeout(80);
     }
@@ -1888,7 +1900,7 @@ async function launchBrowser() {
     await front('.job-mini').first().waitFor();
     await check('after a reload');
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mygarage.board') ?? '{}'));
-    if (kept.size !== 'compact' || kept.order?.[1] !== 'archive' || kept.hidden?.length !== 1) throw new Error('kept on the device: ' + JSON.stringify(kept));
+    if (kept.size !== 'compact' || kept.order?.[1] !== 'archive' || !kept.hidden?.includes('inwork')) throw new Error('kept on the device: ' + JSON.stringify(kept));
     // Back as it was, for the steps after this one.
     await page.evaluate(() => localStorage.removeItem('mygarage.board'));
     await page.reload();

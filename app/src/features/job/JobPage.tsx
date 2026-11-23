@@ -71,7 +71,7 @@ import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, updateItem } from '../../services/estimate';
-import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
+import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
@@ -117,6 +117,8 @@ import { LineSheet, PART_COLOR, PART_STATES, partStateOf, PriceFromMark, useSugg
 import { isLabourCharge } from '../../domain/linePrices';
 import { binOf } from '../../domain/bin';
 import { BinSheet } from './BinSheet';
+import { qtyShort } from '../../domain/sides';
+import { QtyCheckList, QtyCheckSheet } from './QtyCheck';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
 import { ShareJobButton } from './ShareJob';
@@ -559,6 +561,10 @@ export function JobPage() {
   const [act, setAct] = useState<OrderItem | null>(null);
   const [more, setMore] = useState(false);
   const [finish, setFinish] = useState(false);
+  // The parts short of their names, before the quote goes (v0.70).
+  const [qtyCheck, setQtyCheck] = useState(false);
+  // One line's question, from its «×2?» (v0.70).
+  const [qtyLine, setQtyLine] = useState<OrderItem | null>(null);
   // Picking lines to take off several at once (a long press on a line, or “…” → “Select”); null = not picking.
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [confirmPicked, setConfirmPicked] = useState(false);
@@ -639,7 +645,8 @@ export function JobPage() {
   const live = liveLines(b.items);
   const lines = live.filter((i) => i.kind !== 'discount');
   const discounts = live.filter((i) => i.kind === 'discount');
-  const refusedLines = b.items.filter((i) => i.approvalState === 'declined');
+  // Refused by the customer — those not brought back from the bin (v0.70).
+  const refusedLines = b.items.filter((i) => i.approvalState === 'declined' && !i.restoredAt);
   const waiting = b.items.filter(isAwaitingClient);
   const sum = sumAmounts(live.map(itemAmounts));
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
@@ -652,6 +659,8 @@ export function JobPage() {
   const amendable = !lockedMonth && canAmendInvoice(b.order.stage, b.invoices);
   // A car gone on credit whose invoice is being changed: it stays handed over, "Done" issues the new invoice.
   const reissue = phase === 'debt' && !inv;
+  // Lines back from the bin (v0.68; v0.70 — the refused ones too, a job closed reopened for them): before the invoice.
+  const binRestore = !lockedMonth && !reissue && !inv && (editable || canReopen(b.order));
   const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
   const sentAt = waiting.length ? b.versions.filter((v) => waiting.some((i) => i.lastVersionId === v.id)).map((v) => v.sentAt).sort()[0] : undefined;
 
@@ -662,7 +671,9 @@ export function JobPage() {
       if (removed) undoToast(t('item.removed', { title: itemTitle(removed, lang) }), t('common.undo'), () => void restoreLines([removed]));
     });
   /** The quote to the customer's chat; the lines wait for the answer only once it really went. */
-  const toClient = () => run(() => sv.prepare(oid, { via: c.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp' }));
+  const sendNow = () => run(() => sv.prepare(oid, { via: c.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp' }));
+  // A part whose name asks for more than its quantity (v0.70): looked at before the customer sees the price.
+  const toClient = () => (live.some((i) => qtyShort(i)) ? setQtyCheck(true) : void sendNow());
   const remind = () => {
     const v = b.versions.filter((x) => waiting.some((i) => i.lastVersionId === x.id)).pop();
     if (v) setSend({ text: versionMessage(ctx, v), template: 'estimate', lang: v.language, orderId: oid, pdf: () => versionPdf(v.id), photos: waiting.flatMap((i) => i.mediaIds ?? []) });
@@ -726,6 +737,13 @@ export function JobPage() {
       if (!(await copyText(partNamesText(parts, docLang, b.vehicle)))) throw new AppError('err.copy');
       haptic('light');
     }, 'job.copiedLines');
+  // The VIN alone, one tap (v0.70, «быстрый способ копирования VIN — только VIN»): pasted into a catalogue, a chat.
+  const vin = b.vehicle.vin?.trim();
+  const copyVin = () =>
+    run(async () => {
+      if (!vin || !(await copyText(vin))) throw new AppError('err.copy');
+      haptic('light');
+    }, 'job.vinCopied');
   const copyButton = (size: number) =>
     parts.length > 0 && (
       <ActionIcon variant="light" color="gray" size={size} radius="xl" aria-label={t('job.copyLines')} onClick={() => void copyLines()} style={{ flexShrink: 0 }}>
@@ -754,7 +772,10 @@ export function JobPage() {
         ? { label: t('common.delete'), icon: IconTrash, color: 'red', full: false, onCommit: () => void removeLine(i) }
         : { label: t('job.drop'), icon: IconTrash, color: 'red', full: false, onCommit: () => void run(async () => (await (isAwaitingClient(i) ? takeBack([i.id], { cancel: true }) : dropLine(i.id)), haptic('light'))) };
   const swipeOn = (i: OrderItem): SwipeSpec | undefined =>
-    picking || !canPick(i)
+    // A refused line back (v0.70, «восстановить отменённые»): a draft like it, the job reopened if it was closed.
+    !picking && i.approvalState === 'declined' && binRestore
+      ? { label: t('job.bin.restore'), icon: IconArrowBackUp, color: 'green', onCommit: () => void run(async () => (await restoreFromBin(oid, [i.id]), haptic('success'))) }
+      : picking || !canPick(i)
       ? undefined
       : isAwaitingClient(i)
         ? { label: t('job.agreed'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await answerLines([i.id], 'approve'), haptic('success'))) }
@@ -795,6 +816,20 @@ export function JobPage() {
         </Text>
       }
       subtitle={dots([
+        // Its name asks for more than its quantity (v0.70): «×2?» in orange — a tap asks.
+        !picking && qtyShort(i) && (
+          <button
+            key="qty"
+            type="button"
+            className="qty-short"
+            onClick={(e) => {
+              e.stopPropagation();
+              setQtyLine(i);
+            }}
+          >
+            {t('qty.short', { n: qtyShort(i) })}
+          </button>
+        ),
         i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '',
         // Where the part is, in its colour (to find — orange, ordered — blue, here — green), as on the board.
         partNote(i) && (
@@ -829,7 +864,11 @@ export function JobPage() {
           ? canPick(i)
             ? () => togglePick(i.id)
             : undefined
-          : !editable || i.approvalState === 'declined'
+          : i.approvalState === 'declined'
+          ? binRestore
+            ? () => setBinOpen(true)
+            : undefined
+          : !editable
           ? undefined
           : i.kind === 'discount'
             ? () => setDiscountOpen(true)
@@ -1127,6 +1166,12 @@ export function JobPage() {
         <JobDayChip job={b} fixed={!!lockedMonth} />
         {open && phase !== 'booked' && <DueChip order={b.order} lang={lang} />}
         <VinTile vehicleId={b.vehicle.id} vin={b.vehicle.vin} year={b.vehicle.year} hideEmpty={!open} />
+        {vin && (
+          <button type="button" className="chip vin-copy" onClick={() => void copyVin()} aria-label={t('job.copyVin')} data-vin-copy>
+            <IconCopy size={16} stroke={2} aria-hidden />
+            <span className="vin-copy-text tnum">{vin}</span>
+          </button>
+        )}
         <MulkiyaTile vehicleId={b.vehicle.id} hideEmpty={!open} />
         <JobCardChip orderId={oid} open={open} />
         {/* The car's mileage on this visit (v0.44): the odometer's photo, read on the phone. */}
@@ -1389,7 +1434,7 @@ export function JobPage() {
           <MoreSheet opened={o} onClose={() => setMore(false)} tiles={tiles} />
         )}
       </LazySheet>
-      <LazySheet opened={binOpen}>{(o) => <BinSheet b={b} opened={o} onClose={() => setBinOpen(false)} canRestore={editable && !reissue} />}</LazySheet>
+      <LazySheet opened={binOpen}>{(o) => <BinSheet b={b} opened={o} onClose={() => setBinOpen(false)} canRestore={binRestore} />}</LazySheet>
       <DueSheet order={b.order} lang={lang} opened={dueOpen} onClose={() => setDueOpen(false)} />
       <JobDaySheet job={b} opened={dayOpen} onClose={() => setDayOpen(false)} />
       <DriverSheet order={b.order} opened={driverOpen} onClose={() => setDriverOpen(false)} />
@@ -1421,6 +1466,8 @@ export function JobPage() {
           <ComplaintSheet b={b} opened={o} onClose={() => setComplaintOpen(false)} />
         )}
       </LazySheet>
+      <LazySheet opened={qtyCheck}>{(o) => <QtyCheckSheet items={live} lang={docLang} opened={o} onClose={() => setQtyCheck(false)} onGo={() => void sendNow()} goLabel={t('job.toClient')} />}</LazySheet>
+      <SheetFor value={qtyLine}>{(i, o) => <QtyCheckSheet items={live.filter((x) => x.id === i.id)} lang={docLang} opened={o} onClose={() => setQtyLine(null)} onGo={() => undefined} goLabel={t('common.done')} />}</SheetFor>
       <ConfirmModal
         opened={finish}
         onClose={() => setFinish(false)}
@@ -1435,7 +1482,11 @@ export function JobPage() {
           })
         }
       >
-        <Text size="sm">{t('invoice.confirmText')}</Text>
+        {/* The parts short of their names (v0.70): the last look before the invoice. */}
+        <QtyCheckList items={live} lang={docLang} />
+        <Text size="sm" mt={live.some((i) => qtyShort(i)) ? 'sm' : undefined}>
+          {t('invoice.confirmText')}
+        </Text>
         <Group mt="sm" justify="space-between" wrap="nowrap" gap="sm">
           <Text fw={700} fz={20}>
             <Money fils={sum.gross} display />

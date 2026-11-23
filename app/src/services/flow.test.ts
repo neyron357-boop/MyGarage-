@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, removeLines, reopenJob, restoreFromBin, restoreLines, syncStage, takeBack } from './flow';
+import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, noteLineQty, removeLines, reopenJob, restoreFromBin, restoreLines, setBoardStatus, setLineQty, syncStage, takeBack } from './flow';
 import { binOf } from '../domain/bin';
 import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
@@ -206,6 +206,60 @@ describe('lazy flow', () => {
     await approveAll(o.id);
     await quickInvoice(o.id);
     await expect(restoreFromBin(o.id, [copy.id])).rejects.toThrow();
+  });
+
+  it('puts jobs in a tab of the board; the car that comes is no more a request; reopened — by its step (v0.70)', async () => {
+    const a = await job();
+    const b = await job();
+    expect(await setBoardStatus([a.id, b.id], 'request')).toBe(2);
+    expect(await setBoardStatus([a.id], 'request')).toBe(0);
+    expect((await db.orders.get(b.id))!.boardTab).toBe('request');
+    await carArrived(b.id).catch(() => undefined);
+    expect((await db.orders.get(b.id))!.boardTab).toBeUndefined();
+    await setBoardStatus([a.id], 'wait');
+    await addItem(a.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await sendVersion(a.id, { via: 'whatsapp' });
+    await refuseAll(a.id);
+    await reopenJob(a.id);
+    expect((await db.orders.get(a.id))!.boardTab).toBeUndefined();
+  });
+
+  it('brings refused lines back — the job closed by the refusal reopened first (v0.70)', async () => {
+    const o = await job();
+    const a = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'AC compressor', unitPriceFils: 68250 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    await refuseAll(o.id);
+    expect((await db.orders.get(o.id))!.stage).toBe('closed');
+    const bin = await db.orders.get(o.id).then(async (order) => binOf(order!, await db.items.where('orderId').equals(o.id).toArray()));
+    expect(bin.map((l) => l.how)).toEqual(['declined']);
+    expect(await restoreFromBin(o.id, [a.id])).toBe(1);
+    expect((await db.orders.get(o.id))!.stage).not.toBe('closed');
+    const items = await db.items.where('orderId').equals(o.id).toArray();
+    expect(items.find((i) => i.id === a.id)).toMatchObject({ approvalState: 'declined' });
+    expect(items.find((i) => i.id !== a.id)).toMatchObject({ approvalState: 'draft', titleEn: 'AC COMPRESSOR', unitPriceFils: 68250 });
+  });
+
+  it('puts a line’s quantity right in any state before the invoice; its price said for both stops the asking (v0.70)', async () => {
+    const o = await job();
+    const told = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Mirror LH+RH', unitPriceFils: 8000, vatRateBp: 0 });
+    const agreed = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Tie rod end L/R', unitPriceFils: 6000, vatRateBp: 0 });
+    await approveAll(o.id);
+    const waiting = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Wiper blade pair', unitPriceFils: 2000, vatRateBp: 0 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    const draft = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Steering boot left & right', unitPriceFils: 5000, vatRateBp: 0 });
+    await setLineQty(draft.id, 2);
+    await setLineQty(waiting.id, 2);
+    await setLineQty(agreed.id, 2);
+    const now = async (id: string) => (await db.items.get(id))!;
+    expect([(await now(draft.id)).qty, (await now(draft.id)).approvalState]).toEqual([2, 'draft']);
+    // The one waiting is a draft again with its quantity; the agreed one stays agreed, at the new sum, in a new version.
+    expect([(await now(waiting.id)).qty, (await now(waiting.id)).approvalState]).toEqual([2, 'draft']);
+    expect([(await now(agreed.id)).qty, (await now(agreed.id)).approvalState]).toEqual([2, 'approved']);
+    expect((await db.versions.where('orderId').equals(o.id).toArray()).some((v) => v.kind === 'price_change')).toBe(true);
+    await noteLineQty(told.id, 2);
+    expect((await now(told.id)).qtyNoted).toBe(2);
+    await quickInvoice(o.id);
+    await expect(setLineQty(told.id, 2)).rejects.toThrow();
   });
 
   it('reopens a closed job: invoiced — back to "ready", refused — back in the workshop, history — a job of the app', async () => {

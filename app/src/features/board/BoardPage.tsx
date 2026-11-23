@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Button, Group, Stack, Tooltip } from '@mantine/core';
-import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCar, IconExternalLink, IconLayoutBoardSplit, IconLayoutGrid, IconLayoutKanban, IconPinnedFilled, IconPlus, IconSparkles, IconUserDollar } from '@tabler/icons-react';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutBoardSplit, IconLayoutGrid, IconLayoutKanban, IconPinnedFilled, IconPlus, IconSparkles, IconUserDollar } from '@tabler/icons-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { stepMainTab } from '../../ui/mainSwipe';
 import { hintNavigation } from '../../ui/stack';
 import { useTabSwipe } from '../../ui/tabSwipe';
@@ -10,13 +10,16 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dayLong, dayShort } from '../../domain/dates';
 import { lastChange, leftBoardAt, type Phase } from '../../domain/flow';
+import { BOARD_STATUSES, boardStatusOf, STATUS_PHASE, type BoardStatus } from '../../domain/boardStatus';
+import { haptic } from '../../ui/haptics';
+import { notifications } from '@mantine/notifications';
 import { formatPhone } from '../../domain/phone';
 import { coverIndex } from '../../services/cover';
 import { loadDebtors } from '../../services/debts';
-import { archiveJob, phaseOf } from '../../services/flow';
+import { archiveJob, phaseOf, setBoardStatus } from '../../services/flow';
 import { bundleAmountDue, loadOrderBundle, loadRowBundles, prefetchBundle, type OrderBundle } from '../../services/orders';
 import { useBoardView, type BoardTab } from '../../ui/boardView';
-import { EmptyState, List, MediaImage, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs, undoToast, type TabItem } from '../../ui/components';
+import { EmptyState, List, MediaImage, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs, StickyBar, undoToast, type TabItem } from '../../ui/components';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
@@ -78,7 +81,13 @@ async function loadClosed() {
  * is not one of them — it is under "Debts", one card per customer.
  */
 const STEPS: Phase[] = ['look', 'price', 'wait', 'work', 'pay', 'out', 'booked'];
-type Filter = 'all' | 'archive' | 'debts' | Phase;
+/** v0.70: the tabs the manager puts jobs in — «В работе», «Ожидание», «Заявки» (domain/boardStatus.ts). */
+type StatusTab = 'inwork' | 'waiting' | 'requests';
+type Filter = 'all' | 'archive' | 'debts' | StatusTab | Phase;
+const STATUS_OF: Record<StatusTab, BoardStatus> = { inwork: 'work', waiting: 'wait', requests: 'request' };
+const TAB_OF: Record<BoardStatus, StatusTab> = { work: 'inwork', wait: 'waiting', request: 'requests' };
+const isStatusTab = (k: string): k is StatusTab => k in STATUS_OF;
+
 type Job = { b: OrderBundle; phase: Phase };
 const isStep = (k: string): k is Phase => (STEPS as string[]).includes(k);
 
@@ -472,21 +481,48 @@ export function BoardPage() {
   const hidden = new Set<string>(view.hidden);
   const stepShown = (p: Phase) => count(p) > 0 && !hidden.has(p);
   const phaseFilter = isStep(filter) && stepShown(filter) ? filter : undefined;
+  // v0.70: a tab of the manager's (shown unless left out in «Вид») — its jobs, wherever their step is.
+  const statusFilter = isStatusTab(filter) && !hidden.has(filter) ? STATUS_OF[filter] : undefined;
+  const statusOf = (j: Job) => boardStatusOf(j.b.order, j.phase);
+  const statusCount = (s: BoardStatus) => jobs.filter((j) => statusOf(j) === s).length;
+  // Picking jobs to put in a tab (v0.70): «Выбрать» in the head, then the tab at the foot.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const pick = useCallback((id: string) => {
+    haptic('selection');
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }, []);
+  const endPick = () => {
+    setPicking(false);
+    setPicked(new Set());
+  };
+  const putIn = (s: BoardStatus) =>
+    void run(async () => {
+      const n = await setBoardStatus([...picked], s);
+      haptic('success');
+      notifications.show({ color: 'green', message: t('board.movedTo', { n, tab: t(`board.statusOne.${s}`) }) });
+      endPick();
+    });
   // On a PC every step is in its strip (v0.42): one picked counts while it has cars, whatever «Вид» leaves out on a phone.
   const deskStep = !mobile && isStep(filter) && count(filter) > 0 ? filter : undefined;
   // Its last car gone, or the step left out: the board is back on «Все» (and stays there when a car comes).
-  const lost = !!data && isStep(filter) && !(mobile ? phaseFilter : deskStep);
+  const lost = !!data && ((isStep(filter) && !(mobile ? phaseFilter : deskStep)) || (isStatusTab(filter) && (!mobile || hidden.has(filter))));
   useEffect(() => {
     if (lost) setFilter('all');
   }, [lost]);
   // A step picked: the screen glows in its colours, as a job on that step does (debts — in red).
   const glowRef = useRef<HTMLSpanElement>(null);
-  usePhaseGlow(glowRef, debtsTab ? 'debt' : phaseFilter);
+  usePhaseGlow(glowRef, debtsTab ? 'debt' : statusFilter ? STATUS_PHASE[statusFilter] : phaseFilter);
   // The tabs are pages (v0.68, the user: «свайпы должны быть между этими вкладками»): a sideways swipe — the next tab, in
   // the strip's order; past the first or the last — the tab bar's place beside the board (as Money's pages). A card's
   // own swipes stay at its edges.
-  const tabOrder = view.order.filter((k) => k === 'all' || k === 'debts' || k === 'archive' || (isStep(k) && stepShown(k)));
-  const tabNow = archive ? 'archive' : debtsTab ? 'debts' : (phaseFilter ?? 'all');
+  const tabOrder = view.order.filter((k) => k === 'all' || k === 'archive' || ((k === 'debts' || isStatusTab(k)) && !hidden.has(k)) || (isStep(k) && stepShown(k)));
+  const tabNow = archive ? 'archive' : debtsTab ? 'debts' : statusFilter ? TAB_OF[statusFilter] : (phaseFilter ?? 'all');
   const sw = useTabSwipe(tabOrder, tabNow, (v) => setFilter(v as Filter), (dir) => void stepMainTab(navigate, hintNavigation, '/', dir));
   if (!data) return <PageSkeleton />;
   const { bundles, covers } = data;
@@ -537,11 +573,16 @@ export function BoardPage() {
     <>
       {pull}
       <PageHeader
-        eyebrow={dateLabel}
+        // Picking jobs for a tab (v0.70): how many in place of the date.
+        eyebrow={picking ? (picked.size ? t('board.picked', { n: picked.size }) : t('board.pickHint')) : dateLabel}
         title={t('board.title')}
         right={
           mobile ? (
             <Group gap="xs" wrap="nowrap">
+              {/* Several jobs into a tab at once (v0.70). */}
+              <ActionIcon variant={picking ? 'filled' : 'default'} size={40} radius="xl" aria-label={t(picking ? 'common.cancel' : 'board.pick')} onClick={() => (picking ? endPick() : setPicking(true))} data-board-pick>
+                {picking ? <IconX size={22} stroke={2} /> : <IconListCheck size={22} stroke={2} />}
+              </ActionIcon>
               <TodayBell bundles={bundles} />
               {viewButton}
             </Group>
@@ -622,11 +663,17 @@ export function BoardPage() {
       </>
     );
 
-  const shown = phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs;
+  const shown = statusFilter ? jobs.filter((j) => statusOf(j) === statusFilter) : phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs;
   // The strip in the order of «Вид»: «Все», the steps that have cars and are not left out, «Долги», «Архив».
   const tabItem = (k: BoardTab): TabItem | null => {
     if (k === 'all') return { value: 'all', label: t('board.all'), count: jobs.length };
-    if (k === 'debts') return { value: 'debts', label: t('board.tabDebts'), count: owing || undefined, color: PHASE_META.debt.color, icon: IconUserDollar };
+    if (k === 'debts') return hidden.has('debts') ? null : { value: 'debts', label: t('board.tabDebts'), count: owing || undefined, color: PHASE_META.debt.color, icon: IconUserDollar };
+    if (isStatusTab(k)) {
+      if (hidden.has(k)) return null;
+      const s = STATUS_OF[k];
+      const m = PHASE_META[STATUS_PHASE[s]];
+      return { value: k, label: t(`board.status.${s}`), count: statusCount(s) || undefined, color: m.color, icon: m.icon };
+    }
     if (k === 'archive') return { value: 'archive', label: t('board.archive'), count: archived.length || undefined };
     return isStep(k) && stepShown(k) ? { value: k, label: t(`job.phase.${k}`), count: count(k), color: PHASE_META[k].color, icon: PHASE_META[k].icon } : null;
   };
@@ -648,13 +695,28 @@ export function BoardPage() {
             ) : shown.length ? (
               <List animate className={compact ? 'mini-list' : 'board-cards'}>
                 {shown.map((j) => (
-                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={toArchive(j.b)} variant={compact ? 'row' : 'card'} />
+                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={picking ? undefined : toArchive(j.b)} variant={compact ? 'row' : 'card'} picking={picking} picked={picked.has(j.b.order.id)} onPick={pick} status={statusOf(j)} />
                 ))}
               </List>
             ) : (
               <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />
             )}
           </div>
+          {picking && (
+            // The jobs picked into a tab (v0.70): its three buttons at the foot (how many — in the head).
+            <StickyBar>
+              <Group gap={8} grow wrap="nowrap" data-board-put>
+                  {BOARD_STATUSES.map((s) => {
+                    const m = PHASE_META[STATUS_PHASE[s]];
+                    return (
+                      <Button key={s} color={m.color} disabled={!picked.size} leftSection={<m.icon size={18} />} onClick={() => putIn(s)} data-put={s}>
+                        {t(`board.statusOne.${s}`)}
+                      </Button>
+                    );
+                  })}
+              </Group>
+            </StickyBar>
+          )}
         </>
       ) : debtsTab ? (
         <Box maw={920}>{debtList}</Box>

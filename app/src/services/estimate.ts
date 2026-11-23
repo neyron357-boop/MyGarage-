@@ -275,7 +275,7 @@ export async function recordDecisions(versionId: string, decisions: DecisionInpu
  * in as a version of its own ("price change" — like a discount given at the counter), agreed at once.
  * What was sent and agreed before stays as it was.
  */
-export async function agreeNewPrice(item: OrderItem, price: LinePrice): Promise<EstimateVersion> {
+export async function agreeNewPrice(item: OrderItem, price: LinePrice | Pick<OrderItem, 'qty'>): Promise<EstimateVersion> {
   if (item.approvalState !== 'approved') throw new AppError('err.itemSent');
   const { version } = await buildVersion(item.orderId, { via: 'in_person', kind: 'price_change' }, [{ ...item, ...price }]);
   const agreed: EstimateVersion = { ...version, status: 'answered', answeredAt: version.sentAt };

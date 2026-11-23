@@ -10,7 +10,8 @@ import { restoreFromBin } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { EmptyState, List, ListRow, Money } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
-import { useAction } from '../../ui/hooks';
+import { useAction, useLang } from '../../ui/hooks';
+import { formatAed } from '../../domain/money';
 
 /** A line's kind at a glance, as the tiles under the lines: work blue, a part orange, a service violet. */
 function KindIcon({ line }: { line: BinLine }) {
@@ -32,6 +33,7 @@ export function BinSheet({ b, opened, onClose, canRestore }: { b: OrderBundle; o
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const lang = b.order.docLanguage;
+  const uiLang = useLang();
   const lines = binOf(b.order, b.items);
   const restore = (ids: string[]) =>
     run(async () => {
@@ -62,11 +64,16 @@ export function BinSheet({ b, opened, onClose, canRestore }: { b: OrderBundle; o
                     {' · '}
                     {when(l.at)}
                     {l.item.qty !== 1 ? ` · ×${l.item.qty}` : ''}
+                    {/* The price it had, under its name (v0.70: the row's end is «Вернуть» — the name keeps its room). */}
+                    {' · '}
+                    <Text span inherit c="var(--mantine-color-text)" className="tnum">
+                      {formatAed(itemAmounts(l.item).gross, uiLang)}
+                    </Text>
                   </>
                 }
                 right={
                   <span className="bin-right">
-                    <Money fils={itemAmounts(l.item).gross} />
+                    {!canRestore && <Money fils={itemAmounts(l.item).gross} />}
                     {canRestore && (
                       <Button size="compact-md" variant="light" leftSection={<IconArrowBackUp size={16} />} loading={busy} onClick={() => void restore([l.id])} aria-label={`${t('job.bin.restore')}: ${itemTitle(l.item, lang)}`}>
                         {t('job.bin.restore')}

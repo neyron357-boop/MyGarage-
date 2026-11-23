@@ -4,7 +4,8 @@ import type { Order, OrderItem } from './types';
  * The job's bin (v0.68, the user: «иногда удаляю позиции, потом нужно вернуть — вернуть не могу, приходится заново
  * создавать, а иногда забываю, какие цены указывал; нужна корзина в каждой карточке заказа»): the lines taken off it —
  * drafts deleted (kept on the job as they were, `Order.removedLines`) and lines the customer was told, taken off
- * (still among its lines, cancelled — the quotes sent keep them). Each comes back as a draft: a deleted one as itself,
+ * (still among its lines, cancelled — the quotes sent keep them), and (v0.70, «восстановить отменённые») the lines the
+ * customer refused. Each comes back as a draft: a deleted one as itself,
  * a cancelled one as a new line like it (the cancelled one stays as it was, `restoredAt` — out of the bin). Pure.
  */
 
@@ -15,20 +16,20 @@ export interface BinLine {
   /** The line's id (a deleted one's comes back with it). */
   id: string;
   item: OrderItem;
-  /** Deleted (a draft), or cancelled (it was told). */
-  how: 'deleted' | 'cancelled';
+  /** Deleted (a draft), cancelled (it was told), or refused by the customer (v0.70). */
+  how: 'deleted' | 'cancelled' | 'declined';
   /** When it was deleted; a cancelled one — when it was added. */
   at: string;
 }
 
-/** What is in the bin, the newest first: the deleted lines, then the cancelled ones not brought back. */
+/** What is in the bin, the newest first: the deleted lines, then the cancelled and refused ones not brought back. */
 export function binOf(order: Pick<Order, 'removedLines'>, items: OrderItem[]): BinLine[] {
   const here = new Set(items.map((i) => i.id));
   const deleted = (order.removedLines ?? []).filter((r) => !here.has(r.item.id)).map((r): BinLine => ({ id: r.item.id, item: r.item, how: 'deleted', at: r.at }));
   const cancelled = items
-    .filter((i) => i.approvalState === 'cancelled' && i.kind !== 'discount' && !i.restoredAt)
+    .filter((i) => (i.approvalState === 'cancelled' || i.approvalState === 'declined') && i.kind !== 'discount' && !i.restoredAt)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map((i): BinLine => ({ id: i.id, item: i, how: 'cancelled', at: i.createdAt }));
+    .map((i): BinLine => ({ id: i.id, item: i, how: i.approvalState === 'declined' ? 'declined' : 'cancelled', at: i.createdAt }));
   return [...deleted, ...cancelled];
 }
 

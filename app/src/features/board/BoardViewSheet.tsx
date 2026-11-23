@@ -7,6 +7,9 @@ import { List, ListRow } from '../../ui/components';
 import { usePhone } from '../../ui/hooks';
 import { useSortable } from '../../ui/sortable';
 import { PHASE_META } from '../job/phase';
+import { STATUS_PHASE } from '../../domain/boardStatus';
+
+const PHASES = ['look', 'price', 'wait', 'work', 'pay', 'out', 'booked'] as const;
 
 /** A tab of the board as the sheet lists it: its symbol on a squircle of its colour, its name. */
 export function useBoardTabLook() {
@@ -15,6 +18,12 @@ export function useBoardTabLook() {
     if (k === 'all') return { name: t('board.all'), icon: IconLayoutKanban, color: 'gray' };
     if (k === 'debts') return { name: t('board.tabDebts'), icon: IconUserDollar, color: PHASE_META.debt.color };
     if (k === 'archive') return { name: t('board.archive'), icon: IconArchive, color: 'gray' };
+    // The manager's own tabs (v0.70).
+    if (k === 'inwork' || k === 'waiting' || k === 'requests') {
+      const s = k === 'inwork' ? 'work' : k === 'waiting' ? 'wait' : 'request';
+      const m = PHASE_META[STATUS_PHASE[s]];
+      return { name: t(`board.status.${s}`), icon: m.icon, color: m.color };
+    }
     const m = PHASE_META[k as Phase];
     return { name: t(`job.phase.${k}`), icon: m.icon, color: m.color };
   };
@@ -23,7 +32,7 @@ export function useBoardTabLook() {
 /**
  * «Вид» of the board (v0.22), on this device: the cards large or compact, and the tabs — dragged by their grip
  * (≡) into the order the strip shows them; a step switched off leaves the strip (its cars stay under «Все»).
- * «Все» stays first; «Долги» and «Архив» move but stay. A PC has no strip — its columns follow the order, and a
+ * «Все» stays first; «Архив» moves but stays (v0.70: «Долги» may be switched off; the manager's tabs come first). A PC has no strip — its columns follow the order, and a
  * step is never switched off there (a column holds its cars, and there is no «Все»).
  */
 export function BoardViewSheet({ opened, onClose }: { opened: boolean; onClose: () => void }) {
@@ -63,6 +72,8 @@ export function BoardViewSheet({ opened, onClose }: { opened: boolean; onClose: 
                 key={k}
                 left={icon(k)}
                 title={look(k).name}
+                // A job's step (v0.70: beside the manager's own tabs, «В работе» is both) — said so under its name.
+                subtitle={(PHASES as readonly string[]).includes(k) ? t('board.stepTab') : undefined}
                 dim={phone && hidden.has(k)}
                 right={
                   phone && canHide(k) ? (

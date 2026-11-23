@@ -113,7 +113,10 @@ async function launchBrowser() {
     await go('#/');
     await shot(`${prefix}-01-board`);
     await shot(`${prefix}-01b-board-scrolled`, { scroll: 520 });
-    // v0.20: "Debts" beside "Archive" — one card per customer.
+    // v0.20: "Debts" beside "Archive" — one card per customer (v0.70: off the strip at first — on, through the view kept).
+    await page.evaluate(() => localStorage.setItem('mygarage.board', JSON.stringify({ hidden: ['look', 'price', 'wait', 'work', 'pay', 'out', 'booked'], size: 'large' })));
+    await page.reload();
+    await settle(900);
     await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /Долги|Debts/ }).click();
     await settle(600);
     await shot(`${prefix}-01c-board-debts`);

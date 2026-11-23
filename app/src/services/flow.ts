@@ -1,5 +1,6 @@
 import { db, uid } from '../db/db';
 import { binOf, draftLike, withoutRemoved, withRemoved } from '../domain/bin';
+import type { BoardStatus } from '../domain/boardStatus';
 import { nowIso } from '../domain/dates';
 import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { discountBase, discountLines, grossOf } from '../domain/discount';
@@ -73,6 +74,9 @@ export async function leaveOnDebt(orderId: string, debt?: { amountFils: number; 
 
 /** A booked car has come: it is in, and — as at check-in — goes straight on to diagnostics. */
 export async function carArrived(orderId: string): Promise<void> {
+  // Here now: no more a request (v0.70) — in work, unless put elsewhere by hand.
+  const o = await db.orders.get(orderId);
+  if (o?.boardTab === 'request') await db.orders.update(orderId, { boardTab: undefined });
   await changeStage(orderId, 'intake');
   await syncStage(orderId);
 }
@@ -195,6 +199,34 @@ export async function repriceLine(itemId: string, unitGrossFils: number): Promis
   return waiting ? 'draft' : 'agreed';
 }
 
+/**
+ * A line's quantity put right (v0.70: «LEFT & RIGHT» × 1 — the name asks for two, domain/sides.ts): a draft simply; one
+ * waiting for the answer — taken back to a draft with it; an agreed one — agreed again in person at the new sum (as a new
+ * price is, `agreeNewPrice`). Not after the invoice.
+ */
+export async function setLineQty(itemId: string, qty: number): Promise<void> {
+  const item = await db.items.get(itemId);
+  if (!item) throw new AppError('err.notFound');
+  if (!(qty > 0)) throw new AppError('err.amountRequired');
+  if (qty === item.qty) return;
+  if (activeInvoice(await db.invoices.where('orderId').equals(item.orderId).toArray())) throw new AppError('err.invoiceExists');
+  if (item.approvalState === 'draft') await updateItem(itemId, { qty });
+  else if (item.approvalState === 'pending') {
+    await withdrawItems([itemId]);
+    await updateItem(itemId, { qty });
+  } else if (item.approvalState === 'approved') await agreeNewPrice(item, { qty });
+  else throw new AppError('err.itemSent');
+  await logEvent(item.orderId, 'updated', { fields: ['qty'], itemId, from: item.qty, to: qty });
+  await syncDiscount(item.orderId);
+  await syncStage(item.orderId);
+}
+
+/** Its price is for all its name asks for (v0.70): the line is not asked about again (until its name asks for more). */
+export async function noteLineQty(itemId: string, count: number): Promise<void> {
+  if (!(await db.items.get(itemId))) throw new AppError('err.notFound');
+  await db.items.update(itemId, { qtyNoted: count });
+}
+
 /** An agreed line that will not be done after all (the customer changed their mind, no part): off the job. */
 export async function dropLine(itemId: string): Promise<void> {
   const item = await db.items.get(itemId);
@@ -268,7 +300,8 @@ export async function restoreLines(items: OrderItem[]): Promise<void> {
 
 /**
  * Lines back from the job's bin (v0.68), drafts again: a deleted one as itself (its photos, its number, its price), a
- * cancelled one as a new line like it (the cancelled one stays in the history, out of the bin). Not after the invoice —
+ * cancelled or refused one as a new line like it (it stays in the history, out of the bin); a job closed (refused) is
+ * reopened first (v0.70). Not after the invoice —
  * as lines are not removed then. Returns how many came back.
  */
 export async function restoreFromBin(orderId: string, ids: string[]): Promise<number> {
@@ -278,6 +311,9 @@ export async function restoreFromBin(orderId: string, ids: string[]): Promise<nu
   const wanted = new Set(ids);
   const back = binOf(order, await db.items.where('orderId').equals(orderId).toArray()).filter((l) => wanted.has(l.id));
   if (!back.length) return 0;
+  // A job closed or cancelled — refused, say (v0.70, «восстановить отменённые»): back on the board first, the lines on it.
+  if (order.stage === 'closed' || order.stage === 'cancelled') await reopenJob(orderId);
+  const job = (await db.orders.get(orderId)) ?? order;
   const now = nowIso();
   await db.transaction('rw', db.orders, db.items, async () => {
     for (const l of back)
@@ -287,7 +323,7 @@ export async function restoreFromBin(orderId: string, ids: string[]): Promise<nu
         await db.items.update(l.id, { restoredAt: now });
       }
     const deleted = back.filter((l) => l.how === 'deleted').map((l) => l.id);
-    if (deleted.length) await db.orders.update(orderId, { removedLines: withoutRemoved(order, deleted) });
+    if (deleted.length) await db.orders.update(orderId, { removedLines: withoutRemoved(job, deleted) });
   });
   await syncDiscount(orderId);
   await syncStage(orderId);
@@ -322,6 +358,8 @@ export async function reopenJob(orderId: string): Promise<void> {
       updatedAt: now,
       outcome: 'in_progress',
       archivedAt: undefined,
+      // Back on the board by its step (v0.70), not in the tab it was put in before it closed.
+      boardTab: undefined,
       // Closed without payment by mistake: what it owes counts again.
       waived: undefined,
       closedAt: undefined,
@@ -396,6 +434,24 @@ export async function archiveJob(orderId: string, archived: boolean): Promise<vo
     await db.orders.update(orderId, { archivedAt: archived ? nowIso() : undefined });
     await logEvent(orderId, archived ? 'archived' : 'unarchived', {});
   });
+}
+
+/**
+ * Jobs put in a tab of the board by the manager (v0.70, domain/boardStatus.ts): in work, waiting, a request. Only a place
+ * on the board — the job's step, documents and money are not touched.
+ */
+export async function setBoardStatus(orderIds: string[], status: BoardStatus): Promise<number> {
+  let n = 0;
+  await db.transaction('rw', db.orders, db.events, async () => {
+    for (const id of orderIds) {
+      const order = await db.orders.get(id);
+      if (!order || order.boardTab === status) continue;
+      await db.orders.update(id, { boardTab: status, updatedAt: nowIso() });
+      await logEvent(id, 'updated', { fields: ['boardTab'], to: status });
+      n++;
+    }
+  });
+  return n;
 }
 
 /** Parts of the job that are not bought yet. */

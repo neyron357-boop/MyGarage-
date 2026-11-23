@@ -4,6 +4,9 @@ import {
   IconBuildingFactory2,
   IconCar,
   IconCash,
+  IconCheck,
+  IconCircle,
+  IconCircleCheckFilled,
   IconClock,
   IconExternalLink,
   IconFileInvoice,
@@ -24,7 +27,8 @@ import { activeInvoice } from '../../domain/invoice';
 import { itemAmounts, summarize } from '../../domain/items';
 import { jobSummary } from '../../domain/jobSummary';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
-import { partsToFind } from '../../services/flow';
+import { partsToFind, setBoardStatus } from '../../services/flow';
+import { haptic } from '../../ui/haptics';
 import { openWhatsApp } from '../../services/messages';
 import { bundleAmountDue, prefetchBundle, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
@@ -34,6 +38,7 @@ import { LazySheet } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { useSwipeRow } from '../../ui/swipe';
 import { PHASE_META } from '../job/phase';
+import { BOARD_STATUSES, boardStatusOf, STATUS_PHASE, type BoardStatus } from '../../domain/boardStatus';
 import { DeleteJobModal } from '../orders/DeleteJob';
 import { orderFlags } from '../orders/flags';
 import { IconArrowsMaximize, IconArrowsMinimize, IconPin, IconPinnedFilled, IconStar, IconStarFilled } from '@tabler/icons-react';
@@ -78,6 +83,12 @@ type RowProps = {
   pinned?: boolean;
   /** On the PC board's canvas: its size a step larger or smaller from the menu. */
   canvas?: boolean;
+  /** The board picking jobs to put in a tab (v0.70): a tap picks it (a mark on it), it does not open. */
+  picking?: boolean;
+  picked?: boolean;
+  onPick?: (orderId: string) => void;
+  /** The tab of the board it is in (v0.70) — offered in its long-press menu. */
+  status?: BoardStatus;
 };
 
 /**
@@ -100,16 +111,19 @@ export const JobRow = memo(
     a.dated === z.dated &&
     a.important === z.important &&
     a.pinned === z.pinned &&
-    a.canvas === z.canvas,
+    a.canvas === z.canvas &&
+    a.picking === z.picking &&
+    a.picked === z.picked &&
+    a.status === z.status,
 );
 
-function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important, pinned, canvas }: RowProps) {
+function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important, pinned, canvas, picking, picked, onPick, status }: RowProps) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
   const [menu, setMenu] = useState(false);
   const [remove, setRemove] = useState(false);
-  const press = useLongPress(() => setMenu(true));
+  const press = useLongPress(() => !picking && setMenu(true));
   // On a PC (v0.41) a right click opens the card's menu where the mouse is, not a sheet in the middle.
   const phone = usePhone();
   const [deskAt, setDeskAt] = useState<{ x: number; y: number } | null>(null);
@@ -131,7 +145,10 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
         onTouchCancel: () => (press.handlers.onTouchCancel(), sw.handlers.onTouchCancel()),
       }
     : press.handlers;
-  const m = PHASE_META[phase];
+  // Put in a tab by hand (v0.70) other than its step would put it: the card says where — its colour, its word.
+  const manual = b.order.boardTab && b.order.boardTab !== boardStatusOf({}, phase) ? b.order.boardTab : undefined;
+  const m = manual ? PHASE_META[STATUS_PHASE[manual]] : PHASE_META[phase];
+  const stepName = manual ? t(`board.statusOne.${manual}`) : t(`job.phase.${phase}`);
   const { flags, waitingHours } = orderFlags(b);
   const hours = phase === 'wait' && waitingHours !== undefined ? waitingHours : hoursBetween(b.order.stageChangedAt);
   // No answer, or no price told, for a couple of hours: the time turns red.
@@ -151,7 +168,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
   const open = () => navigate(`/orders/${b.order.id}`);
   // The step in its colour — red once it has been there too long: the first thing the card says.
   const tone = late ? 'red' : m.color;
-  const stepText = `${t(`job.phase.${phase}`)} · ${booked ? dueShort(booked, lang) : shortDuration(hours, lang)}`;
+  const stepText = `${stepName} · ${booked ? dueShort(booked, lang) : shortDuration(hours, lang)}`;
   const name = car || `№${b.order.number}`;
   // What the job is about, in a line (v0.30): its work and parts by name, else the complaint.
   const what = jobSummary(b.items, b.order.complaint, b.order.docLanguage);
@@ -223,7 +240,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
               <span className="job-mini-step tnum" title={stepText}>
                 <m.icon size={13} stroke={2.4} aria-hidden />
                 {/* In a narrow row (a lane of the PC board, which names its step) only the symbol and the time. */}
-                <span className="job-mini-step-name">{t(`job.phase.${phase}`)} · </span>
+                <span className="job-mini-step-name">{stepName} · </span>
                 {booked ? dueShort(booked, lang) : shortDuration(hours, lang)}
               </span>
             </>
@@ -266,7 +283,14 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
         data-doc={!row && doc ? '' : undefined}
         data-important={important || undefined}
         data-pinned={pinned || undefined}
+        data-picking={picking || undefined}
+        data-picked={picked || undefined}
       >
+        {picking && (
+          <span className="job-pick" aria-hidden>
+            {picked ? <IconCircleCheckFilled size={26} /> : <IconCircle size={26} stroke={1.8} />}
+          </span>
+        )}
         {wa && (
           <span className="swipe-action lead" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden={sw.open !== 'leading'}>
             <button
@@ -309,8 +333,10 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
           onPointerDown={() => prefetchBundle(b.order.id)}
           onClick={() => {
             if (press.consumeClick() || sw.consumeClick()) return;
+            if (picking) return onPick?.(b.order.id);
             open();
           }}
+          aria-pressed={picking ? !!picked : undefined}
         >
           {/* The photo is the card (or, without one, the car drawn in its place): the step on it, the car and its
               money at its foot over a soft shade. A row: the photo small on the left, the same facts beside it. */}
@@ -392,6 +418,23 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
               open();
             }}
           />
+          {/* The board's tab it is in (v0.70): one tap puts it in another. */}
+          {status &&
+            BOARD_STATUSES.map((st) => {
+              const sm = PHASE_META[STATUS_PHASE[st]];
+              return (
+                <ListRow
+                  key={st}
+                  title={t(`board.statusOne.${st}`)}
+                  left={<sm.icon size={20} stroke={1.8} color={`var(--mantine-color-${sm.color}-6)`} />}
+                  right={st === status ? <IconCheck size={20} stroke={2.4} color="var(--mantine-color-cobalt-6)" aria-label={t('board.current')} /> : undefined}
+                  onClick={() => {
+                    setMenu(false);
+                    if (st !== status) void run(async () => (await setBoardStatus([b.order.id], st), haptic('success')));
+                  }}
+                />
+              );
+            })}
           {swipe && (
             <ListRow
               title={swipe.label}

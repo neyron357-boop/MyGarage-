@@ -379,6 +379,12 @@ export interface Order {
    */
   driver?: JobDriver;
   /**
+   * Where the manager put it on the board (v0.70, the user: «выбрать несколько заказов и присваивать им статусы — в
+   * ожидании, в работе… вкладка заявки»): in work, waiting, a request (no car here — only asked about). None — by its
+   * step (domain/boardStatus.ts).
+   */
+  boardTab?: 'work' | 'wait' | 'request';
+  /**
    * Its lines deleted (drafts — nothing was told of them), the newest first, the last 30 (v0.68, the user: «корзина в
    * каждой карточке заказа — вернуть удалённые позиции или посмотреть их»): as they were, to bring back (domain/bin.ts).
    */
@@ -704,7 +710,12 @@ export interface OrderItem {
   employeeId?: string;
   /** Where the line stands among the job's lines once they were moved by hand (0 — first); the invoice keeps it. */
   position?: number;
-  /** A cancelled line brought back from the bin as a new draft (v0.68): the bin lists it no more. */
+  /**
+   * Its name asks for more than its quantity («LEFT & RIGHT» × 1) and the manager said the price is for all of them
+   * (v0.70, domain/sides.ts): how many it was said for — the line is not asked about again.
+   */
+  qtyNoted?: number;
+  /** A cancelled (v0.68) or refused (v0.70) line brought back from the bin as a new draft: the bin lists it no more. */
   restoredAt?: string;
   createdAt: string;
 }

@@ -240,6 +240,15 @@ export const en: typeof ru = {
     approved: 'Approved',
     tabActive: 'All in the shop',
     tabDebts: 'Debts',
+    // v0.70: the tabs the manager puts jobs in; picking several.
+    status: { work: 'In work', wait: 'Waiting', request: 'Requests' },
+    statusOne: { work: 'In work', wait: 'Waiting', request: 'Request' },
+    pick: 'Pick',
+    picked: 'Picked: {{n}}',
+    pickHint: 'Tap the jobs',
+    stepTab: 'a job’s step',
+    movedTo: '{{tab}} · {{n}}',
+    current: 'Here now',
     view: 'View',
     tabs: 'Tabs',
     sizeLarge: 'Large',
@@ -1155,6 +1164,9 @@ export const en: typeof ru = {
     /** The copy's tile, under its symbol (v0.57). */
     copyWord: 'Copy',
     copiedLines: 'Parts copied',
+    // v0.70: the VIN alone, one tap.
+    copyVin: 'Copy the VIN',
+    vinCopied: 'VIN copied',
     vinPhoto: 'VIN photo',
     vinTake: 'Take the VIN',
     retakePhoto: 'Retake',
@@ -1173,7 +1185,7 @@ export const en: typeof ru = {
     accept: 'Accept',
     more: { quote: 'Quote', invoice: 'Invoice', prepay: 'Deposit', refuse: 'Refused', customer: 'Customer', car: 'Car', claim: 'Warranty', select: 'Edit', amend: 'Change', scanner: 'Scanner', remove: 'Delete', report: 'Report', due: 'Due', day: 'Day', owner: 'To the owner', driver: 'Driver', bin: 'Bin' },
     // v0.68: the job's bin — lines deleted and taken off, back in one tap.
-    bin: { title: 'Bin', deleted: 'Deleted', cancelled: 'Taken off', restore: 'Restore', restoreAll: 'Restore all · {{n}}', restored_one: '{{count}} line restored', restored_few: '{{count}} lines restored', restored_many: '{{count}} lines restored', restored_other: '{{count}} lines restored', empty: 'Empty' },
+    bin: { title: 'Bin', deleted: 'Deleted', cancelled: 'Taken off', declined: 'Refused', restore: 'Restore', restoreAll: 'Restore all · {{n}}', restored_one: '{{count}} line restored', restored_few: '{{count}} lines restored', restored_many: '{{count}} lines restored', restored_other: '{{count}} lines restored', empty: 'Empty' },
     partPhoto: 'Part photo',
     setParts: 'Supplier and stock',
     partsN: 'Parts · {{n}}',
@@ -1263,6 +1275,14 @@ export const en: typeof ru = {
     monthsPaid: 'Paid months · {{count}}',
     pickedOf: '{{n}} of {{of}}',
     monthInvoices: 'Invoices of the month',
+  },
+  // v0.70: a part's name asks for more than its quantity («LEFT & RIGHT» × 1).
+  qty: {
+    says: 'The name says {{n}}',
+    priceFor: 'Price for {{n}}',
+    short: '×{{n}}?',
+    title: 'Check the quantity',
+    allSet: 'Quantities checked',
   },
   // v0.69: a customer's works by month — each month a list of works by day, a month's lock, «＋» for a job forgotten.
   months: {

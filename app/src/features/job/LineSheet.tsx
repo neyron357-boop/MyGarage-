@@ -25,6 +25,8 @@ import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
+import { QtyAsk } from './QtyCheck';
+import { qtyShort } from '../../domain/sides';
 
 /**
  * What is added: work (the labour charge), a part, or a service — anything done to the car (a change of oil, a wash),
@@ -162,6 +164,8 @@ export function LineSheet({
   const [outDays, setOutDays] = useState<number>();
   const [picked, setPicked] = useState<Suggestion>();
   const [qty, setQty] = useState<number>(1);
+  // The price said to be for all the name asks for (v0.70, «LEFT & RIGHT» × 1): kept with the line.
+  const [noted, setNoted] = useState<number | undefined>();
   // The price as typed; `mode` says how it is counted: VAT on top, VAT inside, or no VAT on this line.
   const [price, setPrice] = useState<number | undefined>();
   const [cost, setCost] = useState<number | undefined>();
@@ -189,6 +193,7 @@ export function LineSheet({
     setTitle(item ? itemTitle(item, lang) : '');
     setPicked(undefined);
     setQty(item?.qty ?? 1);
+    setNoted(item?.qtyNoted);
     const m = vatModeOf(item, incl);
     setMode(m);
     setPrice(item ? enteredPrice(item, taxRate, m) : undefined);
@@ -265,6 +270,7 @@ export function LineSheet({
         patch.customerSupplied = own || undefined;
         patch.supplierId = own ? undefined : supplierId;
         patch.partNumber = partNumber.trim() || undefined;
+        patch.qtyNoted = noted;
         patch.offers = !own && offers.length ? offers : undefined;
       } else {
         patch.employeeId = who;
@@ -507,6 +513,12 @@ export function LineSheet({
             </div>
           )}
         </div>
+
+        {/* A part whose name asks for more than its quantity (v0.70): asked here, as it is typed. */}
+        {kind === 'part' && !own && !item?.customerSupplied && (() => {
+          const n = qtyShort({ kind: 'part', qty: qty || 1, titleEn: title, qtyNoted: noted });
+          return n ? <QtyAsk n={n} onFix={() => (setQty(n), haptic('selection'))} onNote={() => (setNoted(n), haptic('selection'))} /> : null;
+        })()}
 
         {/* How much: rows as in the iPhone's settings — the label on the left, the value on the right. */}
         {!own && (
