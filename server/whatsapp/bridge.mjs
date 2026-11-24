@@ -739,8 +739,25 @@ async function forwardMessage(body) {
   allow();
   const m = await within(c.getMessageById(id), 20_000, 'message');
   if (!m) throw httpError(404, 'no message');
-  await within(m.forward(to), 60_000, 'forward');
-  return { ok: true };
+  try {
+    await within(m.forward(to), 60_000, 'forward');
+    return { ok: true, how: 'forward' };
+  } catch (e) {
+    // The library's own forwarding does not find WhatsApp Web's (2.3000.105606…, «forwardMessages» of undefined): the
+    // same content sent anew — its words, its file with its caption — only WhatsApp's «Пересланное» is not on it.
+    log(`forward: ${String(e?.message || e).slice(0, 120)} — sent anew`);
+  }
+  if (m.hasMedia) {
+    const media = await within(m.downloadMedia(), 120_000, 'media');
+    if (!media) throw httpError(410, 'the file is no longer on WhatsApp');
+    const caption = String(m.body || '').slice(0, 4000);
+    await within(c.sendMessage(to, media, { ...(caption ? { caption } : {}), ...(m.type === 'document' ? { sendMediaAsDocument: true } : {}) }), 300_000, 'send');
+  } else {
+    const text = String(m.body || '').trim();
+    if (!text) throw httpError(422, 'nothing to forward');
+    await within(c.sendMessage(to, text), 60_000, 'send');
+  }
+  return { ok: true, how: 'anew' };
 }
 
 async function sendFile(url, bytes, type) {
