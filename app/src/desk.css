@@ -1754,6 +1754,25 @@ html.desk .row-hover-btn:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 1px;
 }
+/* A row moved by hand (v0.76, the owner: «когда двигаю курсор, чтобы перетаскать позиции вверх-вниз, кнопка «Удалить»
+   мешает»): its grip ≡ stays in the clear — the strip ends where the grip begins (the grip is 44 px, 2 px from the
+   row's edge: the row's 14 px less the grip's −12 px), and goes while the mouse is on the grip or a row is moved. */
+html.desk .list-row:has(> .sort-grip) > .row-hover {
+  right: 46px;
+  padding-right: 4px;
+}
+html.desk .list-row:has(> .sort-grip:hover) > .row-hover,
+html.desk .list[data-sorting] .row-hover,
+html.desk .sort-lift > .row-hover {
+  opacity: 0;
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  /* The grip says it is the thing to take. */
+  html.desk .sort-grip:hover {
+    color: var(--mantine-color-text);
+  }
+}
 
 /* ---------- Under the mouse: what can be clicked answers before the click ---------- */
 @media (hover: hover) and (pointer: fine) {

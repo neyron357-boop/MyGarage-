@@ -310,6 +310,46 @@ async function launchBrowser() {
               await settle(300);
               check('job: the mouse leaving the row lets the question go', (await off.getAttribute('data-armed')) === null);
             }
+            // v0.76 (the owner: «когда двигаю курсор, чтобы перетаскать позиции вверх-вниз, кнопка «Удалить» мешает»): the
+            // grip ≡ stays clear of the row's buttons — under the mouse it is the grip, the buttons go — and a row is moved
+            // by it with the mouse.
+            const gripped = p.locator('.job-desk-main .list-row.swipe-row:has(> .sort-grip)');
+            if ((await gripped.count()) >= 2) {
+              const row0 = gripped.first();
+              await row0.hover({ position: { x: 120, y: 20 } });
+              await settle(300);
+              const g = await row0.locator('.sort-grip').boundingBox();
+              const clear = await p.evaluate(([x, y]) => {
+                const el = document.elementFromPoint(x, y);
+                const row = el?.closest('.list-row');
+                const strip = row?.querySelector(':scope > .row-hover')?.getBoundingClientRect();
+                return { onGrip: !!el?.closest('.sort-grip'), stripRight: strip ? Math.round(strip.right) : null, gripLeft: Math.round(row?.querySelector(':scope > .sort-grip')?.getBoundingClientRect().left ?? 0) };
+              }, [g.x + g.width / 2, g.y + g.height / 2]);
+              await p.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+              await settle(300);
+              const onGrip = await row0.locator('.row-hover').evaluate((el) => getComputedStyle(el).opacity);
+              check('job: the grip ≡ in the clear — the buttons end before it and go while the mouse is on it', clear.onGrip && clear.stripRight !== null && clear.stripRight <= clear.gripLeft + 1 && onGrip === '0', { ...clear, onGrip });
+              await shot('03b4-job-line-grip');
+              const titles = () => gripped.evaluateAll((rows) => rows.map((r) => r.querySelector('.title')?.textContent?.trim() ?? ''));
+              const before = await titles();
+              const r1 = await gripped.nth(1).boundingBox();
+              await p.mouse.down();
+              await p.mouse.move(g.x + g.width / 2, r1.y + r1.height / 2 + 6, { steps: 8 });
+              await p.mouse.move(g.x + g.width / 2, r1.y + r1.height - 4, { steps: 4 });
+              await p.mouse.up();
+              await settle(900);
+              const after = await titles();
+              check('job: a line moved by its grip with the mouse, nothing deleted', after.length === before.length && after[0] === before[1] && after[1] === before[0], { before, after });
+              // Back as it was (the pictures after this one).
+              const g2 = await gripped.first().locator('.sort-grip').boundingBox();
+              const b1 = await gripped.nth(1).boundingBox();
+              await p.mouse.move(g2.x + g2.width / 2, g2.y + g2.height / 2);
+              await p.mouse.down();
+              await p.mouse.move(g2.x + g2.width / 2, b1.y + b1.height / 2 + 6, { steps: 8 });
+              await p.mouse.move(g2.x + g2.width / 2, b1.y + b1.height - 4, { steps: 4 });
+              await p.mouse.up();
+              await settle(900);
+            }
           }
           await p.mouse.move(5, 5);
         }
