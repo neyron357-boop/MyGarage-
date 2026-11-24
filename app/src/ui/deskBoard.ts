@@ -6,11 +6,17 @@ import { useSyncExternalStore } from 'react';
  * see it — «Шаги» (the sections by step, as before) and «Холст» (a canvas: every card where the manager put it, its size
  * his too) — and, in both, important cards (lit, larger) and pinned ones (first; on the canvas — fixed where they are).
  * Kept on this computer, like the board's «Вид»: it is how one screen is laid out, not the garage's data.
+ *
+ * v0.75 (the owner on that board: «пересобрать этот экран полностью. Совсем не нравится»): the board is rebuilt —
+ * «Карточки» (one grid, every card one size: the photo 16 : 9, its facts under it), «Список» (a table by step) and
+ * «Холст». An important card is no longer twice as wide among the others (a star, a warm line, first in its step); it
+ * is larger only on the canvas, where sizes are the manager's own. A card's height is no longer half its width
+ * (`cardHeight`), so the canvas kept before v0.75 is laid out afresh once (`LAYOUT`).
  */
 
-export type DeskMode = 'steps' | 'canvas';
+export type DeskMode = 'cards' | 'list' | 'canvas';
 /**
- * A card on the canvas: its top-left corner and its width (px); its height is half of it, as every card's. `z` — which
+ * A card on the canvas: its top-left corner and its width (px); its height follows (`cardHeight`). `z` — which
  * lies on top where cards cover each other: the one put down last (kept, so a reload does not shuffle them).
  */
 export interface Place {
@@ -26,14 +32,20 @@ export interface DeskBoardState {
   pinned: string[];
 }
 
-/** A card's widths: the usual one (a phone's), the important one's, the least and the most. */
-export const CARD = { min: 240, s: 290, l: 560, max: 720 };
+/** A card's widths: the usual one, the important one's (on the canvas), the least and the most. */
+export const CARD = { min: 240, s: 280, l: 420, max: 720 };
+/** Under a card's photo: its facts, the same four lines on every card (desk.css `.dcard-body`). */
+export const CARD_INFO = 116;
+/** A card as tall as its photo (16 : 9 of its width) and its facts. */
+export const cardHeight = (w: number) => Math.round((w * 9) / 16) + CARD_INFO;
+/** The canvas's places are of this layout (v0.75: a card's height changed — places kept before are let go). */
+const LAYOUT = 2;
 /** The canvas's step: places and sizes fall on it. */
 export const GRID = 12;
 /** The room between cards placed by the board. */
 export const GAP = 16;
 
-export const DEFAULT_DESK: DeskBoardState = { mode: 'steps', places: {}, important: [], pinned: [] };
+export const DEFAULT_DESK: DeskBoardState = { mode: 'cards', places: {}, important: [], pinned: [] };
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 export const snap = (v: number, step = GRID) => Math.round(v / step) * step;
@@ -43,7 +55,9 @@ export const clampWidth = (w: number) => Math.min(CARD.max, Math.max(CARD.min, s
 export function normalizeDeskBoard(raw: unknown): DeskBoardState {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const places: Record<string, Place> = {};
-  for (const [id, p] of Object.entries((r.places && typeof r.places === 'object' ? r.places : {}) as Record<string, Record<string, unknown>>)) {
+  // Places of the cards as they were before v0.75 (half as tall): not kept — the canvas lays its cards out afresh.
+  const kept = r.layout === LAYOUT && r.places && typeof r.places === 'object' ? r.places : {};
+  for (const [id, p] of Object.entries(kept as Record<string, Record<string, unknown>>)) {
     const x = num(p?.x);
     const y = num(p?.y);
     const w = num(p?.w);
@@ -52,10 +66,10 @@ export function normalizeDeskBoard(raw: unknown): DeskBoardState {
     places[id] = { x: Math.max(0, snap(x)), y: Math.max(0, snap(y)), w: clampWidth(w), ...(z !== undefined ? { z } : {}) };
   }
   const ids = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).filter((x): x is string => typeof x === 'string' && !!x))];
-  return { mode: r.mode === 'canvas' ? 'canvas' : 'steps', places, important: ids(r.important), pinned: ids(r.pinned) };
+  return { mode: r.mode === 'canvas' || r.mode === 'list' ? r.mode : 'cards', places, important: ids(r.important), pinned: ids(r.pinned) };
 }
 
-const h = (p: Place) => p.w / 2;
+const h = (p: Place) => cardHeight(p.w);
 /** Two cards cover each other (with the room between cards counted). */
 export const overlaps = (a: Place, b: Place, gap = GAP) => a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + h(b) + gap && b.y < a.y + h(a) + gap;
 
@@ -106,7 +120,7 @@ export function arrange(ids: string[], width: number, widthOf: (id: string) => n
     }
     out[id] = { x, y, w };
     x = up(x + w + GAP);
-    row = Math.max(row, w / 2);
+    row = Math.max(row, cardHeight(w));
   }
   return out;
 }
@@ -126,9 +140,9 @@ function read(): DeskBoardState {
 let current: DeskBoardState | undefined;
 
 export function setDeskBoard(patch: Partial<DeskBoardState>): void {
-  const next = normalizeDeskBoard({ ...(current ??= read()), ...patch });
+  const next = normalizeDeskBoard({ ...(current ??= read()), ...patch, layout: LAYOUT });
   try {
-    localStorage.setItem(KEY, JSON.stringify(next));
+    localStorage.setItem(KEY, JSON.stringify({ ...next, layout: LAYOUT }));
   } catch {
     // private mode: for this visit
   }
@@ -140,7 +154,7 @@ export const deskBoardNow = (): DeskBoardState => (current ??= read());
 
 const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
-/** Important: lit; on the canvas made the important size at once (larger) — taken off, it keeps the size it has. */
+/** Important: marked; on the canvas made the important size at once (larger) — taken off, it keeps the size it has. */
 export function toggleImportant(id: string): void {
   const s = deskBoardNow();
   const on = !s.important.includes(id);
@@ -175,7 +189,7 @@ export function resizeStep(id: string, dir: 1 | -1): void {
   const s = deskBoardNow();
   const p = s.places[id];
   if (!p) return;
-  const steps = [CARD.min, CARD.s, 420, CARD.l, CARD.max];
+  const steps = [CARD.min, CARD.s, 340, CARD.l, 560, CARD.max];
   const at = steps.findIndex((w) => w >= p.w - 5);
   const next = steps[Math.min(steps.length - 1, Math.max(0, (at < 0 ? steps.length - 1 : at) + dir))];
   setPlace(id, { ...p, w: next });

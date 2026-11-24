@@ -1,10 +1,10 @@
 import { ActionIcon, Box, Button, Group, Stack } from '@mantine/core';
-import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutBoardSplit, IconLayoutGrid, IconLayoutKanban, IconPinnedFilled, IconPlus, IconSparkles, IconUserDollar } from '@tabler/icons-react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { stepMainTab } from '../../ui/mainSwipe';
 import { hintNavigation } from '../../ui/stack';
 import { useTabSwipe } from '../../ui/tabSwipe';
-import { arrange, CARD, clampWidth, pinnedFirst, placeNew, setDeskBoard, setPlace, useDeskBoard, type Place } from '../../ui/deskBoard';
+import { pinnedFirst, useDeskBoard } from '../../ui/deskBoard';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
@@ -30,7 +30,9 @@ import { PHASE_META, PhaseTag, usePhaseGlow } from '../job/phase';
 import { DebtorList } from '../money/Debts';
 import { InsecureWarning } from './BoardNotices';
 import { BoardViewSheet } from './BoardViewSheet';
-import { jobAmount, jobTotal, JobRow, type RowSwipe } from './JobRow';
+import { DeskBoard } from './DeskBoard';
+import { BOARD_STEPS as STEPS, isBoardStep as isStep, jobAmount, jobTotal } from './jobFacts';
+import { JobRow, type RowSwipe } from './JobRow';
 import { TodayBell } from './TodayBell';
 
 /** The board as it was read last: coming back to it shows the cars at once, the live read follows. */
@@ -76,11 +78,6 @@ async function loadClosed() {
   return ((await loadRowBundles(orders)).filter(Boolean) as OrderBundle[]).filter((b) => !(bundleAmountDue(b) > 0));
 }
 
-/**
- * The steps of a car in the workshop in the order the day goes: cars to look at first. A car gone with money due
- * is not one of them — it is under "Debts", one card per customer.
- */
-const STEPS: Phase[] = ['look', 'price', 'wait', 'work', 'pay', 'out', 'booked'];
 /** v0.70: the tabs the manager puts jobs in — «В работе», «Ожидание», «Заявки» (domain/boardStatus.ts). */
 type StatusTab = 'inwork' | 'waiting' | 'requests';
 type Filter = 'all' | 'archive' | 'debts' | StatusTab | Phase;
@@ -89,263 +86,6 @@ const TAB_OF: Record<BoardStatus, StatusTab> = { work: 'inwork', wait: 'waiting'
 const isStatusTab = (k: string): k is StatusTab => k in STATUS_OF;
 
 type Job = { b: OrderBundle; phase: Phase };
-const isStep = (k: string): k is Phase => (STEPS as string[]).includes(k);
-
-/** The colours of a step for its strip button and its section: `--c` bright, `--c-ink` its words on a tint. */
-const stepVars = (p: Phase) => ({ '--c': `var(--mantine-color-${PHASE_META[p].color}-6)`, '--c-ink': `var(--mantine-color-${PHASE_META[p].color}-light-color)` }) as CSSProperties;
-
-/**
- * PC board (v0.42): every step that has cars is a section — its name, how many cars, what they come to — and its cars
- * a grid of cards the size of the phone's. A card never grows with the window: one busy step no longer stretches its
- * cars over the whole screen (v0.41's lanes did — one car to a screen). On top, a strip of every step in the board's
- * order («Вид»), the empty ones too, greyed: the way through the garage at a glance; a click shows that step alone.
- */
-function DeskBoard({
-  jobs,
-  covers,
-  swipe,
-  tick,
-  order,
-  compact,
-  step,
-  onStep,
-}: {
-  jobs: Job[];
-  covers?: Map<string, string>;
-  swipe: (b: OrderBundle) => RowSwipe;
-  tick: number;
-  order: BoardTab[];
-  compact: boolean;
-  step?: Phase;
-  onStep: (f: Filter) => void;
-}) {
-  const { t } = useTranslation();
-  const desk = useDeskBoard();
-  const pinnedSet = new Set(desk.pinned);
-  const importantSet = new Set(desk.important);
-  const lanes = (order.filter((k) => isStep(k)) as Phase[]).map((p) => ({ p, list: jobs.filter((j) => j.phase === p) }));
-  // v0.67: pinned cards in a section of their own on top (their step's section does not repeat them).
-  const pinnedJobs = jobs.filter((j) => pinnedSet.has(j.b.order.id) && (!step || j.phase === step));
-  const shown = lanes.map((l) => ({ ...l, list: l.list.filter((j) => !pinnedSet.has(j.b.order.id)) })).filter((l) => l.list.length && (!step || l.p === step));
-  const canvas = desk.mode === 'canvas';
-  const card = (j: Job) => (
-    <JobRow
-      key={j.b.order.id}
-      b={j.b}
-      phase={j.phase}
-      cover={covers?.get(j.b.vehicle.id)}
-      tick={tick}
-      swipe={swipe(j.b)}
-      variant={compact ? 'row' : 'card'}
-      important={importantSet.has(j.b.order.id)}
-      pinned={pinnedSet.has(j.b.order.id)}
-    />
-  );
-  return (
-    <>
-      <div className="desk-steps" role="toolbar" aria-label={t('board.title')}>
-        <button type="button" className="desk-step" data-active={!step || undefined} onClick={() => onStep('all')}>
-          <span>{t('board.all')}</span>
-          <span className="desk-step-n">{jobs.length}</span>
-        </button>
-        {lanes.map(({ p, list }) => {
-          const m = PHASE_META[p];
-          return (
-            <button
-              key={p}
-              type="button"
-              className="desk-step"
-              style={stepVars(p)}
-              data-active={step === p || undefined}
-              data-empty={!list.length || undefined}
-              disabled={!list.length}
-              aria-pressed={step === p}
-              onClick={() => onStep(step === p ? 'all' : p)}
-            >
-              <m.icon size={15} stroke={2.2} aria-hidden />
-              <span>{t(`job.phase.${p}`)}</span>
-              <span className="desk-step-n">{list.length}</span>
-            </button>
-          );
-        })}
-        {/* v0.67: the board by step, or a canvas laid out by hand. */}
-        <span className="desk-modes" role="group" aria-label={t('board.view')}>
-          <button type="button" className="desk-mode" data-active={!canvas || undefined} aria-pressed={!canvas} onClick={() => setDeskBoard({ mode: 'steps' })}>
-            <IconLayoutBoardSplit size={15} stroke={2.2} aria-hidden />
-            {t('deskBoard.steps')}
-          </button>
-          <button type="button" className="desk-mode" data-active={canvas || undefined} aria-pressed={canvas} data-desk-canvas onClick={() => setDeskBoard({ mode: 'canvas' })}>
-            <IconLayoutGrid size={15} stroke={2.2} aria-hidden />
-            {t('deskBoard.canvas')}
-          </button>
-        </span>
-      </div>
-      {canvas ? (
-        <DeskCanvas jobs={step ? jobs.filter((j) => j.phase === step) : jobs} all={jobs} covers={covers} swipe={swipe} tick={tick} />
-      ) : (
-        <>
-      {!shown.length && !pinnedJobs.length && <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />}
-      {pinnedJobs.length > 0 && (
-        <section className="desk-lane desk-lane-pinned" data-lane="pinned" aria-label={t('deskBoard.pinned')}>
-          <header className="desk-lane-head">
-            <IconPinnedFilled size={16} className="desk-lane-pin" aria-hidden />
-            <span className="desk-lane-name">{t('deskBoard.pinned')}</span>
-            <span className="desk-lane-count">{pinnedJobs.length}</span>
-          </header>
-          <List animate className={compact ? 'desk-grid mini-list' : 'desk-grid board-cards'}>
-            {pinnedJobs.map(card)}
-          </List>
-        </section>
-      )}
-      {shown.map(({ p, list }) => {
-        const sum = list.reduce((s, j) => s + jobAmount(j.b), 0);
-        return (
-          <section key={p} className="desk-lane" data-lane={p} style={stepVars(p)} aria-label={t(`job.phase.${p}`)}>
-            <header className="desk-lane-head">
-              <span className="stage-dot" style={{ background: 'var(--c)' }} />
-              <span className="desk-lane-name">{t(`job.phase.${p}`)}</span>
-              <span className="desk-lane-count">{list.length}</span>
-              {sum > 0 && (
-                <span className="desk-lane-sum">
-                  <Money fils={sum} />
-                </span>
-              )}
-            </header>
-            <List animate className={compact ? 'desk-grid mini-list' : 'desk-grid board-cards'}>
-              {list.map(card)}
-            </List>
-          </section>
-        );
-      })}
-        </>
-      )}
-    </>
-  );
-}
-
-/**
- * The board as a canvas (v0.67, the owner: «двигать, перемещать карточки, увеличивать, размещать где угодно, выделить
- * важных, увеличить важные, закреплять»): every card where the manager put it — dragged anywhere, its corner drawn out
- * for a larger card (its height half its width, as every card's), important ones lit and larger, pinned ones fixed where
- * they are. A new car finds a free place by itself; «Расставить» lays them all out again (pinned and important first),
- * with «Отменить». A click still opens the job; a drag does not.
- */
-function DeskCanvas({ jobs, all, covers, swipe, tick }: { jobs: Job[]; all: Job[]; covers?: Map<string, string>; swipe: (b: OrderBundle) => RowSwipe; tick: number }) {
-  const { t } = useTranslation();
-  const desk = useDeskBoard();
-  const box = useRef<HTMLDivElement>(null);
-  // Measured before anything is placed (a guess would lay the first cards out past the canvas's edge).
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    // The room for cards: the canvas less its margin on each side (12 px).
-    setWidth(Math.floor(el.clientWidth) - 24);
-    const ro = new ResizeObserver(([e]) => setWidth(Math.floor(e.contentRect.width) - 24));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const pinned = new Set(desk.pinned);
-  const important = new Set(desk.important);
-  const widthOf = (id: string) => (important.has(id) ? CARD.l : CARD.s);
-  // Pinned first, then important, then the board's own order (the freshest first).
-  const ordered = [...all].sort((x, y) => Number(pinned.has(y.b.order.id)) - Number(pinned.has(x.b.order.id)) || Number(important.has(y.b.order.id)) - Number(important.has(x.b.order.id)));
-  const ids = ordered.map((j) => j.b.order.id);
-  const missing = ids.filter((id) => !desk.places[id]);
-  // A car new on the board: a free place found and kept — the others do not move, and none is let go here (a board read
-  // a moment short of its cars must not lose their places; «Расставить» starts afresh).
-  useEffect(() => {
-    if (!width || !missing.length) return;
-    const had = Object.keys(desk.places).length > 0;
-    // The first time on the canvas: all laid out in rows; later a new car takes a free place, the others stay.
-    setDeskBoard({ places: had ? { ...desk.places, ...placeNew(missing, desk.places, width, widthOf) } : arrange(ids, width, widthOf) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids.join(','), width]);
-
-  // A card under the mouse: moved (or its corner drawn out) — written to the store once let go, on the canvas's step.
-  const [live, setLive] = useState<{ id: string; p: Place } | null>(null);
-  const dragged = useRef(false);
-  const begin = (id: string, kind: 'move' | 'size') => (e: ReactPointerEvent) => {
-    if (e.button !== 0 || e.pointerType === 'touch') return;
-    if ((e.target as Element).closest('.job-card-doc, .desk-card-tools, .swipe-action') && kind === 'move') return;
-    const from = desk.places[id];
-    if (!from || (pinned.has(id) && kind === 'move')) return;
-    if (kind === 'size') e.stopPropagation();
-    const sx = e.clientX;
-    const sy = e.clientY;
-    let moved = false;
-    let now: Place = from;
-    const onMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - sx;
-      const dy = ev.clientY - sy;
-      if (!moved && Math.hypot(dx, dy) < 5) return;
-      moved = true;
-      // Within the canvas's width (it grows downwards only: the page never scrolls sideways).
-      now = kind === 'move' ? { ...from, x: Math.min(Math.max(0, width - from.w), Math.max(0, from.x + dx)), y: Math.max(0, from.y + dy) } : { ...from, w: Math.min(clampWidth(from.w + dx), Math.max(CARD.min, width - from.x)) };
-      setLive({ id, p: now });
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      if (moved) {
-        dragged.current = true;
-        setPlace(id, now);
-      }
-      setLive(null);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-  };
-  const tidy = () => {
-    const before = desk.places;
-    setDeskBoard({ places: arrange(ids, width, widthOf) });
-    undoToast(t('deskBoard.arranged'), t('common.undo'), () => setDeskBoard({ places: before }));
-  };
-  const placed = jobs.map((j) => ({ j, p: live?.id === j.b.order.id ? live.p : desk.places[j.b.order.id] })).filter((x): x is { j: Job; p: Place } => !!x.p);
-  // Where cards cover each other: the one put down last on top (pinned above them all, the one under the mouse above all).
-  const stack = placed.map(({ j, p }) => ({ id: j.b.order.id, z: p.z ?? 0 })).sort((a, b) => a.z - b.z).map((x) => x.id);
-  const layer = (id: string) => (live?.id === id ? stack.length + 20 : pinned.has(id) ? stack.length + 10 : stack.indexOf(id) + 1);
-  const height = Math.max(420, ...placed.map(({ p }) => p.y + p.w / 2 + 60));
-  return (
-    <>
-      <div className="desk-canvas-bar">
-        <Button variant="default" size="sm" leftSection={<IconSparkles size={16} />} onClick={tidy} data-desk-arrange>
-          {t('deskBoard.arrange')}
-        </Button>
-      </div>
-      <div className="desk-canvas" ref={box} style={{ height }} data-desk-canvas-area>
-        {placed.map(({ j, p }) => {
-          const id = j.b.order.id;
-          return (
-            <div
-              key={id}
-              className="desk-canvas-card"
-              data-dragging={live?.id === id || undefined}
-              data-pinned={pinned.has(id) || undefined}
-              data-important={important.has(id) || undefined}
-              data-card={id}
-              style={{ transform: `translate(${p.x}px, ${p.y}px)`, width: p.w, zIndex: layer(id) }}
-              onPointerDown={begin(id, 'move')}
-              onClickCapture={(e) => {
-                // A card let go after a drag: not opened.
-                if (!dragged.current) return;
-                dragged.current = false;
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onDragStart={(e) => e.preventDefault()}
-            >
-              <JobRow b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={swipe(j.b)} variant="card" important={important.has(id)} pinned={pinned.has(id)} canvas />
-              {!pinned.has(id) && <span className="desk-resize" title={t('deskBoard.resize')} aria-hidden onPointerDown={begin(id, 'size')} />}
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
 
 /**
  * The archive on a PC (v0.41): one table — the day each job left the board, its number, the car, its customer, where
@@ -555,20 +295,6 @@ export function BoardPage() {
       <IconAdjustmentsHorizontal size={22} stroke={2} />
     </ActionIcon>
   );
-  const pcButtons = {
-    debts: (
-      <Button key="debts" variant={debtsTab ? 'filled' : 'default'} color={debtsTab ? 'red' : undefined} leftSection={<IconUserDollar size={18} />} onClick={() => setFilter(debtsTab ? 'all' : 'debts')}>
-        {t('board.tabDebts')}
-        {owing > 0 ? ` · ${owing}` : ''}
-      </Button>
-    ),
-    archive: (
-      <Button key="archive" variant={archive ? 'filled' : 'default'} leftSection={<IconArchive size={18} />} onClick={() => setFilter(archive ? 'all' : 'archive')}>
-        {t('board.archive')}
-        {archived.length > 0 ? ` · ${archived.length}` : ''}
-      </Button>
-    ),
-  };
   const header = (
     <>
       {pull}
@@ -587,8 +313,8 @@ export function BoardPage() {
               {viewButton}
             </Group>
           ) : (
+            // (v0.75: «Долги» and «Архив» are tabs of the board's own bar on a PC.)
             <Group gap="xs" wrap="nowrap">
-              {view.order.filter((k): k is 'debts' | 'archive' => k === 'debts' || k === 'archive').map((k) => pcButtons[k])}
               <TodayBell bundles={bundles} />
               {viewButton}
             </Group>
@@ -719,17 +445,20 @@ export function BoardPage() {
             </StickyBar>
           )}
         </>
-      ) : debtsTab ? (
-        <Box maw={920}>{debtList}</Box>
-      ) : archive ? (
-        // On a PC the archive is a table (v0.41): every job one line, sorted by a click on a head.
-        archived.length + done.length > 0 ? (
-          <DeskArchive jobs={[...archived, ...done]} byHand={new Set(archived.map((j) => j.b.order.id))} covers={covers} onBack={(b) => back(b).onCommit()} />
-        ) : (
-          <Box maw={720}>{archiveList}</Box>
-        )
       ) : (
-        <DeskBoard jobs={jobs} covers={covers} swipe={toArchive} tick={tick} order={view.order} compact={compact} step={deskStep} onStep={setFilter} />
+        // A PC (v0.75, DeskBoard.tsx): one bar — the steps, «Долги», «Архив» — and under it the cars, or one of those lists.
+        <DeskBoard jobs={jobs} covers={covers} archive={toArchive} tick={tick} order={view.order} tab={debtsTab ? 'debts' : archive ? 'archive' : (deskStep ?? 'all')} onTab={setFilter} owing={owing} archived={archived.length}>
+          {debtsTab ? (
+            <Box maw={920}>{debtList}</Box>
+          ) : archive ? (
+            // On a PC the archive is a table (v0.41): every job one line, sorted by a click on a head.
+            archived.length + done.length > 0 ? (
+              <DeskArchive jobs={[...archived, ...done]} byHand={new Set(archived.map((j) => j.b.order.id))} covers={covers} onBack={(b) => back(b).onCommit()} />
+            ) : (
+              <Box maw={720}>{archiveList}</Box>
+            )
+          ) : null}
+        </DeskBoard>
       )}
     </>
   );

@@ -32,8 +32,8 @@ export function useBoardTabLook() {
 /**
  * «Вид» of the board (v0.22), on this device: the cards large or compact, and the tabs — dragged by their grip
  * (≡) into the order the strip shows them; a step switched off leaves the strip (its cars stay under «Все»).
- * «Все» stays first; «Архив» moves but stays (v0.70: «Долги» may be switched off; the manager's tabs come first). A PC has no strip — its columns follow the order, and a
- * step is never switched off there (a column holds its cars, and there is no «Все»).
+ * «Все» stays first; «Архив» moves but stays (v0.70: «Долги» may be switched off; the manager's tabs come first). On a PC
+ * the steps of its bar and its cars follow the order, and a step is never switched off there.
  */
 export function BoardViewSheet({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
@@ -54,15 +54,18 @@ export function BoardViewSheet({ opened, onClose }: { opened: boolean; onClose: 
   return (
     <Modal opened={opened} onClose={onClose} title={t('board.view')}>
       <Stack gap="lg">
-        <SegmentedControl
-          fullWidth
-          value={view.size}
-          onChange={(v) => setBoardView({ size: v as CardSize })}
-          data={[
-            { value: 'large', label: t('board.sizeLarge') },
-            { value: 'compact', label: t('board.sizeCompact') },
-          ]}
-        />
+        {/* A PC has its own ways to see the board in its bar (v0.75: «Карточки», «Список», «Холст»). */}
+        {phone && (
+          <SegmentedControl
+            fullWidth
+            value={view.size}
+            onChange={(v) => setBoardView({ size: v as CardSize })}
+            data={[
+              { value: 'large', label: t('board.sizeLarge') },
+              { value: 'compact', label: t('board.sizeCompact') },
+            ]}
+          />
+        )}
         <div>
           <div className="group-title">{t('board.tabs')}</div>
           <List animate className="board-tabs-list">

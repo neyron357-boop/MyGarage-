@@ -662,269 +662,498 @@ html.desk .mantine-Notification-root {
   border-radius: 14px;
 }
 
-/* ---------- Board (v0.42): the steps on top, each step's cars as a grid of cards ---------- */
-html.desk .desk-steps {
+/* ---------- Board (v0.75, features/board/DeskBoard.tsx): the workshop as a desk shows it ----------
+   The owner on the board before it: «пересобрать этот экран полностью. Совсем не нравится». It was a phone's gallery made
+   large — photos as cards with words over them, important ones twice as wide in a yellow glow, a strip of every step
+   with its zeros, a section a step. Now: one quiet bar (the steps that have cars, what they come to, how to see them),
+   and the cars as cards of one size — the photo clean, the facts under it in a fixed order — or as a table, or on the
+   canvas. Colour only where it means something; a hairline round a card, a shadow only under the mouse.
+   The values follow shadcn/ui (a 12-px card with a 1-px line; a 36-px segmented strip, 3-px inset, 12 / 13 / 14-px
+   words), GitHub's Primer (the 4-px spacing scale, 12 · 14-px text) and Vercel's interface guidelines (concentric
+   corners: 10 − 3 = 7; shadows in two layers; tabular figures; a hit target no smaller than 24 px). */
+html.desk .dboard-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 2px 0 20px;
+  align-items: center;
+  /* (A narrow window with every step busy: the ways to see the board go to a second line.) */
+  gap: 8px 16px;
+  min-height: 36px;
+  margin: 0 0 16px;
 }
-html.desk .desk-step {
-  --c: var(--mantine-color-text);
+/* A segmented strip: the steps on the left, the ways to see the board on the right. */
+html.desk .dboard-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 8px 0 12px;
+  gap: 2px;
+  min-width: 0;
+  height: 36px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--app-fill);
+}
+html.desk .dboard-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--app-label-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-1) ease, background-color var(--dur-1) ease, box-shadow var(--dur-1) ease;
+}
+html.desk .dboard-tab > svg {
+  flex: none;
+}
+html.desk .dboard-tab[data-active] {
   background: var(--app-card);
-  box-shadow: 0 0 0 0.5px var(--app-hairline);
+  color: var(--mantine-color-text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.1), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+}
+html.desk[data-mantine-color-scheme='dark'] .dboard-tab[data-active] {
+  background: rgb(255 255 255 / 0.14);
+  box-shadow: none;
+}
+html.desk .dboard-tab:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 1px;
+}
+/* How many: quieter than the word, figures of one width. */
+html.desk .dboard-n {
+  color: var(--app-label-2);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+html.desk .dboard-tab:not([data-active]) .dboard-n {
+  opacity: 0.75;
+}
+/* What the cars shown come to. */
+html.desk .dboard-sum {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--app-label-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+html.desk .dboard-sum .money {
+  color: var(--mantine-color-text);
+  font-size: 14px;
+}
+html.desk .dboard-sum .money .cur {
+  font-size: 11px;
+}
+html.desk .dboard-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+html.desk .dboard-sum + .dboard-end {
+  margin-left: 0;
+}
+html.desk .dboard-end[hidden],
+html.desk .dboard-slot:empty {
+  display: none;
+}
+/* Between the steps and the other lists («Долги», «Архив»). */
+html.desk .dboard-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: color-mix(in srgb, var(--mantine-color-text) 14%, transparent);
+}
+/* An action of the bar («Расставить» on the canvas): a strip of one. */
+html.desk .dboard-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--app-fill);
   color: var(--mantine-color-text);
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-1) ease, color var(--dur-1) ease, box-shadow var(--dur-1) ease, opacity var(--dur-1) ease;
+  transition: background-color var(--dur-1) ease, transform var(--dur-0) ease;
 }
-html.desk .desk-step > svg {
-  color: var(--c);
+html.desk .dboard-act:hover {
+  background: color-mix(in srgb, var(--mantine-color-text) 6%, var(--app-fill));
 }
-html.desk .desk-step-n {
-  display: inline-grid;
-  place-items: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--app-fill);
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+html.desk .dboard-act:active {
+  transform: scale(0.97);
 }
-html.desk .desk-step:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--c) 8%, var(--app-card));
-}
-html.desk .desk-step[data-active] {
-  background: var(--c);
-  box-shadow: none;
-  color: #fff;
-}
-html.desk .desk-step:not([style])[data-active] {
-  background: var(--app-pill);
-  color: var(--app-pill-text);
-}
-html.desk .desk-step[data-active] > svg {
-  color: inherit;
-}
-html.desk .desk-step[data-active] .desk-step-n {
-  background: rgba(255, 255, 255, 0.24);
-}
-html.desk .desk-step:not([style])[data-active] .desk-step-n {
-  background: color-mix(in srgb, var(--app-pill-text) 22%, transparent);
-}
-/* A step without cars: in its place on the way, faded. */
-html.desk .desk-step[data-empty] {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--app-hairline);
-  color: var(--app-label-3);
-  cursor: default;
-}
-html.desk .desk-step[data-empty] > svg {
-  color: inherit;
-}
-html.desk .desk-step[data-empty] .desk-step-n {
-  background: transparent;
-}
-html.desk .desk-step:focus-visible {
+html.desk .dboard-act:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 2px;
 }
 
-html.desk .desk-lane + .desk-lane {
-  margin-top: 26px;
+/* A step: a dot of its colour, its word, since when — red once too long. On a card, in a table, in the strip. */
+html.desk .dstep-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c, var(--app-label-3));
 }
-html.desk .desk-lane-head {
-  display: flex;
+html.desk .dstep {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 2px 10px;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-html.desk .desk-lane-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--c) 14%, transparent);
+  gap: 6px;
+  min-width: 0;
   color: var(--c-ink);
   font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-html.desk .desk-lane-sum {
-  margin-left: 4px;
-  color: var(--app-label-2);
-  font-size: 13px;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
-html.desk .desk-lane-sum .money .cur {
-  font-size: 11px;
+html.desk .dstep-time {
+  color: var(--app-label-2);
+  font-weight: 500;
 }
-/* The cards: a grid whose columns never pass ~400 px — a card as big as on a phone, however wide the window. */
-html.desk .list.desk-grid.board-cards {
+html.desk .dstep-time::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--app-label-3);
+}
+html.desk .dstep[data-late] .dstep-time,
+html.desk .dstep[data-late] .dstep-time::before {
+  color: inherit;
+}
+/* What waits on the job: small symbols of their colour; the time promised. */
+html.desk .dmarks {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
+}
+html.desk .dmark {
+  display: inline-grid;
+  place-items: center;
+}
+html.desk .ddue {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--mantine-color-orange-light-color);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+html.desk .ddue[data-late] {
+  color: var(--mantine-color-red-light-color);
+}
+
+/* The cards: one grid, every card one size (about 250–320 px — six in a row of a wide window, four of a laptop's). */
+html.desk .list.dboard-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
   gap: 16px;
   align-items: start;
-}
-html.desk .list.desk-grid.board-cards > .job-card {
-  min-width: 0;
-}
-/* Compact: rows of a list, each its own small card, side by side. */
-html.desk .list.desk-grid.mini-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 10px;
   background: transparent;
   border-radius: 0;
   box-shadow: none;
   overflow: visible;
 }
-html.desk .list.desk-grid.mini-list > .job-mini {
-  border-radius: 14px;
+html.desk .dcard {
+  --line: color-mix(in srgb, var(--mantine-color-text) 10%, transparent);
+  --line-over: color-mix(in srgb, var(--mantine-color-text) 20%, transparent);
+  position: relative;
+  min-width: 0;
+  border-radius: 12px;
   background: var(--app-card);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 0.04);
+  transition: box-shadow var(--dur-1) ease, transform var(--dur-0) ease;
+}
+html.desk[data-mantine-color-scheme='dark'] .dcard {
+  --line: rgb(255 255 255 / 0.1);
+  --line-over: rgb(255 255 255 / 0.22);
+}
+/* The card is one button: its photo and its facts. */
+html.desk .dcard-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
   overflow: clip;
 }
-html.desk[data-mantine-color-scheme='dark'] .list.desk-grid.mini-list > .job-mini {
-  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+html.desk .dcard-open:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
 }
-html.desk .list.desk-grid.mini-list > .job-mini > .job-card-open::before {
-  display: none;
-}
-@media (hover: hover) and (pointer: fine) {
-  /* A card under the mouse lifts a little: this one opens. */
-  html.desk .job-card,
-  html.desk .desk-grid > .job-mini {
-    transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
-  }
-  html.desk .job-card:hover,
-  html.desk .desk-grid > .job-mini:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.14);
-  }
-  html.desk[data-mantine-color-scheme='dark'] .job-card:hover,
-  html.desk[data-mantine-color-scheme='dark'] .desk-grid > .job-mini:hover {
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
-  }
-}
-
-/* ---------- The board's canvas, important and pinned cards (v0.67, ui/deskBoard.ts) ----------
-   «Шаги | Холст» at the end of the steps' strip; important — a warm ring, two columns wide among the steps; pinned — a
-   section of its own on top, fixed on the canvas; star and pin at a card's top, under the mouse (always, when on). */
-html.desk .desk-modes {
-  margin-left: auto;
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 999px;
+html.desk .dcard-pic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
   background: var(--app-fill);
+  color: var(--app-label-3);
+  overflow: hidden;
 }
-html.desk .desk-mode {
-  display: inline-flex;
+html.desk .dcard-pic > :not(svg) {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+/* (A line under the photo: a pale photo does not run into the card.) */
+html.desk .dcard-pic::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 -1px 0 var(--line);
+  pointer-events: none;
+}
+/* Its facts: four lines, the same on every card (116 px — `CARD_INFO` in ui/deskBoard.ts). */
+html.desk .dcard-body {
+  display: block;
+  height: 116px;
+  padding: 10px 12px 12px;
+}
+html.desk .dcard-row {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+}
+html.desk .dcard-status {
+  height: 20px;
+}
+html.desk .dcard-title {
+  height: 22px;
+  margin-top: 4px;
+}
+html.desk .dcard-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+html.desk .dcard-amount {
+  flex: none;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+html.desk .dcard-amount .money .cur {
+  font-size: 11px;
+}
+html.desk .dcard-sub {
+  height: 22px;
+  margin-top: 4px;
+}
+html.desk .dcard[data-doc] .dcard-sub {
+  padding-right: 28px;
+}
+html.desk .dcard-who {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--app-label-2);
+  font-size: 12px;
+}
+html.desk .dcard-what {
+  height: 16px;
+  margin-top: 6px;
+  color: var(--app-label-2);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+}
+/* Its paper: a quiet symbol at the end of the plate's line. */
+html.desk .dcard-doc {
+  position: absolute;
+  z-index: 2;
+  right: 8px;
+  bottom: 31px;
+  width: 28px;
   height: 28px;
-  padding: 0 12px;
+  display: grid;
+  place-items: center;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   background: transparent;
   color: var(--app-label-2);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
 }
-html.desk .desk-mode[data-active] {
-  background: var(--app-card);
-  color: var(--mantine-color-text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
-}
-html.desk .job-card[data-important] {
-  box-shadow:
-    0 0 0 2px var(--mantine-color-yellow-5),
-    0 8px 28px color-mix(in srgb, var(--mantine-color-yellow-5) 32%, transparent);
-}
-html.desk .list.desk-grid.board-cards {
-  grid-auto-flow: row dense;
-}
-html.desk .list.desk-grid.board-cards > .job-card[data-important] {
-  grid-column: span 2;
-}
-html.desk .desk-card-tools {
+/* Important and pinned, at the photo's corner: there when on, else under the mouse. */
+html.desk .dcard-tools {
   position: absolute;
-  z-index: 5;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  z-index: 2;
+  top: 8px;
+  right: 8px;
   display: inline-flex;
   gap: 4px;
 }
-html.desk .desk-card-tool {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 50%;
+html.desk .dcard-tools .dtool {
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.5);
+  border: 0;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.5);
   color: #fff;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--dur-1) ease, transform var(--dur-1) var(--spring);
+  transition: opacity var(--dur-1) ease, transform var(--dur-0) ease;
 }
-html.desk .job-card:hover .desk-card-tool,
-html.desk .desk-card-tool:focus-visible,
-html.desk .desk-card-tool[data-on] {
+html.desk .dcard:hover .dtool,
+html.desk .dcard:has(:focus-visible) .dtool,
+html.desk .dcard-tools .dtool[data-on] {
   opacity: 1;
 }
-html.desk .desk-card-tool:active {
+html.desk .dtool:active {
   transform: scale(0.92);
 }
-html.desk .desk-card-tool[data-tool='important'][data-on] {
+html.desk .dtool[data-tool='important'][data-on] {
   background: var(--mantine-color-yellow-5);
   color: #3a2c00;
 }
-html.desk .desk-card-tool[data-tool='pin'][data-on] {
+html.desk .dtool[data-tool='pin'][data-on] {
   background: var(--mantine-color-cobalt-6);
+  color: #fff;
 }
-html.desk .desk-lane-pin {
+html.desk .dtool:focus-visible,
+html.desk .dcard-doc:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 2px;
+}
+/* An important car: a warm line round it — no glow, no other size. */
+html.desk .dcard[data-important] {
+  --line: color-mix(in srgb, var(--mantine-color-yellow-6) 75%, transparent);
+  --line-over: var(--mantine-color-yellow-6);
+  box-shadow: 0 0 0 1.5px var(--line), 0 1px 2px rgb(0 0 0 / 0.04);
+}
+@media (hover: hover) and (pointer: fine) {
+  html.desk .dboard-tab:not([data-active]):hover {
+    color: var(--mantine-color-text);
+  }
+  html.desk .dcard:hover {
+    box-shadow: 0 0 0 1px var(--line-over), 0 2px 4px rgb(0 0 0 / 0.04), 0 10px 24px rgb(0 0 0 / 0.1);
+  }
+  html.desk[data-mantine-color-scheme='dark'] .dcard:hover {
+    box-shadow: 0 0 0 1px var(--line-over), 0 10px 24px rgb(0 0 0 / 0.5);
+  }
+  html.desk .dcard[data-important]:hover {
+    box-shadow: 0 0 0 1.5px var(--line-over), 0 2px 4px rgb(0 0 0 / 0.04), 0 10px 24px rgb(0 0 0 / 0.1);
+  }
+  html.desk .dcard-doc:hover {
+    background: var(--app-fill);
+    color: var(--mantine-color-text);
+  }
+}
+html.desk .dcard:has(.dcard-open:active) {
+  transform: scale(0.985);
+}
+
+/* «Список»: the same cars as a table by step (ui/DataTable.tsx — its look is «Tables» below). */
+html.desk .dlist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mantine-color-text);
+  font-size: 13px;
+}
+html.desk .dlist-pin {
   color: var(--mantine-color-cobalt-6);
 }
-html.desk .desk-lane-pinned .desk-lane-count {
-  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 14%, transparent);
-  color: var(--mantine-color-cobalt-light-color);
+html.desk .dlist-sum {
+  margin-left: 4px;
+  color: var(--app-label-2);
+  font-weight: 500;
 }
-/* The canvas: a dotted sheet the window wide, each card where it was put. */
-html.desk .desk-canvas-bar {
-  display: flex;
+html.desk .dlist-sum .money .cur {
+  font-size: 11px;
+}
+/* The car and, under it, what the job is about. */
+html.desk .dlist-car {
+  display: block;
+  min-width: 0;
+}
+html.desk .dlist .dt-sub {
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+html.desk .dlist .dt td {
+  height: 52px;
+}
+html.desk .dlist .dt tr.dt-group td {
+  height: 34px;
+}
+html.desk .dlist .dmarks {
+  margin-left: 0;
+}
+html.desk .dlist-tools {
+  display: inline-flex;
+  align-items: center;
   justify-content: flex-end;
-  margin: -8px 0 12px;
+  gap: 2px;
 }
+html.desk .dlist-tools .dtool {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-label-2);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-1) ease, background-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+html.desk .dt tr[data-row]:hover .dlist-tools .dtool,
+html.desk .dt tr[data-row]:focus-within .dlist-tools .dtool,
+html.desk .dlist-tools .dtool[data-on] {
+  opacity: 1;
+}
+html.desk .dlist-tools .dtool:hover {
+  background: var(--app-fill);
+  color: var(--mantine-color-text);
+}
+html.desk .dlist-tools .dtool[data-tool='important'][data-on] {
+  background: transparent;
+  color: var(--mantine-color-yellow-6);
+}
+html.desk .dlist-tools .dtool[data-tool='pin'][data-on] {
+  background: transparent;
+  color: var(--mantine-color-cobalt-6);
+}
+
+/* «Холст» (v0.67, ui/deskBoard.ts): a dotted sheet the window wide, each card where it was put. */
 html.desk .desk-canvas {
   position: relative;
   /* A card left wider than the window (the window made narrower): scrolled inside the canvas, not the page. */
   overflow-x: auto;
   overflow-y: hidden;
-  border-radius: 20px;
+  border-radius: 14px;
   background-color: color-mix(in srgb, var(--app-card) 45%, transparent);
   background-image: radial-gradient(circle, color-mix(in srgb, var(--app-label-3) 40%, transparent) 1px, transparent 1.4px);
   background-size: 24px 24px;
-  box-shadow: inset 0 0 0 0.5px var(--app-hairline);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mantine-color-text) 8%, transparent);
 }
 html.desk .desk-canvas-card {
   position: absolute;
@@ -935,25 +1164,23 @@ html.desk .desk-canvas-card {
   -webkit-user-select: none;
   user-select: none;
 }
-html.desk .desk-canvas-card > .job-card {
-  width: 100%;
+html.desk .desk-canvas-card .dcard-open {
+  cursor: inherit;
 }
 html.desk .desk-canvas-card[data-dragging] {
   cursor: grabbing;
 }
-html.desk .desk-canvas-card[data-dragging] > .job-card {
+html.desk .desk-canvas-card[data-dragging] > .dcard {
   transform: scale(1.02);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
-}
-html.desk .desk-canvas-card[data-dragging][data-important] > .job-card {
-  box-shadow:
-    0 0 0 2px var(--mantine-color-yellow-5),
-    0 18px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 1px var(--line-over), 0 18px 40px rgb(0 0 0 / 0.28);
 }
 html.desk .desk-canvas-card[data-pinned] {
   cursor: default;
 }
-/* The corner drawn out: the card larger or smaller (its height half its width). */
+html.desk .desk-canvas-card[data-pinned] .dcard-open {
+  cursor: pointer;
+}
+/* The corner drawn out: the card larger or smaller. */
 html.desk .desk-resize {
   position: absolute;
   z-index: 6;
@@ -963,7 +1190,7 @@ html.desk .desk-resize {
   height: 18px;
   border-radius: 50%;
   background: var(--mantine-color-cobalt-6);
-  box-shadow: 0 0 0 2px var(--app-card), 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 2px var(--app-card), 0 2px 6px rgb(0 0 0 / 0.25);
   cursor: nwse-resize;
   opacity: 0;
   transition: opacity var(--dur-1) ease;
@@ -1800,16 +2027,6 @@ html.desk .desk-toolrow-end .mantine-Button-root {
 }
 
 /* ---------- Under the mouse and under a key ---------- */
-@media (hover: hover) and (pointer: fine) {
-  html.desk .desk-mode:not([data-active]):hover {
-    color: var(--mantine-color-text);
-  }
-}
-html.desk .desk-mode:focus-visible,
-html.desk .desk-card-tool:focus-visible {
-  outline: 2px solid var(--mantine-color-cobalt-5);
-  outline-offset: 2px;
-}
 
 /* «Уведомления» on a PC (v0.74): the rows at the desk's size; the time a field of the desk. */
 html.desk .time-input {

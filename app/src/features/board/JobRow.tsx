@@ -20,17 +20,14 @@ import {
 import { memo, useState, type CSSProperties, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { dayShort, dueShort, hoursBetween, nowIso, shortDuration } from '../../domain/dates';
+import { dayShort, dueShort, shortDuration } from '../../domain/dates';
 import type { Phase } from '../../domain/flow';
-import { leftBoardAt, liveLines } from '../../domain/flow';
-import { activeInvoice } from '../../domain/invoice';
-import { itemAmounts, summarize } from '../../domain/items';
-import { jobSummary } from '../../domain/jobSummary';
+import { leftBoardAt } from '../../domain/flow';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
-import { partsToFind, setBoardStatus } from '../../services/flow';
+import { setBoardStatus } from '../../services/flow';
 import { haptic } from '../../ui/haptics';
 import { openWhatsApp } from '../../services/messages';
-import { bundleAmountDue, prefetchBundle, type OrderBundle } from '../../services/orders';
+import { prefetchBundle, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { DeskMenu } from '../../ui/desk';
 import { useAction, useLang, usePhone } from '../../ui/hooks';
@@ -38,23 +35,13 @@ import { LazySheet } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { useSwipeRow } from '../../ui/swipe';
 import { PHASE_META } from '../job/phase';
-import { BOARD_STATUSES, boardStatusOf, STATUS_PHASE, type BoardStatus } from '../../domain/boardStatus';
+import { BOARD_STATUSES, STATUS_PHASE, type BoardStatus } from '../../domain/boardStatus';
 import { DeleteJobModal } from '../orders/DeleteJob';
-import { orderFlags } from '../orders/flags';
-import { IconArrowsMaximize, IconArrowsMinimize, IconPin, IconPinnedFilled, IconPinnedOff, IconStar, IconStarFilled } from '@tabler/icons-react';
-import { resizeStep, toggleImportant, togglePinned } from '../../ui/deskBoard';
+import { IconPin, IconPinnedFilled, IconPinnedOff } from '@tabler/icons-react';
+import { togglePinned } from '../../ui/deskBoard';
+import { jobFacts, jobTotal } from './jobFacts';
 
-/** What the job is worth now: the amount due on its invoice, or the total of its lines. */
-export function jobAmount(b: OrderBundle): number {
-  if (activeInvoice(b.invoices) || b.order.stage === 'delivered') return Math.max(0, bundleAmountDue(b));
-  return liveLines(b.items).reduce((s, i) => s + itemAmounts(i).gross, 0);
-}
-
-/** What a job came to: its invoice (with VAT), or the lines the customer agreed to — a closed or cancelled job in the archive. */
-export function jobTotal(b: OrderBundle): number {
-  if (b.order.stage === 'cancelled') return 0;
-  return activeInvoice(b.invoices)?.totalFils ?? summarize(b.items).approvedGross;
-}
+export { jobAmount, jobTotal } from './jobFacts';
 
 /** What a swipe left (and the long-press menu) does with the row: to the archive, or back to the board. */
 export interface RowSwipe {
@@ -78,11 +65,8 @@ type RowProps = {
   variant?: 'card' | 'row';
   /** A row of the archive: the day the job left the board instead of its step and time. */
   dated?: boolean;
-  /** The PC board's marks (v0.67, ui/deskBoard.ts): important — lit and larger; pinned — first, fixed on the canvas. */
-  important?: boolean;
+  /** Pinned to the top of the phone's board (v0.73, ui/deskBoard.ts): a pin among its marks. */
   pinned?: boolean;
-  /** On the PC board's canvas: its size a step larger or smaller from the menu. */
-  canvas?: boolean;
   /** The board picking jobs to put in a tab (v0.70): a tap picks it (a mark on it), it does not open. */
   picking?: boolean;
   picked?: boolean;
@@ -109,15 +93,13 @@ export const JobRow = memo(
     a.swipe?.label === z.swipe?.label &&
     a.variant === z.variant &&
     a.dated === z.dated &&
-    a.important === z.important &&
     a.pinned === z.pinned &&
-    a.canvas === z.canvas &&
     a.picking === z.picking &&
     a.picked === z.picked &&
     a.status === z.status,
 );
 
-function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important, pinned, canvas, picking, picked, onPick, status }: RowProps) {
+function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, picking, picked, onPick, status }: RowProps) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
@@ -131,7 +113,8 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
   // To the left — the row's own action (to the archive, back on the board); to the right (v0.30) — the customer's
   // WhatsApp, when there is a number to write to. Only from the card's edge (v0.36): a card is most of what a thumb
   // touches on the board, and a scroll that drifted sideways sent cars to the archive.
-  const wa = b.customer.whatsapp || b.customer.phone;
+  // What the card says, read off the job's facts (jobFacts.ts — the PC's card reads the same).
+  const { manual, m, flags, hours, booked, amount, car, find, coming, outside, due, dueLate, dueText, tone, name, what, inv, doc, wa } = jobFacts(b, phase, lang);
   const openWa = () => openWhatsApp(wa);
   const sw = useSwipeRow({ trailing: swipe ? { onCommit: () => swipe.onCommit() } : undefined, leading: wa ? { onCommit: openWa } : undefined }, 92, { edge: EDGE });
   const swiping = !!swipe || !!wa;
@@ -145,36 +128,9 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
         onTouchCancel: () => (press.handlers.onTouchCancel(), sw.handlers.onTouchCancel()),
       }
     : press.handlers;
-  // Put in a tab by hand (v0.70) other than its step would put it: the card says where — its colour, its word.
-  const manual = b.order.boardTab && b.order.boardTab !== boardStatusOf({}, phase) ? b.order.boardTab : undefined;
-  const m = manual ? PHASE_META[STATUS_PHASE[manual]] : PHASE_META[phase];
   const stepName = manual ? t(`board.statusOne.${manual}`) : t(`job.phase.${phase}`);
-  const { flags, waitingHours } = orderFlags(b);
-  const hours = phase === 'wait' && waitingHours !== undefined ? waitingHours : hoursBetween(b.order.stageChangedAt);
-  // No answer, or no price told, for a couple of hours: the time turns red.
-  // An appointment says when the car is due in (red once that time has passed), not how long it was booked.
-  const booked = phase === 'booked' ? b.order.bookedFor : undefined;
-  const late = ((phase === 'wait' || phase === 'price') && hours >= (b.settings.boardWarnHours ?? 2)) || (!!booked && booked < nowIso());
-  const amount = jobAmount(b);
-  const car = [b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ');
-  const working = phase === 'look' || phase === 'price' || phase === 'wait' || phase === 'work';
-  const find = working && phase !== 'look' ? partsToFind(b.items).length : 0;
-  // Parts on their way (ordered, not here yet), work handed outside, the time promised to the customer.
-  const coming = working && !find && b.items.some((i) => i.kind === 'part' && !i.customerSupplied && !i.done && i.approvalState === 'approved' && (i.procurementStatus === 'ordered' || i.procurementStatus === 'in_transit'));
-  const outside = working && b.items.some((i) => i.outsource?.state === 'out' && i.approvalState !== 'declined' && i.approvalState !== 'cancelled');
-  const due = working ? b.order.promisedReadyAt : undefined;
-  const dueLate = !!due && due < nowIso();
-  const dueText = due ? dueShort(due, lang) : '';
   const open = () => navigate(`/orders/${b.order.id}`);
-  // The step in its colour — red once it has been there too long: the first thing the card says.
-  const tone = late ? 'red' : m.color;
   const stepText = `${stepName} · ${booked ? dueShort(booked, lang) : shortDuration(hours, lang)}`;
-  const name = car || `№${b.order.number}`;
-  // What the job is about, in a line (v0.30): its work and parts by name, else the complaint.
-  const what = jobSummary(b.items, b.order.complaint, b.order.docLanguage);
-  // Its paper, on the card (v0.30): the invoice once issued, else the quote of its lines.
-  const inv = activeInvoice(b.invoices);
-  const doc = inv ? 'invoice' : liveLines(b.items).some((i) => i.kind !== 'discount') ? 'quote' : null;
   const openDoc = () => run(async () => openPdf(inv ? await invoicePdf(inv.id) : await quotationPdf(b.order.id)));
   const own =
     <E extends SyntheticEvent>(fn?: (e: E) => void) =>
@@ -283,7 +239,6 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
         data-swiping={sw.dragging || undefined}
         data-past={sw.past || undefined}
         data-doc={!row && doc ? '' : undefined}
-        data-important={important || undefined}
         data-pinned={pinned || undefined}
         data-picking={picking || undefined}
         data-picked={picked || undefined}
@@ -377,17 +332,6 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
             </>
           )}
         </button>
-        {!phone && !dated && !row && (
-          // The PC board (v0.67): important and pinned a click away, at the card's top — shown when on, else under the mouse.
-          <span className="desk-card-tools" onPointerDown={own()} onClick={own()} onContextMenu={own()}>
-            <button type="button" className="desk-card-tool" data-on={important || undefined} data-tool="important" aria-pressed={!!important} aria-label={t(important ? 'deskBoard.notImportant' : 'deskBoard.important')} title={t(important ? 'deskBoard.notImportant' : 'deskBoard.important')} onClick={() => toggleImportant(b.order.id)}>
-              {important ? <IconStarFilled size={15} aria-hidden /> : <IconStar size={15} stroke={2} aria-hidden />}
-            </button>
-            <button type="button" className="desk-card-tool" data-on={pinned || undefined} data-tool="pin" aria-pressed={!!pinned} aria-label={t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin')} title={t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin')} onClick={() => togglePinned(b.order.id)}>
-              {pinned ? <IconPinnedFilled size={15} aria-hidden /> : <IconPin size={15} stroke={2} aria-hidden />}
-            </button>
-          </span>
-        )}
         {!row && doc && (
           // The job's paper a tap away, on the card: its touches are its own (the card neither opens nor swipes).
           <button
@@ -486,19 +430,6 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, important
             ...(doc ? [{ key: 'doc', label: t(doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote'), icon: doc === 'invoice' ? IconFileInvoice : IconFileTypePdf, onClick: () => void openDoc() }] : []),
             ...(wa ? [{ key: 'wa', label: 'WhatsApp', icon: IconBrandWhatsapp, onClick: openWa }] : []),
             ...(swipe ? [{ key: 'swipe', label: swipe.label, icon: swipe.icon, onClick: () => swipe.onCommit() }] : []),
-            // The PC board's own (v0.67): important, pinned, and on the canvas — the card's size.
-            ...(!dated
-              ? [
-                  { key: 'important', label: t(important ? 'deskBoard.notImportant' : 'deskBoard.important'), icon: important ? IconStarFilled : IconStar, divided: true, onClick: () => toggleImportant(b.order.id) },
-                  { key: 'pin', label: t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin'), icon: pinned ? IconPinnedFilled : IconPin, onClick: () => togglePinned(b.order.id) },
-                ]
-              : []),
-            ...(canvas
-              ? [
-                  { key: 'bigger', label: t('deskBoard.bigger'), icon: IconArrowsMaximize, onClick: () => resizeStep(b.order.id, 1) },
-                  { key: 'smaller', label: t('deskBoard.smaller'), icon: IconArrowsMinimize, onClick: () => resizeStep(b.order.id, -1) },
-                ]
-              : []),
             { key: 'delete', label: t('order.delete'), icon: IconTrash, color: 'red', divided: true, onClick: () => setRemove(true) },
           ]}
         />

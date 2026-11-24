@@ -1962,7 +1962,8 @@ export const en: typeof ru = {
   },
   // v0.67: the PC board's canvas, important and pinned cards.
   deskBoard: {
-    steps: 'Steps',
+    cards: 'Cards',
+    list: 'List',
     canvas: 'Canvas',
     arrange: 'Arrange',
     arranged: 'Cards arranged',

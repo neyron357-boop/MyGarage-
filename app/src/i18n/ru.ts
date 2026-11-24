@@ -1962,7 +1962,8 @@ export const ru = {
   },
   // v0.67: the PC board's canvas, important and pinned cards.
   deskBoard: {
-    steps: 'Шаги',
+    cards: 'Карточки',
+    list: 'Список',
     canvas: 'Холст',
     arrange: 'Расставить',
     arranged: 'Карточки расставлены',

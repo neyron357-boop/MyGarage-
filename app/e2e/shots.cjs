@@ -247,15 +247,15 @@ async function launchBrowser() {
   await dp.goto(BASE + '#/');
   await dp.waitForTimeout(1200);
   await dp.screenshot({ path: `${OUT}/desktop-01-board.png` });
-  // v0.22: the board compact («Вид»), then back as it was.
+  // «Вид» (the tabs' order), then the board as a list (v0.75: «Список» in the board's bar), and back as it was.
   await dp.getByRole('button', { name: /^(Вид|View)$/ }).click();
   await dp.waitForTimeout(700);
   await dp.screenshot({ path: `${OUT}/desktop-01b-board-view.png` });
-  await dp.getByRole('dialog').locator('.mantine-SegmentedControl-label', { hasText: /Компактно|Compact/ }).click();
   await dp.locator('.mantine-Modal-close').first().click();
+  await dp.locator('.dboard-tab[data-mode="list"]').click();
   await dp.waitForTimeout(700);
-  await dp.screenshot({ path: `${OUT}/desktop-01c-board-compact.png` });
-  await dp.evaluate(() => localStorage.removeItem('mygarage.board'));
+  await dp.screenshot({ path: `${OUT}/desktop-01c-board-list.png` });
+  await dp.evaluate(() => localStorage.removeItem('mygarage.deskBoard'));
   await dp.reload();
   await dp.waitForTimeout(900);
   await dp.getByRole('button', { name: /^Архив/ }).click();

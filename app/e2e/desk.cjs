@@ -66,31 +66,37 @@ async function launchBrowser() {
       await p.addStyleTag({ content: '.mantine-Notifications-root { display: none !important; }' });
       await shot('01-board');
       const first = width === SIZES[0] && scheme === SCHEMES[0];
-      // v0.42: a section per busy step, every step in the strip on top, the cards the size of a phone's whatever the
-      // window — one busy step no longer stretches its cars over the screen (the user's 1920 window: one car to a screen).
+      // v0.75 (the owner on the board before it: «пересобрать этот экран полностью»): one bar — the steps that have cars,
+      // «Долги», «Архив», how to see the cars — and the cars in one grid, every card one size whatever the window.
       const board = async () =>
         p.evaluate(() => {
-          const w = [...document.querySelectorAll('.desk-grid.board-cards > .job-card')].map((c) => c.getBoundingClientRect().width);
+          const cards = [...document.querySelectorAll('.dboard-grid > .dcard')];
+          const r = cards.map((c) => c.getBoundingClientRect());
           return {
-            sections: document.querySelectorAll('.desk-lane').length,
-            heads: document.querySelectorAll('.desk-lane-head .desk-lane-count').length,
-            steps: document.querySelectorAll('.desk-steps .desk-step').length,
-            widest: Math.round(Math.max(...w)),
-            narrowest: Math.round(Math.min(...w)),
+            cards: cards.length,
+            steps: document.querySelectorAll('[data-board-steps] .dboard-tab[data-step]').length,
+            tabs: document.querySelectorAll('[data-board-steps] .dboard-tab').length,
+            shown: [...new Set(cards.map((c) => c.getAttribute('data-step')))],
+            widest: Math.round(Math.max(...r.map((x) => x.width))),
+            narrowest: Math.round(Math.min(...r.map((x) => x.width))),
+            heights: new Set(r.map((x) => Math.round(x.height))).size,
+            // A card: its photo 16 : 9 and its four lines of facts (116 px).
+            shape: r.length ? Math.round(r[0].height - (r[0].width * 9) / 16) : 0,
             overflowX: document.scrollingElement.scrollWidth - innerWidth,
           };
         });
       {
         const b = await board();
-        check(`board ${width}: a section per busy step, every step in the strip, cards 260–440 px, no sideways scroll`, b.sections > 0 && b.heads === b.sections && b.steps === 8 && b.widest <= 440 && b.narrowest >= 260 && b.overflowX <= 1, b);
+        check(`board ${width}: one grid, every card one size (240–340 px), a tab a busy step with «Все», «Долги», «Архив», no sideways scroll`, b.cards > 2 && b.heights === 1 && b.widest <= 340 && b.narrowest >= 240 && Math.abs(b.shape - 116) <= 2 && b.steps >= 2 && b.tabs === b.steps + 3 && b.overflowX <= 1, b);
       }
       if (first) {
-        // One step picked: only its section, its cards as large as before.
-        await p.locator('.desk-step').filter({ hasText: 'В работе' }).click();
+        // One step picked: only its cars, as large as before; what they come to beside the strip.
+        const before = await board();
+        await p.locator('.dboard-tab[data-step="work"]').click();
         await settle(500);
         const one = await board();
-        check('board: one step picked — its section alone, the cards keep their size', one.sections === 1 && one.widest <= 440, one);
-        await p.locator('.desk-step').filter({ hasText: 'Все' }).click();
+        check('board: one step picked — its cars alone, the cards keep their size', one.cards > 0 && one.cards < before.cards && one.shown.join() === 'work' && one.widest === before.widest && (await p.locator('[data-board-sum]').innerText()).includes('В работе'), one);
+        await p.locator('.dboard-tab').filter({ hasText: 'Все' }).click();
         await settle(400);
         // The appearance (language, theme, colour) behind one button at the sidebar's foot.
         await p.locator('.app-nav').getByRole('button', { name: 'Оформление' }).click();
@@ -112,7 +118,7 @@ async function launchBrowser() {
         await go('#/', 700);
       }
       // A right click on a card: its menu where the mouse is.
-      const card = p.locator('.job-card').first();
+      const card = p.locator('.dcard').first();
       const cb = await card.boundingBox();
       await card.click({ button: 'right', position: { x: 60, y: 40 } });
       await settle(500);
@@ -137,26 +143,43 @@ async function launchBrowser() {
         await settle(700);
         check('keys: N opens a new job', (await p.evaluate(() => location.hash)).startsWith('#/orders/new'));
         await go('#/', 700);
-        // v0.67 (the owner's note): an important card — lit and larger; a pinned one — a section of its own on top.
-        const firstCard = p.locator('.desk-grid.board-cards > .job-card').first();
-        await firstCard.hover();
-        await firstCard.locator('[data-tool="important"]').click();
-        await settle(500);
-        const imp = await p.evaluate(() => ({
-          w: document.querySelector('.job-card[data-important]')?.getBoundingClientRect().width ?? 0,
-          other: document.querySelector('.desk-grid.board-cards > .job-card:not([data-important])')?.getBoundingClientRect().width ?? 0,
-          ring: getComputedStyle(document.querySelector('.job-card[data-important]')).boxShadow,
-        }));
-        check('board: an important card is lit and larger', imp.w > imp.other * 1.6 && /rgb/.test(imp.ring), imp);
-        const toPin = p.locator('.desk-grid.board-cards > .job-card:not([data-important])').last();
+        // v0.67 / v0.75: an important card — a star and a warm line, first in its step, no larger than the others; a pinned
+        // one — first on the board.
+        const firstCard = p.locator('.dboard-grid > .dcard').first();
+        const stepOfFirst = await firstCard.getAttribute('data-step');
+        const second = p.locator(`.dboard-grid > .dcard[data-step="${stepOfFirst}"]`).nth(1);
+        const secondId = (await second.count()) ? await second.getAttribute('data-card') : await firstCard.getAttribute('data-card');
+        const marked = p.locator(`.dboard-grid > .dcard[data-card="${secondId}"]`);
+        await marked.hover();
+        await marked.locator('[data-tool="important"]').click();
+        await settle(600);
+        const imp = await p.evaluate((id) => {
+          const it = document.querySelector(`.dcard[data-card="${id}"]`);
+          const other = document.querySelector('.dboard-grid > .dcard:not([data-important])');
+          const sameStep = [...document.querySelectorAll(`.dboard-grid > .dcard[data-step="${it.getAttribute('data-step')}"]`)];
+          return { on: it.hasAttribute('data-important'), w: Math.round(it.getBoundingClientRect().width), other: Math.round(other.getBoundingClientRect().width), ring: getComputedStyle(it).boxShadow !== getComputedStyle(other).boxShadow, firstOfStep: sameStep[0] === it, star: !!it.querySelector('[data-tool="important"][data-on]') };
+        }, secondId);
+        check('board: an important card — a star and a line of its own, first in its step, the size of the others', imp.on && imp.w === imp.other && imp.ring && imp.firstOfStep && imp.star, imp);
+        const toPin = p.locator('.dboard-grid > .dcard:not([data-important])').last();
+        const pinId = await toPin.getAttribute('data-card');
         await toPin.hover();
         await toPin.locator('[data-tool="pin"]').click();
-        await settle(500);
-        const lanes = await p.evaluate(() => [...document.querySelectorAll('.desk-lane')].map((l) => l.getAttribute('data-lane')));
-        check('board: a pinned card — a section of its own, on top', lanes[0] === 'pinned' && (await p.locator('[data-lane="pinned"] .job-card').count()) === 1, lanes);
+        await settle(600);
+        check('board: a pinned card — first on the board', (await p.locator('.dboard-grid > .dcard').first().getAttribute('data-card')) === pinId && (await p.locator('.dboard-grid > .dcard[data-pinned]').count()) === 1);
         await shot('01e-board-marks');
+        // «Список»: the same cars as a table by step, the pinned one in a group of its own on top; a line opens its job.
+        const cardsNow = await p.locator('.dboard-grid > .dcard').count();
+        await p.locator('.dboard-tab[data-mode="list"]').click();
+        await settle(600);
+        const list = await p.evaluate(() => ({ rows: document.querySelectorAll('.dlist tr[data-row]').length, groups: [...document.querySelectorAll('.dlist .dlist-head')].map((h) => h.getAttribute('data-group')), overflowX: document.scrollingElement.scrollWidth - innerWidth }));
+        check('board: «Список» — a line a car, a group a step, the pinned ones first', list.rows === cardsNow && list.groups[0] === 'pinned' && list.groups.length > 2 && list.overflowX <= 1, list);
+        await shot('01g-board-list');
+        await p.locator('.dlist tr[data-row]').nth(1).click();
+        await settle(900);
+        check('board: a line of the list opens its job', (await p.evaluate(() => location.hash)).startsWith('#/orders/'));
+        await go('#/', 700);
         // The canvas: a card dragged anywhere stays there (and is not opened by the drag); its corner drawn out — larger.
-        await p.locator('[data-desk-canvas]').click();
+        await p.locator('.dboard-tab[data-mode="canvas"]').click();
         await settle(900);
         // The leftmost card that is neither pinned nor important (room to its right to be dragged into).
         const candidates = p.locator('.desk-canvas-card:not([data-pinned]):not([data-important])');
@@ -186,7 +209,7 @@ async function launchBrowser() {
         await settle(600);
         const big = await moved.boundingBox();
         const bigOn = await onCanvas(`.desk-canvas-card[data-card="${id}"]`);
-        check('canvas: the corner drawn out — the card larger, 2 : 1 still', big.width - to.width >= 110 && big.width - to.width <= 130 && Math.abs(big.height - big.width / 2) <= 3, { to, big });
+        check('canvas: the corner drawn out — the card larger, its photo 16 : 9 and its facts still', big.width - to.width >= 110 && big.width - to.width <= 130 && Math.abs(big.height - (Math.round((big.width * 9) / 16) + 116)) <= 3, { to, big });
         await shot('01f-canvas');
         // Kept on this computer: a reload — the same canvas, the card where it was put.
         await p.reload();
@@ -195,10 +218,10 @@ async function launchBrowser() {
         check('canvas: kept after a reload', Math.abs(kept.x - bigOn.x) <= 2 && Math.abs(kept.y - bigOn.y) <= 2 && Math.abs(kept.width - bigOn.width) <= 2, { bigOn, kept });
         check('canvas: the page never scrolls sideways', (await p.evaluate(() => document.scrollingElement.scrollWidth - innerWidth)) <= 1);
         // A click (no drag) opens the job as before.
-        await p.locator(`.desk-canvas-card[data-card="${id}"] .job-card-open`).click({ position: { x: 40, y: 60 } });
+        await p.locator(`.desk-canvas-card[data-card="${id}"] .dcard-open`).click({ position: { x: 40, y: 60 } });
         await settle(900);
         check('canvas: a click opens the job', (await p.evaluate(() => location.hash)).startsWith('#/orders/'));
-        // Back to the board by step, its marks taken off (the other sizes' pictures as before).
+        // Back to the cards, the marks taken off (the other sizes' pictures as before).
         await p.evaluate(() => localStorage.removeItem('mygarage.deskBoard'));
         await go('#/', 300);
         await p.reload();
@@ -212,7 +235,7 @@ async function launchBrowser() {
       // A job with lines, waiting for the customer; one in work.
       for (const [k, step] of [['a', /Цена|Price/], ['b', /В работе|In work/]]) {
         await go('#/', 900);
-        await p.locator('.job-row').filter({ hasText: step }).first().locator('.job-card-open').click();
+        await p.locator('.dcard').filter({ hasText: step }).first().locator('.dcard-open').click();
         await settle(1100);
         await shot(`03${k}-job`);
         if (first && k === 'a') {
