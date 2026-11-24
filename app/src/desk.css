@@ -353,7 +353,7 @@ html.desk .page-shell:is([data-page='job'], [data-page='customers'], [data-page=
   --page-max: 1600px;
 }
 /* The notes, a single screen of a job: a readable column. A new job is a form. */
-html.desk .page-shell:is([data-page='notes'], [data-page='claim'], [data-page='suppliers'], [data-page='more'], [data-page='new']) {
+html.desk .page-shell:is([data-page='notes'], [data-page='notify'], [data-page='claim'], [data-page='suppliers'], [data-page='more'], [data-page='new']) {
   --page-max: 1080px;
 }
 /* A job shown to its customer has no side menu: its column is in the middle of the window by itself. */
@@ -1809,4 +1809,14 @@ html.desk .desk-mode:focus-visible,
 html.desk .desk-card-tool:focus-visible {
   outline: 2px solid var(--mantine-color-cobalt-5);
   outline-offset: 2px;
+}
+
+/* «Уведомления» on a PC (v0.74): the rows at the desk's size; the time a field of the desk. */
+html.desk .time-input {
+  height: 32px;
+  font-size: 14px;
+}
+html.desk .today-add {
+  min-height: 36px;
+  font-size: 14px;
 }

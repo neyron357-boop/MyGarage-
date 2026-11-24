@@ -1,4 +1,5 @@
 import type { FitStatus, Marking, NumberCheck, VinCheck } from './fitment';
+import type { NotifySettings } from './notify';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
 // Money is always integer fils (1 AED = 100 fils). VAT rates are basis points (500 = 5%).
 
@@ -61,6 +62,11 @@ export interface Settings {
   cardStartFils?: number;
   /** The garage's own quick-pick lists (domain/quickLists.ts); missing → the standard English ones. */
   quickLists?: Partial<Record<'complaints' | 'warningLights' | 'functionChecks' | 'skipReasons', string[]>>;
+  /**
+   * What the phone is notified of and when (v0.74, domain/notify.ts): the hours and days, each kind's delay and repeat,
+   * the morning's summary. Missing — the defaults; a field missing in it — its default (`notifyOf`).
+   */
+  notify?: Partial<NotifySettings>;
 }
 
 export interface Customer {
@@ -385,6 +391,11 @@ export interface Order {
    */
   boardTab?: 'work' | 'wait' | 'request';
   /**
+   * No notifications about this job (v0.74, «…» → «Не напоминать»): a car that stands for weeks waiting for a part is not
+   * said again every hour. «Сегодня» still lists it; a reminder set on it by hand still comes.
+   */
+  notifyOff?: boolean;
+  /**
    * Its lines deleted (drafts — nothing was told of them), the newest first, the last 30 (v0.68, the user: «корзина в
    * каждой карточке заказа — вернуть удалённые позиции или посмотреть их»): as they were, to bring back (domain/bin.ts).
    */
@@ -418,6 +429,24 @@ export interface Driver {
  * a supplier (or a bill) for the garage, all of it or a part, and is to be paid back. Not a supplier: the supplier base
  * stays the shops. One record however many times he paid (`Expense.lenderId`).
  */
+/**
+ * A reminder the manager set for himself (v0.74, the user: «добавить также напоминалки»): its words, when — and, set from
+ * a job, that job. It shows in «Сегодня» from its day and comes to the phone as a notification at its time, until it is
+ * done; one that repeats moves on to its next time when done. Not a task of a job's facts: typed by hand.
+ */
+export interface Reminder {
+  id: string;
+  text: string;
+  /** When (ISO). */
+  at: string;
+  orderId?: string;
+  /** Comes again: every day, week or month at the same time. */
+  repeat?: 'day' | 'week' | 'month';
+  doneAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface Lender {
   id: string;
   name: string;

@@ -2,7 +2,7 @@ import { db } from '../db/db';
 import { addDays, hoursBetween, nowIso } from '../domain/dates';
 import { isAwaitingClient } from '../domain/items';
 import { FOLLOW_UP_DAYS, SERVICE_DAYS, SERVICE_UNTIL, todayTasks, type OpenJob, type PastJob, type Task } from '../domain/today';
-import type { Customer, Order, Vehicle } from '../domain/types';
+import type { Customer, Order, Reminder, Vehicle } from '../domain/types';
 import { phaseOf } from './flow';
 import type { OrderBundle } from './orders';
 
@@ -53,14 +53,20 @@ export async function loadPast(now = nowIso()): Promise<{ past: PastJob[]; vehic
   };
 }
 
-export function tasksFor(bundles: OrderBundle[], past: Awaited<ReturnType<typeof loadPast>> | undefined, now = nowIso()): Task[] {
+/**
+ * «Сегодня» of the jobs on the board, the jobs that left, and (v0.74) the manager's own reminders. `warnHours` — given
+ * by the notifications' plan (services/notify.ts): 0, a thing is listed as soon as it is so (how long to wait before
+ * saying it is the notification's own rule).
+ */
+export function tasksFor(bundles: OrderBundle[], past: Awaited<ReturnType<typeof loadPast>> | undefined, now = nowIso(), reminders: Reminder[] = [], warnHours?: number): Task[] {
   const s = bundles[0]?.settings;
   return todayTasks({
     open: bundles.filter((b) => !b.order.archivedAt).map(openJobOf),
     past: past?.past ?? [],
     vehicles: past?.vehicles ?? new Map(),
-    warnHours: s?.boardWarnHours ?? 2,
+    warnHours: warnHours ?? s?.boardWarnHours ?? 2,
     alertHours: s?.boardAlertHours ?? 24,
+    reminders,
     now,
   });
 }

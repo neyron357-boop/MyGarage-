@@ -3,6 +3,7 @@ import { DatesProvider } from '@mantine/dates';
 import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
 import {
+  IconBell,
   IconCash,
   IconChartBar,
   IconInfoCircle,
@@ -31,6 +32,7 @@ import { JobPage } from './features/job/JobPage';
 import { JobSuppliersPage } from './features/job/JobSuppliers';
 import { MorePage } from './features/more/MorePage';
 import { GarageNotesPage } from './features/more/GarageNotes';
+import { NotifyPage } from './features/notify/NotifyPage';
 import { NewOrderPage } from './features/orders/NewOrderPage';
 import { PartsPage } from './features/parts/PartsPage';
 import { ReportsPage } from './features/reports/ReportsPage';
@@ -87,6 +89,7 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/more" element={<MorePage />} />
       <Route path="/notes" element={<GarageNotesPage />} />
+      <Route path="/notify" element={<NotifyPage />} />
       <Route path="*" element={<BoardPage />} />
     </Routes>
   );
@@ -135,7 +138,14 @@ const NAV_GROUPS = [
       { to: '/reports', icon: IconChartBar, key: 'nav.reports' },
     ],
   },
-  { key: 'nav.groupSystem', items: [{ to: '/settings', icon: IconSettings, key: 'nav.settings' }] },
+  {
+    key: 'nav.groupSystem',
+    items: [
+      // What the phone is notified of, and the reminders (v0.74).
+      { to: '/notify', icon: IconBell, key: 'notify.title' },
+      { to: '/settings', icon: IconSettings, key: 'nav.settings' },
+    ],
+  },
 ];
 
 /** The language, the theme, the accent: once set, rarely touched — behind one button at the sidebar's foot (v0.42). */

@@ -115,10 +115,23 @@ async function pushRecords(cfg: SyncConfig): Promise<number> {
 }
 
 /** The server's changes written here — as they are, in one transaction marked as the server's (db/syncHooks). */
+/**
+ * Told whenever the garage's data changed on this device — written here, or brought from the server (v0.74: the
+ * notifications' plan is made again from the data as it now is, services/notify.ts).
+ */
+const dataSubs = new Set<() => void>();
+export function onDataChanged(fn: () => void): () => void {
+  dataSubs.add(fn);
+  return () => void dataSubs.delete(fn);
+}
+const dataChanged = () => dataSubs.forEach((f) => f());
+
 export async function applyChanges(changes: Change[]): Promise<void> {
   const pushedT = syncState().pushedT;
   const tables = [...new Set(changes.map((c) => c.t))].map(tableOf).filter((t): t is Table => !!t);
   if (!tables.length) return;
+  // (Told after this call's own work; the listeners wait a few seconds before they read anyway.)
+  setTimeout(dataChanged, 0);
   await db.transaction('rw', tables, async () => {
     markRemote(Dexie.currentTransaction);
     for (const c of changes) {
@@ -695,7 +708,10 @@ export function startSync() {
   // The computer with the server: its files straight from it (v0.42.3).
   void findNearServer();
   // A change here: sent an eighth of a second later (one action's several writes go together).
-  onLocalChange(() => scheduleSync(120));
+  onLocalChange(() => {
+    scheduleSync(120);
+    dataChanged();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     // Back in the app: the stream iOS cut in the background opened anew, and what changed meanwhile taken.

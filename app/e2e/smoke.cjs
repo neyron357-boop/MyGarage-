@@ -3113,7 +3113,10 @@ async function launchBrowser() {
     if (!diagramRows) throw new Error('no parts under «Схемы» on the job suppliers screen');
     const first = front('.job-suppliers .list-row:not(.diagram-parts .list-row)').first();
     await first.waitFor();
-    if (!(await first.innerText()).includes('На этом заказе')) throw new Error('the job’s own supplier is not first: ' + (await first.innerText()));
+    // v0.71: sellers of new parts and of used ones are groups apart — the job's own supplier is the first of its group
+    // (which job this is depends on the demo's ids: its supplier may sell used parts).
+    const heads = await front('.job-suppliers .list:not(.diagram-parts .list)').evaluateAll((lists) => lists.map((l) => l.querySelector('.list-row')?.innerText ?? ''));
+    if (!heads.some((x) => x.includes('На этом заказе'))) throw new Error('the job’s own supplier is not the first of its group: ' + heads.join(' || '));
     await shot('44a-job-suppliers');
     // «Спросить»: all the job's parts at once, through the share sheet. v0.61.1: with a diagram, its sheet and the list
     // go in one send — the list by lines, saying the sheets carry its numbers (not left in the clipboard to paste).
@@ -3144,14 +3147,20 @@ async function launchBrowser() {
     if (!/^1\. /m.test(asked.text) || !/Price and availability/.test(asked.text) || asked.text.split('\n').length < 4) throw new Error('asked: ' + JSON.stringify(asked));
     if (withDiagram && (!asked.files.length || !/^Diagrams in the photos/m.test(asked.text))) throw new Error('the sheets and the list apart: ' + JSON.stringify(asked));
     // Its card: four stars, saved; the pill on its row.
-    await first.click();
+    await front('.job-suppliers .list-row:not(.diagram-parts .list-row)').filter({ hasText: 'На этом заказе' }).first().click();
     const dlg = page.getByRole('dialog');
     await dlg.locator('[data-supplier-stats]').waitFor();
     await dlg.getByRole('radio', { name: '4' }).click();
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await dlg.waitFor({ state: 'detached' });
-    const stars = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.suppliers.get(id)).reliability, job.supplierId);
-    if (stars !== 4) throw new Error('stars ' + stars);
+    // One of the job's own suppliers (its lines', their offers', its work outside) has them now.
+    const stars = await page.evaluate(async (orderId) => {
+      const { db } = await import('/src/db/db.ts');
+      const items = await db.items.where('orderId').equals(orderId).toArray();
+      const ids = [...new Set(items.flatMap((i) => [i.supplierId, i.outsource?.supplierId, ...(i.offers ?? []).map((o) => o.supplierId)]).filter(Boolean))];
+      return (await db.suppliers.bulkGet(ids)).map((s) => s?.reliability ?? 0);
+    }, job.id);
+    if (!stars.includes(4)) throw new Error('stars ' + JSON.stringify(stars));
     await front('.job-suppliers .stars-pill').first().waitFor();
     // An invoice paid in full: its PDF says PAID; one still owed does not.
     const paid = await page.evaluate(async () => {
@@ -3899,6 +3908,60 @@ async function launchBrowser() {
     await panel.getByRole('button', { name: 'Закрыть' }).click();
     await page.evaluate(() => localStorage.setItem('mygarage.feedback', '0'));
     await page.reload();
+  });
+  await step('v0.74: «Уведомления» — each kind of «Сегодня» with its own delay and repeat, the hours and days, kept; a reminder set, due in «Сегодня» (a notification’s address opens it), done by its tick; a job kept quiet; the plan left on the server made of all this', async () => {
+    const notify = () => page.evaluate(async () => (await (await import('/src/db/db.ts')).db.settings.get('main'))?.notify ?? null);
+    await page.goto(BASE + '#/notify');
+    await front('[data-rule]').first().waitFor();
+    if ((await front('[data-rule]').count()) !== 13) throw new Error('thirteen kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
+    // The user's own example: a price not told — after an hour, every hour; then his own timing.
+    const price = front('.list-row').filter({ has: page.locator('[data-rule="price"]') }).first();
+    if (!(await price.innerText()).replace(/\s+/g, ' ').includes('через 1 ч · каждые 1 ч')) throw new Error('«Назвать цену» must be an hour, every hour, by default: ' + (await price.innerText()));
+    await price.click({ position: { x: 120, y: 20 } });
+    await page.locator('[data-rule-sheet="price"] [data-first="30"]').click();
+    await page.locator('[data-rule-sheet="price"] [data-every="15"]').click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+    if (JSON.stringify((await notify())?.rules?.price) !== JSON.stringify({ on: true, after: 30, every: 15 })) throw new Error('the kind’s own timing was not kept: ' + JSON.stringify(await notify()));
+    await front('[data-notify-from]').first().fill('07:30');
+    await front('[data-day="5"]').first().click();
+    await page.waitForTimeout(400);
+    const kept = await notify();
+    if (kept?.from !== 450 || kept.days.includes(5)) throw new Error('the hours and the days were not kept: ' + JSON.stringify(kept));
+    // A reminder due a minute ago: «Сегодня» lists it; the address a notification opens shows the list.
+    await page.evaluate(async () => {
+      const { addReminder } = await import('/src/services/reminders.ts');
+      await addReminder({ text: 'Позвонить Ахмеду', at: new Date(Date.now() - 60000).toISOString() });
+    });
+    await page.goto(BASE + '#/?today=1');
+    const note = page.locator('.today-note').filter({ hasText: 'Позвонить Ахмеду' });
+    await note.waitFor();
+    if ((await page.evaluate(() => location.hash)) !== '#/') throw new Error('«Сегодня» opened by a notification must leave the address clean');
+    await shot('74-today-reminder');
+    await note.locator('[data-reminder-tick]').click();
+    await note.waitFor({ state: 'detached' });
+    await page.keyboard.press('Escape');
+    // The plan, as the server will keep it: the hours, the manager's timing, nothing of a job kept quiet.
+    const plan = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { makePlan, setJobQuiet } = await import('/src/services/notify.ts');
+      const before = await makePlan();
+      const urls = (pl) => pl.groups.filter((g) => !g.solo).flatMap((g) => g.members.map((m) => m.url));
+      const first = urls(before).find((u) => u.startsWith('#/orders/')) ?? '';
+      const id = first.replace('#/orders/', '');
+      if (id && (await db.orders.get(id))) await setJobQuiet(id, true);
+      const after = await makePlan();
+      if (id) await setJobQuiet(id, false);
+      return { from: before.from, days: before.days, every: before.groups.find((g) => g.key === 'price')?.every, had: urls(before).filter((u) => u === first).length, has: urls(after).filter((u) => u === first).length, id };
+    });
+    if (plan.from !== 450 || plan.days.includes(5)) throw new Error('the plan must carry the hours and days set: ' + JSON.stringify(plan));
+    if (plan.every !== undefined && plan.every !== 15) throw new Error('the plan must carry the kind’s own repeat: ' + JSON.stringify(plan));
+    if (plan.id && !(plan.had > 0 && plan.has === 0)) throw new Error('a job kept quiet must leave the plan: ' + JSON.stringify(plan));
+    // Back as it was for the steps after this one.
+    await page.evaluate(async () => {
+      const { saveSettings } = await import('/src/services/settings.ts');
+      await saveSettings({ notify: undefined });
+    });
   });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {

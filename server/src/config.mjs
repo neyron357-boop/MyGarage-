@@ -38,6 +38,11 @@ export function loadConfig(env = process.env) {
      * ntfy.sh — free, no account. Empty: not left anywhere.
      */
     relayUrl: (env.RELAY_URL ?? 'https://ntfy.sh').replace(/\/+$/, ''),
+    /**
+     * Who sends the notifications, as the push services ask to be told (VAPID `sub`: an address to write to about
+     * them) — the app's own address, which they know already; `PUSH_CONTACT` — another (`mailto:…` or `https://…`).
+     */
+    pushContact: env.PUSH_CONTACT || list(env.ALLOWED_ORIGINS || 'https://neyron357-boop.github.io')[0] || 'https://neyron357-boop.github.io',
     /** How many daily copies of the database to keep. */
     keepBackups: Number(env.KEEP_BACKUPS) || 30,
   };

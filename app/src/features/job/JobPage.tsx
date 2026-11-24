@@ -3,6 +3,9 @@ import { AiLineWork, AiPartsTile, AiPickedButton } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
   IconBuildingStore,
+  IconAlarm,
+  IconBell,
+  IconBellOff,
   IconCalendar,
   IconCar,
   IconCash,
@@ -86,6 +89,8 @@ import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from
 import { useDesk, useDeskHotkeys } from '../../ui/desk';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
+import { setJobQuiet } from '../../services/notify';
+import { ReminderSheet } from '../notify/ReminderSheet';
 import { OwnerCheckSheet } from './OwnerCheck';
 import { PartThumb } from './PartThumb';
 import { PartsBatchSheet } from './PartsBatch';
@@ -168,6 +173,7 @@ const TILE_COLOR: Record<string, string> = {
   scanner: 'cyan',
   due: 'yellow',
   day: 'indigo',
+  remind: 'cobalt',
   invoice: 'grape',
   quote: 'grape',
   select: 'teal',
@@ -579,6 +585,7 @@ export function JobPage() {
   const [send, setSend] = useState<SendRequest | null>(null);
   const [mechanicOpen, setMechanicOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
   const [dayOpen, setDayOpen] = useState(false);
   // The invoice's day at «Готово» (v0.53): today — the job's own day for a job typed in later.
   const [invDay, setInvDay] = useState('');
@@ -949,6 +956,13 @@ export function JobPage() {
   if (open) tiles.push({ key: 'scanner', icon: IconEngine, onClick: obd.pick });
   // When the car was promised: rarely needed (the user's call, v0.17.3) — a tile here; once set, its chip on the card.
   if (open && phase !== 'booked') tiles.push({ key: 'due', icon: IconClock, onClick: () => setDueOpen(true) });
+  // A reminder about this job, on the phone at its time (v0.74); and the job kept quiet — a car that stands for weeks
+  // is not said again every hour («Сегодня» lists it all the same).
+  if (open) tiles.push({ key: 'remind', icon: IconAlarm, onClick: () => setRemindOpen(true) });
+  if (open) {
+    const quiet = !!b.order.notifyOff;
+    tiles.push({ key: quiet ? 'loud' : 'quiet', icon: quiet ? IconBell : IconBellOff, color: 'gray', onClick: () => void run(() => setJobQuiet(oid, !quiet), quiet ? 'notify.jobLoud' : 'notify.jobQuiet') });
+  }
   // The day the car came (v0.53): a job typed in later is put on the day it was.
   if (open && phase !== 'booked' && !lockedMonth) tiles.push({ key: 'day', icon: IconCalendar, onClick: () => setDayOpen(true) });
   if (inv) tiles.push({ key: 'invoice', icon: IconFileInvoice, onClick: () => void run(async () => openPdf(await invoicePdf(inv.id))) });
@@ -1439,6 +1453,7 @@ export function JobPage() {
       </LazySheet>
       <LazySheet opened={binOpen}>{(o) => <BinSheet b={b} opened={o} onClose={() => setBinOpen(false)} canRestore={binRestore} />}</LazySheet>
       <DueSheet order={b.order} lang={lang} opened={dueOpen} onClose={() => setDueOpen(false)} />
+      <LazySheet opened={remindOpen}>{(o) => <ReminderSheet opened={o} onClose={() => setRemindOpen(false)} orderId={oid} />}</LazySheet>
       <JobDaySheet job={b} opened={dayOpen} onClose={() => setDayOpen(false)} />
       <DriverSheet order={b.order} opened={driverOpen} onClose={() => setDriverOpen(false)} />
       <LazySheet opened={mechanicOpen}>

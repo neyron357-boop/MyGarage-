@@ -19,6 +19,10 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
  *        /api/ai/part-find {part, make, model, year, engine, vin, track}, /api/ai/receipt {image} — the garage's AI (v0.48, ai.mjs);
  *   GET  /api/ai/progress?t=a,b          — how far the part searches marked so have got, 0…100 (v0.64: no question asked)
+ *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
+ *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
+ *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
+ *   POST /api/push/test {title, body}    — one notification to this device now
  *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
  *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
@@ -119,7 +123,7 @@ export function createPairing() {
   };
 }
 
-export function createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai }) {
+export function createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai, push }) {
   return async function api(req, res) {
     const origin = req.headers.origin;
     const allowed = origin && config.origins.includes(origin);
@@ -208,7 +212,27 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         }
       }
 
+      // Notifications (v0.74, push.mjs): the device's subscription, the plan the app made, a test.
+      if (parts[0] === 'api' && parts[1] === 'push' && parts.length === 3 && push) {
+        if (req.method === 'GET' && parts[2] === 'key') return send(res, 200, { ok: true, key: push.publicKey(), subscribed: push.subscribed(device.id) });
+        if (req.method === 'POST') {
+          const body = await readJson(req, 2 * 1024 * 1024);
+          if (parts[2] === 'subscribe') {
+            push.subscribe(device.id, body.subscription);
+            log(`push: ${device.name} takes notifications`);
+            return send(res, 200, { ok: true });
+          }
+          if (parts[2] === 'unsubscribe') return send(res, 200, { ok: true, was: push.unsubscribe(device.id) });
+          if (parts[2] === 'plan') return send(res, 200, { ok: true, ...push.setPlan(body.plan) });
+          if (parts[2] === 'test') {
+            const r = await push.test(device.id, body);
+            return send(res, 200, { ok: r.ok, status: r.status, gone: r.gone, error: r.error || undefined });
+          }
+        }
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/forget') {
+        push?.unsubscribe(device.id);
         store.revoke(device.id);
         events?.drop(device.id);
         log(`left: ${device.name} (${device.id})`);

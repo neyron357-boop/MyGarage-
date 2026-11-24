@@ -1,5 +1,5 @@
 import { Box, Image, Text } from '@mantine/core';
-import { IconCash, IconChartBar, IconChevronRight, IconCloudDownload, IconDevices, IconNotes, IconPackage, IconSettings, IconShieldCheck, IconTool, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
+import { IconBell, IconCash, IconChartBar, IconChevronRight, IconCloudDownload, IconDevices, IconNotes, IconPackage, IconSettings, IconShieldCheck, IconTool, IconTruck, IconUsers, type Icon } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -22,6 +22,8 @@ const LINKS: { to: string; icon: Icon; label: string; hint: string; color: strin
   { to: '/parts?tab=suppliers', icon: IconTruck, label: 'nav.suppliers', hint: 'more.suppliersHint', color: 'cyan' },
   { to: '/money', icon: IconCash, label: 'nav.money', hint: 'more.moneyHint', color: 'green' },
   { to: '/reports', icon: IconChartBar, label: 'nav.reports', hint: 'more.reportsHint', color: 'indigo' },
+  // What the phone is notified of, and the manager's own reminders (v0.74) — red, as the iPhone's Notifications.
+  { to: '/notify', icon: IconBell, label: 'notify.title', hint: 'more.notifyHint', color: 'red' },
   { to: '/settings', icon: IconSettings, label: 'nav.settings', hint: 'more.settingsHint', color: 'gray' },
 ];
 

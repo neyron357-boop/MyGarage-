@@ -25,6 +25,7 @@ import type {
   JobNote,
   JobTemplate,
   Lender,
+  Reminder,
   Media,
   MediaBlob,
   MessageLog,
@@ -95,6 +96,7 @@ export class GarageDB extends Dexie {
   drivers!: Table<Driver, string>;
   /** Whom the garage owes because they paid for it (v0.61): an expense on credit's `lenderId`. */
   lenders!: Table<Lender, string>;
+  reminders!: Table<Reminder, string>;
   /** Invoices given before this app, read off their PDFs (v0.45): the customer's reports read them, money here does not. */
   historyInvoices!: Table<HistoryInvoice, string>;
   /** The rows of the monthly summaries that came with them (v0.45): the garage's own check. */
@@ -223,6 +225,10 @@ export class GarageDB extends Dexie {
     // has no `lenderId` and owes its seller, as it did.
     this.version(10).stores({
       lenders: 'id, phone, _t',
+    });
+    // v11 (v0.74): the manager's own reminders — a new table only.
+    this.version(11).stores({
+      reminders: 'id, at, orderId, _t',
     });
     installGuards(this);
     installSyncHooks(this);

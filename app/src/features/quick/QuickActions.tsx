@@ -1,5 +1,5 @@
 import { Button, Kbd, Menu } from '@mantine/core';
-import { IconArrowDownLeft, IconArrowUpRight, IconCamera, IconNote, IconPlus, type Icon } from '@tabler/icons-react';
+import { IconAlarm, IconArrowDownLeft, IconArrowUpRight, IconCamera, IconNote, IconPlus, type Icon } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -8,7 +8,8 @@ import { liveCameraAvailable } from '../../ui/camera';
 import { haptic, slideTicksAvailable, useHaptics } from '../../ui/haptics';
 import { LiveCamera } from '../../ui/LiveCamera';
 import { PlateScan, type ScanTally } from './PlateScan';
-import { SheetFor } from '../../ui/lazy';
+import { LazySheet, SheetFor } from '../../ui/lazy';
+import { ReminderSheet } from '../notify/ReminderSheet';
 import { EntrySheet, type EntryPreset } from '../money/MoneyEntry';
 import { holdCarShot } from '../orders/carShot';
 import { EntryDetails } from '../money/LedgerTab';
@@ -26,12 +27,13 @@ import { notifications } from '@mantine/notifications';
  *   - «Фото номера»: the camera inside the app (ui/LiveCamera.tsx, v0.31 — the phone's own opens only for a tap, not
  *     where a slide lets go); the photo goes to "New job", which reads the plate off it (services/plateReader.ts);
  *   - «Приход», «Расход»: the money sheet;
- *   - «Заметка»: the workshop's notes.
+ *   - «Заметка»: the workshop's notes;
+ *   - «Напоминание» (v0.74): the manager's own reminder — its words and when.
  * The actions run right in the finger's lift (touchend). On an iPhone each action the finger slides onto ticks (v0.68,
  * the user: «вибро отклик должен быть оригинальный iPhone»): a hidden switch under the finger (`slideTicksAvailable`).
  */
 
-export type QuickKey = 'photo' | 'in' | 'out' | 'note';
+export type QuickKey = 'photo' | 'in' | 'out' | 'note' | 'remind';
 
 /** Nearest the thumb first: from «＋» up. */
 export const QUICK: { key: QuickKey; icon: Icon; color: string }[] = [
@@ -39,6 +41,7 @@ export const QUICK: { key: QuickKey; icon: Icon; color: string }[] = [
   { key: 'in', icon: IconArrowDownLeft, color: 'green' },
   { key: 'out', icon: IconArrowUpRight, color: 'red' },
   { key: 'note', icon: IconNote, color: 'yellow' },
+  { key: 'remind', icon: IconAlarm, color: 'indigo' },
 ];
 
 /**
@@ -52,6 +55,7 @@ export function useQuickActions(live = false) {
   const camera = useRef<HTMLInputElement>(null);
   const receiptInput = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<EntryPreset | null>(null);
+  const [remind, setRemind] = useState(false);
   const [cam, setCam] = useState<false | 'plate' | 'receipt'>(false);
   // A receipt being read on the server (v0.50): a pill says so; the expense's sheet opens once it is recorded.
   const [scanning, setScanning] = useState(false);
@@ -102,6 +106,7 @@ export function useQuickActions(live = false) {
       if (slide && live && liveCameraAvailable()) setCam('receipt');
       else receiptInput.current?.click();
     } else if (k === 'in') setSheet({ kind: k });
+    else if (k === 'remind') setRemind(true);
     else navigate('/notes');
   };
   // The phone's own camera closed without a photo: the sheet to type the expense.
@@ -142,6 +147,7 @@ export function useQuickActions(live = false) {
         </div>
       )}
       <SheetFor value={sheet}>{(s, o) => <EntrySheet opened={o} onClose={() => setSheet(null)} preset={s} />}</SheetFor>
+      <LazySheet opened={remind}>{(o) => <ReminderSheet opened={o} onClose={() => setRemind(false)} />}</LazySheet>
       <SheetFor value={recorded}>{(r, o) => <RecordedExpense id={r.id} others={r.others} opened={o} onClose={() => setRecorded(null)} />}</SheetFor>
     </>
   );

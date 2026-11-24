@@ -4555,6 +4555,11 @@ html.kb .screen-bottom > .sticky-bar {
   position: absolute;
   inset: 0;
   display: grid;
+  /* One cell exactly the stage's size (v0.74, the owner's note on a PC: «фотография открывается слишком огромным и
+     уходит часть за экраном»): with the rows left to size themselves, a photo taller than the stage (a 1440 × 1080
+     one in a 1920 × 880 window) made its own row as tall as itself — its `max-height: 100%` was 100 % of that — and
+     the stage cut its top and bottom off. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   will-change: transform;
 }
@@ -7658,5 +7663,97 @@ html.desk .mark-layer-body {
   padding: 0;
   font: inherit;
   color: var(--app-label-2);
+  cursor: pointer;
+}
+
+/* ---------- Notifications and reminders (v0.74, features/notify) ----------
+   «Уведомления»: this device's card on top (its state in a line, its one button), then the settings as the iPhone's
+   own groups — a switch, the hours, the days as chips, each kind a row with its switch. */
+.notify-card {
+  padding: 14px 16px;
+  margin-bottom: 4px;
+}
+.notify-device {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notify-device-body {
+  flex: 1;
+  min-width: 0;
+}
+.notify-group {
+  margin-top: var(--mantine-spacing-lg);
+}
+.notify-hours {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-label-2);
+}
+/* A time of the day: the phone's own wheel, as a grey pill of the row. */
+.time-input {
+  height: 36px;
+  min-width: 92px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--app-fill);
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.time-input:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-5);
+  outline-offset: 1px;
+}
+[data-mantine-color-scheme='dark'] .time-input {
+  color-scheme: dark;
+}
+/* The days of the week: seven chips across the row. */
+.ios-row.notify-days {
+  gap: 6px;
+  padding-block: 8px;
+}
+.ios-row.notify-days > .chip {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 0;
+  justify-content: center;
+}
+/* «Сегодня»: a reminder of one's own, added under the day's things. */
+.today-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--app-fill);
+  color: var(--mantine-color-cobalt-filled);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--dur-0) var(--spring), background-color var(--dur-1) ease;
+}
+.today-add:active {
+  transform: scale(0.98);
+  background: var(--app-press);
+}
+[data-mantine-color-scheme='dark'] .today-add {
+  color: var(--mantine-color-cobalt-4);
+}
+/* A reminder's job, in its sheet: the plate, the car, the number — a tap opens the job. */
+.reminder-job {
+  padding: 10px 12px;
   cursor: pointer;
 }

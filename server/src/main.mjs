@@ -7,6 +7,7 @@ import { createAi } from './ai.mjs';
 import { createApi, createPairing } from './api.mjs';
 import { createCards } from './cards.mjs';
 import { createEvents } from './events.mjs';
+import { createPush } from './push.mjs';
 import { createRelay } from './relay.mjs';
 import { loadConfig, VERSION } from './config.mjs';
 import { DIRS, openStore } from './store.mjs';
@@ -47,6 +48,9 @@ try {
 } catch (e) {
   log(`ai cache: ${e.message}`);
 }
+// Notifications on the phones (v0.74): the plan the app leaves here, sent through the browsers' push services.
+const push = createPush({ store, log, contact: config.pushContact });
+push.start();
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
@@ -97,7 +101,7 @@ function backupNow() {
   }
 }
 
-const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai }));
+const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai, push }));
 // Streams stay open (events): no idle cut-off on this side.
 api.keepAliveTimeout = 65_000;
 api.requestTimeout = 0;
@@ -108,7 +112,7 @@ api.listen(config.port, config.host, () => {
   // A permanent address (Docker and Tailscale, or given): the devices have it from the start.
   if (config.publicUrl) relay?.publish(config.publicUrl);
 });
-const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai }));
+const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();
@@ -123,6 +127,7 @@ function stop() {
   log('stopping');
   // The tunnel goes on: the server started next keeps it, and its address.
   tunnel.detach();
+  push.stop();
   relay?.stop();
   events.closeAll();
   api.close();

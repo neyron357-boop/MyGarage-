@@ -1,42 +1,52 @@
 import { ActionIcon, Modal } from '@mantine/core';
 import {
+  IconAlarm,
   IconArrowBackUp,
   IconBell,
   IconBuildingFactory2,
+  IconCalendarEvent,
   IconCash,
+  IconCheck,
   IconChevronRight,
   IconClock,
   IconDroplet,
   IconHourglassHigh,
   IconKey,
   IconMessageCircle,
+  IconPlus,
   IconShoppingCart,
   IconTag,
   IconTruckDelivery,
   IconX,
   type Icon,
 } from '@tabler/icons-react';
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { formatDate, hoursBetween, shortDuration } from '../../domain/dates';
+import { dubaiTime, formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
 import type { Task, TaskKind } from '../../domain/today';
-import type { Customer, Supplier } from '../../domain/types';
+import type { Customer, Reminder, Supplier } from '../../domain/types';
 import { simpleMessage } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
+import { setBadge } from '../../services/push';
+import { doneReminder, openReminders, restoreReminder } from '../../services/reminders';
 import { loadPast, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
-import { EmptyState, Money, PlateText } from '../../ui/components';
+import { EmptyState, Money, PlateText, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { SheetFor } from '../../ui/lazy';
 import { useAutoAnimate } from '../../ui/motion';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { useDueLabel } from '../job/Due';
+import { ReminderSheet } from '../notify/ReminderSheet';
 
 const NONE: Supplier[] = [];
+const NO_REMINDERS: Reminder[] = [];
 
-const META: Record<TaskKind, { icon: Icon; color: string }> = {
+/** Each kind of «Сегодня» as its symbol and colour (the notifications' settings show the same — features/notify). */
+export const TASK_META: Record<TaskKind, { icon: Icon; color: string }> = {
   promised: { icon: IconClock, color: 'orange' },
   answer: { icon: IconHourglassHigh, color: 'orange' },
   price: { icon: IconTag, color: 'grape' },
@@ -48,7 +58,10 @@ const META: Record<TaskKind, { icon: Icon; color: string }> = {
   debt: { icon: IconCash, color: 'red' },
   followUp: { icon: IconMessageCircle, color: 'green' },
   service: { icon: IconDroplet, color: 'cobalt' },
+  booked: { icon: IconCalendarEvent, color: 'gray' },
+  reminder: { icon: IconAlarm, color: 'cobalt' },
 };
+const META = TASK_META;
 
 /**
  * "Today" as a bell (v0.30, the user's call — the strip over the board is gone): a round button in the board's head with
@@ -67,10 +80,22 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
   // moment after the board's own cars are on it (v0.37).
   const past = useScreenLiveQuery(() => loadPast(), [bundles.length], 600, 600);
   const suppliers = useScreenLiveQuery(() => db.suppliers.toArray(), [], 600, 600) ?? NONE;
+  // The manager's own reminders (v0.74): due here from their day, until done.
+  const reminders = useScreenLiveQuery(() => openReminders(), [], 600, 600) ?? NO_REMINDERS;
+  const [reminder, setReminder] = useState<{ r?: Reminder } | null>(null);
+  // A notification tapped (v0.74) opens the app at «Сегодня»: `#/?today=1` — the list, the address clean again.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('today') !== '1') return;
+    setOpen(true);
+    setParams((p) => (p.delete('today'), p), { replace: true });
+  }, [params, setParams]);
   const [send, setSend] = useState<{ request: SendRequest; customer: Customer; task: Task } | null>(null);
   const list = useAutoAnimate<HTMLDivElement>();
-  const tasks = useMemo(() => tasksFor(bundles, past), [bundles, past]);
+  const tasks = useMemo(() => tasksFor(bundles, past, undefined, reminders), [bundles, past, reminders]);
   const late = tasks.some((x) => x.late);
+  // How many things wait — on the app's icon too (the iPhone's badge).
+  useEffect(() => setBadge(tasks.length), [tasks.length]);
 
   const byOrder = new Map(bundles.map((b) => [b.order.id, b]));
   const vehicleOf = (task: Task) => byOrder.get(task.orderId ?? '')?.vehicle ?? past?.vehicles.get(task.vehicleId);
@@ -104,6 +129,10 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
         return t('today.followUp');
       case 'service':
         return t('today.service');
+      case 'booked':
+        return t(task.late ? 'today.bookedLate' : 'today.booked', { time: dubaiTime(task.at) });
+      case 'reminder':
+        return task.text ?? t('reminder.title');
     }
   };
 
@@ -124,7 +153,16 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
       haptic('light');
     });
   const isCustomer = (task: Task) => task.kind === 'followUp' || task.kind === 'service';
+  /** A reminder done from the list (a repeating one moves on to its next time), with «Отменить». */
+  const done = (task: Task) =>
+    run(async () => {
+      if (!task.reminderId) return;
+      const before = await doneReminder(task.reminderId);
+      haptic('success');
+      undoToast(t('reminder.doneToast'), t('common.undo'), () => void restoreReminder(before));
+    });
   const go = (task: Task) => {
+    if (task.kind === 'reminder') return setReminder({ r: reminders.find((r) => r.id === task.reminderId) });
     setOpen(false);
     if (isCustomer(task)) write(task);
     else if (task.kind === 'pickup') navigate('/parts?tab=pickup');
@@ -168,6 +206,10 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
                   </span>
                   {task.kind === 'debt' && task.amountFils ? (
                     <Money fils={task.amountFils} c="red.7" fw={600} />
+                  ) : task.kind === 'reminder' ? (
+                    <ActionIcon variant="light" color="green" size={34} radius="xl" aria-label={t('reminder.done')} onClick={(e) => (e.stopPropagation(), void done(task))} data-reminder-tick>
+                      <IconCheck size={18} stroke={2.6} />
+                    </ActionIcon>
                   ) : isCustomer(task) ? (
                     <ActionIcon variant="subtle" color="gray" size={30} radius="xl" aria-label={t('today.notNeeded')} onClick={(e) => (e.stopPropagation(), void dismiss(task))}>
                       <IconX size={16} />
@@ -182,7 +224,13 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
         ) : (
           <EmptyState icon={IconBell} title={t('today.none')} />
         )}
+        {/* A reminder of the manager's own, set where the day's things are seen (v0.74). */}
+        <button type="button" className="today-add" onClick={() => setReminder({})} data-today-remind>
+          <IconPlus size={18} stroke={2.4} aria-hidden />
+          {t('reminder.add')}
+        </button>
       </Modal>
+      <SheetFor value={reminder}>{(v, o) => <ReminderSheet opened={o} onClose={() => setReminder(null)} reminder={v.r} />}</SheetFor>
       {send && (
         <SendDialog
           customer={send.customer}

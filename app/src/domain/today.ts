@@ -1,14 +1,15 @@
 import { addDays, dubaiDate, hoursBetween, nowIso, shiftDay } from './dates';
 import type { Phase } from './flow';
-import type { Debt, Order, OrderItem, Vehicle } from './types';
+import type { Debt, Order, OrderItem, Reminder, Vehicle } from './types';
 
 /**
  * The day's to-do list across all the cars: what needs the manager now, read from the jobs' facts —
  * a car promised for today, a customer who has not answered, parts to order or to collect, a part to
  * return before the seller's deadline, work outside due back, a car ready and not collected, an overdue
- * debt, and the customers to write to (how is the car, time for a service). Nothing is typed in.
+ * debt, and the customers to write to (how is the car, time for a service). Nothing is typed in — but the manager's
+ * own reminders (v0.74): what he set for himself is due here on its day. v0.74 too: a car booked for today.
  */
-export type TaskKind = 'promised' | 'answer' | 'price' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service';
+export type TaskKind = 'promised' | 'answer' | 'price' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder';
 
 export interface Task {
   kind: TaskKind;
@@ -27,10 +28,13 @@ export interface Task {
   itemId?: string;
   supplierId?: string;
   amountFils?: number;
+  /** A reminder: its record and its words. */
+  reminderId?: string;
+  text?: string;
 }
 
 export interface OpenJob {
-  order: Pick<Order, 'id' | 'vehicleId' | 'customerId' | 'promisedReadyAt' | 'stageChangedAt'>;
+  order: Pick<Order, 'id' | 'vehicleId' | 'customerId' | 'promisedReadyAt' | 'stageChangedAt' | 'bookedFor'>;
   phase: Phase;
   items: OrderItem[];
   debts: Pick<Debt, 'id' | 'status' | 'dueDate' | 'amountFils'>[];
@@ -52,6 +56,8 @@ export interface TodayInput {
   vehicles: Map<string, Pick<Vehicle, 'id' | 'serviceRemindedAt'>>;
   warnHours: number;
   alertHours: number;
+  /** The manager's own reminders (v0.74), not done yet. */
+  reminders?: Pick<Reminder, 'id' | 'text' | 'at' | 'orderId' | 'doneAt'>[];
   now?: string;
 }
 
@@ -83,12 +89,19 @@ export function todayTasks(input: TodayInput): Task[] {
     openVehicles.add(o.vehicleId);
     const base = { orderId: o.id, vehicleId: o.vehicleId, customerId: o.customerId };
     const since = (at: string) => hoursBetween(at, now);
+    // A car booked for today (v0.74): due at its time; its time gone and the car not here — late.
+    if (j.phase === 'booked' && o.bookedFor && dubaiDate(o.bookedFor) <= today) tasks.push({ ...base, kind: 'booked', key: `booked:${o.id}`, at: o.bookedFor, late: o.bookedFor < now });
     if (o.promisedReadyAt && working.includes(j.phase) && dubaiDate(o.promisedReadyAt) <= today)
       tasks.push({ ...base, kind: 'promised', key: `promised:${o.id}`, at: o.promisedReadyAt, late: o.promisedReadyAt < now });
     if (j.phase === 'wait' && j.waitingSince && since(j.waitingSince) >= input.warnHours)
       tasks.push({ ...base, kind: 'answer', key: `answer:${o.id}`, at: j.waitingSince, late: since(j.waitingSince) >= input.alertHours });
-    if (j.phase === 'price' && since(o.stageChangedAt) >= input.warnHours)
-      tasks.push({ ...base, kind: 'price', key: `price:${o.id}`, at: o.stageChangedAt, late: since(o.stageChangedAt) >= input.alertHours });
+    if (j.phase === 'price') {
+      // Since its newest line not told yet was written (v0.74: the car may have stood for days before — the price waits
+      // from the line, and a line just typed is not «late» at once).
+      const written = j.items.filter((i) => i.approvalState === 'draft' && i.kind !== 'discount').map((i) => i.createdAt).sort().pop();
+      const at = written && written > o.stageChangedAt ? written : o.stageChangedAt;
+      if (since(at) >= input.warnHours) tasks.push({ ...base, kind: 'price', key: `price:${o.id}`, at, late: since(at) >= input.alertHours });
+    }
     // Parts the customer agreed to and nobody ordered yet.
     const toOrder = j.items.filter((i) => i.kind === 'part' && !i.customerSupplied && i.approvalState === 'approved' && !i.done && (i.procurementStatus ?? 'needed') === 'needed');
     if (toOrder.length) {
@@ -123,6 +136,12 @@ export function todayTasks(input: TodayInput): Task[] {
     for (const d of j.debts)
       if (d.status === 'open' && d.dueDate <= today)
         tasks.push({ ...base, kind: 'debt', key: `debt:${d.id}`, at: `${d.dueDate}T00:00:00.000Z`, late: d.dueDate < today, amountFils: d.amountFils });
+  }
+
+  // What the manager set for himself (v0.74): from its day on, until it is done; its time gone — late.
+  for (const r of input.reminders ?? []) {
+    if (r.doneAt || dubaiDate(r.at) > today) continue;
+    tasks.push({ kind: 'reminder', key: `reminder:${r.id}`, orderId: r.orderId, vehicleId: '', customerId: '', at: r.at, late: r.at <= now, reminderId: r.id, text: r.text });
   }
 
   // "How is the car?" a few days after it left (the app's own jobs, repaired, with a phone to write to).

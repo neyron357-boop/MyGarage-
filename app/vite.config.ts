@@ -49,6 +49,8 @@ export default defineConfig(({ mode }) => {
           ],
         },
         workbox: {
+          // The app's notifications (v0.74): what the garage's server pushes is shown, a tap opens its job (public/push-sw.js).
+          importScripts: ['push-sw.js'],
           // Everything the app needs offline, including the fonts embedded into PDF documents.
           // (.woff duplicates of .woff2 are skipped: every supported browser reads woff2.)
           globPatterns: ['**/*.{js,mjs,css,html,woff2,ttf,png,svg,webmanifest}'],

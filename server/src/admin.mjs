@@ -41,6 +41,8 @@ const page = `<!doctype html>
 <div class="card" id="tunnel">…</div>
 <h2>ИИ (Gemini)</h2>
 <div class="card" id="ai">…</div>
+<h2>Уведомления</h2>
+<div class="card" id="push">…</div>
 <h2>Устройства</h2>
 <div class="card" id="devices">…</div>
 <h2>Где данные</h2>
@@ -68,6 +70,7 @@ async function load() {
   document.getElementById('folder').textContent = s.dataDir;
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel, s.relay);
   if (!aiTyping) document.getElementById('ai').innerHTML = aiHtml(s.ai);
+  document.getElementById('push').innerHTML = pushHtml(s.push);
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
     '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br>' + (d.live ? '<span class="ok">● на связи сейчас</span>' : '<span class="dim">был на связи: ' + when(d.last_seen) + '</span>') + '</span>' +
     (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
@@ -89,6 +92,13 @@ function tunnelHtml(t, r) {
       : asking ? '<p style="margin:0 0 12px">Сервер станет доступен из интернета через Cloudflare. Данные можно получить только с устройства, подключённого по коду с этого компьютера. Включить?</p>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="setTunnel(1)">Включить</button><button class="ghost" onclick="askTunnel(false)">Отмена</button></div>'
       : '<button onclick="askTunnel(true)">Включить доступ из интернета</button>');
+}
+// Notifications on the phones (v0.74, push.mjs): who takes them, what is planned, when the last one went.
+function pushHtml(p) {
+  if (!p) return '<span class="dim">—</span>';
+  return '<div class="row"><span>Устройств с уведомлениями</span><span>' + (p.devices ? '<span class="ok">● ' + p.devices + '</span>' : '<span class="dim">нет — включаются в приложении: Ещё → Уведомления</span>') + '</span></div>' +
+    '<div class="row"><span>В плане</span><span>' + (p.groups ? p.groups + ' · обновлён ' + esc(when(p.madeAt)) : '<span class="dim">пусто</span>') + '</span></div>' +
+    '<div class="row"><span>Последнее отправлено</span><span>' + (p.lastAt ? esc(when(p.lastAt)) + ' · всего ' + p.sent : '<span class="dim">—</span>') + (p.error ? ' <span class="bad">' + esc(p.error) + '</span>' : '') + '</span></div>';
 }
 // The key is typed or pasted here only: it stays on this computer (Служебное/ai.json), the page shows its last four.
 let aiTyping = false;
@@ -140,7 +150,7 @@ async function copyLink() {
 load(); setInterval(load, 5000);
 </script></body></html>`;
 
-export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai }) {
+export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push }) {
   return async function admin(req, res) {
     const url = new URL(req.url, 'http://local');
     const json = (body) => {
@@ -166,6 +176,7 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
         tunnel: { available: !!tunnel && !!config.tunnelExe && tunnel.available(), on: !!tunnel?.on(), url: tunnel?.url() ?? '' },
         relay: relay?.status() ?? null,
         ai: ai?.status() ?? null,
+        push: push?.status() ?? null,
         ...store.counts(),
       });
     }
@@ -213,6 +224,8 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
     if (req.method === 'POST' && url.pathname === '/revoke') {
       store.revoke(url.searchParams.get('id') || '');
       events?.drop(url.searchParams.get('id') || '');
+      // A device cut off takes no more notifications.
+      push?.unsubscribe(url.searchParams.get('id') || '');
       return json({ ok: true });
     }
     res.writeHead(404);
