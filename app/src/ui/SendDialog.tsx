@@ -1,5 +1,5 @@
 import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, Textarea } from '@mantine/core';
-import { IconBrandTelegram, IconBrandWhatsapp, IconCheck, IconCopy, IconPhoto, IconShare } from '@tabler/icons-react';
+import { IconBrandTelegram, IconBrandWhatsapp, IconCheck, IconCopy, IconPhoto, IconShare, IconUserShield } from '@tabler/icons-react';
 import { mediaBlob } from '../services/media';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -14,7 +14,11 @@ import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
 import { numberOnWa, sendWaFile, sendWaText, useWaPrefs, waReady } from '../services/whatsapp';
 import { useWaSel } from './waSel';
 import { SelectCard } from './components';
-import { useErrorText } from './hooks';
+import { useErrorText, useSettings } from './hooks';
+import { waAutoOf, type WaTarget } from '../domain/waAuto';
+import { saveWaAuto } from '../services/waAuto';
+import { tFor } from '../i18n';
+import { ChatPicker } from '../features/whatsapp/ChatPicker';
 import { LazySheet } from './lazy';
 
 export interface SendRequest {
@@ -28,6 +32,11 @@ export interface SendRequest {
   onConfirm?: () => Promise<unknown>;
   /** Photos that go with the text (what was found, what was done): shared together from the phone. */
   photos?: string[];
+  /**
+   * The PDF for the boss to look at first (v0.80.3): one that freezes nothing — a new estimate's quote (its own `pdf`
+   * makes the version). None — `pdf` itself.
+   */
+  bossPdf?: () => Promise<{ blob: Blob; filename: string }>;
 }
 
 /** The photos as files, ready before the tap (iOS shares only straight from a tap). */
@@ -81,12 +90,19 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
   const [sending, setSending] = useState(false);
   const [withPdf, setWithPdf] = useState(true);
   const [withPhotos, setWithPhotos] = useState(true);
+  // The boss first (v0.80.3, «сначала боссу, потом клиенту по желанию»): sent — said on the button; not picked — picked.
+  const settings = useSettings();
+  const boss = waAutoOf(settings?.waAuto).boss;
+  const [bossDone, setBossDone] = useState(false);
+  const [bossSending, setBossSending] = useState(false);
+  const [pickingBoss, setPickingBoss] = useState(false);
 
   useEffect(() => {
     if (live) {
       setText(live.text);
       setOpened(false);
       setCopied(false);
+      setBossDone(false);
     }
   }, [live]);
 
@@ -129,6 +145,34 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
     } finally {
       setSending(false);
     }
+  };
+
+  /** To the boss: a line whose it is, the words as they will go, the PDF — nothing frozen, nothing logged for the customer. */
+  const sendBoss = async (to: WaTarget) => {
+    setBossSending(true);
+    try {
+      const lang = boss.lang;
+      const who = customer.name || formatPhone(phone);
+      await sendWaText(to.chat, `${tFor(lang)('msg.forCustomer', { name: who, phone: phone ? ` (${formatPhone(phone)})` : '' }).trim()}\n\n${text}`);
+      const pdf = request.bossPdf ?? request.pdf;
+      if (pdf && withPdf) {
+        const { blob, filename } = await pdf();
+        await sendWaFile(to.chat, blob, { name: filename, doc: true });
+      }
+      setBossDone(true);
+      haptic('success');
+      notifications.show({ color: 'green', message: t('wa.sentToBoss'), icon: <IconCheck size={18} stroke={2.6} /> });
+    } catch (e) {
+      haptic('error');
+      notifications.show({ color: 'red', message: errorText(e), autoClose: 7000 });
+    } finally {
+      setBossSending(false);
+    }
+  };
+  // The boss picked here the first time: the boss of the automation from now on — its reports not turned on by it.
+  const pickBoss = (to: WaTarget) => {
+    void saveWaAuto('boss', settings?.waAuto?.boss?.on === undefined ? { to, on: false } : { to });
+    void sendBoss(to);
   };
 
   const shareFile = async () => {
@@ -210,6 +254,21 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
               </Button>
             </>
           )}
+          {waLinked && (
+            <Button
+              fullWidth
+              size="md"
+              variant="light"
+              color="green"
+              loading={bossSending}
+              disabled={bossDone}
+              leftSection={bossDone ? <IconCheck size={20} /> : <IconUserShield size={20} />}
+              onClick={() => (boss.to ? void sendBoss(boss.to) : setPickingBoss(true))}
+              data-send-boss
+            >
+              {bossDone ? t('wa.sentToBoss') : t('wa.toBossFirst')}
+            </Button>
+          )}
           <Button
             fullWidth
             size="md"
@@ -268,6 +327,7 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
           </Group>
         )}
       </Stack>
+      {waLinked && <ChatPicker opened={pickingBoss} onClose={() => setPickingBoss(false)} onPick={pickBoss} kind="person" title={t('wa.pickBoss')} />}
     </Modal>
   );
 }

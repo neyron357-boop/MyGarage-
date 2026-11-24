@@ -1,7 +1,8 @@
 import { db } from '../db/db';
 import { activeInvoice } from '../domain/invoice';
 import { lastChange } from '../domain/flow';
-import type { Customer } from '../domain/types';
+import type { Customer, Order } from '../domain/types';
+import { search } from './customers';
 import { loadDebtors } from './debts';
 import { bundleAmountDue, loadRowBundles, type OrderBundle } from './orders';
 
@@ -25,6 +26,29 @@ export interface ChatJobs {
 /** A company's own group chat (`Customer.waGroup`, v0.79): whose group it is. */
 export async function customerOfGroup(chatId: string): Promise<Customer | undefined> {
   return db.customers.filter((c) => c.waGroup?.chat === chatId).first();
+}
+
+/**
+ * Any job's documents for a chat that is not its customer's (v0.80.3, the owner: «если это не клиент или босс — чтобы
+ * можно было отправлять по выбору инвойс или смету по поиску»): a job's number, a plate, a car, a customer's name or
+ * number — its jobs, the newest first. Nothing typed — the jobs on the board now.
+ */
+export async function findJobs(query: string, limit = 8): Promise<OrderBundle[]> {
+  const q = query.trim();
+  let orders: Order[];
+  if (!q) orders = await db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
+  else {
+    // Digits: the job of that number — and the cars and people they are in (a plate is digits too); «№…» — the job only.
+    const byNumber = /^[#№]?\d{1,5}$/.test(q) ? await db.orders.where('number').equals(Number(q.replace(/\D/g, ''))).toArray() : [];
+    const hits = /^[#№]/.test(q) ? [] : await search(q, 40);
+    const cars = new Set(hits.map((h) => h.vehicle?.id).filter((x): x is string => !!x));
+    const people = new Set(hits.filter((h) => !h.vehicle).map((h) => h.customer.id));
+    const [byCar, byPerson] = await Promise.all([cars.size ? db.orders.where('vehicleId').anyOf([...cars]).toArray() : [], people.size ? db.orders.where('customerId').anyOf([...people]).toArray() : []]);
+    orders = [...new Map([...byNumber, ...byCar, ...byPerson].map((o) => [o.id, o])).values()];
+  }
+  const bundles = (await loadRowBundles(orders.filter((o) => o.stage !== 'cancelled'))).filter((b): b is OrderBundle => !!b);
+  const at = new Map(bundles.map((b) => [b.order.id, lastChange(b)]));
+  return bundles.sort((a, b) => (at.get(b.order.id) ?? '').localeCompare(at.get(a.order.id) ?? '')).slice(0, limit);
 }
 
 export async function chatJobs(customerId: string | undefined, jobId?: string): Promise<ChatJobs> {

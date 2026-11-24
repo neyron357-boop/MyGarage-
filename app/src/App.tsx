@@ -8,14 +8,17 @@ import {
   IconCash,
   IconChartBar,
   IconInfoCircle,
+  IconLayoutColumns,
   IconLayoutKanban,
   IconNotes,
   IconPackage,
   IconPalette,
+  IconPlus,
   IconSearch,
   IconSettings,
   IconTruck,
   IconUsers,
+  IconX,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useMemo, useRef, useState, type ContextType } from 'react';
@@ -58,6 +61,7 @@ import { PhoneStack, useViewportSync } from './ui/stack';
 import { DeskContext, DeskKeys, DeskPaneContext, MOD_KEY, deskPage, setActivePane, sheetOpen, useDeskShell, useDeskWheel, type DeskPaneInfo } from './ui/desk';
 import { DeskTips } from './ui/deskTips';
 import { useWaSideHidden } from './ui/deskSide';
+import { closeTwin, keepTwinPath, openTwin, useTwin } from './ui/deskTwin';
 import { DeskPalette } from './features/search/DeskPalette';
 import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
@@ -191,6 +195,7 @@ function SideNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const cash = useLiveQuery(cashState, []);
+  const twinOpen = !!useTwin();
   const settings = useSettings();
   // WhatsApp messages waiting to be read (v0.78): a number beside its item — its own component (v0.80.2): the menu does not
   // draw again at each message.
@@ -242,6 +247,11 @@ function SideNav() {
             <Money fils={cash.expected} fw={600} />
           </UnstyledButton>
         )}
+        {/* A second tab beside the screen (v0.80.3): opened from anywhere, closed by its own «×». */}
+        <UnstyledButton className="desk-side-btn" onClick={() => (twinOpen ? closeTwin() : openTwin('/'))} aria-pressed={twinOpen} data-twin-side>
+          <IconLayoutColumns size={18} stroke={1.9} aria-hidden />
+          <span>{t(twinOpen ? 'desk.twinClose' : 'desk.twin')}</span>
+        </UnstyledButton>
         <AppearanceButton />
       </div>
     </>
@@ -316,18 +326,50 @@ function ScrollManager() {
   return null;
 }
 
-/* ---------------- PC: a job beside the job (v0.80) ---------------- */
+/* ---------------- PC: a second tab beside the screen (v0.80, v0.80.3) ---------------- */
 
-/** A job's own address (the side pane follows it into the window's: `?side=`). `new` — a new job being taken in. */
-const SIDE_JOB = /^\/orders\/([^/]+)$/;
 const MAIN_PANE: DeskPaneInfo = { id: 'main' };
 
-/** The screens of the side pane, on its own address: what it shows goes into the window's address; the board — it closes. */
-function SidePaneRoutes({ onShow, onClose }: { onShow: (side: string) => void; onClose: () => void }) {
+/** The second tab's places, one click each (v0.80.3: «новая вкладка всего приложения… всё, что захочу»). */
+const TWIN_PLACES = [
+  { to: '/', icon: IconLayoutKanban, key: 'nav.board', end: true },
+  { to: '/search', icon: IconSearch, key: 'nav.search' },
+  { to: '/orders/new', icon: IconPlus, key: 'nav.newOrder' },
+  { to: '/customers', icon: IconUsers, key: 'nav.customers' },
+  { to: '/parts', icon: IconPackage, key: 'nav.parts' },
+  { to: '/money', icon: IconCash, key: 'nav.money' },
+  { to: '/whatsapp', icon: IconBrandWhatsapp, key: 'nav.whatsapp' },
+];
+
+/** The second tab's own bar: its places and «×» (it is closed only so — the board, Back, the left screen leave it be). */
+function TwinBar() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  return (
+    <div className="desk-twin-bar" role="toolbar" aria-label={t('desk.twin')}>
+      {TWIN_PLACES.map((pl) => {
+        const on = pl.end ? pathname === pl.to : pathname.startsWith(pl.to);
+        return (
+          // A symbol each (its name under the mouse — ui/deskTips.tsx): all of them and «×» fit half a window.
+          <UnstyledButton key={pl.to} className="desk-twin-place" aria-label={t(pl.key)} data-active={on || undefined} aria-current={on ? 'page' : undefined} onClick={() => navigate(pl.to)} data-twin-place={pl.to}>
+            <pl.icon size={18} stroke={1.9} aria-hidden />
+          </UnstyledButton>
+        );
+      })}
+      <UnstyledButton className="desk-twin-close" aria-label={t('common.close')} onClick={closeTwin} data-twin-close>
+        <IconX size={18} stroke={2} aria-hidden />
+      </UnstyledButton>
+    </div>
+  );
+}
+
+/** The screens of the second tab, on its own address (kept for the next time it is opened). */
+function SidePaneRoutes() {
   const location = useLocation();
   const type = useNavigationType();
   const navigate = useNavigate();
-  // How deep in its own history (where its «Назад» leads): at the first screen «Назад» closes the pane.
+  // How deep in its own history (where its «Назад» leads): at the first screen «Назад» closes the tab.
   const [depth, setDepth] = useState(0);
   const last = useRef(location.key);
   useEffect(() => {
@@ -335,15 +377,11 @@ function SidePaneRoutes({ onShow, onClose }: { onShow: (side: string) => void; o
     last.current = location.key;
     setDepth((d) => (type === 'PUSH' ? d + 1 : type === 'POP' ? Math.max(0, d - 1) : d));
   }, [location.key, type]);
-  useEffect(() => {
-    if (location.pathname === '/') return onClose();
-    const m = SIDE_JOB.exec(location.pathname);
-    if (m) onShow(m[1]);
-    return undefined;
-  }, [location.pathname, onShow, onClose]);
-  const pane = useMemo<DeskPaneInfo>(() => ({ id: 'side', closes: depth === 0, back: () => (depth > 0 ? navigate(-1) : onClose()) }), [depth, navigate, onClose]);
+  useEffect(() => keepTwinPath(location.pathname + location.search), [location.pathname, location.search]);
+  const pane = useMemo<DeskPaneInfo>(() => ({ id: 'side', closes: depth === 0, back: () => (depth > 0 ? navigate(-1) : closeTwin()) }), [depth, navigate]);
   return (
     <DeskPaneContext.Provider value={pane}>
+      <TwinBar />
       <ErrorBoundary resetKey={location.pathname}>
         <div key={location.pathname} className="page-enter" data-pane-page={deskPage(location.pathname)}>
           <AppRoutes location={location} />
@@ -354,16 +392,16 @@ function SidePaneRoutes({ onShow, onClose }: { onShow: (side: string) => void; o
 }
 
 /**
- * The side pane: a router of its own (its screens open, go back and take in a new job there, the window's screen stays).
- * React Router keeps one router to a page — the window's is left out of this one (its contexts cleared for it).
+ * The second tab: a router of its own (its screens open and go back there, the window's screen stays). React Router
+ * keeps one router to a page — the window's is left out of this one (its contexts cleared for it).
  */
-function SidePane({ start, onShow, onClose }: { start: string; onShow: (side: string) => void; onClose: () => void }) {
-  const [first] = useState(() => `/orders/${start}`);
+function SidePane({ start }: { start: string }) {
+  const [first] = useState(start);
   return (
     <UNSAFE_LocationContext.Provider value={null as unknown as ContextType<typeof UNSAFE_LocationContext>}>
       <UNSAFE_RouteContext.Provider value={{ outlet: null, matches: [], isDataRoute: false }}>
         <MemoryRouter initialEntries={[first]}>
-          <SidePaneRoutes onShow={onShow} onClose={onClose} />
+          <SidePaneRoutes />
         </MemoryRouter>
       </UNSAFE_RouteContext.Provider>
     </UNSAFE_LocationContext.Provider>
@@ -373,26 +411,9 @@ function SidePane({ start, onShow, onClose }: { start: string; onShow: (side: st
 function DesktopShell() {
   const { t } = useTranslation();
   const location = useLocation();
-  const navigate = useNavigate();
-  // A job beside the job (v0.80): `?side=` of a job's address — `new` or the other job's id.
-  const side = new URLSearchParams(location.search).get('side');
-  const twin = !!side && /^\/orders\/(?!new$)[^/]+$/.test(location.pathname);
-  const here = useRef(location);
-  here.current = location;
-  const setSide = useCallback(
-    (v: string | null) => {
-      const loc = here.current;
-      const p = new URLSearchParams(loc.search);
-      if ((p.get('side') ?? null) === v) return;
-      if (v) p.set('side', v);
-      else p.delete('side');
-      const search = p.toString();
-      navigate({ pathname: loc.pathname, search: search ? `?${search}` : '' }, { replace: true });
-    },
-    [navigate],
-  );
-  const showSide = useCallback((v: string) => setSide(v), [setSide]);
-  const closeSide = useCallback(() => setSide(null), [setSide]);
+  // The second tab (v0.80.3): open beside whatever screen the window shows; closed only by its own «×».
+  const side = useTwin();
+  const twin = !!side;
   useEffect(() => {
     if (!twin) setActivePane('main');
   }, [twin]);
@@ -426,7 +447,7 @@ function DesktopShell() {
                     </DeskPaneContext.Provider>
                   </section>
                   <section className="desk-twin-pane" data-pane="side" aria-label={t('desk.twin')} onPointerDownCapture={() => setActivePane('side')} onFocusCapture={() => setActivePane('side')}>
-                    <SidePane start={side} onShow={showSide} onClose={closeSide} />
+                    <SidePane start={side} />
                   </section>
                 </div>
               ) : (

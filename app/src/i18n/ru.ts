@@ -41,7 +41,8 @@ export const ru = {
   desk: {
     keys: 'Клавиши',
     // A new job beside the job (v0.80).
-    twin: 'Заказ рядом',
+    twin: 'Вкладка рядом',
+    twinClose: 'Закрыть вкладку',
     keyLines: 'Работа · Запчасть · Услуга в заказе',
     keyClose: 'Закрыть окно',
     actions: 'Действия',
@@ -1882,8 +1883,16 @@ export const ru = {
       report: 'Отчёт в группу',
       job: 'Заказ',
       jobs: 'Работы',
+      find: 'Заказ: номер, машина, клиент',
       sent: 'Отправлено',
     },
+    // v0.80.3
+    forward: 'Переслать',
+    forwardTo: 'Переслать в',
+    forwarded2: 'Переслано: {{name}}',
+    toBossFirst: 'Сначала боссу',
+    sentToBoss: 'Отправлено боссу',
+    pickBoss: 'Чат босса',
     search: 'Имя или номер',
     tab: { all: 'Все', unread: 'Новые', customers: 'Клиенты', suppliers: 'Поставщики', groups: 'Группы' },
     who: { customer: 'Клиент', supplier: 'Поставщик', employee: 'Сотрудник', driver: 'Водитель' },
@@ -2414,6 +2423,10 @@ export const ru = {
     replace: 'Заменить',
   },
   msg: {
+    // v0.80.3: a customer's message forwarded; the boss sees what goes to the customer first.
+    forwardFrom: 'От клиента {{name}} ({{phone}}):',
+    forwardFromName: 'От клиента {{name}}:',
+    forCustomer: 'Для клиента {{name}}{{phone}} — клиенту ещё не отправлено:',
     optionsHeader: 'Здравствуйте, {{name}}! Для {{car}} ({{plate}}) — {{part}}, есть варианты:',
     optionsAsk: 'Какой ставим? Ответьте номером.',
     reportHeader: 'Заказ №{{number}} — готово ✅',

@@ -318,6 +318,20 @@ export async function sendWaText(chat: string, text: string, quote?: WaMessage):
   }
 }
 
+/**
+ * A message forwarded to another chat (v0.80.3, the owner: «пересылка в каждом сообщении; если это клиент — короткое
+ * примечание, от какого клиента»): WhatsApp's own forwarding (the file goes with it); `note` — a line sent just before it.
+ */
+export async function forwardWa(message: Pick<WaMessage, 'id'>, to: string, note?: string): Promise<void> {
+  if (!waReady()) throw new AppError('wa.err.notReady');
+  if (note?.trim()) await sendWaText(to, note);
+  try {
+    await call('forward', { method: 'POST', body: { id: message.id, to }, timeout: 90_000 });
+  } catch (e) {
+    throw failure(e);
+  }
+}
+
 /** A message that did not go: taken out of the chat (to be written again). */
 export function dropFailed(chat: string, id: string) {
   const list = store.messages[chat];

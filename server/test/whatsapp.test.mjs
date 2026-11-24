@@ -237,6 +237,7 @@ describe('whatsapp through the server', () => {
       if (url.pathname === '/send') return json({ ok: true, msg: { id: 'true_971501234567@c.us_BB1', text: JSON.parse(body).text } });
       if (url.pathname === '/file') return json({ ok: true, msg: { id: 'true_971501234567@c.us_BB2' }, size: body.length });
       if (url.pathname === '/number') return json({ ok: true, chat: '971501234567@c.us' });
+      if (url.pathname === '/forward') return json({ ok: true });
       if (url.pathname === '/media') {
         if (url.searchParams.get('id') === 'gone') return json({ ok: false, error: 'the file is no longer on WhatsApp' }, 404);
         const m = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range || '');
@@ -305,6 +306,12 @@ describe('whatsapp through the server', () => {
     const msgs = await (await call(`/api/wa/messages?chat=${encodeURIComponent('971501234567@c.us')}&limit=40`)).json();
     assert.equal(msgs.messages[0].text, 'Hello');
     assert.deepEqual(asked.at(-1).query, { chat: '971501234567@c.us', limit: '40' });
+  });
+
+  it('v0.80.3: a message forwarded to another chat — only its id and where to, by the device’s key', async () => {
+    const r = await (await call('/api/wa/forward', { method: 'POST', body: { id: 'false_971501234567@c.us_AA1', to: '120363000000000001@g.us', extra: 'no' } })).json();
+    assert.equal(r.ok, true);
+    assert.deepEqual(JSON.parse(asked.at(-1).body), { id: 'false_971501234567@c.us_AA1', to: '120363000000000001@g.us' });
   });
 
   it('a text and a file are sent', async () => {

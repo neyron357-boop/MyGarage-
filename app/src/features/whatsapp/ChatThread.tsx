@@ -4,6 +4,7 @@ import {
   IconAlertCircle,
   IconArrowBackUp,
   IconArrowDown,
+  IconArrowForwardUp,
   IconArrowUp,
   IconBan,
   IconBrandWhatsapp,
@@ -26,7 +27,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiTime } from '../../domain/dates';
 import { clock, fileSize, groupDays, kindOf, MAX_FILE_BYTES, sendKind, type WaMessage, type Who } from '../../domain/whatsapp';
-import { dropFailed, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
+import { dropFailed, forwardWa, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
 import { copyText } from '../../ui/clipboard';
 import { StickyBar } from '../../ui/components';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
@@ -41,6 +42,8 @@ import { useWaSel } from '../../ui/waSel';
 import { useSwipeReply } from '../../ui/swipeReply';
 import { startVideo, VideoPlayer } from '../../ui/VideoPlayer';
 import { ChatQuick, type QuickFor } from './ChatQuick';
+import { ChatPicker } from './ChatPicker';
+import { forwardNote } from './forwardNote';
 import { KIND_ICON, Marked, Ticks } from './WaParts';
 
 /*
@@ -499,10 +502,9 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field, quick, des
           radius="xl"
           variant="default"
           className="notes-round glass"
-          aria-label={t(quick ? 'wa.quick.title' : 'wa.attach')}
-          aria-haspopup={quick ? 'menu' : undefined}
+          aria-label={t('wa.quick.title')}
+          aria-haspopup="menu"
           onClick={(e) => {
-            if (!quick) return gallery.current?.click();
             const r = e.currentTarget.getBoundingClientRect();
             setQuickAt({ x: r.left, y: r.top - 4 });
           }}
@@ -550,7 +552,8 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field, quick, des
         {input(camera, { accept: 'image/*', capture: 'environment' })}
       </div>
       <SheetFor value={picked}>{(list, o) => <FilesSheet files={list} to={title} opened={o} onClose={closePicked} onSend={sendFiles} />}</SheetFor>
-      {quick && <ChatQuick chatId={chatId} quick={quick} desk={desk} at={quickAt} opened={!!quickAt} onClose={() => setQuickAt(null)} onFiles={() => gallery.current?.click()} />}
+      {/* «＋» (v0.80.3): a customer's chat — their jobs; any other — any job found, and files as ever. */}
+      <ChatQuick chatId={chatId} quick={quick ?? {}} desk={desk} at={quickAt} opened={!!quickAt} onClose={() => setQuickAt(null)} onFiles={() => gallery.current?.click()} />
     </div>
   );
 }
@@ -563,7 +566,7 @@ function useScroller(pane: React.RefObject<HTMLDivElement>) {
   return useCallback(() => screen?.scroller.current ?? pane.current, [screen, pane]);
 }
 
-export function ChatThread({ chatId, title, group, people, desk, quick }: { chatId: string; title: string; group: boolean; people: Map<string, Who>; desk: boolean; /** Whose chat it is, for «＋»'s quick actions (v0.80). */ quick?: QuickFor }) {
+export function ChatThread({ chatId, title, group, people, desk, quick, who, phone }: { chatId: string; title: string; group: boolean; people: Map<string, Who>; desk: boolean; /** Whose chat it is, for «＋»'s quick actions (v0.80). */ quick?: QuickFor; /** Who the chat is with, and their number: a customer's message forwarded says whose it is (v0.80.3). */ who?: Who; phone?: string }) {
   const { t } = useTranslation();
   const lang = useLang();
   const errorText = useErrorText();
@@ -583,6 +586,8 @@ export function ChatThread({ chatId, title, group, people, desk, quick }: { chat
   const [viewing, setViewing] = useState<string | null>(null);
   const [film, setFilm] = useState<{ el: HTMLVideoElement; m: WaMessage } | null>(null);
   const [down, setDown] = useState(false);
+  // A message being forwarded: the chat it goes to is picked (v0.80.3).
+  const [forwarding, setForwarding] = useState<WaMessage | null>(null);
 
   // Read when the chat is opened, and again when WhatsApp is back.
   useEffect(() => {
@@ -721,6 +726,7 @@ export function ChatThread({ chatId, title, group, people, desk, quick }: { chat
     const hasFile = !!m.file && !m.pending;
     return [
       ...(!m.pending && !m.failed ? [{ key: 'reply', label: t('wa.reply'), icon: IconArrowBackUp, onClick: () => onReply(m) }] : []),
+      ...(!m.pending && !m.failed ? [{ key: 'forward', label: t('wa.forward'), icon: IconArrowForwardUp, onClick: () => setForwarding(m) }] : []),
       ...(m.text ? [{ key: 'copy', label: t('wa.copy'), icon: IconCopy, onClick: () => void copyText(m.text).then((ok) => ok && notifications.show({ color: 'green', message: t('common.copied') })) }] : []),
       ...(hasFile ? [{ key: 'file', label: t(desk ? 'wa.save' : 'wa.share'), icon: desk ? IconDownload : IconShare2, onClick: () => void fileOf(m).then((f) => f && (desk ? downloadFile(f) : shareOrDownload(f))) }] : []),
       ...(m.failed ? [{ key: 'drop', label: t('wa.remove'), icon: IconTrash, color: 'red', onClick: () => dropFailed(chatId, m.id) }] : []),
@@ -854,6 +860,28 @@ export function ChatThread({ chatId, title, group, people, desk, quick }: { chat
             </Modal>
           )}
         </SheetFor>
+      )}
+      {forwarding && (
+        <ChatPicker
+          opened={!!forwarding}
+          onClose={() => setForwarding(null)}
+          kind="person"
+          title={t('wa.forwardTo')}
+          onPick={(to) => {
+            const m = forwarding;
+            setForwarding(null);
+            // A customer's message says whose it is (the chat's customer, or in a group the customer who wrote it).
+            const from = m.me ? undefined : group ? (m.from?.phone ? people.get(m.from.phone) : undefined) : who;
+            const fromPhone = group ? m.from?.phone : phone;
+            void forwardNote(from?.kind === 'customer' ? { name: from.name, phone: fromPhone } : undefined)
+              .then((note) => forwardWa(m, to.chat, note))
+              .then(() => {
+                haptic('success');
+                notifications.show({ color: 'green', message: t('wa.forwarded2', { name: to.name }) });
+              })
+              .catch((e) => notifications.show({ color: 'red', message: errorText(e) }));
+          }}
+        />
       )}
       {film && <VideoPlayer video={film.el} file={() => waFileBlob(film.m)} onClose={() => setFilm(null)} />}
       {viewing && (

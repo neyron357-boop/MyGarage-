@@ -245,6 +245,7 @@ function wire(c) {
       mark(me);
       set('ready', { qr: '', code: '', error: '', loading: 100, readyAt: Date.now(), web, platform: c.info?.platform || '' });
       void loadIndex();
+      void ensureEvents(c);
       // How the page stands at this moment, for the log: what a later WhatsApp Web changes is seen against it.
       c.pupPage
         .evaluate(PAGE_STANDS)
@@ -410,6 +411,27 @@ setInterval(async () => {
     again('not ready');
   }
 }, 5000).unref();
+
+/**
+ * WhatsApp's own events on the page (v0.80.3, the owner: «список чатов нормально не обновляется»; seen live: ready, and
+ * not one message, tick or unread heard). The library ties them on in the same call that loads its helpers into the page —
+ * and skips that when its helpers are there already: ready by the watchdog (above), it was ready and deaf. After ready,
+ * and every minute while ready, the page is asked whether its hooks are there; none — they are tied on now.
+ */
+async function ensureEvents(c) {
+  try {
+    const has = await within(c.pupPage.evaluate(() => typeof window.onAddMessageEvent === 'function' && typeof window.onMessageAckEvent === 'function'), 10_000, 'events');
+    if (has || client !== c) return;
+    log('events: not tied on — tied on now');
+    await within(c.attachEventListeners(), 60_000, 'events');
+  } catch (e) {
+    log(`events: ${e?.message || e}`);
+  }
+}
+setInterval(() => {
+  const c = client;
+  if (c?.pupPage && state.phase === 'ready') void ensureEvents(c);
+}, 60_000).unref();
 
 /* ---------- The chats ---------- */
 
@@ -708,6 +730,19 @@ async function sendText(body) {
   return { ok: true, msg: row };
 }
 
+/** A message of a chat forwarded to another (v0.80.3): WhatsApp's own forwarding — its file goes with it, marked so. */
+async function forwardMessage(body) {
+  const c = need();
+  const id = String(body.id ?? '');
+  if (!MESSAGE_ID.test(id)) throw httpError(400, 'bad message');
+  const to = chatParam(body.to);
+  allow();
+  const m = await within(c.getMessageById(id), 20_000, 'message');
+  if (!m) throw httpError(404, 'no message');
+  await within(m.forward(to), 60_000, 'forward');
+  return { ok: true };
+}
+
 async function sendFile(url, bytes, type) {
   const c = need();
   const chat = chatParam(url.searchParams.get('chat'));
@@ -890,6 +925,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, publicState());
       }
       if (p === '/send') return sendJson(res, 200, await sendText(await readJson(req)));
+      if (p === '/forward') return sendJson(res, 200, await forwardMessage(await readJson(req)));
       if (p === '/file') return sendJson(res, 200, await sendFile(url, await readBody(req, MAX_FILE), req.headers['content-type']));
       if (p === '/seen') {
         const c = need();

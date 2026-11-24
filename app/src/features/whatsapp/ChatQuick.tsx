@@ -1,17 +1,19 @@
-import { Group, Loader, Modal, Text } from '@mantine/core';
+import { Group, Loader, Modal, Stack, Text } from '@mantine/core';
 import { IconBuildingCommunity, IconCar, IconFileDollar, IconFileInvoice, IconFileText, IconPaperclip, IconPlus, IconUser, type Icon } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatPlate } from '../../domain/plates';
-import { chatJobs, type ChatJobs } from '../../services/chatJobs';
+import { chatJobs, findJobs, type ChatJobs } from '../../services/chatJobs';
+import { invoicePdf, quotationPdf } from '../../services/documents';
+import { activeInvoice } from '../../domain/invoice';
 import { statementPdf } from '../../services/debtDocs';
 import { phaseOf, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { sendClientReport } from '../../services/waAuto';
 import { sendWaFile } from '../../services/whatsapp';
 import { liveLines } from '../../domain/flow';
-import { ConfirmModal, List, ListRow, Money } from '../../ui/components';
+import { ConfirmModal, List, ListRow, Money, SearchField } from '../../ui/components';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
 import { haptic } from '../../ui/haptics';
 import { db } from '../../db/db';
@@ -49,7 +51,109 @@ interface Act {
 
 const carOf = (b: OrderBundle) => [b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ');
 
-export function ChatQuick({ chatId, quick, desk, at, opened, onClose, onFiles }: { chatId: string; quick: QuickFor; desk: boolean; at: { x: number; y: number } | null; opened: boolean; onClose: () => void; onFiles: () => void }) {
+/**
+ * A chat that is not a customer's (v0.80.3, the owner: «если это не клиент или босс — при нажатии отправлять по выбору
+ * инвойс или смету по поиску»): photos and files, and any job found — by its number, a plate, a car, a name or a number;
+ * nothing typed — the jobs on the board — its quote or its invoice as a PDF, into this chat at once. (To the customer
+ * himself an estimate goes from his own chat, where it is frozen once sent; here it is only a document.)
+ */
+function AnyQuick({ chatId, opened, onClose, onFiles }: { chatId: string; opened: boolean; onClose: () => void; onFiles: () => void }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const { run, busy } = useAction({ exclusive: true });
+  const [query, setQuery] = useState('');
+  const [jobs, setJobs] = useState<OrderBundle[] | null>(null);
+  useEffect(() => {
+    if (opened) setQuery('');
+  }, [opened]);
+  useEffect(() => {
+    if (!opened) return undefined;
+    let alive = true;
+    const timer = window.setTimeout(() => void findJobs(query).then((r) => alive && setJobs(r)), query ? 200 : 0);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [opened, query]);
+  const sendDoc = (b: OrderBundle, kind: 'quote' | 'invoice') =>
+    void run(async () => {
+      const inv = activeInvoice(b.invoices);
+      const file = kind === 'invoice' && inv ? await invoicePdf(inv.id) : await quotationPdf(b.order.id);
+      const plate = b.vehicle.plate?.number ? formatPlate(b.vehicle.plate, lang) : '';
+      await sendWaFile(chatId, file.blob, { name: file.filename, doc: true, caption: [`№${b.order.number}`, carOf(b), plate].filter(Boolean).join(' · ') });
+      haptic('success');
+      onClose();
+    }, 'wa.quick.sent');
+  return (
+    <Modal opened={opened} onClose={onClose} title={t('wa.quick.title')}>
+      <Stack gap="sm" data-wa-quick-any>
+        <div className="action-tiles">
+          <button type="button" className="action-tile" onClick={() => (onClose(), onFiles())} data-wa-quick-act="files">
+            <span className="tile-icon" style={{ '--c': 'var(--mantine-color-blue-6)' } as React.CSSProperties}>
+              <IconPaperclip size={23} stroke={1.9} aria-hidden />
+            </span>
+            <span>{t('wa.quick.files')}</span>
+          </button>
+        </div>
+        <SearchField value={query} onChange={setQuery} placeholder={t('wa.quick.find')} />
+        {jobs === null ? (
+          <Group justify="center" py="md">
+            <Loader size="sm" />
+          </Group>
+        ) : jobs.length === 0 ? (
+          <Text c="dimmed" ta="center" py="sm">
+            {t('wa.noFound')}
+          </Text>
+        ) : (
+          <List>
+            {jobs.map((b) => {
+              const inv = activeInvoice(b.invoices);
+              const lines = liveLines(b.items).some((i) => i.kind !== 'discount');
+              const plate = b.vehicle.plate?.number ? formatPlate(b.vehicle.plate, lang) : '';
+              return (
+                <ListRow
+                  key={b.order.id}
+                  title={<span data-wa-quick-job={b.order.id}>{[`№${b.order.number}`, carOf(b)].filter(Boolean).join(' · ')}</span>}
+                  subtitle={
+                    <span className="wa-quick-sub">
+                      <PhaseTag phase={phaseOf(b)} />
+                      {plate && <span className="tnum">{plate}</span>}
+                      {b.customer.name && <span>{b.customer.name}</span>}
+                    </span>
+                  }
+                  right={
+                    <span className="wa-quick-docs">
+                      {lines && (
+                        <button type="button" className="chip" disabled={busy} onClick={() => sendDoc(b, 'quote')} data-wa-quick-doc="quote">
+                          <IconFileDollar size={16} stroke={2} aria-hidden />
+                          {t('wa.quick.estimate')}
+                        </button>
+                      )}
+                      {inv && (
+                        <button type="button" className="chip" disabled={busy} onClick={() => sendDoc(b, 'invoice')} data-wa-quick-doc="invoice">
+                          <IconFileInvoice size={16} stroke={2} aria-hidden />
+                          {t('wa.quick.invoice')}
+                        </button>
+                      )}
+                    </span>
+                  }
+                />
+              );
+            })}
+          </List>
+        )}
+      </Stack>
+    </Modal>
+  );
+}
+
+export function ChatQuick(props: { chatId: string; quick: QuickFor; desk: boolean; at: { x: number; y: number } | null; opened: boolean; onClose: () => void; onFiles: () => void }) {
+  // Not a customer's chat (nor a company's own group): any job's documents, found.
+  if (!props.quick.customerId && !props.quick.jobId) return <AnyQuick chatId={props.chatId} opened={props.opened} onClose={props.onClose} onFiles={props.onFiles} />;
+  return <CustomerQuick {...props} />;
+}
+
+function CustomerQuick({ chatId, quick, desk, at, opened, onClose, onFiles }: { chatId: string; quick: QuickFor; desk: boolean; at: { x: number; y: number } | null; opened: boolean; onClose: () => void; onFiles: () => void }) {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();

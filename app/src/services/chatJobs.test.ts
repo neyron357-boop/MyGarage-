@@ -2,7 +2,9 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { jobDocs } from '../features/job/jobDocs';
-import { chatJobs, customerOfGroup } from './chatJobs';
+import { chatJobs, customerOfGroup, findJobs } from './chatJobs';
+import { forwardNote } from '../features/whatsapp/forwardNote';
+import { saveWaAuto } from './waAuto';
 import { createCustomer } from './customers';
 import { addItem, sendVersion } from './estimate';
 import { approveAll } from './flow';
@@ -59,6 +61,31 @@ describe('chatJobs (v0.80)', () => {
     await setCustomerGroup(c.id, { chat: '120363000000000003@g.us', name: 'ABC — cars' });
     expect((await customerOfGroup('120363000000000003@g.us'))?.id).toBe(c.id);
     expect(await customerOfGroup('120363000000000009@g.us')).toBeUndefined();
+  });
+});
+
+describe('findJobs — any job’s documents for a chat that is not its customer’s (v0.80.3)', () => {
+  it('by the job’s number, by a plate or a name; nothing typed — the jobs on the board', async () => {
+    const c = await customer();
+    const a = await job(c.id, '11111');
+    const b = await job(c.id, '22222');
+    await db.orders.update(b.id, { stage: 'closed' });
+    expect((await findJobs(String(a.number))).map((x) => x.order.id)).toEqual([a.id]);
+    expect((await findJobs(`№${b.number}`)).map((x) => x.order.id)).toEqual([b.id]);
+    expect((await findJobs('22222')).map((x) => x.order.id)).toEqual([b.id]);
+    expect((await findJobs('ahmed')).map((x) => x.order.id).sort()).toEqual([a.id, b.id].sort());
+    expect((await findJobs('')).map((x) => x.order.id)).toEqual([a.id]);
+    expect(await findJobs('nobody here')).toEqual([]);
+  });
+});
+
+describe('forwardNote — whose a customer’s message forwarded is (v0.80.3)', () => {
+  it('in the language of the garage’s own reports; not a customer — no line', async () => {
+    expect(await forwardNote({ name: 'Jun', phone: '971544441554' })).toBe('From customer Jun (+971 54 444 1554):');
+    expect(await forwardNote({ name: 'Jun' })).toBe('From customer Jun:');
+    await saveWaAuto('boss', { lang: 'ru' });
+    expect(await forwardNote({ name: 'Jun', phone: '+971544441554' })).toBe('От клиента Jun (+971 54 444 1554):');
+    expect(await forwardNote(undefined)).toBeUndefined();
   });
 });
 

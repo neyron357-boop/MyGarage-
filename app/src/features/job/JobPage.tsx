@@ -96,6 +96,7 @@ import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { useDesk, useDeskHotkeys, useDeskPane } from '../../ui/desk';
+import { openTwin, useTwin } from '../../ui/deskTwin';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { setJobQuiet } from '../../services/notify';
@@ -581,17 +582,10 @@ export function JobPage() {
   };
   // The tabs move like pages: the page follows the finger sideways, the other one comes in beside it.
   const sw = useTabSwipe(tabs, tab, pickTab);
-  // A PC (v0.80): another job taken in beside this one — the window's address keeps it (`side`), this job stays.
+  // A PC (v0.80; v0.80.3 — a whole second tab, not only a new job): opened beside this job, which stays.
   const pane = useDeskPane();
-  const openBeside = () =>
-    setParams(
-      (p) => {
-        const next = new URLSearchParams(p);
-        next.set('side', 'new');
-        return next;
-      },
-      { replace: true },
-    );
+  const twinOpen = !!useTwin();
+  const openBeside = () => openTwin('/');
   // The tabs stay in reach under the navigation bar (a long chat, a long job): backed only once stuck.
   const tabsMark = useRef<HTMLDivElement>(null);
   const tabsBar = useRef<HTMLDivElement>(null);
@@ -1483,7 +1477,7 @@ export function JobPage() {
             {/* The job to the garage's group: the car's photo, the car, the customer's name, the lines. */}
             <ShareJobButton b={b} />
             {/* A PC (v0.80): a new job beside this one, both on one screen. */}
-            {!phone && !pane && (
+            {!phone && !pane && !twinOpen && (
               <ActionIcon variant="default" size={40} radius="md" aria-label={t('desk.twin')} onClick={openBeside} data-twin-btn>
                 <IconLayoutSidebarRightExpand size={20} />
               </ActionIcon>

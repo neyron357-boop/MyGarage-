@@ -18,7 +18,7 @@ import { createOutbox } from './waOutbox.mjs';
  *   POST /api/wa/link · /logout · /restart      — link this computer, unlink it, start WhatsApp Web again
  *   POST /api/wa/code {phone}                   — link by a code typed on the phone
  *   GET  /api/wa/chats · /messages?chat= · /number?phone=
- *   POST /api/wa/send {chat, text, quote} · /seen {chat}
+ *   POST /api/wa/send {chat, text, quote} · /seen {chat} · /forward {id, to} (v0.80.3)
  *   POST /api/wa/file?chat=&name=&caption=      — a file (the body is its bytes)
  *   GET  /api/wa/media?id= · /avatar?id=        — a message's file, a chat's picture: by the device's key, or by
  *                                                 `?d=<device>&k=<media key>` (a picture element sends no key)
@@ -368,6 +368,11 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     if (req.method === 'POST' && what === 'send') {
       const body = await readJson(req, 256 * 1024);
       send(res, 200, await call('/send', { method: 'POST', body: { chat: body.chat, text: body.text, quote: body.quote }, timeout: 70_000 }));
+      return true;
+    }
+    if (req.method === 'POST' && what === 'forward') {
+      const body = await readJson(req, 4096);
+      send(res, 200, await call('/forward', { method: 'POST', body: { id: body.id, to: body.to }, timeout: 90_000 }));
       return true;
     }
     if (req.method === 'POST' && what === 'seen') {

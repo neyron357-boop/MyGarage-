@@ -61,7 +61,7 @@ export function JobChat({ b }: { b: OrderBundle }) {
     );
   return (
     <div className="notes-page job-chat" data-job-chat>
-      <ChatThread key={chat.id} chatId={chat.id} title={b.customer.name || phone} group={false} people={people} desk={desk} quick={{ customerId: b.customer.id, jobId: b.order.id }} />
+      <ChatThread key={chat.id} chatId={chat.id} title={b.customer.name || phone} group={false} people={people} desk={desk} quick={{ customerId: b.customer.id, jobId: b.order.id }} who={{ kind: 'customer', id: b.customer.id, name: b.customer.name }} phone={phone} />
     </div>
   );
 }

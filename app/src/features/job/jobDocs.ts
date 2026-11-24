@@ -4,7 +4,7 @@ import { isAwaitingClient, itemAmounts } from '../../domain/items';
 import { formatAed } from '../../domain/money';
 import { qtyShort } from '../../domain/sides';
 import type { EstimateVersion } from '../../domain/types';
-import { invoicePdf, versionPdf } from '../../services/documents';
+import { invoicePdf, quotationPdf, versionPdf } from '../../services/documents';
 import { previewVersion, sendVersion } from '../../services/estimate';
 import { phaseOf } from '../../services/flow';
 import { simpleMessage, versionMessage } from '../../services/messages';
@@ -53,6 +53,7 @@ export function jobDocs(b: OrderBundle): JobDocs {
           lang: preview.language,
           orderId: oid,
           pdf: async () => versionPdf((await freeze()).id),
+          bossPdf: () => quotationPdf(oid),
           photos: b.items.filter((i) => i.approvalState === 'draft').flatMap((i) => i.mediaIds ?? []),
           onConfirm: async () => {
             await freeze();

@@ -418,7 +418,7 @@ export function WhatsAppPage() {
                     {face.who && <WhoTag kind={face.who.kind} />}
                     {face.c.phone && <span className="wa-chat-head-phone tnum">{formatPhone(`+${face.c.phone}`)}</span>}
                   </button>
-                  <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk quick={quick} />
+                  <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk quick={quick} who={face.who} phone={face.c.phone} />
                 </>
               ) : (
                 <div className="wa-desk-none">
@@ -456,7 +456,7 @@ export function WhatsAppPage() {
         />
         {gate ?? (
           <div className="notes-page">
-            <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk={false} quick={quick} />
+            <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk={false} quick={quick} who={face.who} phone={face.c.phone} />
           </div>
         )}
         {sheets}

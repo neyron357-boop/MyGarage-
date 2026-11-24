@@ -118,6 +118,11 @@ html.desk .desk-shell[data-side-hidden] {
 html.desk .desk-shell[data-side-hidden] .desk-side {
   display: none;
 }
+/* …and the whole window it is (v0.80.3, «при скрытии боковой панели ватсап должен раскрыться на полный экран»): no
+   readable column in the middle — the chats and the chat from edge to edge. */
+html.desk .desk-shell[data-side-hidden] .page-shell {
+  --page-max: 100000px;
+}
 /* A job shown to its customer (v0.67): no side menu — the job in the middle of the window. */
 html.desk[data-client-lock] .desk-main {
   margin-left: var(--desk-side-gap);
@@ -1411,6 +1416,75 @@ html.desk .desk-twin-pane {
 }
 html.desk .desk-twin-pane + .desk-twin-pane {
   box-shadow: inset 0.5px 0 0 var(--app-hairline);
+}
+/* Nothing of a pane scrolls sideways (v0.80.3: a job's pane showed a bar of its own under it). */
+html.desk .desk-twin-pane {
+  overflow-x: hidden;
+}
+/* The second tab's own bar (v0.80.3): its places and «×», over its screen's toolbar — both stay at the top. */
+html.desk .desk-twin-pane[data-pane='side'] {
+  --twin-bar: 44px;
+}
+html.desk .desk-twin-bar {
+  position: sticky;
+  top: 0;
+  z-index: 61;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--twin-bar);
+  margin: 0 calc(-1 * var(--page-pad));
+  padding: 0 var(--page-pad);
+  background: var(--app-canvas);
+  box-shadow: 0 0.5px 0 var(--app-hairline);
+}
+html.desk .desk-twin-place {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--app-label-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+html.desk .desk-twin-place:hover {
+  color: var(--mantine-color-text);
+  background: var(--app-fill);
+}
+html.desk .desk-twin-place[data-active] {
+  color: var(--mantine-color-text);
+  background: var(--app-card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+html.desk .desk-twin-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border-radius: 8px;
+  color: var(--app-label-2);
+}
+html.desk .desk-twin-close:hover {
+  color: var(--mantine-color-text);
+  background: var(--app-fill);
+}
+html.desk .desk-twin-pane[data-pane='side'] .desk-bar {
+  top: var(--twin-bar);
+}
+html.desk .desk-twin-pane[data-pane='side'] .job-desk .job-tabs,
+html.desk .desk-twin-pane[data-pane='side'] .dt th {
+  top: calc(var(--app-nav-h) + var(--twin-bar));
+}
+/* WhatsApp in a pane: its chats and chat within the pane's height (under its bars), the list narrower. */
+html.desk .desk-twin .wa-desk {
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  height: calc(100dvh - var(--app-nav-h, 64px) - 48px - var(--twin-bar, 0px));
 }
 html.desk .desk-twin .job-body.job-desk {
   grid-template-columns: minmax(0, 1fr);
