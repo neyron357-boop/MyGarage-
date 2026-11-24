@@ -336,6 +336,23 @@ export async function forwardWa(message: Pick<WaMessage, 'id'>, to: string, note
   }
 }
 
+/**
+ * A message of ours taken back for everyone (v0.83, the owner: «удалять у всех сообщения»): WhatsApp's «Удалить у всех»,
+ * through the garage's server; in the chat it becomes «Сообщение удалено» at once (the server's stream says the same a
+ * moment later). Too late for WhatsApp — said so, nothing deleted.
+ */
+export async function deleteWaForAll(message: Pick<WaMessage, 'id' | 'chat'>): Promise<void> {
+  if (!waReady()) throw new AppError('wa.err.notReady');
+  let r: { msg?: WaMessage | null };
+  try {
+    r = await call<{ msg?: WaMessage | null }>('delete', { method: 'POST', body: { id: message.id }, timeout: 60_000 });
+  } catch (e) {
+    if (e instanceof SyncError && e.status === 409) throw new AppError('wa.delAll.late');
+    throw failure(e);
+  }
+  if (r.msg) waSaid({ t: 'msg', msg: r.msg, chat: null, was: true });
+}
+
 /** Voice messages that did not go, by their place in the chat: «Повторить» sends the same recording again. */
 const unsentVoices = new Map<string, { blob: Blob; seconds: number }>();
 

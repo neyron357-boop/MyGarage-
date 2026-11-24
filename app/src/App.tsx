@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ContextType } f
 import { useTranslation } from 'react-i18next';
 import { HashRouter, Link, MemoryRouter, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { ClaimPage } from './features/claims/ClaimPage';
+import { setRouteOpener } from './ui/openRoute';
 import { BoardPage } from './features/board/BoardPage';
 import { CustomerPage } from './features/customers/CustomerPage';
 import { CustomersPage } from './features/customers/CustomersPage';
@@ -510,6 +511,12 @@ function Shell() {
     const timer = window.setTimeout(() => void refreshWa(), 2500);
     return () => window.clearTimeout(timer);
   }, []);
+  // Screens opened from outside the screens (a notification, a toast's button) go through the router (ui/openRoute.ts).
+  const navigate = useNavigate();
+  useEffect(() => {
+    setRouteOpener((to) => navigate(to));
+    return () => setRouteOpener(null);
+  }, [navigate]);
   const { pathname } = useLocation();
   // Toasts of the previous screen do not follow onto the next one.
   useEffect(() => {

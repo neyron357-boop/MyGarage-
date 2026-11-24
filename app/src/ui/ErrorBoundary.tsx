@@ -4,6 +4,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dubaiDate } from '../domain/dates';
 import { saveBackupFile } from '../services/backup';
+import { openRoute } from './openRoute';
 
 function Fallback({ error, onReset }: { error: Error; onReset: () => void }) {
   const { t } = useTranslation();
@@ -31,7 +32,7 @@ function Fallback({ error, onReset }: { error: Error; onReset: () => void }) {
             variant="default"
             leftSection={<IconHome size={18} />}
             onClick={() => {
-              window.location.hash = '#/';
+              openRoute('/');
               onReset();
             }}
           >

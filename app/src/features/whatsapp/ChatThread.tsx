@@ -28,10 +28,12 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiTime } from '../../domain/dates';
 import { clock, fileSize, groupDays, kindOf, MAX_FILE_BYTES, sendKind, type WaMessage, type Who } from '../../domain/whatsapp';
-import { againWaVoice, dropFailed, forwardWa, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, sendWaVoice, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
+import { againWaVoice, deleteWaForAll, dropFailed, forwardWa, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, sendWaVoice, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
 import { canRecord, useRecorder } from '../../ui/recorder';
+import { peaksOfBlob, rateLabel, savedVoiceRate, saveVoiceRate, VOICE_RATES, type VoiceRate } from '../../ui/voice';
+import { WAVE_BARS } from '../../domain/waveform';
 import { copyText } from '../../ui/clipboard';
-import { StickyBar } from '../../ui/components';
+import { ConfirmModal, StickyBar } from '../../ui/components';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
 import { haptic } from '../../ui/haptics';
 import { useErrorText, useLang } from '../../ui/hooks';
@@ -69,15 +71,45 @@ function frameOf(w: number | undefined, h: number | undefined): React.CSSPropert
 
 /* ---------- What a message carries ---------- */
 
-/** A sound: ▶, the line of where it is, how long. One plays at a time. */
+/**
+ * A voice message or a sound, as WhatsApp shows one (v0.83, the owner: «сделать визуал как в настоящем ватсапе»): ▶ · the
+ * recording's own bars with the dot at the place (a tap or a drag moves it there) · the speed once it has been played
+ * (1× → 1.5× → 2×, kept on this device for the next ones, as in the notes) or the microphone · how long (how far it went)
+ * under the bars. The bars are read from the recording itself, one recording at a time, a moment after the chat shows
+ * (`waveOf`); until then they lie flat. One plays at a time.
+ */
 let playing: HTMLAudioElement | null = null;
+const waves = new Map<string, number[]>();
+let waveQueue: Promise<unknown> = Promise.resolve();
+function waveOf(m: WaMessage): Promise<number[] | undefined> {
+  const known = waves.get(m.id);
+  if (known) return Promise.resolve(known);
+  const p = waveQueue.then(async () => {
+    const blob = await waFileBlob(m).catch(() => undefined);
+    const bars = blob ? await peaksOfBlob(blob) : undefined;
+    if (bars) waves.set(m.id, bars);
+    return bars;
+  });
+  waveQueue = p.catch(() => undefined);
+  return p;
+}
+const FLAT = Array.from({ length: WAVE_BARS }, () => 0.12);
+
 function Sound({ m }: { m: WaMessage }) {
   const { t } = useTranslation();
+  const lang = useLang();
   const audio = useRef<HTMLAudioElement | null>(null);
   const [on, setOn] = useState(false);
   const [pos, setPos] = useState(0);
+  const [started, setStarted] = useState(false);
   const [failed, setFailed] = useState(false);
-  const total = m.file?.sec ?? 0;
+  const [rate, setRate] = useState<VoiceRate>(savedVoiceRate);
+  const [bars, setBars] = useState<number[] | undefined>(() => waves.get(m.id));
+  const [dur, setDur] = useState(0);
+  const [drag, setDrag] = useState<number | null>(null);
+  const press = useRef<{ x: number; at: number } | null>(null);
+  const wave = useRef<HTMLDivElement>(null);
+  const length = m.file?.sec || dur || 0;
   useEffect(
     () => () => {
       audio.current?.pause();
@@ -85,54 +117,132 @@ function Sound({ m }: { m: WaMessage }) {
     },
     [],
   );
-  const toggle = () => {
+  useEffect(() => {
+    if (bars || !(m.local || waFileSrc(m.id))) return undefined;
+    let alive = true;
+    const later = window.setTimeout(() => void waveOf(m).then((p) => alive && p && setBars(p)), 500);
+    return () => {
+      alive = false;
+      window.clearTimeout(later);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [m.id]);
+  const player = (): HTMLAudioElement | null => {
+    if (audio.current) return audio.current;
     const src = m.local ?? waFileSrc(m.id);
-    if (!src) return;
-    let a = audio.current;
-    if (!a) {
-      a = new Audio(src);
-      a.preload = 'auto';
-      a.addEventListener('timeupdate', () => setPos(a!.currentTime));
-      a.addEventListener('ended', () => {
-        setOn(false);
-        setPos(0);
-      });
-      a.addEventListener('pause', () => setOn(false));
-      a.addEventListener('play', () => setOn(true));
-      a.addEventListener('error', () => setFailed(true));
-      audio.current = a;
-    }
+    if (!src) return null;
+    const a = new Audio(src);
+    a.preload = 'auto';
+    a.playbackRate = rate;
+    a.addEventListener('timeupdate', () => setPos(a.currentTime));
+    a.addEventListener('loadedmetadata', () => Number.isFinite(a.duration) && setDur(a.duration));
+    a.addEventListener('ended', () => {
+      setOn(false);
+      setPos(0);
+    });
+    a.addEventListener('pause', () => setOn(false));
+    a.addEventListener('play', () => setOn(true));
+    a.addEventListener('error', () => setFailed(true));
+    audio.current = a;
+    return a;
+  };
+  const toggle = () => {
+    const a = player();
+    if (!a) return;
+    setStarted(true);
     if (a.paused) {
       if (playing && playing !== a) playing.pause();
       playing = a;
+      a.playbackRate = rate;
       void a.play().catch(() => setFailed(true));
     } else a.pause();
   };
-  const length = total || audio.current?.duration || 0;
-  const part = length ? Math.min(1, pos / length) : 0;
+  const seek = (frac: number) => {
+    const a = player();
+    const whole = length || a?.duration || 0;
+    if (!a || !whole || !Number.isFinite(whole)) return;
+    a.currentTime = Math.min(whole, Math.max(0, frac * whole));
+    setPos(a.currentTime);
+    setStarted(true);
+  };
+  const cycle = () => {
+    const next = VOICE_RATES[(VOICE_RATES.indexOf(rate) + 1) % VOICE_RATES.length];
+    setRate(next);
+    saveVoiceRate(next);
+    if (audio.current) audio.current.playbackRate = next;
+    haptic('selection');
+  };
+  const fracAt = (x: number) => {
+    const r = wave.current?.getBoundingClientRect();
+    return r && r.width ? Math.max(0, Math.min(1, (x - r.left) / r.width)) : 0;
+  };
+  const shown = drag ?? (length ? Math.min(1, pos / length) : 0);
+  const seconds = drag !== null ? drag * length : on || pos ? pos : length;
+  const drawn = useMemo(() => (bars ?? FLAT).map((h, k) => <i key={k} style={{ '--h': h } as React.CSSProperties} />), [bars]);
   return (
-    <span className="wa-sound" data-failed={failed || undefined}>
-      <button type="button" className="wa-sound-play tap" aria-label={t(on ? 'wa.pause' : 'wa.play')} onClick={toggle} data-repeat>
+    <span className="note-voice wa-voice" data-active={started || undefined} data-failed={failed || undefined}>
+      <button type="button" className="wa-sound-play note-play tap" aria-label={t(on ? 'wa.pause' : 'wa.play')} onClick={toggle} data-repeat>
         {on ? <IconPlayerPauseFilled size={18} /> : <IconPlayerPlayFilled size={18} />}
       </button>
-      <span
-        className="wa-sound-line"
+      <div
+        ref={wave}
+        className="voice-wave"
         role="slider"
+        tabIndex={0}
         aria-label={t('wa.kind.voice')}
         aria-valuemin={0}
         aria-valuemax={Math.round(length)}
-        aria-valuenow={Math.round(pos)}
-        tabIndex={0}
-        onClick={(e) => {
-          const a = audio.current;
-          if (!a || !length) return;
-          const box = e.currentTarget.getBoundingClientRect();
-          a.currentTime = Math.min(length, Math.max(0, ((e.clientX - box.left) / box.width) * length));
+        aria-valuenow={Math.round(seconds)}
+        aria-valuetext={clock(seconds)}
+        data-drag={drag !== null || undefined}
+        data-playing={(on && drag === null) || undefined}
+        style={{ '--p': shown } as React.CSSProperties}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'mouse' && e.button !== 0) return;
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          press.current = { x: e.clientX, at: e.timeStamp };
+          setDrag(fracAt(e.clientX));
+        }}
+        onPointerMove={(e) => {
+          if (drag !== null) setDrag(fracAt(e.clientX));
+        }}
+        onPointerUp={(e) => {
+          if (drag === null) return;
+          setDrag(null);
+          const p = press.current;
+          press.current = null;
+          // A long press without a move opened the message's menu: lifting the finger does not move the place.
+          if (p && e.timeStamp - p.at > 450 && Math.abs(e.clientX - p.x) < 8) return;
+          seek(fracAt(e.clientX));
+        }}
+        onPointerCancel={() => setDrag(null)}
+        onKeyDown={(e) => {
+          if (!length || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+          e.preventDefault();
+          seek(Math.max(0, Math.min(1, (pos + (e.key === 'ArrowRight' ? 5 : -5)) / length)));
         }}
       >
-        <span style={{ width: `${part * 100}%` }} />
-      </span>
-      <span className="wa-sound-time tnum">{failed ? t('wa.fileGone') : clock(on || pos ? pos : length)}</span>
+        <span className="voice-bars" aria-hidden>
+          {drawn}
+        </span>
+        <span className="voice-bars voice-played" aria-hidden>
+          {drawn}
+        </span>
+        <span className="voice-dot-rail" aria-hidden>
+          <span className="voice-dot" />
+        </span>
+      </div>
+      {started && !failed ? (
+        // Its words change with each tap, yet it is the same control: taps in a row all count (ui/tapGuard).
+        <button type="button" className="voice-rate" data-repeat aria-label={t('notes.speed')} onClick={cycle}>
+          {rateLabel(rate, lang)}
+        </button>
+      ) : (
+        <span className="voice-mic" aria-hidden>
+          <IconMicrophone size={18} stroke={2} />
+        </span>
+      )}
+      <span className="tnum voice-len">{failed ? t('wa.fileGone') : clock(seconds)}</span>
     </span>
   );
 }
@@ -706,6 +816,8 @@ export function ChatThread({ chatId, title, group, people, desk, quick, who, pho
   const [down, setDown] = useState(false);
   // A message being forwarded: the chat it goes to is picked (v0.80.3).
   const [forwarding, setForwarding] = useState<WaMessage | null>(null);
+  // «Удалить у всех» (v0.83): asked first — it cannot be taken back.
+  const [delAll, setDelAll] = useState<WaMessage | null>(null);
 
   // Read when the chat is opened, and again when WhatsApp is back.
   useEffect(() => {
@@ -850,6 +962,8 @@ export function ChatThread({ chatId, title, group, people, desk, quick, who, pho
       ...(m.text ? [{ key: 'copy', label: t('wa.copy'), icon: IconCopy, onClick: () => void copyText(m.text).then((ok) => ok && notifications.show({ color: 'green', message: t('common.copied') })) }] : []),
       ...(hasFile ? [{ key: 'file', label: t(desk ? 'wa.save' : 'wa.share'), icon: desk ? IconDownload : IconShare2, onClick: () => void fileOf(m).then((f) => f && (desk ? downloadFile(f) : shareOrDownload(f))) }] : []),
       ...(m.failed ? [{ key: 'drop', label: t('wa.remove'), icon: IconTrash, color: 'red', onClick: () => dropFailed(chatId, m.id) }] : []),
+      // Ours, on WhatsApp, not taken back yet (v0.83): for everyone — while WhatsApp allows it (the server asks it).
+      ...(m.me && !m.pending && !m.failed && kindOf(m.type) !== 'gone' ? [{ key: 'delAll', label: t('wa.delAll.action'), icon: IconTrash, color: 'red', onClick: () => setDelAll(m) }] : []),
     ];
   };
 
@@ -981,6 +1095,27 @@ export function ChatThread({ chatId, title, group, people, desk, quick, who, pho
           )}
         </SheetFor>
       )}
+      <ConfirmModal
+        opened={!!delAll}
+        onClose={() => setDelAll(null)}
+        title={t('wa.delAll.title')}
+        confirmLabel={t('wa.delAll.action')}
+        color="red"
+        onConfirm={async () => {
+          const m = delAll;
+          if (!m) return true;
+          try {
+            await deleteWaForAll(m);
+            haptic('success');
+            notifications.show({ color: 'green', message: t('wa.delAll.done') });
+          } catch (e) {
+            notifications.show({ color: 'red', message: errorText(e) });
+          }
+          return true;
+        }}
+      >
+        <Text size="sm">{t('wa.delAll.text')}</Text>
+      </ConfirmModal>
       {forwarding && (
         <ChatPicker
           opened={!!forwarding}

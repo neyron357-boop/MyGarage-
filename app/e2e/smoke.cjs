@@ -1644,31 +1644,27 @@ async function launchBrowser() {
     if ((await front('.phase-track > span').count()) !== 6) throw new Error('the phase track has six steps');
     await front('.phase-track > span[data-now]').waitFor();
     const line = (name) => front('.list-row:not([data-ghost])').filter({ hasText: name }).first();
-    // A draft swiped left all the way is not deleted at once (v0.63.2, the owner: «слишком быстро удаляется без
-    // предложения»): «Удалить» waits for a tap — then it is gone, with Undo.
+    // No swipe takes a line away (v0.83, the owner: «убрать свайп для удаления»): swiped left all the way, a draft stays
+    // and no «Удалить» comes out.
     await swipe(line('Wheel alignment'), -1);
-    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).waitFor();
-    await page.waitForTimeout(500);
-    if (!(await line('Wheel alignment').count())) throw new Error('a long swipe deleted a draft line at once');
-    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).click();
-    await line('Wheel alignment').waitFor({ state: 'detached' });
-    await page.getByRole('button', { name: 'Отменить' }).last().click();
-    await line('Wheel alignment').waitFor();
-    // A short swipe only uncovers the button; a tap on the row closes it again.
-    await swipe(line('Wheel alignment'), -1, 3);
-    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).waitFor();
+    await page.waitForTimeout(700);
+    // (A row without a swipe of its own leaves the sideways swipe to the job's tabs: it may have gone to «Заметки».)
+    if (page.url().includes('tab=notes')) {
+      await front('.scroll-tabs').getByText('Основная').click();
+      await page.waitForTimeout(600);
+    }
+    if (!(await line('Wheel alignment').count())) throw new Error('a swipe took a draft line away');
+    if (await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Удалить' }).count()) throw new Error('a swipe uncovered a button on a draft line');
     await shot('36a-line-swipe');
-    await line('Wheel alignment').locator('.body').click();
-    if (await dlg.count()) throw new Error('a tap on an open row only closes it');
     // Agreed in person; a swipe right marks the work done, the line steps back.
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.locator('.screen[data-role="top"]').getByText('В работе').first().waitFor();
     await swipe(line('Oil change'), 1);
     await front('.list-row[data-done]').filter({ hasText: 'Oil change' }).waitFor();
-    // An agreed line swiped left all the way is not dropped at once: the button waits for a tap.
+    // An agreed line swiped left: nothing (v0.83) — it is taken off from its sheet.
     await swipe(line('Wheel alignment'), -1);
-    await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Убрать' }).waitFor();
-    await line('Wheel alignment').locator('.body').click();
+    await page.waitForTimeout(600);
+    if (await line('Wheel alignment').locator('.swipe-btn', { hasText: 'Убрать' }).count()) throw new Error('a swipe uncovered «Убрать» on an agreed line');
     await shot('36b-line-done');
     // Paid in full and handed over: each moment gets its mark.
     await page.getByRole('button', { name: /^Готово/ }).click();

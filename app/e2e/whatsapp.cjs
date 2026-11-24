@@ -153,6 +153,7 @@ async function playServer(page, phase) {
           return { ok: init.query.phone !== '971500009999', chat: known?.id ?? `${init.query.phone}@c.us` };
         }
         if (path === 'forward') return { ok: true };
+        if (path === 'delete') return { ok: true, msg: null };
         if (path === 'send' || path === 'file') {
           const chatId = path === 'send' ? init.body.chat : init.query.chat;
           const type = path === 'send' ? 'chat' : init.query.voice ? 'ptt' : init.query.doc ? 'document' : /^image/.test(init.file.type) ? 'image' : 'document';
@@ -192,6 +193,11 @@ let current = null;
   watch(page);
   const settle = (ms = 700) => page.waitForTimeout(ms);
   const top = () => page.locator('.screen[data-role="top"]');
+  // v0.83: a job's chat tab opens locked — «Открыть чат» (once a visit).
+  const unlockJobChat = async () => {
+    const lock = top().locator('[data-job-chat-open]');
+    if (await lock.waitFor({ timeout: 4000 }).then(() => true, () => false)) await lock.click();
+  };
   const shot = async (name) => {
     await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline === document.timeline).map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
     await page.screenshot({ path: `${OUT}/${name}.png` });
@@ -310,7 +316,7 @@ let current = null;
   check((await top().locator('.note-row[data-in]').count()) === 4, 'four of them are the customer’s, on the left');
   check((await top().locator('.wa-pic-full[data-shown]').count()) === 1, 'the photo is shown over its preview');
   check(await top().locator('.wa-doc-name', { hasText: 'QUO-2026-351.pdf' }).isVisible(), 'a document shows its name');
-  check(await top().locator('.wa-sound').isVisible(), 'a voice message has its player');
+  check(await top().locator('.wa-voice .voice-wave').isVisible() && (await top().locator('.wa-voice .voice-bars').first().locator('i').count()) > 20, 'a voice message has its player — as WhatsApp: ▶, the bars, the microphone (v0.83)');
   check(await top().locator('.wa-quote').isVisible(), 'an answer shows what it answers');
   check((await top().locator('.note-bubble b').first().innerText()) === 'Toyota Camry 2019', 'WhatsApp’s bold is bold');
   check(await top().locator('.note-bubble a[href="https://maps.app.goo.gl/garage"]').isVisible(), 'a link is a link');
@@ -362,7 +368,7 @@ let current = null;
     await page.screenshot({ path: `${OUT}/phone-07c-recording.png` });
     await page.mouse.up();
     await top().locator('[data-wa-rec]').waitFor({ state: 'detached' });
-    await top().locator('.note-row .wa-sound').last().waitFor();
+    await top().locator('.note-row .wa-voice').last().waitFor();
     await settle(600);
     check((await top().locator('.note-row').count()) === before + 1, 'v0.81: the voice message is in the chat at once');
     const went = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file'), asked);
@@ -490,6 +496,22 @@ let current = null;
   await shot('phone-14-job-full');
   // The customer's chat is a tab of the job, next to it (a swipe from it); «…» → «Чат» opens it too.
   check(await top().getByRole('tab', { name: /WhatsApp/ }).isVisible(), 'v0.80: the job has a «WhatsApp» tab');
+  // v0.83 (the owner: «ватсап переместить на третью позицию»; «вначале заблокировать… по нажатию чтоб открылся чат»): the
+  // tabs — the job, its notes, WhatsApp; the chat tab opens locked: whose chat, «Открыть чат», nothing of the chat drawn.
+  const tabNames = await top().locator('.job-tabs [role="tab"]').allInnerTexts();
+  check(tabNames.length === 3 && /WhatsApp/.test(tabNames[2]) && /Заметки|Notes/.test(tabNames[1]), 'v0.83: WhatsApp is the job’s third tab: ' + tabNames.join(' | '));
+  await top().getByRole('tab', { name: /WhatsApp/ }).click();
+  await top().locator('[data-job-chat-lock]').waitFor();
+  await settle(500);
+  check(!(await top().locator('[data-wa-list], [data-wa-mic], .notes-field').count()), 'v0.83: the chat tab is locked — no messages, no field, no microphone');
+  await shot('phone-15a-job-chat-locked');
+  await top().locator('[data-job-chat-open]').click();
+  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
+  check(true, 'v0.83: «Открыть чат» opens it');
+  await top().getByRole('tab', { name: /^(Основная|Job)$/ }).click();
+  await settle(600);
+  await go(`#/`, 900);
+  await go(`#/orders/${jobId}`, 1200);
   await top().getByRole('button', { name: /^(Ещё|More)$/ }).first().click();
   await page.locator('.action-tile', { hasText: 'Чат' }).click();
   await top().locator('[data-job-chat] [data-wa-list]').waitFor();
@@ -523,6 +545,7 @@ let current = null;
 
   // v0.80: the estimate again from the job's chat («＋» → «Смета»): the version waiting for the answer, its PDF.
   await go(`#/orders/${jobId}?tab=chat`, 1200);
+  await unlockJobChat();
   await top().locator('[data-job-chat] [data-wa-list]').waitFor();
   await top().locator('[data-wa-plus]').click();
   await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
@@ -567,6 +590,7 @@ let current = null;
   // v0.80.3: «Сначала боссу» in the sheet to the customer — the boss gets the words (whose they are) and the PDF; the
   // customer is not sent anything, the sheet stays.
   await go(`#/orders/${jobId}?tab=chat`, 1200);
+  await unlockJobChat();
   await top().locator('[data-job-chat] [data-wa-list]').waitFor();
   await top().locator('[data-wa-plus]').click();
   await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
@@ -686,6 +710,14 @@ let current = null;
       await p.getByText(/^Переслано/).first().waitFor({ timeout: 20000 });
       const went7 = await p.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'send' || a.path === 'forward'), before7);
       check(went7.length === 2 && went7[0].path === 'send' && /^From customer .+ \(\+971/.test(went7[0].body.text) && went7[1].path === 'forward' && /^false_/.test(went7[1].body.id) && went7[1].body.to === went7[0].body.chat, 'PC v0.80.3: a customer’s message forwarded — the line whose it is, then the message itself');
+      // v0.83: «Удалить у всех» on a message of ours — asked first, then the server is asked to take it back.
+      await p.locator('.note-row:not([data-in]) .note-bubble').last().click({ button: 'right' });
+      await p.getByRole('menuitem', { name: 'Удалить у всех' }).click();
+      const before8 = await p.evaluate(() => window.__wa.asked.length);
+      await p.getByRole('dialog').getByRole('button', { name: 'Удалить у всех' }).click();
+      await p.getByText('Удалено у всех').first().waitFor({ timeout: 10000 });
+      const went8 = await p.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'delete'), before8);
+      check(went8.length === 1 && !!went8[0].body.id, 'PC v0.83: «Удалить у всех» — confirmed, then the server takes the message back');
       await p.goto(BASE + '#/');
       await p.locator('.desk-side').waitFor();
       check(await p.locator('.desk-side').isVisible(), 'PC v0.80: other screens keep their side menu');

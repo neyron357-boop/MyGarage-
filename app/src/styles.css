@@ -443,6 +443,9 @@ a {
 .screen-body,
 .page-shell {
   isolation: isolate;
+}
+.screen-scroll,
+.page-shell {
   --glow: var(--mantine-color-cobalt-6);
   --glow-2: var(--mantine-color-grape-6);
 }
@@ -462,42 +465,21 @@ a {
     radial-gradient(75% 60% at 100% 0%, color-mix(in srgb, var(--glow-2) var(--glow-b), transparent) 0%, transparent 70%);
   transition: --glow var(--dur-4) var(--ease-out), --glow-2 var(--dur-4) var(--ease-out);
 }
-/* Phone: the glow stays at the top of the screen when the list is pulled past its top (the iPhone's rubber
-   band) — the title and the groups come down over it, as in a system app, and no bare strip with a hard edge
-   opens above them. The glow is held in the screen (fixed) and moved by the screen's own scroll timeline: with
-   the content, 1:1, while it scrolls (gone after 440 px, as before), at rest while the list bounces at its
-   top (the timeline does not go below 0). On the compositor; nothing is written per frame. Where scroll
-   timelines are missing it scrolls with the content as it always did. (The board's own pull holds it with
-   --pull.) This is the content's own scroll, not a motion of its own: Reduce Motion — which turns every
-   animation off below — keeps it, hence the !important. */
-@supports (scroll-timeline: --g y) and (animation-range: 0px 1px) {
-  .screen-scroll {
-    scroll-timeline: --screen y;
-  }
-  .screen-body::before {
-    position: fixed;
-    animation-name: mg-glow-scroll !important;
-    animation-duration: auto !important;
-    animation-timing-function: linear !important;
-    animation-fill-mode: both !important;
-    animation-iteration-count: 1 !important;
-    animation-timeline: --screen !important;
-    animation-range: 0px 440px !important;
-  }
-  /* The keyboard has moved the visible area (html.vv places the app over what is visible): the glow goes too. */
-  html.vv .screen-body::before {
-    top: var(--vv-top, 0px);
-  }
-  /* The board pulled down (ui/pullRefresh): the page is moved by a transform, so the glow is held by --pull
-     against it — the timeline would move it a second time if the list scrolled meanwhile. */
-  .screen-body[data-pulled]::before {
-    animation-name: none !important;
-  }
+/* Phone: the glow is painted once with the content and scrolls with it (v0.83 — FPS: it was held by the screen,
+   position: fixed, and moved by the scroller's scroll timeline; WebKit runs scroll-driven animations on the main thread,
+   so every frame of a scroll waited for it and the glow trailed the content). The list pulled past its top (the iPhone's
+   rubber band) uncovers the scroller itself: its still background is the glow's own top row — the same colours from the
+   same places, left and right (along the row a radial gradient is a straight one) — so no bare strip opens there, as
+   before (v0.16.1). The content covers it everywhere else (.screen-body is the canvas). */
+html.phone-shell .screen-scroll {
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--glow) var(--glow-a), transparent) 4%, transparent 72.4%) top / 100% 180px no-repeat,
+    linear-gradient(to left, color-mix(in srgb, var(--glow-2) var(--glow-b), transparent) 0%, transparent 52.5%) top / 100% 180px no-repeat,
+    var(--app-canvas);
+  transition: --glow var(--dur-4) var(--ease-out), --glow-2 var(--dur-4) var(--ease-out);
 }
-@keyframes mg-glow-scroll {
-  to {
-    transform: translateY(-440px);
-  }
+html.phone-shell .screen-body {
+  background: var(--app-canvas);
 }
 :root {
   --glow-a: 17%;
@@ -573,12 +555,20 @@ html.vv .app-root {
 .stack[data-out='below'] > .screen[data-role='out'] {
   z-index: 1;
 }
-/* The edge shadow of a screen that slides over another. */
-.screen.moving {
+/* The edge shadow of a screen that slides over another. v0.83 (FPS): always there — off the screen while it rests — and
+   every screen of the phone's stack is a layer of its own for good: a push, a pop or a swipe only moves layers. Before,
+   each move made both screens layers and dropped them again, and the shadow came and went with it: a whole screen
+   painted at the start and once more at the end of every move. */
+.screen.moving,
+html.phone-shell .screen {
   box-shadow: -0.5px 0 0 rgba(0, 0, 0, 0.08), -10px 0 28px rgba(0, 0, 0, 0.16);
 }
-.screen[data-modal].moving {
+.screen[data-modal].moving,
+html.phone-shell .screen[data-modal] {
   box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.16);
+}
+html.phone-shell .screen {
+  will-change: transform;
 }
 .screen-scroll {
   position: absolute;
@@ -2399,14 +2389,12 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
 /* ---------- Pull to refresh (ui/pullRefresh.tsx): the iPhone's spinner ---------- */
 /* Twelve spokes round a point under the navigation bar: they appear one by one as the page comes down,
    then turn (each fading after the one before) while the refresh runs. */
-/* How far the page is pulled down: the glow under the large title is held at the top meanwhile. */
+/* How far the page is pulled down. (Until v0.83 the glow was held at the top meanwhile; now the glow goes with the page and
+   the scroller's still top tint fills what opens above it, as on every screen's rubber band.) */
 @property --pull {
   syntax: '<length>';
   inherits: true;
   initial-value: 0px;
-}
-.screen-body::before {
-  translate: 0 calc(-1 * var(--pull, 0px));
 }
 .pull-spinner {
   position: absolute;
@@ -8951,4 +8939,104 @@ html.desk .mark-layer-body {
 }
 .owner-figure[data-tone='bad'] .owner-figure-value {
   color: var(--mantine-color-red-7);
+}
+
+/* ---------- v0.83 ---------- */
+/* FPS (the owner: «очень сильно сейчас просаживается FPS»): the blur behind glass is painted again for every frame of a
+   scroll under it (v0.39 — the feedback pencil). On a phone only the tab bar and «＋» keep it — the glass of the iPhone's
+   own bars; the small glass over moving content is a dense frosted white without the blur: the navigation bar's round
+   buttons, a board card's «Смета»/«Инвойс», the chat's field and round buttons, the bar's buttons, a sheet's ×, banners,
+   a video's ▶. */
+html.phone-shell
+  :is(
+    .glass,
+    .nav-glass,
+    .mantine-Modal-close,
+    .mantine-Notification-root,
+    .update-bar,
+    .note-video-play,
+    .screen-nav .nav-bar :is(.mantine-ActionIcon-root, .mantine-Button-root),
+    .screen-bottom > .sticky-bar .mantine-Button-root
+  ):not(.tab-bar):not(.tab-plus) {
+  --glass-bg: var(--glass-solid);
+  --glass-bg-strong: var(--glass-solid);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.phone-shell .note-video-play {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* A job's WhatsApp tab, locked until tapped (v0.83): whose chat, how many unread, «Открыть чат». */
+.job-chat-lock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 28px 16px 24px;
+  border-radius: var(--radius-group);
+  text-align: center;
+}
+.job-chat-lock-face {
+  position: relative;
+  display: inline-flex;
+}
+.job-chat-lock-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--mantine-color-green-filled);
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--app-card);
+}
+.job-chat-lock-name {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.job-chat-lock-unread {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mantine-color-green-7);
+}
+.job-chat-lock .mantine-Button-root {
+  margin-top: 8px;
+  min-width: 200px;
+}
+
+/* A WhatsApp voice message (v0.83): the notes' voice — ▶, the bars and the dot, the speed or the microphone, how long.
+   In a bubble of ours (green) the bars are white; in a received one (light) grey, the place and the dot green. */
+.note-voice.wa-voice {
+  grid-template-areas:
+    'play wave side'
+    '. len .';
+  width: min(250px, 62vw);
+}
+.note-voice.wa-voice .wa-sound-play {
+  grid-area: play;
+  color: inherit;
+}
+.wa-voice[data-failed] .voice-wave {
+  opacity: 0.4;
+}
+.wa-chat .note-row[data-in] .wa-voice .voice-bars > i {
+  background: color-mix(in srgb, var(--mantine-color-text) 24%, transparent);
+}
+.wa-chat .note-row[data-in] .wa-voice .voice-played > i,
+.wa-chat .note-row[data-in] .wa-voice .voice-dot {
+  background: var(--mantine-color-green-6);
+}
+.wa-chat .note-row[data-in] .wa-voice .voice-mic {
+  background: color-mix(in srgb, var(--mantine-color-green-6) 14%, transparent);
+  color: var(--mantine-color-green-7);
+}
+.wa-chat .note-row[data-in] .wa-voice .voice-rate {
+  background: color-mix(in srgb, var(--mantine-color-text) 10%, transparent);
+  color: var(--mantine-color-text);
 }

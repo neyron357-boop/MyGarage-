@@ -732,6 +732,36 @@ async function sendText(body) {
   return { ok: true, msg: row };
 }
 
+/**
+ * A message of ours taken back for everyone (v0.83, the owner: «добавить возможность удалять у всех сообщения»): WhatsApp's
+ * own «Удалить у всех» — only our own, only while WhatsApp still allows it. The library would quietly delete it «for me»
+ * (on every device of the account) once that time is over: asked first, and said no to instead.
+ */
+async function deleteMessage(body) {
+  const c = need();
+  const id = String(body.id ?? '');
+  if (!MESSAGE_ID.test(id)) throw httpError(400, 'bad message');
+  const m = await within(c.getMessageById(id), 20_000, 'message');
+  if (!m) throw httpError(404, 'no message');
+  if (!m.fromMe) throw httpError(403, 'not ours');
+  const can = await within(
+    c.pupPage.evaluate((mid) => {
+      const msg = window.Store?.Msg?.get?.(mid);
+      const checks = window.Store?.MsgActionChecks;
+      if (!msg || !checks) return null;
+      return !!(checks.canSenderRevokeMsg?.(msg) || checks.canAdminRevokeMsg?.(msg));
+    }, id),
+    15_000,
+    'check',
+  );
+  if (can === null) throw httpError(409, 'cannot check');
+  if (!can) throw httpError(409, 'too late');
+  allow();
+  await within(m.delete(true), 30_000, 'delete');
+  const after = await within(c.getMessageById(id), 20_000, 'message').catch(() => null);
+  return { ok: true, msg: messageRow((after ?? m)?._data, { me: meId }) };
+}
+
 /** A message of a chat forwarded to another (v0.80.3): WhatsApp's own forwarding — its file goes with it, marked so. */
 async function forwardMessage(body) {
   const c = need();
@@ -963,6 +993,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (p === '/send') return sendJson(res, 200, await sendText(await readJson(req)));
       if (p === '/forward') return sendJson(res, 200, await forwardMessage(await readJson(req)));
+      if (p === '/delete') return sendJson(res, 200, await deleteMessage(await readJson(req)));
       if (p === '/file') return sendJson(res, 200, await sendFile(url, await readBody(req, MAX_FILE), req.headers['content-type']));
       if (p === '/seen') {
         const c = need();

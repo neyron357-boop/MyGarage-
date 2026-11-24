@@ -541,10 +541,10 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
 /** The job's tabs, in their order on screen: the job, and its notes. */
 const JOB_TABS = ['main', 'notes'] as const;
 /**
- * The garage's WhatsApp linked (v0.80, «при свайпе вместо заметки открылась чат с клиентом»): the customer's chat next
- * to the job — a swipe from it — and the notes after it.
+ * The garage's WhatsApp linked (v0.80, «при свайпе вместо заметки открылась чат с клиентом»): the customer's chat beside
+ * the job. Third (v0.83, the owner: «ватсап переместить на третью позицию»): the job, its notes, the chat.
  */
-const JOB_TABS_WA = ['main', 'chat', 'notes'] as const;
+const JOB_TABS_WA = ['main', 'notes', 'chat'] as const;
 
 /**
  * The job, on one screen: who and what, the lines (work and parts) with what the customer said to
@@ -578,6 +578,14 @@ export function JobPage() {
   const [params, setParams] = useSearchParams();
   const asked = params.get('tab');
   const tab = asked === 'notes' ? 'notes' : asked === 'chat' && tabs === JOB_TABS_WA ? 'chat' : 'main';
+  // The chat opens locked (v0.83, the owner: «вкладку надо вначале заблокировать, потому что могу случайно не то отправить —
+  // блокировать, по нажатию чтоб открылся чат»): a swipe onto it shows who and how many unread, a tap opens it for this
+  // visit. The green WhatsApp button and the «Чат» tile are that tap already.
+  const [chatOpen, setChatOpen] = useState(false);
+  const openChat = () => {
+    setChatOpen(true);
+    pickTab('chat');
+  };
   const pickTab = (v: string) => {
     if (v === tab) return;
     setParams(
@@ -850,12 +858,6 @@ export function JobPage() {
   // it — a draft is deleted (with Undo; v0.63.2, the owner: «при свайпе влево слишком быстро удаляется без предложения —
   // можно случайно удалить»: a long swipe deleted it at once), a line the customer has heard of is dropped (it stays in
   // the history as cancelled). Right — the next good thing: "agreed" on a line that waits, "done" on agreed work.
-  const swipeOff = (i: OrderItem): SwipeSpec | undefined =>
-    picking || !canPick(i)
-      ? undefined
-      : i.approvalState === 'draft'
-        ? { label: t('common.delete'), icon: IconTrash, color: 'red', full: false, onCommit: () => void removeLine(i) }
-        : { label: t('job.drop'), icon: IconTrash, color: 'red', full: false, onCommit: () => void run(async () => (await (isAwaitingClient(i) ? takeBack([i.id], { cancel: true }) : dropLine(i.id)), haptic('light'))) };
   const swipeOn = (i: OrderItem): SwipeSpec | undefined =>
     // A refused line back (v0.70, «восстановить отменённые»): a draft like it, the job reopened if it was closed.
     !picking && i.approvalState === 'declined' && binRestore
@@ -872,7 +874,8 @@ export function JobPage() {
       key={i.id}
       selected={picking && picked.has(i.id)}
       onLong={!picking && canPick(i) ? () => setPicked(new Set([i.id])) : undefined}
-      trailing={swipeOff(i)}
+      // No swipe that takes a line away (v0.83, the owner: «убрать свайп для удаления»): a line goes from its sheet or
+      // by «Выбрать» (a hold on it).
       leading={swipeOn(i)}
       dim={i.done && !picking}
       left={
@@ -1062,7 +1065,7 @@ export function JobPage() {
       key: 'whatsapp',
       icon: IconBrandWhatsapp,
       // v0.80: the chat is the job's own tab.
-      onClick: () => pickTab('chat'),
+      onClick: openChat,
     });
   // The reports by hand (v0.79): the job to the work group, the visit to the company's own group — no prices.
   if (waLinked && waGroups?.work) tiles.push({ key: 'toWork', icon: IconUsersGroup, onClick: () => void run(() => sendWorkReport(oid), 'wa.sentToGroup') });
@@ -1271,7 +1274,7 @@ export function JobPage() {
           <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
             {tabs === JOB_TABS_WA ? (
               // The garage's WhatsApp linked (v0.80): the customer's chat is this job's own tab.
-              <ActionIcon variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp" onClick={() => pickTab('chat')} data-job-chat-btn>
+              <ActionIcon variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp" onClick={openChat} data-job-chat-btn>
                 <IconBrandWhatsapp size={21} />
               </ActionIcon>
             ) : (
@@ -1328,14 +1331,14 @@ export function JobPage() {
         segmented
         items={[
           { value: 'main', label: t('job.tab.main') },
-          ...(tabs === JOB_TABS_WA ? [{ value: 'chat', label: 'WhatsApp', icon: IconBrandWhatsapp, color: 'green', count: chatUnread || undefined }] : []),
           { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
+          ...(tabs === JOB_TABS_WA ? [{ value: 'chat', label: 'WhatsApp', icon: IconBrandWhatsapp, color: 'green', count: chatUnread || undefined }] : []),
         ]}
       />
     </div>
     <div key={tab} ref={sw.panel} className="job-panel">
     {tab === 'chat' ? (
-      <JobChat b={b} />
+      <JobChat b={b} open={chatOpen} onOpen={() => setChatOpen(true)} unread={chatUnread} />
     ) : tab === 'notes' ? (
       <NotesChat orderId={oid} notes={b.notes} editable={open} />
     ) : (

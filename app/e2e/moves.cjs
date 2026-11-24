@@ -98,6 +98,7 @@ async function run(dir) {
 
   const out = [];
   const measure = async (name, fn) => {
+    if (process.env.MOVES_DEBUG) console.log('…', name);
     await page.waitForTimeout(900);
     await browser.startTracing(page, { categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline'] });
     const t0 = Date.now();
@@ -132,7 +133,7 @@ async function run(dir) {
     await top('.job-row').first().waitFor({ timeout: 60000 });
   });
   await measure('board → job', async () => {
-    await top('.job-row').filter({ hasText: /Цена/ }).first().click();
+    await top('.job-row').filter({ hasText: 'Nissan Patrol' }).first().click();
     await top('.list-row').first().waitFor();
   });
   await measure('line sheet up', async () => {
@@ -164,12 +165,15 @@ async function run(dir) {
     await top('.job-row').first().waitFor();
   });
   await measure('board: archive', async () => {
-    await top('[role="tab"], .scroll-tabs button').filter({ hasText: /Архив/ }).first().click();
+    // v0.81: the board's lists are under «Фильтры» on a phone.
+    await page.locator('[data-board-filters]').filter({ visible: true }).click();
+    await page.getByRole('dialog').locator('.list-row').filter({ hasText: /Архив/ }).first().click();
     await top('.job-mini').first().waitFor({ timeout: 60000 });
   });
+  // v0.81: the search is the board's own field (no «Поиск» in the tab bar).
   await measure('search: type', async () => {
-    await page.locator('.tab-bar button', { hasText: 'Поиск' }).click();
-    await top('input').first().click();
+    await page.locator('.tab-bar button', { hasText: 'Доска' }).click();
+    await top('input[type="search"]').first().click();
     for (const ch of 'toyota') await page.keyboard.type(ch, { delay: 60 });
     await page.waitForTimeout(300);
   });

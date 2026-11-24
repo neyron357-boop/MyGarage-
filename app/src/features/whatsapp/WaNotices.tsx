@@ -4,6 +4,7 @@ import { IconBrandWhatsapp } from '@tabler/icons-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { onRepliesRead } from '../../services/waAsk';
+import { openRoute } from '../../ui/openRoute';
 
 /**
  * A supplier's answer put on a job (v0.79): said once, in a line — who, how many parts got a price, which job — with
@@ -25,7 +26,7 @@ export function WaNotices() {
                 size="compact-sm"
                 variant="light"
                 onClick={() => {
-                  window.location.hash = `#/orders/${r.orderId}`;
+                  openRoute(`/orders/${r.orderId}`);
                   notifications.clean();
                 }}
               >

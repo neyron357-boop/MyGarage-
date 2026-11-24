@@ -1894,6 +1894,10 @@ export const en: typeof ru = {
   wa: {
     // v0.81: «Garage only», chats' statuses, voice messages, an expense to the boss.
     garageOnly: 'Garage only',
+    // v0.83: a job's chat opens by a tap.
+    // v0.83: take a message of ours back for everyone.
+    delAll: { action: 'Delete for everyone', title: 'Delete for everyone?', text: 'The message goes for everyone in the chat — «This message was deleted» stays in its place.', done: 'Deleted for everyone', late: 'WhatsApp no longer lets this message be deleted for everyone' },
+    openChat: 'Open the chat',
     tags: { pick: 'Select', give: 'Status · {{n}}', title: 'Status of chats · {{n}}', none: 'No status', done: 'Status «{{tag}}» — chats: {{n}}', cleared: 'Status removed — chats: {{n}}' },
     voice: { mic: 'Voice message', hold: 'Hold to record', slide: 'cancel' },
     boss: { send: 'Send to the boss', sentAt: 'Sent · {{time}}', pickJob: 'Pick the job first', noJob: 'Pick the job first', noChat: 'The boss\'s chat is not set', sent: 'Sent to the boss' },

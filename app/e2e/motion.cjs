@@ -136,7 +136,9 @@ const check = (name, ok, detail) => {
   // Opening a job is only a look: its stage, its journal and its place on the board stay as they were.
   const rowsAfter = (await rows()).map((r) => r.plate);
   const journalAfter = await journal();
-  check('back: a look changed nothing (same order, no journal entry)', journalAfter === journalBefore && rowsAfter.join('|') === rowsBefore.join('|'), { journalBefore, journalAfter, rowsBefore: rowsBefore.slice(-4), rowsAfter: rowsAfter.slice(-4) });
+  // (v0.81: an opened job comes first on the board — remembered on the device, nothing of the job written.)
+  const lookedFirst = [lookAt.plate, ...rowsBefore.filter((p) => p !== lookAt.plate)];
+  check('back: a look changed nothing but its place (first on the board, v0.81), no journal entry', journalAfter === journalBefore && rowsAfter.join('|') === lookedFirst.join('|'), { journalBefore, journalAfter, rowsBefore: rowsBefore.slice(0, 4), rowsAfter: rowsAfter.slice(0, 4) });
 
   // 2b. A job that did change goes on top of the board; the board stays where it was (the scroll does not
   // follow the card up): the cards that were in view are still in view.
@@ -364,6 +366,17 @@ const check = (name, ok, detail) => {
   //     nothing; a press catches the lens mid-flight; a tap is still a tap.
   await page.goto(BASE + '#/');
   await page.waitForTimeout(900);
+  // Four tabs, as on the garage's phone (v0.81 took «Поиск» out of the bar; WhatsApp is there while the garage's server
+  // is — played here): Доска · Деньги · WhatsApp · Ещё. Below, «search» stands for Деньги, «money» for WhatsApp.
+  await page.evaluate(async () => {
+    const { setWaTransport } = await import('/src/services/whatsapp.ts');
+    const status = { ok: true, available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 0, unread: 0 };
+    setWaTransport(async (p) => (p === 'status' ? status : p === 'chats' ? { chats: [], total: 0, unread: 0 } : p === 'messages' ? { messages: [], more: false } : p === 'outbox' ? { items: [] } : { ok: true }), () => '');
+    location.hash = '#/more';
+  });
+  await page.waitForTimeout(700);
+  await page.evaluate(() => (location.hash = '#/'));
+  await page.waitForTimeout(900);
   const cdp = await ctx.newCDPSession(page);
   const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' || type === 'touchCancel' ? [] : [{ x, y }] });
   const lensX = () => page.evaluate(() => { const r = document.querySelector('.tab-lens').getBoundingClientRect(); return Math.round(r.left + r.width / 2); });
@@ -403,7 +416,7 @@ const check = (name, ok, detail) => {
   await page.waitForTimeout(800);
   const slow = { catchUp, slowGap, backGap, pauseGap, reverseGap, midRoutes, routes: await routes(), lens: await lensX(), search: tSearch.x };
   check('tab bar: lens under the finger (slow, pause, back), nothing opens mid-slide', catchUp <= 12 && slowGap <= 1 && backGap <= 1 && pauseGap <= 1 && reverseGap <= 1 && midRoutes.length === 0, slow);
-  check('tab bar: release opens only that tab, once; lens settles on it', slow.routes.join() === '#/search' && Math.abs(slow.lens - tSearch.x) <= 1, slow);
+  check('tab bar: release opens only that tab, once; lens settles on it', slow.routes.join() === '#/money' && Math.abs(slow.lens - tSearch.x) <= 1, slow);
 
   await touch('touchStart', tSearch.x, ty);
   await glide(tSearch.x, tMore.x, 120);
@@ -411,14 +424,14 @@ const check = (name, ok, detail) => {
   await touch('touchEnd');
   await page.waitForTimeout(800);
   const fast = { routes: await routes(), lens: await lensX(), money: tMoney.x };
-  check('tab bar: a fast sweep opens only the tab of release', fast.routes.join() === '#/money' && Math.abs(fast.lens - tMoney.x) <= 1, fast);
+  check('tab bar: a fast sweep opens only the tab of release', fast.routes.join() === '#/whatsapp' && Math.abs(fast.lens - tMoney.x) <= 1, fast);
 
   await touch('touchStart', tMoney.x, ty);
   await glide(tMoney.x, tBoard.x, 300);
   await touch('touchCancel');
   await page.waitForTimeout(800);
   const cancelled = { routes: await routes(), lens: await lensX(), hash: await page.evaluate(() => location.hash) };
-  check('tab bar: a cancelled slide opens nothing, the lens goes home', cancelled.routes.length === 0 && cancelled.hash === '#/money' && Math.abs(cancelled.lens - tMoney.x) <= 1, cancelled);
+  check('tab bar: a cancelled slide opens nothing, the lens goes home', cancelled.routes.length === 0 && cancelled.hash === '#/whatsapp' && Math.abs(cancelled.lens - tMoney.x) <= 1, cancelled);
 
   await touch('touchStart', tMoney.x, ty);
   await glide(tMoney.x, tBoard.x, 250);
@@ -451,7 +464,7 @@ const check = (name, ok, detail) => {
   await touch('touchEnd');
   await page.waitForTimeout(700);
   const tap = { routes: await routes(), lens: await lensX() };
-  check('tab bar: a tap (under the slop) still opens its tab', tap.routes.join() === '#/search' && Math.abs(tap.lens - tSearch.x) <= 1, tap);
+  check('tab bar: a tap (under the slop) still opens its tab', tap.routes.join() === '#/money' && Math.abs(tap.lens - tSearch.x) <= 1, tap);
 
   // A quick flick, then a tap at once: Chrome must not take the flick for a fling and swallow the tap.
   await touch('touchStart', tSearch.x, ty);
@@ -465,7 +478,7 @@ const check = (name, ok, detail) => {
   await touch('touchEnd');
   await page.waitForTimeout(600);
   const flickTap = { routes: await routes() };
-  check('tab bar: a tap right after a quick flick is not swallowed', flickTap.routes.join() === '#/,#/money', flickTap);
+  check('tab bar: a tap right after a quick flick is not swallowed', flickTap.routes.join() === '#/,#/whatsapp', flickTap);
 
   // Pressed on the lens but off its centre, then a slow slide: it centres under the finger (the tint,
   // the lens and the tab that opens agree).
@@ -486,7 +499,7 @@ const check = (name, ok, detail) => {
   await touch('touchEnd');
   await page.waitForTimeout(800);
   Object.assign(offLens, { routes: await routes(), lens: await lensX() });
-  check('tab bar: pressed off the lens — it comes under the finger and follows', offLens.gap <= 1 && offLens.routes.join() === '#/search' && Math.abs(offLens.lens - tSearch.x) <= 1, offLens);
+  check('tab bar: pressed off the lens — it comes under the finger and follows', offLens.gap <= 1 && offLens.routes.join() === '#/money' && Math.abs(offLens.lens - tSearch.x) <= 1, offLens);
 
   // A form with unsaved edits: a slide to another tab asks first, as a tapped tab does; nothing opens until "Leave".
   await page.evaluate(() => (location.hash = '#/settings'));
@@ -503,7 +516,7 @@ const check = (name, ok, detail) => {
   await page.getByRole('button', { name: 'Уйти', exact: true }).click();
   await page.waitForTimeout(700);
   const left = { routes: await routes(), lens: await lensX() };
-  check('tab bar: "Leave" then opens the tab of the slide', left.routes.join() === '#/money' && Math.abs(left.lens - tMoney.x) <= 1, left);
+  check('tab bar: "Leave" then opens the tab of the slide', left.routes.join() === '#/whatsapp' && Math.abs(left.lens - tMoney.x) <= 1, left);
 
   // Reduce Motion: no spring, no swell — a short plain settle (≤150 ms); the finger still drags the lens 1:1.
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -519,7 +532,7 @@ const check = (name, ok, detail) => {
   await page.waitForTimeout(250);
   Object.assign(rm, { releaseLens: await lensX(), routes: await routes() });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  check('tab bar: Reduce Motion — short settle, no swell, still follows the finger', Math.abs(rm.tapLens - tSearch.x) <= 1 && rm.scale === 1 && rm.gap <= 1 && Math.abs(rm.releaseLens - tMoney.x) <= 1 && rm.routes.join() === '#/search,#/money', rm);
+  check('tab bar: Reduce Motion — short settle, no swell, still follows the finger', Math.abs(rm.tapLens - tSearch.x) <= 1 && rm.scale === 1 && rm.gap <= 1 && Math.abs(rm.releaseLens - tMoney.x) <= 1 && rm.routes.join() === '#/money,#/whatsapp', rm);
 
   // A second tap while the lens is still flying bends its path at the speed it has (no stop-and-go): a frame or
   // two after the new aim it moves at least as fast as before it (a stop would start again from ~0 px a frame).
@@ -562,8 +575,8 @@ const check = (name, ok, detail) => {
   await page.evaluate(() => (location.hash = '#/money/payments'));
   await page.waitForTimeout(900);
   const deeper = await page.evaluate(() => location.hash);
-  await touch('touchStart', tMoney.x - 8, ty);
-  await glide(tMoney.x - 8, tMoney.x + 8, 120);
+  await touch('touchStart', tSearch.x - 8, ty);
+  await glide(tSearch.x - 8, tSearch.x + 8, 120);
   await touch('touchEnd');
   await page.waitForTimeout(800);
   const sloppy = { deeper, hash: await page.evaluate(() => location.hash) };
@@ -934,22 +947,17 @@ const check = (name, ok, detail) => {
   await page.waitForTimeout(500);
   const gives = band.every((x, i) => x > 0 && x < (i + 1) * 20 && (i === 0 || x - band[i - 1] < 20));
   check('tab swipe: before the first tab — a rubber band, then home', gives && (await pagePx()) === 0 && (await jobTab()) === 'main', band);
-  // The glow under the title: fixed in the screen, moved by the screen's scroll — 1:1, gone after 440 px.
-  const glowAt = async (y) => {
-    await setScroll(y);
-    await page.waitForTimeout(150);
-    return page.evaluate(() => {
-      const cs = getComputedStyle(document.querySelector('.stack > .screen[data-role="top"] .screen-body'), '::before');
-      return { pos: cs.position, ty: Math.round(new DOMMatrix(cs.transform === 'none' ? undefined : cs.transform).m42) };
-    });
-  };
-  const glows = [await glowAt(0), await glowAt(120), await glowAt(5000)];
-  const maxScroll = await scrollOf();
-  check(
-    'glow: held by the screen (it stays at the top when the list bounces there), scrolls away 1:1',
-    glows.every((g) => g.pos === 'fixed') && glows[0].ty === 0 && glows[1].ty === -120 && glows[2].ty === -Math.min(440, maxScroll),
-    { glows, maxScroll },
-  );
+  // The glow under the title (v0.83 — FPS): painted with the content and scrolling with it (no scroll timeline, nothing
+  // moved by the main thread per frame); the scroller's own still background carries the glow's top row, so the list
+  // pulled past its top opens onto the same colours; the content is the canvas over it everywhere else.
+  const glowNow = await page.evaluate(() => {
+    const top = document.querySelector('.stack > .screen[data-role="top"]');
+    const glow = getComputedStyle(top.querySelector('.screen-body'), '::before');
+    const scroller = getComputedStyle(top.querySelector('.screen-scroll'));
+    const body = getComputedStyle(top.querySelector('.screen-body'));
+    return { pos: glow.position, anim: glow.animationName, tint: (scroller.backgroundImage.match(/linear-gradient/g) || []).length, body: body.backgroundColor, canvas: getComputedStyle(top).backgroundColor };
+  });
+  check('glow: scrolls with the content (no scroll timeline); the scroller under a pull carries its top row', glowNow.pos === 'absolute' && glowNow.anim === 'none' && glowNow.tint === 2 && glowNow.body === glowNow.canvas, glowNow);
   await setScroll(0);
   await page.waitForTimeout(200);
   // The node under the finger goes away mid-touch (React replaced it: a skeleton, a picture loading): the rest of

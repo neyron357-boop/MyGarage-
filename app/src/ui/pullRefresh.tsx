@@ -41,11 +41,10 @@ export function usePullRefresh(onRefresh: () => Promise<unknown> | unknown): Rea
     let armed = false;
     let busy = false;
     const place = (y: number, animate: boolean) => {
-      // The page comes down; the glow under its title stays at the top of the screen (`--pull`).
-      page.style.transition = animate ? 'transform 420ms var(--ease-ios), --pull 420ms var(--ease-ios)' : 'none';
+      // The page comes down with its glow; the scroller's still top tint fills what opens above it (v0.83: only a
+      // transform each frame — no style of the page written while the finger moves).
+      page.style.transition = animate ? 'transform 420ms var(--ease-ios)' : 'none';
       page.style.transform = y ? `translate3d(0, ${y}px, 0)` : '';
-      page.style.setProperty('--pull', `${y}px`);
-      // While the page is moved, the glow is held by --pull, not by the screen's scroll (styles.css).
       if (y) page.setAttribute('data-pulled', '');
       mark.style.transition = animate ? 'opacity 260ms ease, transform 420ms var(--ease-ios)' : 'none';
       mark.style.transform = `translate3d(0, ${Math.max(0, y / 2 - 14)}px, 0)`;
@@ -62,7 +61,6 @@ export function usePullRefresh(onRefresh: () => Promise<unknown> | unknown): Rea
         if (busy || pulling) return;
         page.style.transition = '';
         page.style.transform = '';
-        page.style.removeProperty('--pull');
         page.removeAttribute('data-pulled');
       }, 440);
     };
@@ -128,7 +126,6 @@ export function usePullRefresh(onRefresh: () => Promise<unknown> | unknown): Rea
       scroller.removeEventListener('touchcancel', onEnd);
       page.style.transition = '';
       page.style.transform = '';
-      page.style.removeProperty('--pull');
       page.removeAttribute('data-pulled');
     };
   }, [screen, host, mark]);

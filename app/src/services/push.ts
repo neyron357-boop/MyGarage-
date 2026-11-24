@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { callJson, SyncError } from './sync/api';
 import { syncConfig } from './sync/config';
+import { openRoute } from '../ui/openRoute';
 
 /*
  * This device takes notifications (v0.74): the browser's push subscription, kept on the garage's server
@@ -173,7 +174,7 @@ export function startPush() {
   if (!capable()) return;
   navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
     const d = e.data as { type?: string; url?: string } | undefined;
-    if (d?.type === 'mg-open' && typeof d.url === 'string' && d.url.startsWith('#/')) window.location.hash = d.url;
+    if (d?.type === 'mg-open' && typeof d.url === 'string' && d.url.startsWith('#/')) openRoute(d.url);
   });
   window.setTimeout(() => void refreshPush(true).catch(() => undefined), 4000);
 }

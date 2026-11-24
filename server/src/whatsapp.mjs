@@ -18,7 +18,8 @@ import { createOutbox } from './waOutbox.mjs';
  *   POST /api/wa/link · /logout · /restart      — link this computer, unlink it, start WhatsApp Web again
  *   POST /api/wa/code {phone}                   — link by a code typed on the phone
  *   GET  /api/wa/chats · /messages?chat= · /number?phone=
- *   POST /api/wa/send {chat, text, quote} · /seen {chat} · /forward {id, to} (v0.80.3)
+ *   POST /api/wa/send {chat, text, quote} · /seen {chat} · /forward {id, to} (v0.80.3) · /delete {id} (v0.83: ours, for
+ *        everyone — while WhatsApp allows it)
  *   POST /api/wa/file?chat=&name=&caption=      — a file (the body is its bytes)
  *   GET  /api/wa/media?id= · /avatar?id=        — a message's file, a chat's picture: by the device's key, or by
  *                                                 `?d=<device>&k=<media key>` (a picture element sends no key)
@@ -373,6 +374,11 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     if (req.method === 'POST' && what === 'forward') {
       const body = await readJson(req, 4096);
       send(res, 200, await call('/forward', { method: 'POST', body: { id: body.id, to: body.to }, timeout: 90_000 }));
+      return true;
+    }
+    if (req.method === 'POST' && what === 'delete') {
+      const body = await readJson(req, 4096);
+      send(res, 200, await call('/delete', { method: 'POST', body: { id: body.id }, timeout: 60_000 }));
       return true;
     }
     if (req.method === 'POST' && what === 'seen') {

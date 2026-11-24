@@ -1,11 +1,12 @@
-import { Group, Loader } from '@mantine/core';
-import { IconBrandWhatsapp } from '@tabler/icons-react';
+import { Button, Group, Loader } from '@mantine/core';
+import { IconBrandWhatsapp, IconLock } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { OrderBundle } from '../../services/orders';
 import { chatOfNumber, chatOfPhone, useWa, waReady } from '../../services/whatsapp';
 import { useWaSel } from '../../ui/waSel';
-import { EmptyState } from '../../ui/components';
+import { EmptyState, PersonAvatar } from '../../ui/components';
+import { haptic } from '../../ui/haptics';
 import { useDesk } from '../../ui/desk';
 import { ChatThread } from './ChatThread';
 import { useWaPeople } from './WaParts';
@@ -44,7 +45,12 @@ function LiveGate() {
   return <WaGate s={useWa()} />;
 }
 
-export function JobChat({ b }: { b: OrderBundle }) {
+/**
+ * Locked until tapped (v0.83, the owner: «вкладку надо вначале заблокировать, потому что могу случайно не то отправить»):
+ * a swipe onto the tab shows whose chat and how many unread — the chat itself, with its field, «＋» and the microphone,
+ * only after «Открыть чат» (the job remembers it for this visit). Nothing of the chat is drawn before.
+ */
+export function JobChat({ b, open = true, onOpen, unread = 0 }: { b: OrderBundle; open?: boolean; onOpen?: () => void; unread?: number }) {
   const { t } = useTranslation();
   const desk = useDesk();
   const ready = useWaSel(waReady);
@@ -52,6 +58,24 @@ export function JobChat({ b }: { b: OrderBundle }) {
   const phone = jobChatPhone(b);
   const chat = useNumberChat(phone);
   if (!ready) return <LiveGate />;
+  if (!open) {
+    const name = b.customer.name || b.customer.companyName || phone;
+    return (
+      <div className="job-chat-lock surface" data-job-chat-lock>
+        <span className="job-chat-lock-face">
+          <PersonAvatar name={name} size={64} />
+          <span className="job-chat-lock-badge" aria-hidden>
+            <IconLock size={14} stroke={2.4} />
+          </span>
+        </span>
+        <span className="job-chat-lock-name">{name}</span>
+        {unread > 0 && <span className="job-chat-lock-unread tnum">{t('wa.unreadN', { count: unread })}</span>}
+        <Button size="lg" color="green" radius="xl" leftSection={<IconBrandWhatsapp size={20} />} onClick={() => (haptic('light'), onOpen?.())} data-job-chat-open>
+          {t('wa.openChat')}
+        </Button>
+      </div>
+    );
+  }
   if (chat.none) return <EmptyState icon={IconBrandWhatsapp} title={t('wa.notOnWa')} />;
   if (!chat.id)
     return (

@@ -18,6 +18,7 @@ import { armSound } from './ui/sound';
 
 armSound();
 import { installTapGuard } from './ui/tapGuard';
+import { installVirtualHistory } from './ui/virtualHistory';
 import { startNotifyPlan } from './services/notify';
 import { startPush } from './services/push';
 import { startSync } from './services/sync/engine';
@@ -52,6 +53,8 @@ async function start() {
   // Platform hooks for the stylesheet: an installed app has its own chrome.
   html.classList.toggle('ios', isApple());
   html.classList.toggle('standalone', window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
+  // The installed app on an iPhone: the browser's history stays at one page — no Safari swipe between pages (v0.83).
+  installVirtualHistory();
   prepareTelegramGestures();
   blockPinchZoom();
   // The accent chosen on this device, before the first paint (no blue flash).

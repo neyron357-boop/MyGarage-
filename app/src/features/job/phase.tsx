@@ -32,7 +32,8 @@ export const PHASE_META: Record<Phase, { color: string; glow: string; icon: Icon
  */
 export function usePhaseGlow(ref: React.RefObject<HTMLElement | null>, phase: Phase | undefined) {
   useLayoutEffect(() => {
-    const host = ref.current?.closest<HTMLElement>('.screen-body, .page-shell');
+    // The scroller on a phone (its still top tint takes the same colours, v0.83), the page on a PC.
+    const host = ref.current?.closest<HTMLElement>('.screen-scroll, .page-shell');
     if (!host || !phase) return;
     const m = PHASE_META[phase];
     host.style.setProperty('--glow', `var(--mantine-color-${m.color}-6)`);

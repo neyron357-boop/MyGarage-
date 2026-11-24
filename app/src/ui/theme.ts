@@ -338,6 +338,8 @@ export const cssResolver: CSSVariablesResolver = () => ({
     // Liquid Glass: a bright translucent body, a light rim on top, a soft shadow under it.
     '--glass-bg': 'rgba(255, 255, 255, 0.66)',
     '--glass-bg-strong': 'rgba(255, 255, 255, 0.84)',
+    // v0.83: glass without its blur (small things over moving content on a phone) — dense enough to read.
+    '--glass-solid': 'rgba(255, 255, 255, 0.94)',
     '--glass-rim': 'rgba(255, 255, 255, 0.95)',
     '--glass-edge': 'rgba(0, 0, 0, 0.07)',
     '--glass-shadow': '0 8px 28px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06)',
@@ -392,6 +394,7 @@ export const cssResolver: CSSVariablesResolver = () => ({
     '--mantine-color-teal-filled-hover': 'var(--mantine-color-teal-9)',
     '--glass-bg': 'rgba(48, 48, 52, 0.6)',
     '--glass-bg-strong': 'rgba(40, 40, 44, 0.86)',
+    '--glass-solid': 'rgba(44, 44, 48, 0.95)',
     '--glass-rim': 'rgba(255, 255, 255, 0.16)',
     '--glass-edge': 'rgba(255, 255, 255, 0.08)',
     '--glass-shadow': '0 8px 28px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3)',
