@@ -51,20 +51,78 @@ export function onLocalChange(fn: Listener | null) {
   onChange = fn;
 }
 
+/**
+ * What was written here, a transaction at a time, once it is kept (v0.79: what WhatsApp is to say by itself — an
+ * invoice, a payment, an expense, a line «CAR WASH» — services/waAuto.ts). Never what came from the server: another
+ * device said it already. `obj` — the record as it is now (an update: the old one with the changed fields).
+ */
+export interface LocalWrite {
+  table: string;
+  key: string;
+  obj: Record<string, unknown>;
+  kind: 'create' | 'update';
+  /** An update: the record before it. */
+  was?: Record<string, unknown>;
+}
+type WritesListener = (writes: LocalWrite[]) => void;
+const writesListeners = new Set<WritesListener>();
+export function onLocalWrites(fn: WritesListener): () => void {
+  writesListeners.add(fn);
+  return () => void writesListeners.delete(fn);
+}
+/**
+ * Writes made while this runs are nobody's news (v0.79): the demo, a backup put back, an import of Eaglecart or of old
+ * invoices — thousands of records that were not done now. WhatsApp says nothing of them.
+ */
+let muted = 0;
+export async function muteLocalWrites<T>(fn: () => Promise<T>): Promise<T> {
+  muted++;
+  try {
+    return await fn();
+  } finally {
+    muted--;
+  }
+}
+type Collecting = { __mgWrites?: LocalWrite[]; parent?: Collecting | null; on?: (ev: string, fn: () => void) => void };
+function collect(trans: unknown, w: LocalWrite) {
+  if (!writesListeners.size || !trans || muted) return;
+  let root = trans as Collecting;
+  while (root.parent) root = root.parent;
+  if (!root.__mgWrites) {
+    root.__mgWrites = [];
+    const list = root.__mgWrites;
+    root.on?.('complete', () => {
+      for (const fn of writesListeners) {
+        try {
+          fn(list);
+        } catch {
+          // a listener's own trouble is not the transaction's
+        }
+      }
+    });
+  }
+  root.__mgWrites.push(w);
+}
+
 export function installSyncHooks(db: Dexie) {
   for (const table of db.tables) {
     if (LOCAL_TABLES.has(table.name)) continue;
     const name = table.name;
-    table.hook('creating', function (_key, obj, trans) {
+    table.hook('creating', function (key, obj, trans) {
       if (isRemote(trans)) return;
       (obj as Record<string, unknown>)[STAMP] = nextStamp();
       onChange?.();
+      const rec = obj as Record<string, unknown>;
+      collect(trans, { table: name, key: String(key ?? rec.id ?? ''), obj: rec, kind: 'create' });
     });
-    table.hook('updating', function (mods, _key, _obj, trans) {
+    table.hook('updating', function (mods, key, obj, trans) {
       if (isRemote(trans)) return;
       const keys = Object.keys(mods as object);
       if (keys.length === 1 && keys[0] === STAMP) return;
       onChange?.();
+      const was = obj as Record<string, unknown>;
+      // (A field set to undefined is taken off; a dotted key path is not used by this app's updates.)
+      collect(trans, { table: name, key: String(key), obj: { ...was, ...(mods as Record<string, unknown>) }, was, kind: 'update' });
       return { [STAMP]: nextStamp() };
     });
     table.hook('deleting', function (key, _obj, trans) {

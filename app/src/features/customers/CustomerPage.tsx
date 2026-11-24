@@ -1,7 +1,7 @@
 import { usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DeskSplit } from '../../ui/desk';
 import { Alert, Badge, Box, Button, Group, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconCar, IconNote, IconPencil, IconPlus } from '@tabler/icons-react';
+import { IconCar, IconNote, IconPencil, IconPlus, IconUsersGroup } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -17,6 +17,10 @@ import { OrderStatus } from '../job/phase';
 import { CustomerDrivers } from '../job/Driver';
 import { CustomerHistory } from './HistoryInvoices';
 import { CustomerModal, VehicleModal } from './forms';
+import { ChatPicker } from '../whatsapp/ChatPicker';
+import { setCustomerGroup } from '../../services/waAuto';
+import { useWa, waReady } from '../../services/whatsapp';
+import { useAction } from '../../ui/hooks';
 
 export function CustomerPage() {
   const { id } = useParams();
@@ -25,6 +29,10 @@ export function CustomerPage() {
   const [edit, setEdit] = useState(false);
   const [addCar, setAddCar] = useState(false);
   const phone = usePhone();
+  // Its WhatsApp group (v0.79): picked among the garage's WhatsApp groups.
+  const waLinked = waReady(useWa());
+  const [groupPick, setGroupPick] = useState(false);
+  const { run } = useAction();
   const data = useScreenLiveQuery(async () => {
     const c = await db.customers.get(id!);
     if (!c) return null;
@@ -78,6 +86,16 @@ export function CustomerPage() {
                 </Box>
               </Group>
               <ContactTiles phone={c.phone} whatsapp={c.whatsapp} telegram={c.telegram} />
+              {/* Its own WhatsApp group (v0.79): each visit's report goes there with one tap — no prices. */}
+              {(waLinked || c.waGroup) && (
+                <button type="button" className="wa-group-row tap" onClick={() => waLinked && setGroupPick(true)} data-customer-wa-group>
+                  <span className="row-icon" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden>
+                    <IconUsersGroup size={17} stroke={2} />
+                  </span>
+                  <span className="wa-group-label">{t('wa.auto.clientGroup')}</span>
+                  <span className="wa-group-name" data-set={c.waGroup ? true : undefined}>{c.waGroup?.name ?? t('wa.auto.pick')}</span>
+                </button>
+              )}
               <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md" spacing="md">
                 <Field label={t('customer.docLanguage')}>{t(`lang.${c.docLanguage}`)}</Field>
                 <Field label={t('customer.channel')}>{c.preferredChannel === 'call' ? t('customer.call') : c.preferredChannel === 'telegram' ? 'Telegram' : 'WhatsApp'}</Field>
@@ -191,6 +209,16 @@ export function CustomerPage() {
         }
       />
       <CustomerModal opened={edit} onClose={() => setEdit(false)} customer={c} />
+      {groupPick && (
+        <ChatPicker
+          opened={groupPick}
+          kind="group"
+          title={t('wa.auto.clientGroup')}
+          onClose={() => setGroupPick(false)}
+          onPick={(to) => void run(() => setCustomerGroup(c.id, to))}
+          onClear={c.waGroup ? () => void run(() => setCustomerGroup(c.id, undefined)) : undefined}
+        />
+      )}
       <VehicleModal opened={addCar} onClose={() => setAddCar(false)} customerId={c.id} />
     </>
   );

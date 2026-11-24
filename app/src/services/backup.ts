@@ -1,3 +1,4 @@
+import { muteLocalWrites } from '../db/syncHooks';
 import { db, GarageDB } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { AppError } from './errors';
@@ -125,7 +126,11 @@ async function ownCopy(b: Blob): Promise<Blob> {
  * few at a time, each read out of the backup into memory first; one the device refuses does not stop the
  * others — it is counted. `onProgress` hears the files as they go. The page reloads afterwards.
  */
-export async function importBackup(file: Blob, onProgress?: (done: number, total: number) => void): Promise<RestoreResult> {
+/** A backup put back, quietly: nothing of it is news for WhatsApp (v0.79). */
+export function importBackup(file: Blob, onProgress?: (done: number, total: number) => void): Promise<RestoreResult> {
+  return muteLocalWrites(() => restoreBackup(file, onProgress));
+}
+async function restoreBackup(file: Blob, onProgress?: (done: number, total: number) => void): Promise<RestoreResult> {
   const data = await readBackup(file);
   const name = db.name;
   db.close();

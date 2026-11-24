@@ -39,6 +39,7 @@ import { PartsPage } from './features/parts/PartsPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { SearchPage } from './features/search/SearchPage';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { WaAutoPage } from './features/whatsapp/WaAutoPage';
 import { WaSetupPage } from './features/whatsapp/WaSetupPage';
 import { WhatsAppPage } from './features/whatsapp/WhatsAppPage';
 import { refreshWa, useWa, waUnread } from './services/whatsapp';
@@ -64,6 +65,7 @@ import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 // The developer's feedback tool (temporary): removed with src/devtools/feedback and this line and the one below.
 import { FeedbackTool } from './devtools/feedback';
 import { AiNotices } from './features/ai/AiNotices';
+import { WaNotices } from './features/whatsapp/WaNotices';
 import { useClientLockGuard } from './ui/clientLock';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
@@ -98,6 +100,7 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/whatsapp" element={<WhatsAppPage />} />
       <Route path="/whatsapp/chat/:id" element={<WhatsAppPage />} />
       <Route path="/whatsapp/setup" element={<WaSetupPage />} />
+      <Route path="/whatsapp/auto" element={<WaAutoPage />} />
       <Route path="*" element={<BoardPage />} />
     </Routes>
   );
@@ -438,6 +441,7 @@ function Providers({ children }: { children: React.ReactNode }) {
       <Celebration />
       <FeedbackTool />
       <AiNotices />
+      <WaNotices />
       {children}
     </DatesProvider>
   );

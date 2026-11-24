@@ -1,3 +1,4 @@
+import { muteLocalWrites } from '../db/syncHooks';
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { monthTable, readDocument, tableDiff, type MonthRow } from '../domain/historyInvoices';
@@ -47,7 +48,11 @@ export interface HistoryImportResult {
  * the transaction the month table is counted again from the invoices as written and must be the plan's and the expected
  * one (when given), else it is rolled back.
  */
-export async function applyHistoryImport(customerId: string, plan: HistoryPlan, expected?: MonthRow[]): Promise<HistoryImportResult> {
+/** Old invoices brought in, quietly: nothing of them is news for WhatsApp (v0.79). */
+export function applyHistoryImport(customerId: string, plan: HistoryPlan, expected?: MonthRow[]): Promise<HistoryImportResult> {
+  return muteLocalWrites(() => applyHistoryNow(customerId, plan, expected));
+}
+async function applyHistoryNow(customerId: string, plan: HistoryPlan, expected?: MonthRow[]): Promise<HistoryImportResult> {
   if (plan.problems.length) throw new AppError('history.problems', { n: plan.problems.length });
   if (expected) {
     const diff = tableDiff(plan.table, expected);

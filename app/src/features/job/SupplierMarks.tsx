@@ -75,7 +75,36 @@ function MarkSheet({ s, opened, onClose }: { s: Supplier; opened: boolean; onClo
  * A supplier of the job's list: its name, stars and mark, why it fits; WhatsApp and a call at its end. Marked by a swipe or
  * a long press; a tap opens its card. `used`: its WhatsApp sends the car's and the parts' photos with the words.
  */
-export function SupplierRow({ r, why, chat, used, onCard, onUsedAsk, stars }: { r: Ranked; why: string; chat?: string; used?: boolean; onCard: () => void; onUsedAsk?: () => void; stars?: React.ReactNode }) {
+export function SupplierRow({
+  r,
+  why,
+  chat,
+  used,
+  onCard,
+  onUsedAsk,
+  stars,
+  picking,
+  picked,
+  onPick,
+  status,
+  onChat,
+}: {
+  r: Ranked;
+  why: string;
+  chat?: string;
+  used?: boolean;
+  onCard: () => void;
+  onUsedAsk?: () => void;
+  stars?: React.ReactNode;
+  /** Picking suppliers to ask through the garage's WhatsApp (v0.79): a tap picks or lets go. */
+  picking?: boolean;
+  picked?: boolean;
+  onPick?: () => void;
+  /** Where its request stands, what it answered (v0.79). */
+  status?: React.ReactNode;
+  /** Its chat opened by the link: the request is kept, to read its answer (v0.79). */
+  onChat?: () => void;
+}) {
   const { t } = useTranslation();
   const { run } = useAction();
   const s = r.supplier;
@@ -91,11 +120,20 @@ export function SupplierRow({ r, why, chat, used, onCard, onUsedAsk, stars }: { 
   return (
     <>
       <ListRow
-        handlers={press.handlers}
-        onClick={() => !press.consumeClick() && onCard()}
-        leading={{ label: good ? t('suppliers.mark.none') : t('suppliers.mark.good'), icon: good ? IconX : IconThumbUp, color: good ? 'gray' : 'green', onCommit: () => take(good ? undefined : 'good') }}
-        trailing={{ label: t('suppliers.mark.off'), icon: IconEyeOff, color: 'red', full: false, onCommit: () => take('off') }}
-        left={<PersonAvatar name={s.name} company size={36} />}
+        handlers={picking ? undefined : press.handlers}
+        onClick={() => (picking ? onPick?.() : !press.consumeClick() && onCard())}
+        selected={picking ? picked : undefined}
+        leading={picking ? undefined : { label: good ? t('suppliers.mark.none') : t('suppliers.mark.good'), icon: good ? IconX : IconThumbUp, color: good ? 'gray' : 'green', onCommit: () => take(good ? undefined : 'good') }}
+        trailing={picking ? undefined : { label: t('suppliers.mark.off'), icon: IconEyeOff, color: 'red', full: false, onCommit: () => take('off') }}
+        left={
+          picking ? (
+            <span className="pick-tick" data-on={picked || undefined} aria-hidden>
+              {picked && <IconCheck size={16} stroke={3} />}
+            </span>
+          ) : (
+            <PersonAvatar name={s.name} company size={36} />
+          )
+        }
         title={
           <span className="supplier-name">
             <span className="supplier-name-text">{s.name}</span>
@@ -103,16 +141,21 @@ export function SupplierRow({ r, why, chat, used, onCard, onUsedAsk, stars }: { 
           </span>
         }
         subtitle={
-          s.mark === 'good' || s.mark === 'silent' || why ? (
-            <span className="supplier-why">
-              <MarkTag mark={s.mark} />
-              {why && <Text span inherit>{why}</Text>}
-            </span>
+          s.mark === 'good' || s.mark === 'silent' || why || status ? (
+            <>
+              {(s.mark === 'good' || s.mark === 'silent' || why) && (
+                <span className="supplier-why">
+                  <MarkTag mark={s.mark} />
+                  {why && <Text span inherit>{why}</Text>}
+                </span>
+              )}
+              {status}
+            </>
           ) : undefined
         }
         right={
           <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
-            {(chat || (used && onUsedAsk)) && (
+            {!picking && (chat || (used && onUsedAsk)) && (
               <ActionIcon
                 component="a"
                 href={chat}
@@ -126,6 +169,7 @@ export function SupplierRow({ r, why, chat, used, onCard, onUsedAsk, stars }: { 
                 data-used-ask={used || undefined}
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
+                  onChat?.();
                   // A used-parts seller (v0.71): the car's and the parts' photos with the words — the share sheet (a link
                   // to the chat carries words only).
                   if (used && onUsedAsk) {
@@ -137,7 +181,7 @@ export function SupplierRow({ r, why, chat, used, onCard, onUsedAsk, stars }: { 
                 <IconBrandWhatsapp size={19} />
               </ActionIcon>
             )}
-            {s.phone && (
+            {!picking && s.phone && (
               <ActionIcon component="a" href={`tel:${s.phone}`} variant="light" color="green" size={36} radius="xl" aria-label={t('customer.call')} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <IconPhone size={18} />
               </ActionIcon>

@@ -2177,3 +2177,8 @@ html.desk .wa-link,
 html.desk .wa-state {
   max-width: 560px;
 }
+
+/* WhatsApp → Automation on a PC (v0.79): a readable column. */
+html.desk .wa-auto {
+  max-width: 760px;
+}

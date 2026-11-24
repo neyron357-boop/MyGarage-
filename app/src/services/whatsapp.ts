@@ -79,9 +79,18 @@ export interface WaStore {
   meta: Record<string, ChatMeta>;
   /** Linking, unlinking, starting again — one at a time. */
   busy: boolean;
+  /** What the server's outbox said of the items this device looks at (v0.79), by key. */
+  outbox: Record<string, OutboxFace>;
 }
 
-const EMPTY: WaStore = { old: false, away: false, statusAt: 0, chats: [], chatsAt: 0, chatsLoading: false, messages: {}, meta: {}, busy: false };
+const EMPTY: WaStore = { old: false, away: false, statusAt: 0, chats: [], chatsAt: 0, chatsLoading: false, messages: {}, meta: {}, busy: false, outbox: {} };
+/** The outbox's faces as read (v0.79). */
+export function keepOutbox(items: OutboxFace[]) {
+  if (!items.length) return;
+  const next = { ...store.outbox };
+  for (const it of items) next[it.key] = it;
+  set({ outbox: next });
+}
 let store: WaStore = { ...EMPTY };
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
@@ -114,6 +123,15 @@ function failure(e: unknown): Error {
   if (status === 413) return new AppError('wa.err.tooBig');
   if (status === 401) return new AppError('wa.err.revoked');
   return new AppError('wa.err.failed');
+}
+
+/** A call to the server's WhatsApp (v0.79: the outbox's services call it too). */
+export const waCall = <T,>(path: string, init: WaCallInit = {}): Promise<T> => call<T>(path, init);
+
+/** A chat's last messages, read and handed over — not kept in the lists (a supplier's answers read, v0.79). */
+export async function fetchChatMessages(chat: string, limit = 60): Promise<WaMessage[]> {
+  const r = await call<{ messages: WaMessage[] }>('messages', { query: { chat, limit: String(limit) }, timeout: 100_000 });
+  return r.messages ?? [];
 }
 
 async function call<T>(path: string, init: WaCallInit = {}): Promise<T> {
@@ -432,10 +450,52 @@ export const waUnread = (s: WaStore = store): number => (!waReady(s) ? 0 : s.cha
 
 /* ---------- What the server says ---------- */
 
+/**
+ * Whoever wants to hear what WhatsApp says as it says it (v0.79: a supplier's answer read at once, the outbox's
+ * progress shown): every event of the stream, after the lists took it.
+ */
+type WaListener = (ev: WaEvent | OutboxEvent) => void;
+const waListeners = new Set<WaListener>();
+export function onWaEvent(fn: WaListener): () => void {
+  waListeners.add(fn);
+  return () => void waListeners.delete(fn);
+}
+
+/** What the server's outbox says of an item: queued, sent, failed (v0.79, server/src/waOutbox.mjs). */
+export interface OutboxFace {
+  key: string;
+  state: 'queued' | 'sending' | 'sent' | 'failed' | 'dropped' | 'none';
+  at?: number;
+  title?: string;
+  chat?: string;
+  error?: string;
+  tries?: number;
+  parts?: number;
+  done?: number;
+}
+export type OutboxEvent = { t: 'outbox'; item: OutboxFace };
+
 /** An event of the stream (`{"wa": …}`): the state, a message, its ticks, a chat's line. */
 export function waSaid(value: unknown) {
-  const ev = value as WaEvent | undefined;
+  waHeard(value);
+  const ev = value as WaEvent | OutboxEvent | undefined;
+  if (ev && typeof ev === 'object' && 't' in ev)
+    for (const fn of waListeners) {
+      try {
+        fn(ev);
+      } catch {
+        // a listener's own trouble
+      }
+    }
+}
+function waHeard(value: unknown) {
+  const ev = value as WaEvent | OutboxEvent | undefined;
   if (!ev || typeof ev !== 'object' || !('t' in ev)) return;
+  if (ev.t === 'outbox') {
+    const item = ev.item;
+    if (item?.key) set({ outbox: { ...store.outbox, [item.key]: item } });
+    return;
+  }
   if (ev.t === 'state') {
     const was = store.status?.phase;
     set({ status: ev.state, old: false, away: false, statusAt: Date.now() });

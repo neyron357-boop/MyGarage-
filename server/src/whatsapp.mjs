@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findBrowser } from '../whatsapp/browser.mjs';
 import { DIRS, httpError } from './store.mjs';
+import { createOutbox } from './waOutbox.mjs';
 
 /*
  * The garage's WhatsApp for the app (v0.78): this server starts the bridge (server/whatsapp/bridge.mjs — WhatsApp Web
@@ -241,10 +242,38 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       browser: !!browser,
       on: turnedOn(),
       ...(last ?? off),
+      // What waits to go by itself, what did not go (v0.79).
+      outbox: outbox.counts(),
       // Started and not heard yet: starting, not off.
       ...(!last && (child || given) && turnedOn() ? { phase: 'starting' } : {}),
     };
   }
+
+  /* ----- What goes by itself (v0.79, waOutbox.mjs) ----- */
+
+  const outbox = createOutbox({
+    dir: path.join(config.dataDir, DIRS.service, 'whatsapp', 'outbox'),
+    store,
+    ready: () => available() && turnedOn() && last?.phase === 'ready',
+    tell,
+    log,
+    bridge: {
+      json: (p, init = {}) => call(p, { ...init, timeout: 90_000 }),
+      async file({ chat, name, caption, mime, doc, bytes }) {
+        const q = new URLSearchParams({ chat, name: name || 'file' });
+        if (caption) q.set('caption', caption);
+        if (doc) q.set('doc', '1');
+        let res;
+        try {
+          res = await fetch(`${base}/file?${q}`, { method: 'POST', headers: { 'X-Bridge': secret, 'Content-Type': mime || 'application/octet-stream' }, body: bytes, signal: AbortSignal.timeout(300_000) });
+        } catch {
+          throw httpError(503, 'whatsapp is starting');
+        }
+        if (!res.ok) throw httpError(res.status, (await res.json().catch(() => ({}))).error || `whatsapp ${res.status}`);
+        return res.json();
+      },
+    },
+  });
 
   /* ----- The app's calls ----- */
 
@@ -275,6 +304,24 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       return true;
     }
     if (!available()) throw httpError(503, installed() ? 'whatsapp: no browser on the server' : 'whatsapp is not installed on the server');
+
+    // What goes by itself (v0.79): taken even while WhatsApp is not answering — it waits here.
+    if (req.method === 'POST' && what === 'outbox') {
+      const body = await readJson(req, 32 * 1024 * 1024);
+      const list = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
+      send(res, 200, { ok: true, items: list.map((x) => outbox.put(x, device?.name)) });
+      return true;
+    }
+    if (get && what === 'outbox') {
+      const keys = (url.searchParams.get('keys') || '').split(',').filter(Boolean).slice(0, 200);
+      send(res, 200, { ok: true, items: outbox.list(keys), ...outbox.counts() });
+      return true;
+    }
+    if (req.method === 'POST' && (what === 'outbox-retry' || what === 'outbox-drop')) {
+      const body = await readJson(req, 4096);
+      send(res, 200, { ok: true, item: what === 'outbox-retry' ? outbox.retry(body.key) : outbox.drop(body.key) });
+      return true;
+    }
 
     if (req.method === 'POST' && what === 'link') {
       store.metaSet('whatsapp', 'on');
@@ -353,9 +400,11 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     start() {
       if (turnedOn() && available()) run();
       if (given) listen();
+      outbox.start();
     },
     stop() {
       stopping = true;
+      outbox.stop();
       clearTimeout(respawn);
       listening?.destroy();
       end();
@@ -363,6 +412,7 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     status,
     available,
     api,
+    outbox,
     file,
     /** This computer's page: link, unlink, start again — as the app does. */
     async admin(what) {

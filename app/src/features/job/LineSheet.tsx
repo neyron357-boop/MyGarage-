@@ -612,10 +612,14 @@ export function LineSheet({
             <div className="group-title">{t('offer.title')}</div>
             <div className="ios-group">
               {offers.map((o) => (
-                <div key={o.id} className="ios-row clickable offer-row" role="button" tabIndex={0} aria-pressed={offerTaken(o)} onClick={() => takeOffer(o)}>
-                  <span className="offer-kind">{t(`offer.${o.kind}`)}</span>
+                <div key={o.id} className="ios-row clickable offer-row" role="button" tabIndex={0} aria-pressed={offerTaken(o)} data-offer-na={o.na || undefined} data-offer-wa={o.msg ? true : undefined} onClick={() => !o.na && takeOffer(o)}>
+                  {/* Read from a supplier's WhatsApp answer (v0.79): the kind it did not say — «?»; none — «нет». */}
+                  <span className="offer-kind">
+                    {t(`offer.${o.kind}`)}
+                    {o.unsure ? '?' : ''}
+                  </span>
                   <Text size="sm" c="dimmed" className="offer-meta" lineClamp={1}>
-                    {[sName(o.supplierId), offerWhen(o.days, uiLang)].filter(Boolean).join(' · ')}
+                    {[sName(o.supplierId), o.brand, o.na ? t('wa.ask.na') : offerWhen(o.days, uiLang), o.note].filter(Boolean).join(' · ')}
                   </Text>
                   <Text fw={600} className="tnum" style={{ flexShrink: 0 }}>
                     {o.costFils !== undefined ? formatAed(o.costFils, uiLang, false) : '—'}

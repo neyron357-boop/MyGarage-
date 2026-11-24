@@ -1,3 +1,4 @@
+import type { WaAuto, WaTarget } from './waAuto';
 import type { FitStatus, Marking, NumberCheck, VinCheck } from './fitment';
 import type { NotifySettings } from './notify';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
@@ -67,6 +68,11 @@ export interface Settings {
    * the morning's summary. Missing — the defaults; a field missing in it — its default (`notifyOf`).
    */
   notify?: Partial<NotifySettings>;
+  /**
+   * What the garage's WhatsApp says by itself (v0.79, domain/waAuto.ts): the work group, the boss, the wash, the
+   * requests to suppliers and their answers. Missing — the defaults (`waAutoOf`); written only by `saveWaAuto`.
+   */
+  waAuto?: { [K in keyof WaAuto]?: Partial<WaAuto[K]> };
 }
 
 export interface Customer {
@@ -89,6 +95,11 @@ export interface Customer {
    * A job of such a month (domain/monthLock.ts) is not changed, deleted, reopened or moved; no job or invoice goes in.
    */
   lockedMonths?: string[];
+  /**
+   * A company's own WhatsApp group (v0.79, the user: «группа корпоративного клиента, куда кидаются фото-отчёты каждого
+   * визита»): a job's report goes there with one tap — never a price.
+   */
+  waGroup?: WaTarget;
   createdAt: string;
   archivedAt?: string;
 }
@@ -404,6 +415,15 @@ export interface Order {
   mileageKm?: number;
   /** What the odometer's photo was read as when not sure, best first ([] — nothing read): waits to be looked at. */
   mileageOffered?: number[];
+  /**
+   * The parts asked of suppliers through WhatsApp (v0.79, services/waAsk.ts): to whom, which lines (their order is the
+   * list's numbers), and the answers read — their prices are the lines' offers (`PartOffer.msg`).
+   */
+  asks?: PartAsk[];
+  /** What WhatsApp said of this job by itself or by a tap (v0.79): the report to the work group, the company's group, the wash. */
+  waSent?: { kind: 'work' | 'client' | 'wash'; at: string; key: string; trigger?: string }[];
+  /** The lines the work group was told of as agreed (v0.79): a later agreement says only the new ones («Добавлено»). */
+  waSentItems?: string[];
   stageChangedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -757,6 +777,37 @@ export interface PartOffer {
   supplierId?: string;
   /** Days until it is here: 0 — today. */
   days?: number;
+  /** Read from a supplier's WhatsApp answer (v0.79): the message, and what else it said. */
+  msg?: string;
+  /** The kind was not said — it is the line's own, or aftermarket (shown with «?»). */
+  unsure?: true;
+  /** Not available from this supplier. */
+  na?: true;
+  brand?: string;
+  /** The supplier's own words («1 HOUR ORDER», «need sample»). */
+  note?: string;
+}
+
+/**
+ * A part request to one supplier through WhatsApp (v0.79): sent by the garage's server (picked on the job's suppliers
+ * screen), or opened by hand (the chat's link) — either way its answer is read.
+ */
+export interface PartAsk {
+  id: string;
+  supplierId: string;
+  /** The supplier's number as WhatsApp has it (digits). */
+  phone: string;
+  at: string;
+  /** The lines asked, in the list's order — «1.» is the first. */
+  items: string[];
+  /** The words sent (its car line and VIN tell which request an answer quotes). */
+  text: string;
+  via: 'server' | 'link';
+  /** The server's outbox key (sent by the server). */
+  key?: string;
+  used?: boolean;
+  /** The supplier's answers read: the message, when, its words (the first 400), how many parts it priced. */
+  replies?: { id: string; at: string; text: string; lines: number }[];
 }
 
 /** A line handed to someone outside the garage (a supplier marked as a contractor). The price to them is the line's cost. */

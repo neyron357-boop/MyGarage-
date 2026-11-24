@@ -1,8 +1,9 @@
 import { Button, Loader, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconCheck, IconCopy, IconLinkOff, IconRefresh } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCheck, IconCopy, IconLinkOff, IconRefresh, IconRobot } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { formatPhone } from '../../domain/phone';
 import { waDigits, type WaStatus } from '../../domain/whatsapp';
 import { getSettings } from '../../services/settings';
@@ -89,6 +90,7 @@ function Linking({ st }: { st: WaStatus }) {
 
 export function WaSetupPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const s = useWaStatus();
   const prefs = useWaPrefs();
   const { run, busy } = useAction({ exclusive: true });
@@ -165,6 +167,23 @@ export function WaSetupPage() {
           <Switch checked={prefs.seen} onChange={(e) => setWaPrefs({ seen: e.currentTarget.checked })} aria-label={t('wa.optSeen')} data-wa-opt="seen" />
         </FormRow>
       </RowGroup>
+
+      {/* What WhatsApp says by itself (v0.79): reports, the boss, the wash, suppliers. */}
+      <div className="notify-group">
+        <List>
+          <ListRow
+            onClick={() => navigate('/whatsapp/auto')}
+            chevron
+            left={
+              <span className="row-icon" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden>
+                <IconRobot size={19} stroke={2} />
+              </span>
+            }
+            title={<span data-wa-auto-link>{t('wa.auto.title')}</span>}
+            subtitle={t('wa.auto.hint')}
+          />
+        </List>
+      </div>
 
       {st.on && phase !== 'qr' && (
         <div className="notify-group">

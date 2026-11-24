@@ -8328,3 +8328,137 @@ html.desk .mark-layer-body {
   letter-spacing: 0.08em;
   cursor: pointer;
 }
+
+/* ---------- WhatsApp by itself (v0.79): suppliers picked, their answers, the automation's settings ---------- */
+/* A supplier picked for a request: a round tick in place of its picture. */
+.pick-tick {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 2px solid var(--app-label-3);
+  border-radius: 50%;
+  color: var(--mantine-color-white);
+  transition: background-color var(--dur-1) ease, border-color var(--dur-1) ease;
+}
+.pick-tick[data-on] {
+  border-color: var(--mantine-color-green-6);
+  background: var(--mantine-color-green-6);
+}
+/* Where its request stands: under the supplier's name. */
+.ask-status {
+  display: block;
+  color: var(--app-label-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ask-status[data-ask-state='answered'] {
+  color: var(--mantine-color-green-7);
+  font-weight: 600;
+}
+.ask-status[data-ask-state='failed'] {
+  color: var(--mantine-color-red-6);
+}
+.ask-status[data-ask-state='queued'] {
+  color: var(--mantine-color-orange-7);
+}
+/* Their answers, as they wrote them. */
+.ask-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ask-reply {
+  padding: 12px 14px;
+}
+.ask-reply-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ask-reply-head > :first-child {
+  min-width: 0;
+}
+.ask-priced {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mantine-color-green-6) 14%, transparent);
+  color: var(--mantine-color-green-7);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ask-reply-text {
+  margin-top: 4px;
+  color: var(--app-label-2);
+  font-size: 15px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* An offer read from WhatsApp «not available»: quieter. */
+.offer-row[data-offer-na] {
+  opacity: 0.6;
+  cursor: default;
+}
+/* A company's WhatsApp group on its card. */
+.wa-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 6px 0 0;
+  border: 0;
+  border-top: 0.5px solid var(--app-hairline);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wa-group-label {
+  flex-shrink: 0;
+  font-size: 15px;
+}
+.wa-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--mantine-color-cobalt-6);
+  font-weight: 600;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-group-name[data-set] {
+  color: var(--mantine-color-text);
+  font-weight: 500;
+}
+/* The automation's settings: a row whose choices are too many for its right side — under its label. */
+.wa-auto-stack {
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 8px;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+.wa-auto .ios-row .chip-row.wrap {
+  justify-content: flex-end;
+}
+.wa-auto-stack .chip-row.wrap {
+  justify-content: flex-start !important;
+}
+.wa-queue-actions {
+  display: inline-flex;
+  gap: 6px;
+}

@@ -21,6 +21,7 @@ import { installTapGuard } from './ui/tapGuard';
 import { startNotifyPlan } from './services/notify';
 import { startPush } from './services/push';
 import { startSync } from './services/sync/engine';
+import { startWaAsk, startWaAutomation } from './services/waStart';
 
 /** The Mini App owns vertical swipes inside its webview. Telegram's header still handles dismissal. */
 function prepareTelegramGestures() {
@@ -84,6 +85,9 @@ async function start() {
   );
   // Paired with the garage's server (v0.40): syncing runs by itself from now on.
   startSync();
+  // The garage's WhatsApp by itself (v0.79): reports, the outbox kept here, the suppliers' answers read.
+  startWaAutomation();
+  startWaAsk();
   // Notifications (v0.74): the plan of what to remind of follows the data; a notification tapped opens its job.
   startNotifyPlan();
   startPush();

@@ -117,6 +117,8 @@ function waHtml(w) {
   let h = '<div class="row"><span>Состояние</span><span class="' + cls + '">' + (w.phase === 'ready' ? '● ' : '') + esc(names[w.phase] || w.phase) + '</span></div>';
   if (w.me && w.linked) h += '<div class="row"><span>Номер</span><span>+' + esc(w.me.phone) + (w.me.name ? ' · ' + esc(w.me.name) : '') + '</span></div>';
   if (w.phase === 'ready') h += '<div class="row"><span>Чатов</span><span>' + w.chats + (w.unread ? ' · непрочитанных ' + w.unread : '') + '</span></div>';
+  // What goes by itself (v0.79): reports, the boss, the wash, requests to suppliers.
+  if (w.outbox && (w.outbox.queued || w.outbox.failed || w.outbox.sent)) h += '<div class="row"><span>Отправляется само</span><span>' + (w.outbox.queued ? 'в очереди ' + w.outbox.queued + ' · ' : '') + (w.outbox.failed ? '<span class="bad">не ушло ' + w.outbox.failed + '</span> · ' : '') + 'ушло ' + w.outbox.sent + '</span></div>';
   if (w.error && w.phase !== 'ready') h += '<div class="row"><span>Причина</span><span class="dim mono">' + esc(w.error) + '</span></div>';
   if (w.phase === 'qr' && w.qr) h += '<div style="padding:14px 0;text-align:center"><img alt="QR" src="' + esc(w.qr) + '" style="width:280px;height:280px;border-radius:12px;background:#fff;padding:8px"><p class="dim" style="margin:10px 0 0">WhatsApp на телефоне → Настройки → Связанные устройства → Привязка устройства → наведите камеру на код.</p></div>';
   h += '<p class="dim" style="margin:8px 0 12px">Этот компьютер — связанное устройство WhatsApp мастерской: приложение показывает чаты и отправляет сообщения и файлы. Переписка не копируется — читается из WhatsApp. Сессия хранится только здесь.</p>';

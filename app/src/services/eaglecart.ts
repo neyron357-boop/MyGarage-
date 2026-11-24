@@ -1,3 +1,4 @@
+import { muteLocalWrites } from '../db/syncHooks';
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { normalizePhone } from '../domain/phone';
@@ -413,7 +414,11 @@ export async function previewEaglecartImport(data: EaglecartExport, opts: Import
   return planEaglecartImport(data, await loadExisting(), opts).stats;
 }
 
-export async function importEaglecart(data: EaglecartExport, opts: ImportOptions = {}): Promise<ImportPlan['stats']> {
+/** Eaglecart's jobs brought in, quietly: nothing of them is news for WhatsApp (v0.79). */
+export function importEaglecart(data: EaglecartExport, opts: ImportOptions = {}): Promise<ImportPlan['stats']> {
+  return muteLocalWrites(() => importEaglecartNow(data, opts));
+}
+async function importEaglecartNow(data: EaglecartExport, opts: ImportOptions = {}): Promise<ImportPlan['stats']> {
   return db.transaction('rw', [db.customers, db.vehicles, db.ownerships, db.orders, db.items, db.counters], async () => {
     const plan = planEaglecartImport(data, await loadExisting(), opts);
     await db.customers.bulkAdd(plan.customers);

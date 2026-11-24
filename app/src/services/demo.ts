@@ -1,3 +1,4 @@
+import { muteLocalWrites } from '../db/syncHooks';
 import { db } from '../db/db';
 import { addDays, dubaiDate, nowIso, runAt } from '../domain/dates';
 import { QC_CHECKS, REQUIRED_SLOTS } from '../domain/inspection';
@@ -78,7 +79,11 @@ async function receiveParts(orderId: string, supplierId: string, paidCash = fals
  * waiting for parts, in progress, ready, a debt and a closed job), suppliers, payments and expenses.
  * Photos and signatures are drawn stand-ins marked "DEMO". Only offered while there are no jobs.
  */
-export async function loadDemoData(): Promise<void> {
+/** The demo, quietly: nothing of it is news for WhatsApp (v0.79). */
+export function loadDemoData(): Promise<void> {
+  return muteLocalWrites(() => loadDemo());
+}
+async function loadDemo(): Promise<void> {
   const yesterday = dubaiDate(addDays(nowIso(), -1));
   const mech = (await db.employees.toArray()).filter((e) => e.active);
   const m1 = mech[0]?.id;

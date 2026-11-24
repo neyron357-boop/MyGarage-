@@ -2,6 +2,8 @@ import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Te
 import { AiLineWork, AiPartsTile, AiPickedButton } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
+  IconBuildingCommunity,
+  IconUsersGroup,
   IconBuildingStore,
   IconAlarm,
   IconBell,
@@ -78,6 +80,9 @@ import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDeb
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { chatPath } from '../../domain/whatsapp';
 import { numberOnWa, useWa, waReady } from '../../services/whatsapp';
+import { waAutoOf } from '../../domain/waAuto';
+import { getSettings } from '../../services/settings';
+import { sendClientReport, sendWorkReport } from '../../services/waAuto';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { bundleAmountDue, changeStage, toggleMechanic, updateOrder, type OrderBundle } from '../../services/orders';
@@ -171,6 +176,8 @@ interface Tile {
 const TILE_COLOR: Record<string, string> = {
   customer: 'blue',
   whatsapp: 'green',
+  toWork: 'green',
+  toClient: 'teal',
   car: 'indigo',
   driver: 'violet',
   scanner: 'cyan',
@@ -551,6 +558,8 @@ export function JobPage() {
   const b = useOrderBundle(id);
   // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…».
   const waLinked = waReady(useWa());
+  // Where its reports go (v0.79): the work group, set in «WhatsApp → Автоматизация».
+  const waGroups = useScreenLiveQuery(async () => ({ work: !!waAutoOf((await getSettings()).waAuto).work.to }), []);
   // Shown to the customer (v0.67): the job locked to its customer's view until the lock is held.
   const locked = useClientLock();
   // Quick lines in the language of this job's documents (English by default), as they will be printed.
@@ -968,6 +977,9 @@ export function JobPage() {
           navigate(chatPath(r.chat));
         }),
     });
+  // The reports by hand (v0.79): the job to the work group, the visit to the company's own group — no prices.
+  if (waLinked && waGroups?.work) tiles.push({ key: 'toWork', icon: IconUsersGroup, onClick: () => void run(() => sendWorkReport(oid), 'wa.sentToGroup') });
+  if (waLinked && b.customer.waGroup) tiles.push({ key: 'toClient', icon: IconBuildingCommunity, onClick: () => void run(() => sendClientReport(oid), 'wa.sentToGroup') });
   tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
   // Who brought the car: a company's job has it on its card too; a private customer's — here only.
   tiles.push({ key: 'driver', icon: IconSteeringWheel, onClick: () => setDriverOpen(true) });
