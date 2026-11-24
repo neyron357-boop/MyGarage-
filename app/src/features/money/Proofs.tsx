@@ -13,7 +13,13 @@ export function Proofs({ entry }: { entry: Pick<LedgerEntry, 'id' | 'source'> })
   const { t } = useTranslation();
   const { run } = useAction();
   const list = useLiveQuery(() => proofsOf(entry.id), [entry.id]);
-  if (!list) return null;
+  // On top of the sheet (v0.77): its place is kept while the photos are read — the sheet does not jump under them.
+  if (!list)
+    return takesProofs(entry) ? (
+      <div className="strip-row" aria-hidden>
+        <span className="strip-tile" style={{ visibility: 'hidden' }} />
+      </div>
+    ) : null;
   return (
     <PhotoStrip
       name="proof"

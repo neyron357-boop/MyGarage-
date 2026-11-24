@@ -5,10 +5,12 @@ import { dubaiDate } from '../domain/dates';
 import { onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { addItem } from './estimate';
 import { checkIn } from './orders';
-import { removeEntry } from './entries';
+import { removeEntry, updateEntry } from './entries';
+import { expenseEntry } from '../domain/ledger';
 import { scanReceipt } from './receipts';
 import { ensureSeed } from './seed';
 import { saveSupplier } from './parts';
+import { addExpense } from './money';
 
 const PHOTO = () => new File([new Uint8Array(12000).fill(1)], 'receipt.jpg', { type: 'image/jpeg' });
 let asked: { path: string; body: Record<string, unknown> }[] = [];
@@ -81,7 +83,17 @@ describe('a receipt scanned', () => {
     expect(r.supplier).toEqual({ id: known.id, name: 'Al Quoz Auto Parts', added: false });
     expect(await db.suppliers.count()).toBe(1);
     expect((await db.suppliers.get(known.id))!.address).toBe('Al Quoz Ind. 3');
-    expect(e.note).toBe('#A-1042 · OIL FILTER 90915-YZZE1 · AIR FILTER ELEMENT');
+    // v0.77: the note is the paper's number, the positions a list of their own; the book's row reads them after it, as before.
+    expect(e.note).toBe('#A-1042');
+    expect(e.lines).toEqual([
+      { name: 'OIL FILTER 90915-YZZE1', qty: 1 },
+      { name: 'AIR FILTER ELEMENT', qty: 1 },
+    ]);
+    expect(expenseEntry(e).note).toBe('Al Quoz Auto Parts · #A-1042 · OIL FILTER 90915-YZZE1 · AIR FILTER ELEMENT');
+    expect([expenseEntry(e).expenseNote, expenseEntry(e).lines]).toEqual(['#A-1042', e.lines]);
+    // The note edited in the sheet: the positions stay.
+    await updateEntry({ source: 'expense', id: e.id }, { note: '#A-1042 paid by Ali', lines: expenseEntry(e).lines });
+    expect((await db.expenses.get(e.id))!.lines).toEqual(e.lines);
     // The photo is the expense's receipt; the cash moved.
     const media = await db.media.where('ownerId').equals(e.id).toArray();
     expect(media.map((m) => m.slot)).toEqual(['receipt']);
@@ -227,5 +239,16 @@ describe('a receipt scanned', () => {
     expect(r.fields?.items[0].name).toBe('OIL FILTER');
     expect(await db.expenses.count()).toBe(0);
     expect(notices).toHaveLength(0);
+  });
+
+  it('an expense recorded before v0.77 (its positions in its note): read as a list; its note edited — kept apart from then on', async () => {
+    const cat = (await db.expenseCategories.filter((c) => c.code === 'parts').first())!;
+    const old = await addExpense({ date: dubaiDate(), categoryId: cat.id, amountFils: 8400, vatFils: 400, vendor: 'Al Maroof', method: 'credit', note: '#98352 · SWITCH ON OFF 3PIN D ×2 · RELAY 12V', receipt: PHOTO(), overLimitComment: 'receipt' });
+    const line = expenseEntry(old);
+    expect([line.expenseNote, line.lines, line.note]).toEqual(['#98352', [{ name: 'SWITCH ON OFF 3PIN D', qty: 2 }, { name: 'RELAY 12V', qty: 1 }], 'Al Maroof · #98352 · SWITCH ON OFF 3PIN D ×2 · RELAY 12V']);
+    await updateEntry({ source: 'expense', id: old.id }, { note: 'paid by Ali', lines: line.lines });
+    const now = (await db.expenses.get(old.id))!;
+    expect([now.note, now.lines]).toEqual(['paid by Ali', line.lines]);
+    expect(expenseEntry(now).note).toBe('Al Maroof · paid by Ali · SWITCH ON OFF 3PIN D ×2 · RELAY 12V');
   });
 });

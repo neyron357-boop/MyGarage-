@@ -3963,6 +3963,81 @@ async function launchBrowser() {
       await saveSettings({ notify: undefined });
     });
   });
+  await step('v0.77: a receipt’s positions — a list of their own in the expense’s sheet (past five — «Ещё N»), the receipt’s photo on top, «Поделиться» lists them a numbered line each; an expense recorded before (its positions in its note) reads the same, and its note edited keeps them', async () => {
+    const made = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { addExpense } = await import('/src/services/money.ts');
+      const { dubaiDate } = await import('/src/domain/dates.ts');
+      const c = document.createElement('canvas');
+      c.width = 600;
+      c.height = 800;
+      const g = c.getContext('2d');
+      g.fillStyle = '#fbfaf6';
+      g.fillRect(0, 0, 600, 800);
+      g.fillStyle = '#222';
+      g.font = 'bold 30px Arial';
+      g.fillText('AL MAROOF AUTO SPARE PARTS', 30, 70);
+      g.font = '24px Arial';
+      ['TAX INVOICE 98352', 'SWITCH ON OFF 3PIN D  2  30.00', 'RELAY 12V  1  12.00', 'TOTAL  84.00'].forEach((s, i) => g.fillText(s, 30, 150 + i * 60));
+      const receipt = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+      const cat = (await db.expenseCategories.toArray()).find((x) => x.code === 'parts');
+      const day = dubaiDate(new Date().toISOString());
+      const names = ['SWITCH ON OFF 3PIN D', 'RELAY 12V', 'FUSE 30A', 'WIRE HARNESS CONNECTOR', 'BULB H4 12V', 'TERMINAL', 'INSULATION TAPE'];
+      const fresh = await addExpense({ date: day, categoryId: cat.id, amountFils: 8400, vatFils: 400, vendor: 'Al Maroof Auto Spare Parts', method: 'cash', note: '#98352', lines: names.map((name, i) => ({ name, qty: i === 0 ? 2 : 1 })), receipt, overLimitComment: 'receipt' });
+      const old = await addExpense({ date: day, categoryId: cat.id, amountFils: 4200, vatFils: 200, vendor: 'Old Paper Parts', method: 'cash', note: '#77 · BRAKE PADS ×2 · OIL FILTER', receipt, overLimitComment: 'receipt' });
+      return { fresh: fresh.id, old: old.id };
+    });
+    await page.goto(BASE + '#/money?tab=book');
+    await front('.list-row').filter({ hasText: 'Al Maroof Auto Spare Parts' }).first().click();
+    const dlg = page.getByRole('dialog');
+    const list = dlg.locator('[data-paper-lines="7"]');
+    await list.waitFor();
+    // Past five: the first five and «Ещё 2»; a tap — all of them.
+    if ((await list.locator('[data-paper-line]').count()) !== 5) throw new Error('a long list shows five first: ' + (await list.locator('[data-paper-line]').count()));
+    const first = (await list.locator('.list-row').first().innerText()).replace(/\s+/g, ' ').trim();
+    if (first !== 'SWITCH ON OFF 3PIN D ×2') throw new Error('a position is its name and how many: ' + first);
+    if ((await dlg.getByLabel('Заметка').inputValue()) !== '#98352') throw new Error('the note is the paper’s number, not the positions: ' + (await dlg.getByLabel('Заметка').inputValue()));
+    // The receipt's photo on top: above the ways it was paid.
+    const strip = await dlg.locator('.strip-row').first().boundingBox();
+    const way = await dlg.locator('[data-way]').first().boundingBox();
+    if (!strip || !way || strip.y > way.y) throw new Error('the receipt’s photo must be on top of the sheet: ' + JSON.stringify({ strip, way }));
+    await shot('77-expense-lines');
+    await list.getByText('Ещё 2').click();
+    await list.locator('[data-paper-line]').nth(6).waitFor();
+    // «Поделиться»: the head as before, then a blank line and a numbered line each.
+    await page.evaluate(() => {
+      window.__shared = null;
+      navigator.share = async (d) => void (window.__shared = d);
+      navigator.canShare = () => true;
+    });
+    const share = dlg.locator('[data-share-entry]');
+    await page.waitForFunction(() => !document.querySelector('[data-share-entry][data-loading]'));
+    await share.click();
+    const shared = await page.evaluate(() => window.__shared);
+    const text = shared?.text ?? '';
+    if (!text.includes('#98352\n\n1. SWITCH ON OFF 3PIN D × 2\n2. RELAY 12V\n3. FUSE 30A') || !text.endsWith('7. INSULATION TAPE')) throw new Error('shared: ' + JSON.stringify(text));
+    if (!(shared.files ?? []).length) throw new Error('the receipt’s photo must go with the text');
+    await closeModal();
+    await dlg.waitFor({ state: 'detached' });
+    // Recorded before v0.77: the same list out of its note; the note edited — the positions are kept by themselves.
+    await front('.list-row').filter({ hasText: 'Old Paper Parts' }).first().click();
+    await dlg.locator('[data-paper-lines="2"]').waitFor();
+    if ((await dlg.getByLabel('Заметка').inputValue()) !== '#77') throw new Error('an old receipt’s note: ' + (await dlg.getByLabel('Заметка').inputValue()));
+    await dlg.getByLabel('Заметка').fill('#77 paid by Ali');
+    await dlg.getByLabel('Заметка').blur();
+    await page.waitForTimeout(400);
+    const kept = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.expenses.get(id)), made.old);
+    if (kept.note !== '#77 paid by Ali' || JSON.stringify(kept.lines) !== JSON.stringify([{ name: 'BRAKE PADS', qty: 2 }, { name: 'OIL FILTER', qty: 1 }])) throw new Error('the old receipt edited: ' + JSON.stringify(kept));
+    await closeModal();
+    await dlg.waitFor({ state: 'detached' });
+    // The book's row still reads the positions after the note.
+    const row = (await front('.list-row').filter({ hasText: 'Old Paper Parts' }).first().innerText()).replace(/\s+/g, ' ');
+    if (!row.includes('#77 paid by Ali · BRAKE PADS ×2 · OIL FILTER')) throw new Error('the book’s row: ' + row);
+    await page.evaluate(async ({ fresh, old }) => {
+      const { removeEntry } = await import('/src/services/entries.ts');
+      for (const id of [fresh, old]) await removeEntry({ source: 'expense', id });
+    }, made);
+  });
   await step('invoice pdf', async () => {
     const b64 = await page.evaluate(async () => {
       const docs = await import('/src/services/documents.ts');

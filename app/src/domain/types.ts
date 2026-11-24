@@ -1083,6 +1083,12 @@ export interface ExpenseCategory {
   active: boolean;
 }
 
+/** A position of a supplier's paper (v0.77): its name as the garage names lines (capitals) and how many. */
+export interface PaperLine {
+  name: string;
+  qty: number;
+}
+
 export interface Expense {
   id: string;
   date: string; // YYYY-MM-DD
@@ -1106,6 +1112,12 @@ export interface Expense {
   vehicleId?: string;
   customerId?: string;
   note?: string;
+  /**
+   * What the paper lists (v0.77, the owner: «если в инвойсе есть позиции — отображать их отдельным списком, не одной
+   * строкой в заметках»): a receipt's positions as read off it, kept apart from the note (which keeps the paper's number
+   * and what the manager types). A receipt recorded before kept them in its note — `paperOf` (domain/paperLines.ts) reads both.
+   */
+  lines?: PaperLine[];
   overLimitComment?: string;
   createdAt: string;
   /**

@@ -2,6 +2,7 @@ import { db } from '../db/db';
 import { itemTitle } from '../domain/items';
 import { indexText, type JobDoc, type JobField } from '../domain/search';
 import type { Customer, Lang, Order, Vehicle } from '../domain/types';
+import { expenseNoteLine } from '../domain/paperLines';
 
 export interface JobHitData {
   order: Order;
@@ -72,7 +73,7 @@ export async function loadJobIndex(lang: Lang): Promise<JobDoc<JobHitData>[]> {
       for (const a of addBy.get(x.id) ?? []) if (a.text.trim()) fields.push(field('damage', a.text.trim()));
     }
     for (const e of expBy.get(order.id) ?? []) {
-      const text = [e.vendor, e.note].filter((s) => s?.trim()).join(' — ');
+      const text = [e.vendor, expenseNoteLine(e)].filter((s) => s?.trim()).join(' — ');
       if (text) fields.push(field('expense', text));
     }
     for (const e of incBy.get(order.id) ?? []) if (e.note?.trim()) fields.push(field('income', e.note.trim()));

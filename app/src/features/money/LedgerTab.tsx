@@ -20,6 +20,7 @@ import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks
 import { DataTable, type Column } from '../../ui/DataTable';
 import { CreditSheet } from './Debts';
 import { ShareEntryButton } from './ShareEntry';
+import { PaperLines } from './PaperLines';
 import { EntrySheet, IncomeChips, LinkPicker, PURSE_ICON, PursePicker, SplitParts, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
 import { ExpenseOwedTo, OwedName } from './OwedTo';
 import { Proofs } from './Proofs';
@@ -255,6 +256,9 @@ export function EntryDetails({
               </Text>
             ))}
         </Group>
+        {/* The receipt and the proofs on top (v0.77, the owner: «фотографии чеков — сверху»), what the paper lists under them. */}
+        <Proofs entry={entry} />
+        {entry.lines && <PaperLines lines={entry.lines} />}
         {wayable && (
           // A job's refund leaves the card account (no "it does not reduce the card" note under it): passed as money in.
           <PursePicker value={entry.method ?? 'cash'} onChange={(method) => method !== entry.method && change({ method })} kind={entry.source === 'payment' ? 'in' : entry.kind} credit={entry.source === 'expense'} />
@@ -290,11 +294,11 @@ export function EntryDetails({
           </div>
         )}
         {noteable ? (
-          <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} onBlur={() => note !== typed && noteSave.run(() => updateEntry(ref, { note }))} />
+          // A receipt's positions go with its note (an old one kept them in it): from then on they are kept by themselves.
+          <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} onBlur={() => note !== typed && noteSave.run(() => updateEntry(ref, entry.lines ? { note, lines: entry.lines } : { note }))} />
         ) : (
           entry.note && <Text size="sm">{entry.note}</Text>
         )}
-        <Proofs entry={entry} />
         {/* To the owner (v0.68): what it was, its photos and — money for a job — the job's invoice. */}
         {entry.source !== 'closing' && <ShareEntryButton entry={entry} label={label} />}
         <Group justify="space-between">

@@ -246,6 +246,8 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     supplierId: seller?.supplier.id,
     method: fields.method,
     note: fields.note,
+    // What the paper lists — a list of its own in the sheet, not one line of the note (v0.77).
+    lines: fields.items.map((i) => ({ name: i.name, qty: i.qty })),
     receipt: file,
     orderId: guess?.orderId,
     // The category's monthly limit is the manager's own warning: a receipt in hand is already spent.

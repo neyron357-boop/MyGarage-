@@ -17,6 +17,7 @@ import { formatDate, formatDateTime, monthKey } from '../../domain/dates';
 import { expenseEntry, withEntries } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { CashReason, ExpenseMethod, PayMethod, SalaryPayment } from '../../domain/types';
+import { expenseNoteLine } from '../../domain/paperLines';
 import { loadCredits } from '../../services/debts';
 import { loadLedger } from '../../services/ledger';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
@@ -338,7 +339,7 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
                           {` · ${t('debt.leftSum', { sum: formatAed(owed) })}`}
                         </Text>
                       )}
-                      {`${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${e.note ? ` · ${e.note}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
+                      {`${e.vatFils ? ` · VAT ${formatAed(e.vatFils)}` : ''}${expenseNoteLine(e) ? ` · ${expenseNoteLine(e)}` : ''}${e.overLimitComment ? ` · ⚠ ${e.overLimitComment}` : ''}`}
                     </Text>
                   </Group>
                 }

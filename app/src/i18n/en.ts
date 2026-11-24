@@ -1441,6 +1441,8 @@ export const en: typeof ru = {
     forJob: 'Job',
     linkSearch: 'Plate, name or phone — optional',
     note: 'Note',
+    paperLines: 'Items',
+    moreLines: '{{n}} more',
     today: 'Today',
     receiptVat: 'date, receipt, VAT',
     changeAmount: 'Change the amount',

@@ -1441,6 +1441,8 @@ export const ru = {
     forJob: 'Заказ',
     linkSearch: 'Номер машины, имя или телефон — необязательно',
     note: 'Заметка',
+    paperLines: 'Позиции',
+    moreLines: 'Ещё {{n}}',
     today: 'Сегодня',
     receiptVat: 'дата, чек, VAT',
     changeAmount: 'Изменить сумму',

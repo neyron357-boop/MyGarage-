@@ -68,6 +68,7 @@ export interface ReceiptExpense {
   /** The date is as printed and read whole (false: a digit hidden, or its year put right here) — the manager should look. */
   dateSure: boolean;
   method: ExpenseMethod;
+  /** The paper's number («#98352»); the positions are `items` (v0.77: not in the note). */
   note: string;
   /** The lines, named as the garage names lines (capitals), each with its net price per piece in fils when the paper gives one. */
   items: { name: string; part?: string; car?: string; qty: number; partNumber?: string; unitNetFils?: number; lineNetFils?: number }[];
@@ -196,7 +197,8 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
   const pm = String(read.paymentMethod ?? '').toLowerCase();
   const method: ExpenseMethod = /card/.test(pm) ? 'card' : /transfer|bank/.test(pm) ? 'transfer' : /credit|unpaid|due/.test(pm) ? 'credit' : 'cash';
   const { date, sure: dateSure } = receiptDate(read, today);
-  const note = [read.invoiceNo ? `#${String(read.invoiceNo).trim().slice(0, 20)}` : '', ...items.map((i) => (i.qty !== 1 ? `${i.name} ×${i.qty}` : i.name))].filter(Boolean).join(' · ').slice(0, 200);
+  // The paper's number; its positions are kept apart (v0.77: `items` → `Expense.lines`, a list in the sheet).
+  const note = read.invoiceNo ? `#${String(read.invoiceNo).trim().slice(0, 20)}` : '';
   return {
     ok: total > 0 && read.isReceipt !== false && (read.confidence ?? 1) >= 0.4,
     amountFils: total,

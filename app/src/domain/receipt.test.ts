@@ -25,7 +25,8 @@ describe('a receipt as an expense', () => {
     );
     expect(r.ok).toBe(true);
     expect([r.amountFils, r.vatFils, r.vendor, r.date, r.method]).toEqual([28875, 1375, 'Al Quoz Auto Parts', '2026-11-18', 'cash']);
-    expect(r.note).toBe('#A-1042 · OIL FILTER · BRAKE PADS FRONT ×2');
+    // v0.77: the note is the paper's number; the positions are a list of their own (`items` → `Expense.lines`).
+    expect(r.note).toBe('#A-1042');
     // The lines were printed without VAT (they add up to the subtotal): their net is as printed.
     expect(r.items.map((i) => [i.name, i.qty, i.partNumber, i.unitNetFils, i.lineNetFils])).toEqual([
       ['OIL FILTER', 1, '90915-YZZE1', 3500, 3500],

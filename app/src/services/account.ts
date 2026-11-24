@@ -7,6 +7,7 @@ import { summarize } from '../domain/items';
 import { buildLedger, type LedgerEntry } from '../domain/ledger';
 import { formatPlate } from '../domain/plates';
 import type { CreditPayment, Customer, Expense, Income, Invoice, Order, OrderItem, Payment } from '../domain/types';
+import { expenseNoteLine } from '../domain/paperLines';
 import { loadCredits, loadDebtors } from './debts';
 
 /*
@@ -134,7 +135,7 @@ export async function creditorAccounts(): Promise<{ lines: OwedLine[]; payments:
     const owner = to?.key ?? '';
     const o = owners.get(owner) ?? owners.set(owner, { name: to?.name ?? '', phone: to?.phone, person: !!to?.lender, leftFils: 0 }).get(owner)!;
     o.leftFils += Math.max(0, leftFils);
-    lines.push({ key: e.id, owner, date: e.date, at: momentOf(e.date, e.createdAt), totalFils: e.amountFils, label: [e.vendor, e.note].filter(Boolean).join(' · ') || undefined });
+    lines.push({ key: e.id, owner, date: e.date, at: momentOf(e.date, e.createdAt), totalFils: e.amountFils, label: [e.vendor, expenseNoteLine(e)].filter(Boolean).join(' · ') || undefined });
     for (const p of paid) payments.push({ id: p.id, source: 'credit', owner, date: p.date, at: momentOf(p.date, p.paidAt), amountFils: p.amountFils, method: p.method, parts: [{ key: e.id, amountFils: p.amountFils }], debt: true });
   }
   return { lines, payments, owners };

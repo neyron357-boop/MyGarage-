@@ -8,6 +8,7 @@ import { db } from '../../db/db';
 import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
 import { byMonths, creditMonths, creditSince, spread, type Creditor, type DebtJob, type DebtMonth, type Debtor } from '../../domain/debts';
 import { creditEntry } from '../../domain/ledger';
+import { expenseNoteLine } from '../../domain/paperLines';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { formatPlate } from '../../domain/plates';
@@ -285,7 +286,7 @@ export function CompanyDebtList({ list, cats, onOpen }: { list: CompanyDebt[]; c
             </span>
           }
           title={[catName(e.categoryId), e.vendor].filter(Boolean).join(' · ')}
-          subtitle={[formatDate(e.date), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ')}
+          subtitle={[formatDate(e.date), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', expenseNoteLine(e) ?? ''].filter(Boolean).join(' · ')}
           right={<Money fils={leftFils} size="sm" c="orange.7" roll />}
         />
       ))}
@@ -318,7 +319,7 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
       onClick={() => onOpen(e.id)}
       left={indent ? <span className="row-indent" aria-hidden /> : undefined}
       title={[formatDate(e.date), catName(e.categoryId)].join(' · ')}
-      subtitle={[where(e), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', e.note ?? ''].filter(Boolean).join(' · ') || undefined}
+      subtitle={[where(e), paid.length ? t('debt.ofTotal', { sum: formatAed(e.amountFils) }) : '', expenseNoteLine(e) ?? ''].filter(Boolean).join(' · ') || undefined}
       right={<Money fils={leftFils} size="sm" c="orange.7" roll />}
     />
   );
@@ -387,7 +388,7 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
                     {[formatDate(e.date), catName(e.categoryId)].join(' · ')}
                   </Text>
                 }
-                subtitle={[where(e), e.note ?? ''].filter(Boolean).join(' · ') || undefined}
+                subtitle={[where(e), expenseNoteLine(e) ?? ''].filter(Boolean).join(' · ') || undefined}
                 right={<Money fils={e.amountFils} size="sm" c="dimmed" />}
               />
             ))}
@@ -475,7 +476,7 @@ function SupplierPaySheet({ c, months: start, opened, onClose }: { c: Creditor<C
                 <ListRow
                   key={p.key}
                   title={formatDate(d.expense.date)}
-                  subtitle={[c.lender ? d.expense.vendor ?? '' : '', d.expense.note ?? ''].filter(Boolean).join(' · ') || undefined}
+                  subtitle={[c.lender ? d.expense.vendor ?? '' : '', expenseNoteLine(d.expense) ?? ''].filter(Boolean).join(' · ') || undefined}
                   right={
                     <Text size="sm" className="tnum">
                       <Money fils={p.amountFils} size="sm" /> <span className="chip-note">{t('debt.ofTotal', { sum: formatAed(d.leftFils) })}</span>
@@ -583,7 +584,7 @@ export function CreditSheet({ expenseId, opened, onClose }: { expenseId: string;
               </Text>
             </Group>
             <Text size="sm" c="dimmed">
-              {[formatDate(d.expense.date), d.expense.note ?? ''].filter(Boolean).join(' · ')}
+              {[formatDate(d.expense.date), expenseNoteLine(d.expense) ?? ''].filter(Boolean).join(' · ')}
             </Text>
           </Box>
           {/* Whom it is owed to (v0.61): said here, changed with a tap. */}

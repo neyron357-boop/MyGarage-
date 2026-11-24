@@ -1,6 +1,7 @@
 import { dubaiDate, inRange } from './dates';
 import { owedToOf, type OwedIndex } from './debts';
-import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Order, Payment } from './types';
+import { expenseNoteLine, paperOf } from './paperLines';
+import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Order, PaperLine, Payment } from './types';
 
 /*
  * The money book, kept the way the garage keeps its money sheet:
@@ -51,9 +52,11 @@ export interface LedgerEntry {
    */
   owedTo?: string;
   note?: string;
-  /** Expenses: where it was bought and the note as typed (`note` shows both). */
+  /** Expenses: where it was bought and the note as typed (`note` shows both, and the positions after them). */
   vendor?: string;
   expenseNote?: string;
+  /** An expense's receipt positions (v0.77, domain/paperLines.ts): a list of their own in its sheet and when it is shared. */
+  lines?: PaperLine[];
   orderId?: string;
   vehicleId?: string;
   customerId?: string;
@@ -108,6 +111,8 @@ type Raw = Omit<LedgerEntry, 'cashAfter' | 'cardAfter'>;
 
 /** An expense as a line of the book (without the balances after it). */
 export function expenseEntry(e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardAfter'> {
+  // The receipt's positions (v0.77): a list in its sheet; the row and the money sheet still read them after the note.
+  const paper = paperOf(e);
   return {
     id: e.id,
     source: 'expense',
@@ -118,9 +123,10 @@ export function expenseEntry(e: Expense): Omit<LedgerEntry, 'cashAfter' | 'cardA
     method: e.method,
     amountFils: e.amountFils,
     category: e.categoryId,
-    note: [e.vendor, e.note].filter(Boolean).join(' · ') || undefined,
+    note: [e.vendor, expenseNoteLine(e)].filter(Boolean).join(' · ') || undefined,
     vendor: e.vendor || undefined,
-    expenseNote: e.note || undefined,
+    expenseNote: paper.note,
+    lines: paper.lines.length ? paper.lines : undefined,
     receiptMediaId: e.receiptMediaId,
     orderId: e.orderId,
     vehicleId: e.vehicleId,
@@ -170,7 +176,7 @@ export function creditEntry(c: CreditPayment, e: Expense): Omit<LedgerEntry, 'ca
     method: c.method,
     amountFils: c.amountFils,
     category: 'credit_payment',
-    note: [e.vendor, c.note ?? e.note].filter(Boolean).join(' · ') || undefined,
+    note: [e.vendor, c.note ?? expenseNoteLine(e)].filter(Boolean).join(' · ') || undefined,
     credit: { expenseId: e.id, categoryId: e.categoryId },
     orderId: e.orderId,
     vehicleId: e.vehicleId,

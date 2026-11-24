@@ -4,7 +4,8 @@ import { isCustomerDebt, orderDue } from '../domain/debts';
 import { amountDue } from '../domain/invoice';
 import { summarize } from '../domain/items';
 import type { LedgerSource } from '../domain/ledger';
-import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Media, PayMethod, Payment } from '../domain/types';
+import { cleanPaperLines, expenseNoteLine } from '../domain/paperLines';
+import type { CashClosing, CashMovement, CreditPayment, Expense, ExpenseMethod, Income, Media, PaperLine, PayMethod, Payment } from '../domain/types';
 import { closingFor, closingOfPayment, recountClosing } from './cashDays';
 import { AppError } from './errors';
 import { settleIfPaid } from './money';
@@ -410,6 +411,11 @@ export interface EntryPatch {
   method?: ExpenseMethod;
   /** The note (a job payment's: its reference). */
   note?: string;
+  /**
+   * An expense's receipt positions (v0.77): sent with its note when an old receipt's note (positions in it) is edited —
+   * they are kept by themselves from then on (domain/paperLines.ts).
+   */
+  lines?: PaperLine[];
 }
 
 const clean = (s?: string) => s?.trim() || undefined;
@@ -497,9 +503,10 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
           if (method === 'credit' && paid.reduce((s, c) => s + c.amountFils, 0) > amountFils) throw new AppError('err.belowPaid');
         }
         const note = patch.note !== undefined ? clean(patch.note) : e.note;
+        const lines = patch.lines !== undefined ? cleanPaperLines(patch.lines) : e.lines;
         // The seller's VAT was a part of the sum: a new sum carries its share.
         const vatFils = amountFils === e.amountFils || !e.vatFils ? e.vatFils : Math.round((e.vatFils * amountFils) / e.amountFils);
-        await db.expenses.update(e.id, { date, amountFils, vatFils, method, note });
+        await db.expenses.update(e.id, { date, amountFils, vatFils, method, note, lines });
         await syncCash(t, 'expenseId', e.id, method === 'cash' ? { at: e.createdAt, direction: 'out', amountFils, reason: 'expense', expenseId: e.id, note: e.vendor ?? note } : null, {
           becameCash: e.method !== 'cash',
           day: date,
@@ -585,7 +592,7 @@ export async function updateEntry(ref: EntryRef, patch: EntryPatch): Promise<voi
           t,
           'creditPaymentId',
           c.id,
-          method === 'cash' ? { at: c.paidAt, direction: 'out', amountFils, reason: 'credit_payment', creditPaymentId: c.id, orderId: e.orderId, note: [e.vendor, note ?? e.note].filter(Boolean).join(' · ') || undefined } : null,
+          method === 'cash' ? { at: c.paidAt, direction: 'out', amountFils, reason: 'credit_payment', creditPaymentId: c.id, orderId: e.orderId, note: [e.vendor, note ?? expenseNoteLine(e)].filter(Boolean).join(' · ') || undefined } : null,
           { becameCash: c.method !== 'cash', day: date, typedAt: c.paidAt, dayMoved: date !== c.date },
         );
         break;

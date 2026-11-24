@@ -86,7 +86,7 @@ export function useQuickActions(live = false) {
         } else {
           // Fuel, food, another kind of paper: read, but which category is the manager's call — the sheet, filled in, no word.
           if (r.failed !== 'kind') notifications.show({ color: 'orange', message: t(r.failed === 'unsure' ? 'ai.receiptCheck' : 'ai.receiptFailed') });
-          setSheet({ kind: 'out', receipt: file, expense: r.fields ? { amountFils: r.fields.amountFils || undefined, vatFils: r.fields.vatFils || undefined, vendor: r.fields.vendor, note: r.fields.note, date: r.fields.date } : undefined });
+          setSheet({ kind: 'out', receipt: file, expense: r.fields ? { amountFils: r.fields.amountFils || undefined, vatFils: r.fields.vatFils || undefined, vendor: r.fields.vendor, note: r.fields.note, lines: r.fields.items.map((i) => ({ name: i.name, qty: i.qty })), date: r.fields.date } : undefined });
         }
       })
       .finally(() => setScanning(false));

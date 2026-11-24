@@ -31,8 +31,9 @@ import { incomeCategoryName, KEPT_INCOME, renamedIn } from '../../domain/incomeC
 import type { OwedPick } from '../../domain/lenders';
 import { formatAed } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
-import type { ExpenseMethod, IncomeCategory, Order } from '../../domain/types';
+import type { ExpenseMethod, IncomeCategory, Order, PaperLine } from '../../domain/types';
 import { netFromGross, vatOf } from '../../domain/vat';
+import { expenseNoteLine } from '../../domain/paperLines';
 import { search, type SearchHit } from '../../services/customers';
 import { loadDebtors } from '../../services/debts';
 import { addIncomeCategory, loadIncomeCategories, removeIncomeCategory, restoreIncomeCategory, saveIncomeCategory } from '../../services/incomeCategories';
@@ -47,6 +48,7 @@ import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { OwedToField } from './OwedTo';
+import { PaperLines } from './PaperLines';
 
 /** The garage's income categories, in their order — taken out ones too (their entries show their names). */
 export function useIncomeCategories(): IncomeCategory[] | undefined {
@@ -690,7 +692,7 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
     ...data.incomes.map((i) => ({ id: i.id, date: i.date, at: i.createdAt, in: true, amount: i.amountFils, title: incomeLabel(i.category), note: i.note, method: i.method as ExpenseMethod, orderId: i.orderId })),
     ...data.expenses.map((e) => {
       const c = data.cats.find((x) => x.id === e.categoryId);
-      return { id: e.id, date: e.date, at: e.createdAt, in: false, amount: e.amountFils, title: c ? (lang === 'ru' ? c.nameRu : c.nameEn) : '', note: [e.vendor, e.note].filter(Boolean).join(' · '), method: e.method, orderId: e.orderId };
+      return { id: e.id, date: e.date, at: e.createdAt, in: false, amount: e.amountFils, title: c ? (lang === 'ru' ? c.nameRu : c.nameEn) : '', note: [e.vendor, expenseNoteLine(e)].filter(Boolean).join(' · '), method: e.method, orderId: e.orderId };
     }),
   ].sort((a, b) => `${b.date}${b.at}`.localeCompare(`${a.date}${a.at}`));
   const spent = data.expenses.reduce((s, e) => s + e.amountFils, 0);
@@ -750,7 +752,8 @@ export interface EntryPreset {
   amountFils?: number;
   /** A receipt photographed before the sheet (v0.50): attached, and what was read off it filled in. */
   receipt?: File;
-  expense?: { amountFils?: number; vatFils?: number; vendor?: string; note?: string; date?: string };
+  /** What was read off the receipt; its positions (v0.77) — a list of their own, saved with the expense. */
+  expense?: { amountFils?: number; vatFils?: number; vendor?: string; note?: string; lines?: PaperLine[]; date?: string };
 }
 
 /**
@@ -861,6 +864,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           method,
           parts: split,
           note,
+          lines: preset?.expense?.lines,
           overLimitComment: over,
           receipt,
           owedTo: onCredit ? owed : undefined,
@@ -924,6 +928,7 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
             <LinkPicker value={link} onChange={setLink} />
           </div>
         )}
+        {kind === 'out' && preset?.expense?.lines && <PaperLines lines={preset.expense.lines} />}
         <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
         <UnstyledButton onClick={() => setMore((m) => !m)}>
           <Group gap={4} c="cobalt.6">

@@ -7,7 +7,8 @@ import { atDay, jobDay } from '../domain/jobDay';
 import { discountBase, discountGross, grossOf, type DiscountSpec } from '../domain/discount';
 import { activeInvoice, chooseInvoiceType, formatDocNumber, invoiceLines, invoiceTotals, jobDocNumber, paidNet } from '../domain/invoice';
 import { formatAed } from '../domain/money';
-import type { CashClosing, CashMovement, CashReason, Debt, Expense, ExpenseMethod, Invoice, InvoiceType, PayMethod, Payment, SalaryPayment } from '../domain/types';
+import { cleanPaperLines } from '../domain/paperLines';
+import type { CashClosing, CashMovement, CashReason, Debt, Expense, ExpenseMethod, Invoice, InvoiceType, PaperLine, PayMethod, Payment, SalaryPayment } from '../domain/types';
 import { placeInDay, recountClosing } from './cashDays';
 import { setDiscount } from './discount';
 import { AppError } from './errors';
@@ -335,6 +336,8 @@ export interface ExpenseInput {
   vehicleId?: string;
   customerId?: string;
   note?: string;
+  /** The receipt's positions (v0.77): a list of their own, not in the note. */
+  lines?: PaperLine[];
   overLimitComment?: string;
   receipt?: Blob;
   /**
@@ -393,6 +396,7 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
       vehicleId,
       customerId,
       note: input.note?.trim() || undefined,
+      lines: cleanPaperLines(input.lines),
       overLimitComment: input.overLimitComment?.trim() || undefined,
       createdAt,
       splitId: split ? ids[0] : undefined,

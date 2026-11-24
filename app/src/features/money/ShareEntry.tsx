@@ -8,6 +8,7 @@ import { formatDate } from '../../domain/dates';
 import { activeInvoice } from '../../domain/invoice';
 import type { LedgerEntry } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
+import { paperListText } from '../../domain/paperLines';
 import { formatPlate } from '../../domain/plates';
 import { invoicePdf } from '../../services/documents';
 import { cardBlob } from '../../services/media';
@@ -73,16 +74,18 @@ export function ShareEntryButton({ entry, label }: { entry: LedgerEntry; label: 
     const car = v ? [v.make, v.model, formatPlate(v.plate)].filter(Boolean).join(' ') : '';
     const who = c ? (c.type === 'company' && c.companyName ? c.companyName : c.name) : '';
     const sign = entry.kind === 'in' ? '+' : '−';
-    return [
+    const head = [
       [label, entry.vendor].filter(Boolean).join(' · '),
       `${sign}${formatAed(entry.amountFils, lang)}`,
       [wayLabel(t, entry.method ?? (entry.purse === 'credit' ? 'credit' : 'cash'), entry.source === 'payment' ? 'in' : entry.kind), formatDate(entry.date)].join(' · '),
       [about?.order ? `№${about.order.number}` : '', car, who].filter(Boolean).join(' · '),
       entry.owedTo ? t('ledger.shareOwed', { name: entry.owedTo }) : '',
       (entry.source === 'expense' ? entry.expenseNote : entry.note) ?? '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    ].filter(Boolean);
+    // The receipt's positions (v0.77, the owner: «в WhatsApp — по списку, в правильном формате»): after a blank line, a
+    // numbered line each — WhatsApp shows them as a list.
+    const list = entry.lines?.length ? ['', ...paperListText(entry.lines)] : [];
+    return [...head, ...list].join('\n');
   };
   const share = () => {
     haptic('light');

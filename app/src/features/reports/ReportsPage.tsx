@@ -8,6 +8,7 @@ import { invoiceBuyer } from '../../domain/invoice';
 import { addDays, dubaiDate, formatDate, nowIso } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { computeReport } from '../../domain/reports';
+import { expenseNoteLine } from '../../domain/paperLines';
 import { downloadBlob, toCsv } from '../../services/backup';
 import { openPdf } from '../../services/documents';
 import { EmptyState, Kpi, List, ListRow, Money, PageHeader, PageSkeleton, ScrollTabs, Section } from '../../ui/components';
@@ -158,7 +159,7 @@ export function ReportsPage() {
     await downloadBlob(
       toCsv([
         ['date', 'category', 'vendor', 'method', 'owed_to', 'gross_aed', 'vat_aed', 'note'],
-        ...ex.map((e) => [formatDate(e.date), catName(e.categoryId), e.vendor, e.method, e.method === 'credit' ? owedToOf(e, owed)?.name : '', (e.amountFils / 100).toFixed(2), (e.vatFils / 100).toFixed(2), e.note]),
+        ...ex.map((e) => [formatDate(e.date), catName(e.categoryId), e.vendor, e.method, e.method === 'credit' ? owedToOf(e, owed)?.name : '', (e.amountFils / 100).toFixed(2), (e.vatFils / 100).toFixed(2), expenseNoteLine(e)]),
       ]),
       `expenses-${f}-${tt}.csv`,
     );

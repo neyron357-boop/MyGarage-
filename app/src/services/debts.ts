@@ -1,6 +1,7 @@
 import { db, nextNumber, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
 import { creditLeft, creditSince, debtMonths, debtQueue, groupCredits, groupDebts, historyDues, historyKeyOf, historyLeft, isCustomerDebt, monthKeys, monthTotals, orderDue, spread, type DebtJob, type Creditor, type DebtShare, type Debtor, type HistoryDue, type MonthTotal } from '../domain/debts';
+import { expenseNoteLine } from '../domain/paperLines';
 import { activeInvoice, amountDue, formatDocNumber } from '../domain/invoice';
 import { summarize } from '../domain/items';
 import type { CreditPayment, Customer, Expense, Income, Invoice, Order, OrderItem, PayMethod, Payment, Vehicle } from '../domain/types';
@@ -343,7 +344,7 @@ export async function payCredit(expenseId: string, input: { amountFils: number; 
     await db.creditPayments.add(p);
     if (p.method === 'cash') {
       const e = debt.expense;
-      await db.cashMovements.add({ id: movementId, at: now, direction: 'out', amountFils: p.amountFils, reason: 'credit_payment', creditPaymentId: p.id, orderId: e.orderId, note: [e.vendor, p.note ?? e.note].filter(Boolean).join(' · ') || undefined });
+      await db.cashMovements.add({ id: movementId, at: now, direction: 'out', amountFils: p.amountFils, reason: 'credit_payment', creditPaymentId: p.id, orderId: e.orderId, note: [e.vendor, p.note ?? expenseNoteLine(e)].filter(Boolean).join(' · ') || undefined });
     }
     return p;
   });
