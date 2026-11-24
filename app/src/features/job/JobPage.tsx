@@ -79,7 +79,8 @@ import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../se
 import { addItem, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
-import { chatOfPhone, loadChats, useWa, waReady } from '../../services/whatsapp';
+import { chatOfPhone, ensureChats, waReady } from '../../services/whatsapp';
+import { useWaSel } from '../../ui/waSel';
 import { JobChat, jobChatPhone } from '../whatsapp/JobChat';
 import { waAutoOf } from '../../domain/waAuto';
 import { getSettings } from '../../services/settings';
@@ -549,15 +550,17 @@ export function JobPage() {
   const navigate = useNavigate();
   const b = useOrderBundle(id);
   // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…» — and (v0.80) a tab of the job.
-  const wa = useWa();
-  const waLinked = waReady(wa);
+  const waLinked = useWaSel(waReady);
   const chatPhone = b ? jobChatPhone(b) : '';
   const tabs = waLinked && chatPhone ? JOB_TABS_WA : JOB_TABS;
   // Its unread messages light the tab: the chats are read once WhatsApp is there (kept right by the server after).
+  // (Once: from then on the server's stream keeps them right — v0.80.2.)
   useEffect(() => {
-    if (waLinked) void loadChats();
+    if (waLinked) void ensureChats();
   }, [waLinked]);
-  const chatUnread = tabs === JOB_TABS_WA ? (chatOfPhone(chatPhone, wa)?.unread ?? 0) : 0;
+  // Only this customer's chat: the job draws again when its unread changes, not at every message of every chat.
+  const chatUnreadAny = useWaSel((s) => (chatPhone ? (chatOfPhone(chatPhone, s)?.unread ?? 0) : 0));
+  const chatUnread = tabs === JOB_TABS_WA ? chatUnreadAny : 0;
   // The tabs — the job, the customer's chat, its notes (a chat with oneself); the address keeps which, without a step
   // in the history (and keeps the rest of itself: a job beside it on a PC, v0.80).
   const [params, setParams] = useSearchParams();

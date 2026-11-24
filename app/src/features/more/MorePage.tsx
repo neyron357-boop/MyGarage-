@@ -9,7 +9,7 @@ import { List, ListRow, PageHeader } from '../../ui/components';
 import { useScreenLiveQuery } from '../../ui/hooks';
 import { getSettings } from '../../services/settings';
 import { garageNoteCount } from '../../services/notes';
-import { useWa, waUnread } from '../../services/whatsapp';
+import { WaCount } from '../../ui/WaCount';
 import { useBackupAge } from '../../ui/device';
 import { SetupChecklist } from '../board/BoardNotices';
 import { TransferSheet } from './Transfer';
@@ -59,8 +59,6 @@ export function MorePage() {
   const backup = useBackupAge();
   const [transfer, setTransfer] = useState(false);
   const noteCount = useScreenLiveQuery(garageNoteCount, []);
-  // WhatsApp messages waiting to be read (v0.78).
-  const waiting = waUnread(useWa());
   return (
     <>
       <PageHeader title={t('nav.more')} />
@@ -81,10 +79,9 @@ export function MorePage() {
                 <Text c="dimmed" className="tnum" aria-hidden>
                   {noteCount}
                 </Text>
-              ) : l.to === '/whatsapp' && waiting ? (
-                <span className="wa-badge" aria-hidden>
-                  {waiting > 99 ? '99+' : waiting}
-                </span>
+              ) : l.to === '/whatsapp' ? (
+                // WhatsApp messages waiting to be read (v0.78) — drawn by itself (v0.80.2).
+                <WaCount className="wa-badge" />
               ) : undefined
             }
             onClick={() => navigate(l.to)}

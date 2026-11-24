@@ -11,7 +11,8 @@ import { copyText } from './clipboard';
 import { haptic } from './haptics';
 import { AppError } from '../services/errors';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
-import { numberOnWa, sendWaFile, sendWaText, useWa, useWaPrefs, waReady } from '../services/whatsapp';
+import { numberOnWa, sendWaFile, sendWaText, useWaPrefs, waReady } from '../services/whatsapp';
+import { useWaSel } from './waSel';
 import { SelectCard } from './components';
 import { useErrorText } from './hooks';
 import { LazySheet } from './lazy';
@@ -75,7 +76,7 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
   const canSharePhotos = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
   // The garage's WhatsApp is linked (v0.78): the message goes from the app itself — the words, the PDF, the photos —
   // and is logged at once; nobody is asked «was it sent?». Opening WhatsApp by hand stays, under it.
-  const wa = useWa();
+  const waLinked = useWaSel(waReady);
   const prefs = useWaPrefs();
   const [sending, setSending] = useState(false);
   const [withPdf, setWithPdf] = useState(true);
@@ -93,7 +94,7 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
   const phone = customer.whatsapp || customer.phone;
   const url = channel === 'whatsapp' ? whatsappUrl(phone, text) : telegramUrl(text);
 
-  const direct = channel === 'whatsapp' && prefs.direct && waReady(wa) && !!phone;
+  const direct = channel === 'whatsapp' && prefs.direct && waLinked && !!phone;
 
   const confirm = async (said = 'send.logged') => {
     try {

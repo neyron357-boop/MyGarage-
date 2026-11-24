@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import { db, uid } from '../db/db';
 import {
   applyEvent,
@@ -104,6 +104,8 @@ const subscribe = (f: () => void) => {
   return () => void subs.delete(f);
 };
 export const waStore = (): WaStore => store;
+/** Told of every change of the store (`ui/waSel.ts` — a screen's own part of it). */
+export const subscribeWa = (f: () => void) => subscribe(f);
 
 /** The store, for the screens. */
 export function useWa(): WaStore {
@@ -186,32 +188,6 @@ export function refreshWa(): Promise<WaStore> {
   return asking;
 }
 
-/** The state while a screen that shows it is open: asked at once, and every two seconds while it is on its way. */
-export function useWaStatus(): WaStore {
-  const s = useWa();
-  const moving = s.status ? ['starting', 'qr', 'loading', 'offline'].includes(s.status.phase) && s.status.on : false;
-  // Asked when the screen opens — and again once there is a server to ask (connected while this screen was open).
-  const can = waCan();
-  const known = !!s.status || s.old;
-  useEffect(() => {
-    void refreshWa();
-  }, []);
-  useEffect(() => {
-    if (can && !known) void refreshWa();
-  }, [can, known]);
-  useEffect(() => {
-    // On its way (a QR that changes, a loading that ends): the stream says it too — this is the net under it.
-    const timer = setInterval(() => void refreshWa(), moving ? 2500 : 60_000);
-    const back = () => document.visibilityState === 'visible' && void refreshWa();
-    document.addEventListener('visibilitychange', back);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', back);
-    };
-  }, [moving]);
-  return s;
-}
-
 async function act(path: 'link' | 'logout' | 'restart' | 'code', body?: unknown): Promise<void> {
   if (store.busy) return;
   set({ busy: true });
@@ -236,6 +212,12 @@ export const restartWa = () => act('restart');
 let chatsAsking: Promise<void> | undefined;
 /** A screen has shown the chats: from then on they are kept right (the app's start asks only how many wait). */
 let chatsWanted = false;
+/**
+ * The chats once (v0.80.2): read if they never were — from then on the server's stream keeps them right. A job's screen
+ * asks this, not `loadChats`: opening jobs one after another read the whole list each time.
+ */
+export const ensureChats = (): Promise<void> => (store.chatsAt ? Promise.resolve() : loadChats());
+
 /** The chats, read from the server (`force` — again, though read a moment ago). */
 export function loadChats(force = false): Promise<void> {
   chatsWanted = true;

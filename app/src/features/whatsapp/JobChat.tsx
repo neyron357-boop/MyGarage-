@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { OrderBundle } from '../../services/orders';
 import { chatOfNumber, chatOfPhone, useWa, waReady } from '../../services/whatsapp';
+import { useWaSel } from '../../ui/waSel';
 import { EmptyState } from '../../ui/components';
 import { useDesk } from '../../ui/desk';
 import { ChatThread } from './ChatThread';
@@ -22,9 +23,8 @@ export const jobChatPhone = (b: Pick<OrderBundle, 'customer'>): string => b.cust
 
 /** A number's chat: from the chats read at once, else asked of the server once (null — not on WhatsApp). */
 export function useNumberChat(phone: string | undefined): { id?: string; none: boolean } {
-  const s = useWa();
-  const ready = waReady(s);
-  const listed = chatOfPhone(phone, s)?.id;
+  const ready = useWaSel(waReady);
+  const listed = useWaSel((s) => chatOfPhone(phone, s)?.id);
   const [asked, setAsked] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     if (listed || !phone || !ready) return undefined;
@@ -39,14 +39,19 @@ export function useNumberChat(phone: string | undefined): { id?: string; none: b
   return { id: listed ?? asked ?? undefined, none: !listed && asked === null };
 }
 
+/** What stands in the way, while it does (the whole state: only then). */
+function LiveGate() {
+  return <WaGate s={useWa()} />;
+}
+
 export function JobChat({ b }: { b: OrderBundle }) {
   const { t } = useTranslation();
   const desk = useDesk();
-  const s = useWa();
+  const ready = useWaSel(waReady);
   const people = useWaPeople();
   const phone = jobChatPhone(b);
   const chat = useNumberChat(phone);
-  if (!waReady(s)) return <WaGate s={s} />;
+  if (!ready) return <LiveGate />;
   if (chat.none) return <EmptyState icon={IconBrandWhatsapp} title={t('wa.notOnWa')} />;
   if (!chat.id)
     return (

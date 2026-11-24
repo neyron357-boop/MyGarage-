@@ -42,7 +42,8 @@ import { SettingsPage } from './features/settings/SettingsPage';
 import { WaAutoPage } from './features/whatsapp/WaAutoPage';
 import { WaSetupPage } from './features/whatsapp/WaSetupPage';
 import { WhatsAppPage } from './features/whatsapp/WhatsAppPage';
-import { refreshWa, useWa, waUnread } from './services/whatsapp';
+import { refreshWa } from './services/whatsapp';
+import { WaCount } from './ui/WaCount';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
 import { useResolvedScheme } from './ui/scheme';
@@ -191,8 +192,8 @@ function SideNav() {
   const location = useLocation();
   const cash = useLiveQuery(cashState, []);
   const settings = useSettings();
-  // WhatsApp messages waiting to be read (v0.78): a number beside its item.
-  const unread = waUnread(useWa());
+  // WhatsApp messages waiting to be read (v0.78): a number beside its item — its own component (v0.80.2): the menu does not
+  // draw again at each message.
   // "Parts" and "Suppliers" share a route: highlight by the tab, not just the path.
   const isActive = (to: string, end?: boolean) => {
     const [path, query] = to.split('?');
@@ -226,7 +227,7 @@ function SideNav() {
                 <Link key={s.to} to={s.to} className="desk-nav-item" data-active={on || undefined} aria-current={on ? 'page' : undefined}>
                   <s.icon size={18} stroke={1.9} aria-hidden />
                   <span>{t(s.key)}</span>
-                  {s.to === '/whatsapp' && unread > 0 && <span className="desk-nav-count tnum">{unread > 99 ? '99+' : unread}</span>}
+                  {s.to === '/whatsapp' && <WaCount className="desk-nav-count tnum" />}
                 </Link>
               );
             })}

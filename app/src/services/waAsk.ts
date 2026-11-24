@@ -72,6 +72,7 @@ export async function askSuppliers(orderId: string, picks: AskPick[], x: { items
   if (!items.length) return { asked: 0, noNumber };
   await queueWa(items);
   await keepAsks(orderId, asks);
+  askPhones = undefined;
   return { asked: asks.length, noNumber };
 }
 
@@ -88,11 +89,24 @@ async function keepAsks(orderId: string, asks: PartAsk[]) {
   if (!order) return;
   // The last 30 requests of a job are kept (their answers with them).
   await db.orders.update(orderId, { asks: [...(order.asks ?? []), ...asks].slice(-30) });
+  askPhones = undefined;
 }
 
 /* ---------- The answers ---------- */
 
 /** Requests still worth reading answers to: five days, a job not closed. */
+/**
+ * The numbers asked and not yet past their five days (v0.80.2): a message from anyone else is not a supplier's answer —
+ * nothing is read for it. Kept a minute (a busy account writes every few seconds); a new request puts it aside at once.
+ */
+let askPhones: { at: number; set: Set<string> } | undefined;
+async function openAskPhones(): Promise<Set<string>> {
+  if (askPhones && Date.now() - askPhones.at < 60_000) return askPhones.set;
+  const set = new Set((await openAsks()).map((x) => x.ask.phone));
+  askPhones = { at: Date.now(), set };
+  return set;
+}
+
 async function openAsks(): Promise<{ order: Order; ask: PartAsk }[]> {
   const orders = await db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
   const since = Date.now() - 5 * 24 * 60 * 60_000;
@@ -286,13 +300,19 @@ export function startWaReplies() {
     if (ev.t === 'msg' && !ev.msg.me) {
       const phone = ev.chat?.phone || waStore().chats.find((c) => c.id === ev.msg.chat)?.phone;
       if (!phone) return;
-      waiting.add(phone);
-      clearTimeout(soon);
-      soon = setTimeout(() => {
-        const list = [...waiting];
-        waiting.clear();
-        void readReplies(list).catch(() => undefined);
-      }, 2500);
+      // Only a number asked for parts: the rest of the account's messages read nothing (v0.80.2).
+      void openAskPhones()
+        .then((asked) => {
+          if (!asked.has(phone)) return;
+          waiting.add(phone);
+          clearTimeout(soon);
+          soon = setTimeout(() => {
+            const list = [...waiting];
+            waiting.clear();
+            void readReplies(list).catch(() => undefined);
+          }, 2500);
+        })
+        .catch(() => undefined);
     }
     if (ev.t === 'state' && ev.state.phase === 'ready') setTimeout(() => void readReplies().catch(() => undefined), 5000);
   });

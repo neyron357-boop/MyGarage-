@@ -20,7 +20,8 @@ import { waAutoOf } from '../../domain/waAuto';
 import { getSettings } from '../../services/settings';
 import { askSuppliers, recordLinkAsk } from '../../services/waAsk';
 import { useOutboxKeys } from '../../services/waOutbox';
-import { useWa, waReady } from '../../services/whatsapp';
+import { waReady } from '../../services/whatsapp';
+import { useWaSel } from '../../ui/waSel';
 import { ConfirmModal, StickyBar } from '../../ui/components';
 import { SheetFor } from '../../ui/lazy';
 import { SupplierSheet } from '../parts/Suppliers';
@@ -94,8 +95,8 @@ export function JobSuppliersPage() {
   const [showOff, setShowOff] = useState(false);
   // Asking through the garage's WhatsApp (v0.79, the user: «автоотправка заявок в WhatsApp поставщиков — сначала
   // выбрать их, потом отправить»): picked here, sent by the server one after another.
-  const wa = useWa();
-  const canSend = waReady(wa);
+  const canSend = useWaSel(waReady);
+  const outbox = useWaSel((s) => s.outbox);
   const job = useScreenLiveQuery(async () => ({ order: await db.orders.get(id), s: waAutoOf((await getSettings()).waAuto) }), [id]);
   const [picked, setPicked] = useState<Map<string, { used: boolean }> | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -185,7 +186,7 @@ export function JobSuppliersPage() {
   const statusOf = (supplierId: string) => {
     const a = lastAsk(supplierId);
     if (!a) return undefined;
-    const box = a.key ? wa.outbox[a.key] : undefined;
+    const box = a.key ? outbox[a.key] : undefined;
     const priced = (a.replies ?? []).reduce((n, r) => n + r.lines, 0);
     const answered = (a.replies ?? []).length;
     const state = answered ? 'answered' : box?.state === 'failed' ? 'failed' : box?.state === 'sent' || a.via === 'link' ? 'sent' : 'queued';

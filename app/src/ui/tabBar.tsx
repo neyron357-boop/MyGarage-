@@ -3,7 +3,8 @@ import { animate, type AnimationPlaybackControls } from 'motion';
 import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useWa, waCan, waUnread } from '../services/whatsapp';
+import { waCan } from '../services/whatsapp';
+import { WaCount } from './WaCount';
 import { haptic } from './haptics';
 import { hintNavigation, scrollToTop } from './stack';
 import { mayLeave } from './unsaved';
@@ -46,10 +47,8 @@ export function TabBar({ plus }: { /** «＋» with its quick actions (features/
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  // WhatsApp's tab, and how many of its messages wait (the number on it, as the iPhone badges an app).
-  const wa = useWa();
+  // WhatsApp's tab (how many of its messages wait — `WaCount` on it, as the iPhone badges an app: only it draws again).
   const TABS = waTab() ? TABS_WA : TABS_PLAIN;
-  const unread = TABS === TABS_WA ? waUnread(wa) : 0;
   const last = useRef('/');
   const current = tabOf(pathname, TABS) ?? last.current;
   last.current = current;
@@ -83,11 +82,7 @@ export function TabBar({ plus }: { /** «＋» with its quick actions (features/
           >
             <s.icon stroke={2.2} aria-hidden />
             <span>{t(s.key)}</span>
-            {s === WHATSAPP && unread > 0 && (
-              <i className="tab-badge tnum" aria-label={t('wa.unreadN', { count: unread })}>
-                {unread > 99 ? '99+' : unread}
-              </i>
-            )}
+            {s === WHATSAPP && <WaCount className="tab-badge tnum" label={(n) => t('wa.unreadN', { count: n })} />}
           </button>
         ))}
       </nav>

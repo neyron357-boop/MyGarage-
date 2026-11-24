@@ -19,7 +19,8 @@ import { CustomerHistory } from './HistoryInvoices';
 import { CustomerModal, VehicleModal } from './forms';
 import { ChatPicker } from '../whatsapp/ChatPicker';
 import { setCustomerGroup } from '../../services/waAuto';
-import { useWa, waReady } from '../../services/whatsapp';
+import { waReady } from '../../services/whatsapp';
+import { useWaSel } from '../../ui/waSel';
 import { useAction } from '../../ui/hooks';
 
 export function CustomerPage() {
@@ -30,7 +31,7 @@ export function CustomerPage() {
   const [addCar, setAddCar] = useState(false);
   const phone = usePhone();
   // Its WhatsApp group (v0.79): picked among the garage's WhatsApp groups.
-  const waLinked = waReady(useWa());
+  const waLinked = useWaSel(waReady);
   const [groupPick, setGroupPick] = useState(false);
   const { run } = useAction();
   const data = useScreenLiveQuery(async () => {

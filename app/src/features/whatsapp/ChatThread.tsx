@@ -26,7 +26,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiTime } from '../../domain/dates';
 import { clock, fileSize, groupDays, kindOf, MAX_FILE_BYTES, sendKind, type WaMessage, type Who } from '../../domain/whatsapp';
-import { dropFailed, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, useWa, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
+import { dropFailed, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
 import { copyText } from '../../ui/clipboard';
 import { StickyBar } from '../../ui/components';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
@@ -37,6 +37,7 @@ import { useLongPress } from '../../ui/longPress';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { downloadFile, shareOrDownload } from '../../ui/share';
 import { useScreen } from '../../ui/stack';
+import { useWaSel } from '../../ui/waSel';
 import { useSwipeReply } from '../../ui/swipeReply';
 import { startVideo, VideoPlayer } from '../../ui/VideoPlayer';
 import { ChatQuick, type QuickFor } from './ChatQuick';
@@ -566,13 +567,13 @@ export function ChatThread({ chatId, title, group, people, desk, quick }: { chat
   const { t } = useTranslation();
   const lang = useLang();
   const errorText = useErrorText();
-  const s = useWa();
+  // Only this chat's part of the store (v0.80.2): a message in another chat does not draw this one again.
   const prefs = useWaPrefs();
   const screen = useScreen();
-  const ready = waReady(s);
-  const list = s.messages[chatId];
-  const meta = s.meta[chatId];
-  const unread = s.chats.find((c) => c.id === chatId)?.unread ?? 0;
+  const ready = useWaSel(waReady);
+  const list = useWaSel((s) => s.messages[chatId]);
+  const meta = useWaSel((s) => s.meta[chatId]);
+  const unread = useWaSel((s) => s.chats.find((c) => c.id === chatId)?.unread ?? 0);
   const pane = useRef<HTMLDivElement>(null);
   const fill = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);

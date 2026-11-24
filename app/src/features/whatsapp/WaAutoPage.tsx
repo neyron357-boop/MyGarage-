@@ -9,7 +9,8 @@ import { waAutoOf, type WaAuto, type WaTarget } from '../../domain/waAuto';
 import { getSettings } from '../../services/settings';
 import { saveWaAuto } from '../../services/waAuto';
 import { dropOutbox, outboxStatus, retryOutbox } from '../../services/waOutbox';
-import { useWa, waCan, type OutboxFace } from '../../services/whatsapp';
+import { waCan, type OutboxFace } from '../../services/whatsapp';
+import { useWaSel } from '../../ui/waSel';
 import { db } from '../../db/db';
 import { FormRow, List, ListRow, PageHeader, PageSkeleton, RowGroup } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
@@ -72,7 +73,7 @@ export function WaAutoPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { run } = useAction();
-  const wa = useWa();
+  const outbox = useWaSel((s) => s.outbox);
   const data = useScreenLiveQuery(async () => ({ s: waAutoOf((await getSettings()).waAuto), groups: (await db.customers.toArray()).filter((c) => c.waGroup && !c.archivedAt) }), []);
   const [picking, setPicking] = useState<{ section: 'work' | 'boss' | 'wash'; kind: 'group' | 'person' } | null>(null);
   const [queue, setQueue] = useState<OutboxFace[] | null>(null);
@@ -82,7 +83,7 @@ export function WaAutoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // The stream says what changed: the list follows.
-  const live = queue?.map((q) => wa.outbox[q.key] ?? q);
+  const live = queue?.map((q) => outbox[q.key] ?? q);
   if (!data) return <PageSkeleton />;
   const { s } = data;
   const save = <K extends Section>(section: K, patch: Partial<WaAuto[K]>) => void run(() => saveWaAuto(section, patch));

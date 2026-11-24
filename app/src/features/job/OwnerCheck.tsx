@@ -16,7 +16,8 @@ import { cardUrl } from '../../services/media';
 import type { OrderBundle } from '../../services/orders';
 import { waAutoOf, type WaTarget } from '../../domain/waAuto';
 import { saveWaAuto } from '../../services/waAuto';
-import { sendWaFile, useWa, waReady } from '../../services/whatsapp';
+import { sendWaFile, waReady } from '../../services/whatsapp';
+import { useWaSel } from '../../ui/waSel';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 import { shareOrDownload } from '../../ui/share';
@@ -116,7 +117,7 @@ export function OwnerCheckSheet({
   const { t } = useTranslation();
   const lang = useLang();
   const [shot, setShot] = useState<{ file: File; url: string }>();
-  const ready = waReady(useWa());
+  const ready = useWaSel(waReady);
   const owner = waAutoOf(b.settings.waAuto).boss.to;
   const [picking, setPicking] = useState(false);
   const { run, busy } = useAction({ exclusive: true });

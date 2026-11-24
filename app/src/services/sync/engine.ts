@@ -703,7 +703,8 @@ function listen() {
         let i: number;
         while ((i = buf.indexOf('\n\n')) >= 0) {
           const block = buf.slice(0, i);
-          const rev = eventRev(block);
+          // (Read for its number only when it is the data's: WhatsApp's events are not parsed twice — v0.80.2.)
+          const rev = block.includes('"rev"') ? eventRev(block) : undefined;
           buf = buf.slice(i + 2);
           tellSaid(block);
           if (!through) {
