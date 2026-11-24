@@ -246,6 +246,40 @@ describe('what WhatsApp says, into the lists', () => {
     expect(applyEvent(start, { t: 'ack', chat: 'other@c.us', id: 'zz', ack: 3 })).toBe(start);
   });
 
+  it('v0.80: ticks only grow — a late smaller tick, a send’s answer read after its tick take none away', () => {
+    const start = lists();
+    const read = applyEvent(start, { t: 'ack', chat: '971501234567@c.us', id: 'm1', ack: 3 });
+    expect(applyEvent(read, { t: 'ack', chat: '971501234567@c.us', id: 'm1', ack: 1 })).toBe(read);
+    const again = applyEvent(read, { t: 'msg', msg: msg('m1', { me: true, ack: 1 }), chat: null });
+    expect(again.messages['971501234567@c.us'][0].ack).toBe(3);
+    expect(mergeMessages([msg('a', { ack: 2 })], [msg('a', { ack: 0 })])[0].ack).toBe(2);
+  });
+
+  it('v0.80: the chat read under its other id (a number’s, WhatsApp’s hidden @lid) — its tick, its message, its copy on the way', () => {
+    const NUM = '971501234567@c.us';
+    const LID = '55512345678901@lid';
+    const start: WaLists = { chats: [chat(LID, { phone: '971501234567' })], messages: { [NUM]: [msg(`true_${NUM}_3EB0AA`, { chat: NUM, me: true, ack: 0 }), msg('p:1', { chat: NUM, me: true, text: 'Hi', t: 5000, pending: true })] } };
+    // A tick said under the other id: the same message (its key).
+    const ticked = applyEvent(start, { t: 'ack', chat: LID, id: `true_${LID}_3EB0AA`, ack: 1 });
+    expect(ticked.messages[NUM][0].ack).toBe(1);
+    // The message written here, now on WhatsApp under the other id: its waiting copy leaves, it is there once.
+    const sent = applyEvent(ticked, { t: 'msg', msg: msg(`true_${LID}_3EB0BB`, { chat: LID, me: true, text: 'Hi', t: 5200, ack: 1 }), chat: chat(LID, { phone: '971501234567' }) });
+    expect(sent.messages[NUM].map((m) => m.id)).toEqual([`true_${NUM}_3EB0AA`, `true_${LID}_3EB0BB`]);
+    // An answer of the customer under the other id: into the chat as it is read here.
+    const answer = applyEvent(sent, { t: 'msg', msg: msg(`false_${LID}_3EB0CC`, { chat: LID, text: 'Thanks', t: 6000 }), chat: chat(LID, { phone: '971501234567' }) });
+    expect(answer.messages[NUM].at(-1)?.text).toBe('Thanks');
+    expect(answer.messages[LID]).toBeUndefined();
+  });
+
+  it('v0.80: the same words in another person’s chat are not taken for its copy on the way', () => {
+    const A = '971501234567@c.us';
+    const B = '971509990000@c.us';
+    const start: WaLists = { chats: [chat(A), chat(B, { phone: '971509990000' })], messages: { [A]: [msg('p:1', { chat: A, me: true, text: 'ok', t: 5000, pending: true })], [B]: [] } };
+    const next = applyEvent(start, { t: 'msg', msg: msg('true_B_1', { chat: B, me: true, text: 'ok', t: 5100, ack: 1 }), chat: null });
+    expect(next.messages[A].map((m) => m.id)).toEqual(['p:1']);
+    expect(next.messages[B].map((m) => m.id)).toEqual(['true_B_1']);
+  });
+
   it('a chat’s line: read on the phone', () => {
     const start = lists();
     start.chats[0].unread = 3;

@@ -45,8 +45,6 @@ export interface MsgContext {
   vehicle: Vehicle;
   order: Order;
   garageName: string;
-  /** Parts costing this much or more are ordered after an advance (the estimate says so). */
-  partsAdvanceFrom?: number;
 }
 
 /**
@@ -290,9 +288,7 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   if (v.recommendedGross > 0) lines.push(t('msg.recommendedTotal', { sum: money(v.recommendedGross) }));
   lines.push(t('msg.validUntil', { date: formatDate(v.validUntil) }));
   if (v.items.some((i) => i.block === 'B')) lines.push('', t('msg.bExplain'));
-  // Parts that cost something are ordered after an advance: said once, calmly, with the amount.
-  const parts = v.items.filter((i) => i.kind === 'part' && !i.customerSupplied).reduce((s, i) => s + i.gross, 0);
-  if (ctx.partsAdvanceFrom && parts >= ctx.partsAdvanceFrom) lines.push('', t('msg.partsAdvance', { amount: money(parts) }));
+  // (No word of an advance for the parts: v0.80, the owner — «не писать клиентам, что нужен аванс».)
   lines.push('', t('msg.answerHint'));
   return lines.join('\n');
 }

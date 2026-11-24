@@ -688,6 +688,11 @@ export interface OrderItem {
   doneAt?: string;
   templateId?: string;
   mediaIds?: string[];
+  /**
+   * A labour charge's name typed by hand (v0.80): kept as typed — not named by the job's parts any more
+   * (domain/labourName.ts). Back to plain labour words — named by the parts again.
+   */
+  ownName?: boolean;
   // parts
   partNumber?: string;
   /** The garage's AI looked at the part's name as typed (v0.48): what it was, so it is not asked again; «Отменить» puts it back. */

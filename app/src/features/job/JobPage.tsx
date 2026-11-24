@@ -131,6 +131,7 @@ import { isLabourCharge } from '../../domain/linePrices';
 import { binOf } from '../../domain/bin';
 import { BinSheet } from './BinSheet';
 import { qtyShort } from '../../domain/sides';
+import { labourWords, plainLabour } from '../../domain/labourName';
 import { QtyCheckList, QtyCheckSheet } from './QtyCheck';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { PrevVisit } from './PrevVisit';
@@ -717,7 +718,7 @@ export function JobPage() {
   const reissue = phase === 'debt' && !inv;
   // Lines back from the bin (v0.68; v0.70 — the refused ones too, a job closed reopened for them): before the invoice.
   const binRestore = !lockedMonth && !reissue && !inv && (editable || canReopen(b.order));
-  const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
+  const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
   const sentAt = waiting.length ? b.versions.filter((v) => waiting.some((i) => i.lastVersionId === v.id)).map((v) => v.sentAt).sort()[0] : undefined;
 
   const removeLine = (i: OrderItem) =>
@@ -761,7 +762,8 @@ export function JobPage() {
     });
 
   // The usual jobs (those that went with a similar complaint first) for one-tap adding.
-  const onJob = new Set(live.map((i) => itemTitle(i, docLang)));
+  // (A labour charge named by the parts, v0.80, is its plain words: its chip does not come back.)
+  const onJob = new Set(live.map((i) => (plainLabour(itemTitle(i, docLang)) ? labourWords(itemTitle(i, docLang)) : itemTitle(i, docLang))));
   const quick = (suggestions?.work.top ?? [])
     .filter((name) => !onJob.has(name))
     .slice(0, 8)

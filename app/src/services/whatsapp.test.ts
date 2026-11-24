@@ -47,6 +47,8 @@ interface Server {
   asked: { path: string; init: WaCallInit }[];
   fail?: SyncError;
   hold?: Promise<void>;
+  /** The send's own answer, played by a test. */
+  onSend?: () => Promise<unknown>;
 }
 let server: Server;
 
@@ -65,6 +67,7 @@ beforeEach(async () => {
       if (path === 'logout') return (server.status = status({ phase: 'off', linked: false, on: false, me: null }));
       if (path === 'chats') return { chats: server.chats, total: server.chats.length, unread: 2 };
       if (path === 'messages') return { messages: server.messages.slice(-Number(init.query?.limit ?? 40)), more: true };
+      if (path === 'send' && server.onSend) return server.onSend();
       if (path === 'send') return { ok: true, msg: msg('sent1', { me: true, t: Date.now(), text: (init.body as { text: string }).text, ack: 1 }) };
       if (path === 'file') return { ok: true, msg: msg('sent2', { me: true, t: Date.now(), type: 'document', text: init.query?.caption ?? '', ack: 1, file: { name: init.query?.name, size: init.file?.size, here: true } }) };
       if (path === 'seen') return { ok: true, unread: 0 };
@@ -147,6 +150,40 @@ describe('a chat', () => {
     expect(waStore().messages[ALI].some((m) => m.pending)).toBe(false);
     expect(waStore().chats[0].last?.id).toBe('sent1');
     expect(server.asked.find((a) => a.path === 'send')?.init.body).toEqual({ chat: ALI, text: 'Car is ready', quote: undefined });
+  });
+
+  it('v0.80: WhatsApp’s tick on the stream before the send’s own answer — the tick stays (no clock on a sent message)', async () => {
+    await loadMessages(ALI);
+    let free = () => {};
+    const hold = new Promise<void>((r) => (free = r));
+    const real = msg(`true_${ALI}_3EB0AA11`, { me: true, t: Date.now(), text: 'Hi', ack: 0 });
+    // The send's own answer comes late, and says what WhatsApp said at once: not yet sent (ack 0).
+    server.onSend = async () => (await hold, { ok: true, msg: real });
+    const going = sendWaText(ALI, 'Hi');
+    await Promise.resolve();
+    // The message is on WhatsApp — its tick, then its own event — while the send's answer is still on its way.
+    tellSaid(`data: ${JSON.stringify({ wa: { t: 'ack', chat: ALI, id: real.id, ack: 1 } })}`);
+    tellSaid(`data: ${JSON.stringify({ wa: { t: 'msg', msg: real, chat: null } })}`);
+    expect(waStore().messages[ALI].at(-1)).toMatchObject({ id: real.id, ack: 1 });
+    expect(waStore().messages[ALI].some((m) => m.pending)).toBe(false);
+    tellSaid(`data: ${JSON.stringify({ wa: { t: 'ack', chat: ALI, id: real.id, ack: 2 } })}`);
+    free();
+    await going;
+    const last = waStore().messages[ALI].at(-1)!;
+    expect([last.id, last.ack, last.pending]).toEqual([real.id, 2, undefined]);
+    expect(waStore().messages[ALI].filter((m) => m.text === 'Hi')).toHaveLength(1);
+  });
+
+  it('v0.80: a tick that comes before anything of its message is kept for it', async () => {
+    await loadMessages(ALI);
+    const real = msg(`true_${ALI}_3EB0BB22`, { me: true, t: Date.now(), text: 'Ok', ack: 0 });
+    server.onSend = async () => {
+      // WhatsApp's tick reaches the stream while the server is still answering the send.
+      tellSaid(`data: ${JSON.stringify({ wa: { t: 'ack', chat: ALI, id: real.id, ack: 1 } })}`);
+      return { ok: true, msg: real };
+    };
+    await sendWaText(ALI, 'Ok');
+    expect(waStore().messages[ALI].at(-1)).toMatchObject({ id: real.id, ack: 1 });
   });
 
   it('a text that did not go stays, marked — and says why', async () => {

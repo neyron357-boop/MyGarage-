@@ -30,6 +30,8 @@ import { AppError } from './errors';
 import { addMedia, deleteMedia } from './media';
 import { logEvent, tryStage } from './orders';
 import { getSettings } from './settings';
+import { syncLabourNames } from './labourName';
+import { typedOwnName } from '../domain/labourName';
 
 export type NewItem = Partial<OrderItem> & Pick<OrderItem, 'kind' | 'block'>;
 
@@ -57,6 +59,8 @@ export async function addItem(orderId: string, input: NewItem): Promise<OrderIte
     await db.items.add(item);
     await logEvent(orderId, 'item_added', { itemId: item.id, title: item.titleRu || item.titleEn, block: item.block });
   });
+  // A part added — the labour charge says it; a labour charge added — says the parts (v0.80).
+  await syncLabourNames(orderId);
   return item;
 }
 
@@ -76,7 +80,12 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
   if (item.approvalState !== 'draft' && LOCKED_FIELDS.some((f) => f in patch && patch[f] !== item[f])) {
     throw new AppError('err.itemSent');
   }
-  await db.items.update(id, item.approvalState === 'draft' ? { ...patch, ...capitals(patch, item) } : patch);
+  const next: Partial<OrderItem> = item.approvalState === 'draft' ? { ...patch, ...capitals(patch, item) } : patch;
+  // A labour charge renamed by hand keeps its name; plain labour words again — named by the parts (v0.80).
+  if (item.kind === 'labor' && ((next.titleEn !== undefined && next.titleEn !== item.titleEn) || (next.titleRu !== undefined && next.titleRu !== item.titleRu)))
+    next.ownName = typedOwnName(item, next, await db.items.where('orderId').equals(item.orderId).toArray());
+  await db.items.update(id, next);
+  await syncLabourNames(item.orderId);
 }
 
 /** Work and parts are named in capitals (a discount keeps its words): the titles of `patch`, as they will be stored. */

@@ -5,6 +5,7 @@ import {
   chatIdOf,
   MAX_FILE_BYTES,
   mergeMessages,
+  msgKey,
   peopleIndex,
   sendKind,
   unreadTotal,
@@ -291,10 +292,29 @@ export async function seenWa(chat: string): Promise<void> {
 function putPending(chat: string, m: WaMessage) {
   set({ messages: { ...store.messages, [chat]: mergeMessages(store.messages[chat] ?? [], [m]) } });
 }
+/**
+ * Ticks heard before their message is here (v0.80, «в приложении в ожидании, а в WhatsApp уже отправилось»): WhatsApp's
+ * tick comes on the open stream, the send's own answer through the server a moment later — the tick waits for it (two
+ * minutes) and is put on it when it comes.
+ */
+const earlyAcks = new Map<string, { ack: number; at: number }>();
+const EARLY_MS = 120_000;
+function keepEarlyAck(id: string, ack: number) {
+  const now = Date.now();
+  for (const [k, v] of earlyAcks) if (now - v.at > EARLY_MS) earlyAcks.delete(k);
+  const had = earlyAcks.get(msgKey(id));
+  if (!had || ack > had.ack) earlyAcks.set(msgKey(id), { ack, at: now });
+}
+function withEarlyAck(m: WaMessage): WaMessage {
+  const early = earlyAcks.get(msgKey(m.id));
+  return early && Date.now() - early.at <= EARLY_MS && early.ack > m.ack ? { ...m, ack: early.ack } : m;
+}
+
 function settle(chat: string, pendingId: string, sent: WaMessage | undefined, local?: string) {
   const list = (store.messages[chat] ?? []).filter((m) => m.id !== pendingId);
   if (sent) {
-    const next = applyEvent({ chats: store.chats, messages: { ...store.messages, [chat]: list } }, { t: 'msg', msg: local ? { ...sent, local } : sent, chat: null });
+    const msg = withEarlyAck(local ? { ...sent, local } : sent);
+    const next = applyEvent({ chats: store.chats, messages: { ...store.messages, [chat]: list } }, { t: 'msg', msg, chat: null });
     set({ chats: next.chats, messages: next.messages });
   } else set({ messages: { ...store.messages, [chat]: (store.messages[chat] ?? []).map((m) => (m.id === pendingId ? { ...m, failed: true } : m)) } });
 }
@@ -528,7 +548,10 @@ function waHeard(value: unknown) {
     return;
   }
   if (!store.chatsAt && ev.t === 'chat' && store.status && typeof ev.unread === 'number') set({ status: { ...store.status, unread: ev.unread } });
-  const next = applyEvent({ chats: store.chats, messages: store.messages }, ev);
+  const said: WaEvent = ev.t === 'msg' ? { ...ev, msg: withEarlyAck(ev.msg) } : ev;
+  const next = applyEvent({ chats: store.chats, messages: store.messages }, said);
   if (next.chats !== store.chats || next.messages !== store.messages) set({ chats: next.chats, messages: next.messages });
+  // A tick for a message not here yet (its send not answered yet): kept for it.
+  else if (ev.t === 'ack' && ev.ack > 0) keepEarlyAck(ev.id, ev.ack);
 }
 onServerSaid('wa', waSaid);

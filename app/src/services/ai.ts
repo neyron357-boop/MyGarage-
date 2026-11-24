@@ -11,6 +11,7 @@ import { isVin, vinBuilt } from '../domain/vin';
 import { addWebPictures, deleteMedia, mediaBlob } from './media';
 import { callJson, SyncError } from './sync/api';
 import { syncConfig } from './sync/config';
+import { syncLabourNames } from './labourName';
 
 /*
  * The garage's AI on this device (v0.48): questions go to the garage's server (server/src/ai.mjs — Gemini with the key
@@ -300,6 +301,8 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
     if (fix.title) patch[russian ? 'titleRu' : 'titleEn'] = fix.title;
     if (fix.english) patch.titleEn = fix.english;
     await db.items.update(itemId, patch);
+    // The part's name put right — the labour charge says it so (v0.80).
+    if (fix.title || fix.english) await syncLabourNames(now.orderId);
     if ((fix.title || fix.english) && !quiet) {
       const before = { titleRu: now.titleRu, titleEn: now.titleEn };
       // Said as the line now shows it: in the job's documents' language (an English name, once there is one).
@@ -314,6 +317,7 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
           if (!cur || cur.approvalState !== 'draft') return;
           // The name as typed comes back — and is not asked about again.
           await db.items.update(itemId, { titleRu: before.titleRu, titleEn: before.titleEn, aiName: { from: typed, to: typed, at: nowIso() } });
+          await syncLabourNames(cur.orderId);
         },
       });
     }

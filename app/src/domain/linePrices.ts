@@ -1,4 +1,5 @@
 import { lineName } from './items';
+import { labourWords, plainLabour } from './labourName';
 import type { ApprovalState, Lang } from './types';
 
 /*
@@ -104,9 +105,12 @@ export function buildSuggestions(lines: HistLine[], jobs: Map<string, HistJob>, 
   const mine = new Set(words(ctx.complaint ?? ''));
   const alike = (job?: HistJob) => !!job && mine.size > 0 && words(job.complaint ?? '').some((w) => mine.has(w));
   const titleOf = (ru?: string, en?: string) => lineName((ctx.lang === 'ru' ? ru || en : en || ru)?.trim() ?? '');
-  for (const it of lines) {
-    if (it.kind !== 'labor' && it.kind !== 'part') continue;
-    if (ctx.orderId && it.orderId === ctx.orderId) continue;
+  // A labour charge named by its job's parts (v0.80) is the same labour charge: by its words, not by the parts.
+  const plain = (t?: string) => (t && plainLabour(t) ? labourWords(t) : t);
+  for (const raw of lines) {
+    if (raw.kind !== 'labor' && raw.kind !== 'part') continue;
+    if (ctx.orderId && raw.orderId === ctx.orderId) continue;
+    const it = raw.kind === 'labor' ? { ...raw, titleRu: plain(raw.titleRu), titleEn: plain(raw.titleEn) } : raw;
     const title = titleOf(it.titleRu, it.titleEn);
     if (!title) continue;
     const job = jobs.get(it.orderId);

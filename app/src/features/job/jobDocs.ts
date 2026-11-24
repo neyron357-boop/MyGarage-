@@ -33,7 +33,7 @@ export function jobDocs(b: OrderBundle): JobDocs {
   const lines = live.filter((i) => i.kind !== 'discount');
   const waiting = b.items.filter(isAwaitingClient);
   const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
-  const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
+  const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
   const docLang = b.order.docLanguage;
   const oid = b.order.id;
   const sent = (v: EstimateVersion, photos: string[]): SendRequest => ({ text: versionMessage(ctx, v), template: 'estimate', lang: v.language, orderId: oid, pdf: () => versionPdf(v.id), photos });

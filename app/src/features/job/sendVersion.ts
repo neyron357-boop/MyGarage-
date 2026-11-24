@@ -14,7 +14,7 @@ export function useSendVersion(b: OrderBundle | undefined) {
   const [send, setSend] = useState<SendRequest | null>(null);
   const prepare = async (orderId: string, opts: SendOptions) => {
     if (!b) return;
-    const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name, partsAdvanceFrom: b.settings.prepaymentThresholdFils };
+    const ctx = { customer: b.customer, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };
     const preview = await previewVersion(orderId, opts);
     let frozen: Promise<EstimateVersion> | undefined;
     const freeze = () => (frozen ??= sendVersion(orderId, opts));

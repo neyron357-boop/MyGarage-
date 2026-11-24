@@ -2421,7 +2421,6 @@ export const en: typeof ru = {
     months_few: '{{count}} months',
     months_many: '{{count}} months',
     months_other: '{{count}} months',
-    partsAdvance: 'We order the parts after an advance of {{amount}}.',
     followUp: 'Hello {{name}}! This is {{garage}}. How is your {{car}} after the repair? If anything bothers you, just write to us.',
     serviceDue: 'Hello {{name}}! It has been about six months since the oil change on your {{car}} ({{plate}}). Time for a service — reply and we will book you in. {{garage}}',
     booked: 'Hello {{name}}! We are expecting your {{car}} ({{plate}}) at {{garage}}. Job no. {{number}}.',

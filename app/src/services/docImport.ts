@@ -1,3 +1,4 @@
+import { labourWords, plainLabour } from '../domain/labourName';
 import { db } from '../db/db';
 import { parseGarageDoc, type GarageDoc } from '../domain/docImport';
 import { activeInvoice } from '../domain/invoice';
@@ -104,15 +105,17 @@ export async function importGarageDoc(items: TextItem[]): Promise<DocImport> {
 
   // The lines, priced as printed: the line's total with VAT is what the customer pays.
   const had = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => ['draft', 'pending', 'approved'].includes(i.approvalState));
-  const seen = new Set(had.map((i) => `${itemTitle(i, 'en')}|${itemAmounts(i).gross}`));
+  // A labour charge named by the job's parts (v0.80) is the line of plain labour words it came as.
+  const words = (t: string) => (plainLabour(t) ? labourWords(t) : t);
+  const seen = new Set(had.map((i) => `${words(itemTitle(i, 'en'))}|${itemAmounts(i).gross}`));
   const added: OrderItem[] = [];
   let skipped = 0;
   for (const l of doc.lines) {
-    if (seen.has(`${l.title}|${l.totalFils}`)) {
+    if (seen.has(`${words(l.title)}|${l.totalFils}`)) {
       skipped++;
       continue;
     }
-    seen.add(`${l.title}|${l.totalFils}`);
+    seen.add(`${words(l.title)}|${l.totalFils}`);
     const rate = l.vatFils > 0 ? settings.vatRateBp : 0;
     const qty = l.qty > 0 ? l.qty : 1;
     // Per unit with VAT, kept to the fils ("VAT in the price"); a total that does not divide stays as one.

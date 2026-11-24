@@ -9,6 +9,7 @@ import { byPosition, canReprice, isAwaitingClient, itemAmounts, unitGrossPrice }
 import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } from '../domain/stages';
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
+import { syncLabourNames } from './labourName';
 import { AppError } from './errors';
 import { assertJobOpen } from './monthLock';
 import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, setDone, updateItem, withdrawItems } from './estimate';
@@ -257,6 +258,7 @@ export async function takeBack(itemIds: string[], opts: { cancel?: boolean } = {
   const first = itemIds.length ? await db.items.get(itemIds[0]) : undefined;
   if (!first || !(await withdrawItems(itemIds, opts))) return;
   await syncDiscount(first.orderId);
+  await syncLabourNames(first.orderId);
   await syncStage(first.orderId);
 }
 
@@ -284,6 +286,7 @@ export async function removeLines(itemIds: string[]): Promise<OrderItem[]> {
   if (waiting.length) await withdrawItems(waiting, { cancel: true });
   for (const i of items.filter((x) => x.approvalState === 'approved')) await dropLine(i.id);
   await syncDiscount(orderId);
+  await syncLabourNames(orderId);
   await syncStage(orderId);
   return removed;
 }
@@ -295,6 +298,7 @@ export async function restoreLines(items: OrderItem[]): Promise<void> {
   const order = await db.orders.get(items[0].orderId);
   if (order?.removedLines) await db.orders.update(order.id, { removedLines: withoutRemoved(order, items.map((i) => i.id)) });
   await syncDiscount(items[0].orderId);
+  await syncLabourNames(items[0].orderId);
   await syncStage(items[0].orderId);
 }
 
@@ -326,6 +330,7 @@ export async function restoreFromBin(orderId: string, ids: string[]): Promise<nu
     if (deleted.length) await db.orders.update(orderId, { removedLines: withoutRemoved(job, deleted) });
   });
   await syncDiscount(orderId);
+  await syncLabourNames(orderId);
   await syncStage(orderId);
   return back.length;
 }

@@ -200,10 +200,10 @@ describe('messages of v0.7', () => {
       '#7 Nissan Sunny 2019 · ' + mechanicText(ctx().vehicle, ctx().order, [], []).split(' · ')[1].split('\n')[0] + '\nComplaint: Brake noise\n\nTo do:\n1. Oil change — Raju\n\nNotes:\n- pads at 2 mm',
     );
   });
-  it('the estimate says the parts are ordered after an advance (from the garage threshold)', () => {
+  it('the estimate never asks the customer for an advance (v0.80, the owner: «не писать клиентам, что нужен аванс»)', () => {
     const line = (title: string, gross: number, kind: SnapshotItem['kind']): SnapshotItem => ({ itemId: title, kind, block: 'A', title, qty: 1, unit: 'pcs', net: gross, vat: 0, gross });
     const v = { number: 1, language: 'en', items: [line('Clutch kit', 120000, 'part'), line('Labour', 90000, 'labor')], fixedGross: 210000, maxGross: 210000, recommendedGross: 0, validUntil: '2026-11-17T08:00:00.000Z' } as EstimateVersion;
-    expect(versionMessage({ ...ctx(), partsAdvanceFrom: 30000 }, v)).toContain('We order the parts after an advance of 1,200.00 AED.');
-    expect(versionMessage({ ...ctx(), partsAdvanceFrom: 200000 }, v)).not.toContain('advance');
+    expect(versionMessage(ctx(), v)).not.toMatch(/advance|prepay/i);
+    expect(versionMessage(ctx(), v)).toMatch(/clutch kit/i);
   });
 });

@@ -2425,7 +2425,6 @@ export const ru = {
     months_few: '{{count}} месяца',
     months_many: '{{count}} месяцев',
     months_other: '{{count}} месяца',
-    partsAdvance: 'Запчасти заказываем после аванса {{amount}}.',
     followUp: 'Здравствуйте, {{name}}! Это {{garage}}. Как ваш {{car}} после ремонта? Если что-то беспокоит — напишите, поможем.',
     serviceDue: 'Здравствуйте, {{name}}! Прошло около полугода с замены масла на вашем {{car}} ({{plate}}). Пора на ТО — ответьте, и мы запишем вас. {{garage}}',
     booked: 'Здравствуйте, {{name}}! Ждём ваш {{car}} ({{plate}}) в {{garage}}. Заказ №{{number}}.',

@@ -375,11 +375,25 @@ export type WaEvent =
   | { t: 'chats'; n: number; unread: number }
   | { t: 'state'; state: WaStatus };
 
-/** A chat's messages with these put in: one of the same id replaces it, the order is the time's. */
+/**
+ * A message's own key — the last part of its id. The same message under a chat's two ids (its number's, and the one
+ * WhatsApp hides the number behind — @lid) has the same key.
+ */
+export const msgKey = (id: string): string => id.slice(id.lastIndexOf('_') + 1);
+
+/**
+ * A chat's messages with these put in: one of the same id replaces it, the order is the time's. Its ticks only grow
+ * (v0.80): an answer that left WhatsApp before its ticks came — the send's own, a list read a moment ago — does not take
+ * a tick away («в приложении в ожидании, а в WhatsApp уже отправилось»).
+ */
 export function mergeMessages(have: WaMessage[], more: WaMessage[]): WaMessage[] {
   if (!more.length) return have;
   const by = new Map(have.map((m) => [m.id, m]));
-  for (const m of more) by.set(m.id, { ...by.get(m.id), ...m, pending: m.pending, failed: m.failed, local: m.local ?? by.get(m.id)?.local });
+  for (const m of more) {
+    const was = by.get(m.id);
+    const ack = was && m.ack >= 0 && was.ack > m.ack ? was.ack : m.ack;
+    by.set(m.id, { ...was, ...m, ack, pending: m.pending, failed: m.failed, local: m.local ?? was?.local });
+  }
   // (Messages of the same second keep the order they came in: WhatsApp's times are whole seconds.)
   return [...by.values()].sort((a, b) => a.t - b.t);
 }
@@ -391,31 +405,60 @@ const putChat = (chats: WaChat[], row: WaChat): WaChat[] => (chats.some((c) => c
  * ticks change in both; a chat's line changes. `was`: a message changed (edited, taken back) — it does not become the
  * chat's last one. Nothing changed — the same lists come back (the screens do not draw again).
  */
+/**
+ * Where a message of `chat` is kept here: its own chat's messages — or the same chat read under its other id (v0.80: a
+ * number's `…@c.us` and WhatsApp's `…@lid`): by the number, or the list that already has `has` (the message, its copy
+ * on the way).
+ */
+function listOf(lists: WaLists, chat: string, row: WaChat | null, sure: (m: WaMessage) => boolean, copy: (m: WaMessage) => boolean = () => false): string {
+  const own = lists.messages[chat];
+  if (own?.some((m) => sure(m) || copy(m))) return chat;
+  // The message itself under the chat's other id: its key is its own.
+  const other = Object.keys(lists.messages).find((c) => c !== chat && lists.messages[c].some(sure));
+  if (other) return other;
+  // The same person under the other id: by the number (the event's chat says it, or the chats read say whose id it is).
+  const phone = row?.phone || (chat.endsWith('@c.us') ? chat.split('@')[0] : lists.chats.find((c) => c.id === chat)?.phone);
+  const twins = phone ? [`${phone}@c.us`, ...lists.chats.filter((c) => !c.group && c.phone === phone).map((c) => c.id)].filter((c, i, all) => c !== chat && !!lists.messages[c] && all.indexOf(c) === i) : [];
+  return twins.find((c) => lists.messages[c].some(copy)) ?? (own ? chat : (twins[0] ?? chat));
+}
+
 export function applyEvent(lists: WaLists, ev: WaEvent): WaLists {
   if (ev.t === 'msg') {
     let chats = ev.chat ? putChat(lists.chats, ev.chat) : lists.chats;
-    const have = lists.messages[ev.msg.chat];
+    const key = msgKey(ev.msg.id);
     // What was written here and is now on WhatsApp: the waiting copy leaves (the same words, sent within the minute).
+    const waitingFor = (m: WaMessage) => ev.msg.me && !!m.pending && !m.failed && m.text === ev.msg.text && (m.type === ev.msg.type || !!m.file === !!ev.msg.file) && Math.abs(m.t - ev.msg.t) < 120_000;
+    // The same message under the chat's other id.
+    const twinOf = (m: WaMessage) => !m.pending && m.id !== ev.msg.id && m.me === ev.msg.me && msgKey(m.id) === key;
+    const at = listOf(lists, ev.msg.chat, ev.chat, (m) => m.id === ev.msg.id || twinOf(m), waitingFor);
+    const have = lists.messages[at];
     let list = have;
     if (have) {
-      const waiting = ev.msg.me ? have.find((m) => m.pending && !m.failed && m.text === ev.msg.text && (m.type === ev.msg.type || !!m.file === !!ev.msg.file) && Math.abs(m.t - ev.msg.t) < 120_000) : undefined;
+      const waiting = have.find(waitingFor);
+      const twin = have.find(twinOf);
       const rest = waiting ? have.filter((m) => m !== waiting) : have;
-      list = mergeMessages(rest, [waiting?.local && !ev.msg.local ? { ...ev.msg, local: waiting.local } : ev.msg]);
+      list = mergeMessages(rest, [{ ...ev.msg, ...(twin ? { id: twin.id } : {}), ...(waiting?.local && !ev.msg.local ? { local: waiting.local } : {}) }]);
     }
     if (!ev.chat && !ev.was) {
       const last: WaLast = { id: ev.msg.id, t: ev.msg.t, me: ev.msg.me, type: ev.msg.type, text: ev.msg.text.slice(0, 160), ack: ev.msg.ack, name: ev.msg.file?.name, sec: ev.msg.file?.sec, from: ev.msg.from?.name };
-      chats = chats.map((c) => (c.id === ev.msg.chat && ev.msg.t >= c.t ? { ...c, t: ev.msg.t, last } : c));
+      chats = chats.map((c) => ((c.id === ev.msg.chat || c.id === at) && ev.msg.t >= c.t ? { ...c, t: ev.msg.t, last } : c));
     }
-    return { chats, messages: list === have ? lists.messages : { ...lists.messages, [ev.msg.chat]: list! } };
+    return { chats, messages: list === have ? lists.messages : { ...lists.messages, [at]: list! } };
   }
   if (ev.t === 'ack') {
-    const have = lists.messages[ev.chat];
-    const hit = have?.some((m) => m.id === ev.id && m.ack !== ev.ack);
-    const inList = lists.chats.some((c) => c.id === ev.chat && c.last?.id === ev.id && c.last.ack !== ev.ack);
+    // A tick for this message, under whichever id its chat is read; ticks only grow (a late smaller one takes none away).
+    const key = msgKey(ev.id);
+    const is = (id: string) => id === ev.id || (!id.startsWith('p:') && msgKey(id) === key);
+    const grows = (ack: number) => ack !== ev.ack && (ev.ack > ack || ev.ack < 0);
+    const at = listOf(lists, ev.chat, null, (m) => is(m.id));
+    const have = lists.messages[at];
+    const hit = have?.some((m) => is(m.id) && grows(m.ack));
+    const lineOf = (c: WaChat) => (c.id === ev.chat || c.id === at) && !!c.last && is(c.last.id) && grows(c.last.ack);
+    const inList = lists.chats.some(lineOf);
     if (!hit && !inList) return lists;
     return {
-      chats: inList ? lists.chats.map((c) => (c.id === ev.chat && c.last?.id === ev.id ? { ...c, last: { ...c.last, ack: ev.ack } } : c)) : lists.chats,
-      messages: hit ? { ...lists.messages, [ev.chat]: have!.map((m) => (m.id === ev.id ? { ...m, ack: ev.ack } : m)) } : lists.messages,
+      chats: inList ? lists.chats.map((c) => (lineOf(c) ? { ...c, last: { ...c.last!, ack: ev.ack } } : c)) : lists.chats,
+      messages: hit ? { ...lists.messages, [at]: have!.map((m) => (is(m.id) && grows(m.ack) ? { ...m, ack: ev.ack } : m)) } : lists.messages,
     };
   }
   if (ev.t === 'chat') return { ...lists, chats: putChat(lists.chats, ev.chat) };
