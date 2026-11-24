@@ -1,4 +1,4 @@
-import { byPosition, itemAmounts, itemTitle } from './items';
+import { byPosition, itemAmounts, itemOff, itemTitle } from './items';
 import type { Customer, Invoice, InvoiceLine, InvoiceType, Lang, Order, OrderItem, PartySnapshot, Payment, Stage } from './types';
 
 /** The name a customer goes by on a document: a company's name, else the person's. */
@@ -43,6 +43,8 @@ export function invoiceLines(items: OrderItem[], lang: Lang): InvoiceLine[] {
         vat: a.vat,
         gross: a.gross,
         customerSupplied: i.customerSupplied || undefined,
+        // Its own discount (v0.82): the price × qty above is before it, `net` after.
+        ...(itemOff(i) ? { discountFils: itemOff(i) } : {}),
       };
     });
 }

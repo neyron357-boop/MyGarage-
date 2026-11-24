@@ -764,10 +764,19 @@ async function launchBrowser() {
     await page.getByText('220,50').first().waitFor(); // (150 + 2 × 30) AED + 5 % VAT
     // A part shows its photo itself beside its name (v0.29).
     await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).locator('.part-thumb:not([data-empty]) img').waitFor();
-    // The parts by name only, in one tap (for a parts seller).
-    await page.getByRole('button', { name: 'Скопировать запчасти' }).click();
+    // v0.82 (#22): «Поставщики» under the lines — the parts picked (those still to buy), the suppliers that fit; the copy
+    // of the parts by name is there (it took «Копия»'s place).
+    await front('button.add-extra[aria-label="Поставщики"]').click();
+    const ask = page.locator('.mantine-Modal-content.ask-sheet');
+    await ask.locator('[data-ask-part]').first().waitFor();
+    if (!(await ask.locator('[data-ask-part][aria-pressed="true"]').count())) throw new Error('no part picked at first');
+    await shot('31c-suppliers-sheet');
+    await ask.locator('[data-ask-copy]').click();
     await page.getByText('Запчасти скопированы').first().waitFor();
     await shot('31b-copy-lines');
+    await closeModal();
+    await ask.waitFor({ state: 'detached' });
+    if (await front('.job-foot').getByRole('button', { name: 'Поставщики' }).count()) throw new Error('v0.82 (#21): the «Поставщики» chip is still on the job');
     // A line without VAT (a fee paid for the customer): 100 AED stays 100 AED.
     // Added quickly, then its card (its name — a tap): the price and its VAT.
     await addLine('labor', 'RTA test fee');
@@ -2932,36 +2941,31 @@ async function launchBrowser() {
       },
       { job, b64: fs.readFileSync(FIXTURE).toString('base64') },
     );
-    // «…» → «Владельцу»: the picture, then «Отправить» (a download on a PC).
+    // «…» → «Владельцу» (v0.82: a PDF with its message), then «Отправить» (a download on a PC).
     await page.waitForTimeout(400);
     await front('[aria-label="Ещё"]').first().click();
     await page.getByRole('dialog').getByText('Владельцу').click();
-    await page.locator('img[data-owner-check]').waitFor({ timeout: 15000 });
-    const size = await page.locator('img[data-owner-check]').evaluate((img) => [img.naturalWidth, img.naturalHeight]);
-    if (size[0] !== 1080 || size[1] < 900) throw new Error('the picture is ' + size.join('×'));
-    // The photo top right: there the picture is not white paper.
-    const shade = await page.locator('img[data-owner-check]').evaluate((img) => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      const g = c.getContext('2d');
-      g.drawImage(img, 0, 0);
-      const d = g.getImageData(760, 200, 240, 180).data;
-      let s = 0;
-      for (let i = 0; i < d.length; i += 4) s += (d[i] + d[i + 1] + d[i + 2]) / 3;
-      return s / (d.length / 4);
-    });
-    if (shade > 235) throw new Error('no car photo on the owner’s picture: ' + shade);
+    // v0.82 (#23): its four figures, the message ready (a job with no labour charge priced asks about it), the PDF.
+    await page.locator('[data-owner-check]').waitFor({ timeout: 20000 });
+    const words = await page.locator('[data-owner-text]').inputValue();
+    if (!/(Клиенту|Customer):/.test(words)) throw new Error('the owner’s message: ' + words);
     await shot('41c-owner-check');
-    // The phone's share sheet (a PC's too, in Chrome): what it is handed is the picture.
+    const pdfMade = await page.evaluate(async (orderId) => {
+      const { ownerCheckFile } = await import('/src/services/ownerCheck.ts');
+      const m = await ownerCheckFile(orderId, 'ru');
+      const head = new TextDecoder().decode(new Uint8Array(await m.pdf.blob.slice(0, 5).arrayBuffer()));
+      return { head, size: m.pdf.blob.size, name: m.pdf.filename, vat: m.check.vat, sellers: m.check.sellers.length };
+    }, job);
+    if (pdfMade.head !== '%PDF-' || pdfMade.size < 5000 || !/\.pdf$/.test(pdfMade.name) || pdfMade.vat.due !== pdfMade.vat.out - pdfMade.vat.in || !pdfMade.sellers) throw new Error('the owner’s PDF: ' + JSON.stringify(pdfMade));
+    // The phone's share sheet: the PDF and the words together.
     await page.evaluate(() => {
       window.__shared = null;
       navigator.canShare = () => true;
-      navigator.share = async (d) => void (window.__shared = d.files.map((f) => [f.name, f.type]));
+      navigator.share = async (d) => void (window.__shared = { files: d.files.map((f) => [f.name, f.type]), text: d.text });
     });
     await page.getByRole('button', { name: 'Отправить' }).click();
     const shared = await page.waitForFunction(() => window.__shared).then((h) => h.jsonValue());
-    if (shared.length !== 1 || shared[0][1] !== 'image/jpeg' || !/\.jpg$/.test(shared[0][0])) throw new Error('shared ' + JSON.stringify(shared));
+    if (shared.files.length !== 1 || shared.files[0][1] !== 'application/pdf' || !/(Клиенту|Customer):/.test(shared.text)) throw new Error('shared ' + JSON.stringify(shared));
     await closeModal();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
   });
@@ -3115,65 +3119,21 @@ async function launchBrowser() {
     });
     if (!job) throw new Error('no open job with a supplier on a part');
     await page.goto(BASE + '#/orders/' + job.id);
-    const chip = front('.job-foot').getByRole('button', { name: 'Поставщики' });
-    await chip.scrollIntoViewIfNeeded();
-    await chip.click();
-    await page.waitForURL(/\/suppliers$/);
-    // v0.59: the parts' diagrams first — a row a part to buy, numbered as the list asked about; then the suppliers.
-    await front('.job-suppliers .diagram-parts .list-row').first().waitFor();
-    const diagramRows = await front('.job-suppliers .diagram-parts .list-row').count();
-    if (!diagramRows) throw new Error('no parts under «Схемы» on the job suppliers screen');
-    const first = front('.job-suppliers .list-row:not(.diagram-parts .list-row)').first();
-    await first.waitFor();
-    // v0.71: sellers of new parts and of used ones are groups apart — the job's own supplier is the first of its group
-    // (which job this is depends on the demo's ids: its supplier may sell used parts).
-    const heads = await front('.job-suppliers .list:not(.diagram-parts .list)').evaluateAll((lists) => lists.map((l) => l.querySelector('.list-row')?.innerText ?? ''));
-    if (!heads.some((x) => x.includes('На этом заказе'))) throw new Error('the job’s own supplier is not the first of its group: ' + heads.join(' || '));
+    // v0.82 (#21, #22): no chip, no screen — «Поставщики» under the lines: the job's own supplier first, «На этом заказе».
+    await front('button.add-extra[aria-label="Поставщики"]').click();
+    const askSheet = page.locator('.mantine-Modal-content.ask-sheet');
+    await askSheet.locator('[data-ask-supplier]').first().waitFor();
+    const firstRow = await askSheet.locator('[data-ask-supplier]').first().innerText();
+    if (!firstRow.includes('На этом заказе')) throw new Error('the job’s own supplier is not first: ' + firstRow);
+    // Picked: «Отправить · 1» (no garage WhatsApp here — the button says so, each one's chat is a link).
+    await askSheet.locator('[data-ask-supplier]').first().click();
+    if ((await askSheet.locator('[data-ask-supplier][aria-pressed="true"]').count()) !== 1) throw new Error('a supplier is not picked by a tap');
     await shot('44a-job-suppliers');
-    // «Спросить»: all the job's parts at once, through the share sheet. v0.61.1: with a diagram, its sheet and the list
-    // go in one send — the list by lines, saying the sheets carry its numbers (not left in the clipboard to paste).
-    const withDiagram = await page.evaluate(async (orderId) => {
-      const { db } = await import('/src/db/db.ts');
-      const { addDiagram } = await import('/src/services/diagramSheet.ts');
-      const part = (await db.items.where('orderId').equals(orderId).toArray()).find((i) => i.kind === 'part' && !i.diagramIds?.length);
-      if (!part) return false;
-      const c = document.createElement('canvas');
-      c.width = 400;
-      c.height = 300;
-      const g = c.getContext('2d');
-      g.fillStyle = '#fff';
-      g.fillRect(0, 0, 400, 300);
-      g.strokeStyle = '#000';
-      g.strokeRect(100, 80, 200, 140);
-      await addDiagram(part.id, await new Promise((r) => c.toBlob(r, 'image/png')));
-      return true;
-    }, job.id);
-    if (withDiagram) await front('.job-suppliers [data-diagram-sheets] img').first().waitFor({ timeout: 20000 });
-    await page.evaluate(() => {
-      window.__asked = null;
-      navigator.canShare = () => true;
-      navigator.share = async (d) => void (window.__asked = { text: d.text, files: (d.files || []).map((f) => f.type) });
-    });
-    await front('.nav-bar, .page-header').getByRole('button', { name: 'Спросить' }).first().click();
-    const asked = await page.waitForFunction(() => window.__asked).then((h) => h.jsonValue());
-    if (!/^1\. /m.test(asked.text) || !/Price and availability/.test(asked.text) || asked.text.split('\n').length < 4) throw new Error('asked: ' + JSON.stringify(asked));
-    if (withDiagram && (!asked.files.length || !/^Diagrams in the photos/m.test(asked.text))) throw new Error('the sheets and the list apart: ' + JSON.stringify(asked));
-    // Its card: four stars, saved; the pill on its row.
-    await front('.job-suppliers .list-row:not(.diagram-parts .list-row)').filter({ hasText: 'На этом заказе' }).first().click();
-    const dlg = page.getByRole('dialog');
-    await dlg.locator('[data-supplier-stats]').waitFor();
-    await dlg.getByRole('radio', { name: '4' }).click();
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
-    await dlg.waitFor({ state: 'detached' });
-    // One of the job's own suppliers (its lines', their offers', its work outside) has them now.
-    const stars = await page.evaluate(async (orderId) => {
-      const { db } = await import('/src/db/db.ts');
-      const items = await db.items.where('orderId').equals(orderId).toArray();
-      const ids = [...new Set(items.flatMap((i) => [i.supplierId, i.outsource?.supplierId, ...(i.offers ?? []).map((o) => o.supplierId)]).filter(Boolean))];
-      return (await db.suppliers.bulkGet(ids)).map((s) => s?.reliability ?? 0);
-    }, job.id);
-    if (!stars.includes(4)) throw new Error('stars ' + JSON.stringify(stars));
-    await front('.job-suppliers .stars-pill').first().waitFor();
+    await closeModal();
+    await askSheet.waitFor({ state: 'detached' });
+    // An old address of the screen shows the job.
+    await page.goto(BASE + '#/orders/' + job.id + '/suppliers');
+    await front('button.add-extra[aria-label="Поставщики"]').waitFor();
     // An invoice paid in full: its PDF says PAID; one still owed does not.
     const paid = await page.evaluate(async () => {
       const { db } = await import('/src/db/db.ts');
@@ -3930,7 +3890,7 @@ async function launchBrowser() {
     if (await front('[data-rule="price"]').count()) throw new Error('«Назвать цену» is still a notification');
     // A customer who has not answered — after two hours, every two hours; then the manager's own timing.
     const answer = front('.list-row').filter({ has: page.locator('[data-rule="answer"]') }).first();
-    if (!(await answer.innerText()).replace(/\s+/g, ' ').includes('через 2 ч · каждые 2 ч')) throw new Error('«Ждём ответа» must be two hours, every two hours, by default: ' + (await answer.innerText()));
+    if (!(await answer.innerText()).replace(/\s+/g, ' ').includes('через 2 ч · каждые 3 ч')) throw new Error('«Ждём ответа» must be two hours, every three hours, by default (v0.82): ' + (await answer.innerText()));
     await answer.click({ position: { x: 120, y: 20 } });
     await page.locator('[data-rule-sheet="answer"] [data-first="30"]').click();
     await page.locator('[data-rule-sheet="answer"] [data-every="15"]').click();

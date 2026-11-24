@@ -123,6 +123,8 @@ export interface PricedLine {
   gross: number;
   /** Not kept on quotations sent before it was: lines with VAT and without are then told apart by their VAT. */
   vatRateBp?: number;
+  /** The line's own discount without VAT (v0.82): `net` is after it — it goes into its Discount column too. */
+  discountFils?: number;
 }
 
 export interface SpreadLine<T> {
@@ -157,7 +159,9 @@ const rateKey = (l: PricedLine) => l.vatRateBp ?? (l.vat === 0 ? 0 : -1);
 export function spreadDiscount<T extends PricedLine>(lines: T[], spreadable: (l: T) => boolean = () => true): SpreadDiscount<T> {
   const base = lines.filter((l) => l.kind !== 'discount');
   const discounts = lines.filter((l) => l.kind === 'discount');
-  const out: SpreadLine<T>[] = base.map((line) => ({ line, discount: 0, vat: line.vat, gross: line.gross }));
+  // A line's own discount (v0.82) is in its column from the start; the job's discount is added to it below.
+  const own = (l: T) => l.discountFils ?? 0;
+  const out: SpreadLine<T>[] = base.map((line) => ({ line, discount: own(line), vat: line.vat, gross: line.gross }));
   const rest: T[] = [];
   for (const key of new Set(discounts.map(rateKey))) {
     const ds = discounts.filter((d) => rateKey(d) === key);
@@ -176,7 +180,7 @@ export function spreadDiscount<T extends PricedLine>(lines: T[], spreadable: (l:
     const vatAfter = idx.reduce((a, i) => a + base[i].vat, 0) - vatOff;
     const vats = roundToTotal(after.map((g, k) => g * share(base[idx[k]])), vatAfter);
     idx.forEach((i, k) => {
-      out[i] = { line: base[i], discount: base[i].net - (after[k] - vats[k]), vat: vats[k], gross: after[k] };
+      out[i] = { line: base[i], discount: own(base[i]) + base[i].net - (after[k] - vats[k]), vat: vats[k], gross: after[k] };
     });
   }
   return { lines: out, rest, subtotal: base.reduce((a, l) => a + l.gross, 0), discount: discounts.reduce((a, d) => a + d.gross, 0) };

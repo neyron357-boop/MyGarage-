@@ -26,6 +26,7 @@ import { typedOnly, useAction, useLang, usePhone, useScreenLiveQuery } from '../
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { DaysChips, KindSegment, RequestButton, SupplierChips, WhoChips } from './PartTools';
 import { QtyAsk } from './QtyCheck';
+import { cleanOff, LineOffRow, type LineOff } from './LineOff';
 import { qtyShort } from '../../domain/sides';
 
 /**
@@ -170,6 +171,8 @@ export function LineSheet({
   const [price, setPrice] = useState<number | undefined>();
   const [cost, setCost] = useState<number | undefined>();
   const [mode, setMode] = useState<VatMode>('add');
+  // The line's own discount (v0.82).
+  const [off, setOff] = useState<LineOff>();
   const [part, setPart] = useState<PartState>('needed');
   const [supplierId, setSupplierId] = useState<string>();
   // Photos of the line: the stored ones kept, and new ones picked (saved with the line).
@@ -210,6 +213,7 @@ export function LineSheet({
     setMode(m);
     setPrice(item ? enteredPrice(item, taxRate, m) : undefined);
     setCost(item?.costPriceFils);
+    setOff(item?.lineOff);
     setPart(item ? partStateOf(item) : 'needed');
     setSupplierId(item?.supplierId);
     setPartNumber(item?.partNumber ?? '');
@@ -265,7 +269,7 @@ export function LineSheet({
   const counts = kind !== 'labor' || (!!item && item.qty !== 1);
   const lineQty = counts ? qty || 1 : (item?.qty ?? 1);
   const priced = { ...priceFromEntered(own ? 0 : price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
-  const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: lineQty, ...priced } as OrderItem) : undefined;
+  const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: lineQty, ...priced, lineOff: cleanOff(off) } as OrderItem) : undefined;
   const save = async (next = false) => {
     // Ordered with a number the search found and not verified (v0.65): the manager's reason first — or not ordered.
     if (kind === 'part' && item && part === 'ordered' && partStateOf(item) !== 'ordered' && !(await order.guard([item.id], { [item.id]: partNumber }))) {
@@ -276,7 +280,7 @@ export function LineSheet({
       const typed = lineName(title.trim());
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
       const titles = picked && itemTitle(picked, lang) === typed ? { titleRu: picked.titleRu || typed, titleEn: picked.titleEn || typed } : /[а-яё]/i.test(typed) ? { titleRu: typed, titleEn: undefined } : { titleEn: typed, titleRu: undefined };
-      const patch: Partial<OrderItem> = { ...titles, qty: lineQty, ...priced };
+      const patch: Partial<OrderItem> = { ...titles, qty: lineQty, ...priced, lineOff: own ? undefined : cleanOff(off) };
       const status = kind === 'part' && !own ? (part as Exclude<PartState, 'customer'>) : undefined;
       if (kind === 'part') {
         patch.costPriceFils = own ? undefined : cost;
@@ -577,6 +581,7 @@ export function LineSheet({
                 data={(['add', 'incl', 'none'] as const).map((m) => ({ value: m, label: t(`item.vatShort.${m}`, { rate }) }))}
               />
             </FormRow>
+            <LineOffRow value={off} onChange={setOff} />
           </RowGroup>
         )}
         {sum && lineTotal && lineTotal.gross !== 0 && (

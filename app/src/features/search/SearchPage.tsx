@@ -140,12 +140,15 @@ export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<
   const hits = exclude && found ? found.filter((h) => !(h.activeOrder && exclude.has(h.activeOrder.id))) : found;
   // Read once (and again when the data changes); each letter only filters it.
   const jobIndex = useScreenLiveQuery(() => loadJobIndex(lang), [lang], 600);
+  // (Compared by its ids: the board makes a new set each time it draws.)
+  const exKey = exclude ? [...exclude].sort().join() : '';
   const jobs = useMemo(() => {
     const all = jobIndex && dq.trim() ? matchJobs(jobIndex, dq) : undefined;
     if (!all || !exclude?.size) return all;
     const matches = all.matches.filter((m) => !exclude.has(m.doc.orderId));
     return { matches, total: all.total - (all.matches.length - matches.length) };
-  }, [jobIndex, dq, exclude]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobIndex, dq, exKey]);
   // Suppliers too: "toyota headlights" — who to write to, one tap from the result.
   const allSuppliers = useScreenLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []);
   const suppliers = useMemo(() => {

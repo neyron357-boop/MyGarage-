@@ -808,10 +808,13 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
   .stage-btn,
   .search-clear,
   .day-pill-input,
-  .fit-badge {
+  .fit-badge,
+  .price-add,
+  .price-tap-row,
+  .qa-added-x {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .fit-badge)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .fit-badge, .price-add, .price-tap-row, .qa-added-x)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -8824,4 +8827,128 @@ html.desk .mark-layer-body {
 }
 .notes-field[hidden] {
   display: none !important;
+}
+
+/* ---------- v0.82 ---------- */
+/* A line's own discount: chips under its price; on the job's row — the discount in green. */
+.ios-row.line-off-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.line-off-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.line-off-chips {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 6px;
+}
+.line-off-chips .chip {
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 8px;
+}
+.line-off-note {
+  color: var(--mantine-color-green-7);
+  font-weight: 600;
+}
+/* «Поставщики»: the parts and the suppliers, a tap each. */
+.ask-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+  border-bottom: 0.5px solid var(--app-hairline);
+}
+.ask-row-wrap:last-child {
+  border-bottom: 0;
+}
+.ask-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 0.5px solid var(--app-hairline);
+  background: transparent;
+  color: var(--mantine-color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ask-row-wrap .ask-row {
+  border-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+.ios-group > .ask-row:last-child {
+  border-bottom: 0;
+}
+.ask-row:active {
+  background: var(--app-press);
+}
+.ask-check {
+  flex: none;
+  color: var(--app-label-3);
+}
+.ask-check[data-on] {
+  color: var(--mantine-color-cobalt-6);
+}
+.ask-row-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.ask-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.ask-row-why,
+.ask-row-note {
+  font-size: 13px;
+  color: var(--app-label-2);
+}
+/* The owner's check: its four figures. */
+.owner-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.owner-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--app-card);
+}
+[data-mantine-color-scheme='dark'] .owner-figure {
+  background: var(--app-soft);
+}
+.owner-figure-label {
+  font-size: 13px;
+  color: var(--app-label-2);
+}
+.owner-figure-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+.owner-figure[data-tone='good'] .owner-figure-value {
+  color: var(--mantine-color-green-7);
+}
+.owner-figure[data-tone='bad'] .owner-figure-value {
+  color: var(--mantine-color-red-7);
 }

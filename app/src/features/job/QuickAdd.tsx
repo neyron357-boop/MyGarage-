@@ -100,7 +100,6 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
   };
 
   const placeholder = t(mode === 'part' ? 'qi.partPlaceholder' : mode === 'labor' ? 'qi.workPlaceholder' : 'qi.servicePlaceholder');
-  const listed = (set?.list.size ?? 0) > 0;
   return (
     <Modal opened={opened} onClose={onClose} title={added.length ? t('qa.addedN', { n: added.length }) : t('qa.title')} classNames={{ content: 'sheet-grouped qa-sheet' }}>
       <div className="qa-body">
@@ -117,7 +116,7 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
             ))}
           </div>
         )}
-        {(listed || typed) && (
+        {(matches.length > 0 || typed) && (
           <div className="qa-list ios-group" role="listbox" aria-label={t('qi.frequent')}>
             {typed && !exact && (
               <button type="button" role="option" aria-selected={false} className="qa-row qa-new" onMouseDown={keep} onClick={() => add(typed)}>

@@ -12,6 +12,7 @@ import { FormRow, Money, MoneyInput } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 import { forgetSuggestions } from './LineSheet';
+import { cleanOff, LineOffRow, type LineOff } from './LineOff';
 
 /*
  * «+ Цена» on a line (v0.81, the user's brief: «у позиции без цены справа «+ Цена»… «Закупка» и «Продажа», курсор сразу в
@@ -30,6 +31,8 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
   const { run, busy } = useAction();
   const [cost, setCost] = useState<number>();
   const [price, setPrice] = useState<number>();
+  // The line's own discount (v0.82).
+  const [off, setOff] = useState<LineOff>();
   const i = item;
   const incl = b.settings.pricesIncludeVat;
   const taxRate = i?.vatRateBp ? i.vatRateBp : b.settings.vatRateBp;
@@ -40,6 +43,7 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
   useEffect(() => {
     if (!opened || !i) return;
     setCost(i.costPriceFils);
+    setOff(i.lineOff);
     const p = enteredPrice(i, taxRate, mode);
     setPrice(p > 0 ? p : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -47,11 +51,11 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
   if (!i) return null;
   const qty = i.qty || 1;
   const priced = { ...priceFromEntered(price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
-  const total = price ? itemAmounts({ ...i, ...priced }) : undefined;
+  const total = price ? itemAmounts({ ...i, ...priced, lineOff: cleanOff(off) }) : undefined;
   const paid = costs && cost !== undefined ? (part ? itemCostPaid({ kind: 'part', costPriceFils: cost, qty, vatRateBp: priced.vatRateBp, purchaseVatFils: cost === i.costPriceFils ? i.purchaseVatFils : undefined }) : roundFils(cost * qty)) : undefined;
   const save = () =>
     run(async () => {
-      const patch: Partial<OrderItem> = { ...priced };
+      const patch: Partial<OrderItem> = { ...priced, lineOff: cleanOff(off) };
       if (part) patch.costPriceFils = cost;
       else if (service && cost !== undefined && cost > 0) {
         // What we pay them makes it work done outside (as in its card): its cost is theirs.
@@ -95,6 +99,7 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
           <FormRow label={t('price.sell')}>
             <MoneyInput label={undefined} ariaLabel={t('price.sell')} value={price} autoFocus={!costs} leftSection={qty !== 1 ? `${qty} ×` : undefined} onChange={setPrice} />
           </FormRow>
+          <LineOffRow value={off} onChange={setOff} />
         </div>
         {cells.length > 0 && (
           <div className="line-sum" role="group" data-cells={cells.length}>

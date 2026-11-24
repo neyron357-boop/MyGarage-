@@ -172,14 +172,23 @@ async function playServer(page) {
     check(client.chat === '120363000000000003@g.us' && !/AED/.test(JSON.stringify(client.parts)), "the visit's report goes to the company's group, no prices");
 
     // 5. Suppliers: picked, asked through the server, one answers — its prices on the lines.
-    await go(`#/orders/${job.id}/suppliers`, 1200);
-    await top().locator('[data-ask-pick]').click();
+    // v0.82 (#22): «Поставщики» under the job's lines — picked in its sheet, «Отправить» sends at once (no confirmation).
+    await go(`#/orders/${job.id}`, 1200);
+    await top().locator('button.add-extra[aria-label="Поставщики"]').click();
+    const askSheet = page.locator('.mantine-Modal-content.ask-sheet');
+    await askSheet.locator('[data-ask-supplier]').first().waitFor();
     const sups = await page.evaluate(() => window.__wa.sups);
-    for (const s of sups.slice(0, 2)) await top().locator('.supplier-name-text', { hasText: s.name }).first().click();
+    for (const s of sups.slice(0, 2)) {
+      await askSheet.locator('[data-ask-search] input, .search-field input').first().fill(s.name);
+      await askSheet.locator('.supplier-name-text', { hasText: s.name }).first().click();
+      // A person's second tap, not a double tap at the same spot (ui/tapGuard.ts drops that one).
+      await settle(450);
+    }
+    await askSheet.locator('.search-field input').first().fill('');
     await settle(300);
     await shot('phone-05-suppliers-picked');
-    await top().locator('[data-ask-send]').click();
-    await page.getByRole('button', { name: 'Отправить', exact: true }).click();
+    await askSheet.locator('[data-ask-send]').click();
+    await askSheet.waitFor({ state: 'detached' });
     const asks = await waitOut('ask:', 2);
     check(asks.length === 2 && asks.every((a) => /1\. BRAKE PADS FRONT/.test(a.parts[0].text) && a.gap === 8), 'each picked supplier gets the request, a pause between');
     // The first supplier answers in its own way: the list copied back with prices.
@@ -196,7 +205,12 @@ async function playServer(page) {
       const { waSaid } = await import('/src/services/whatsapp.ts');
       waSaid({ t: 'msg', msg: { id: `false_${chatId}_R1`, chat: chatId, t: at, me: false, type: 'chat', text: '1. BRAKE PADS FRONT  org 180/dupl 95', ack: 0 }, chat: { id: chatId, name: 'x', group: false, phone, unread: 1, t: at, archived: false, pinned: false, muted: false, self: false, last: null } });
     }, { chatId, at, phone: sup.phone });
-    await top().locator('[data-ask-replies]').waitFor({ timeout: 15000 });
+    // The answer read into the line (any open device reads it — here, at once on the message).
+    for (let i = 0; i < 100; i++) {
+      const n = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.items.get(id))?.offers?.length ?? 0, job.pads);
+      if (n >= 2) break;
+      await page.waitForTimeout(150);
+    }
     const offers = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.items.get(id)).offers, job.pads);
     check(offers?.length === 2 && offers[0].kind === 'oem' && offers[0].costFils === 18000 && offers[1].costFils === 9500, "the answer's prices are the line's offers (original 180, copy 95)");
     const disc = await page.evaluate(async (id) => (await (await import('/src/db/db.ts')).db.items.get(id)).offers, job.disc);

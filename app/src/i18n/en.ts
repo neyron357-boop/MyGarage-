@@ -469,6 +469,9 @@ export const en: typeof ru = {
   // v0.81: the job's quick «＋» sheet and «+ Price».
   qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
+  // v0.82: a line's own discount; the job's «Suppliers» sheet.
+  lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
+  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', noNumber: 'No number: {{names}}', used: 'used' },
   newOrder: {
     // v0.81: the VIN in the plate's card.
     scanVin: 'Scan VIN',
@@ -1783,6 +1786,9 @@ export const en: typeof ru = {
     warranty_order: 'Warranty job',
   },
   notify: {
+    // v0.82: notification titles — a sign and what to do.
+    push: { answer: '📞 No answer from the customer', order: '📦 Parts to order', pickup: '🚚 Parts to collect', promised: '⏰ Promised to the customer', booked: '🚗 Booked — on the way', collect: '🔑 Ready — not collected', outsource: '🏭 Collect from outside', returnBy: '↩️ Return a part', debt: '💰 Debt overdue', reminder: '🔔 Reminder', followUp: '💬 Ask how the car is', service: '🛢 Invite for a service' },
+    pushDigest: '📋 Today',
     title: 'Notifications',
     kind: {
       price: 'Tell the price',
@@ -2446,6 +2452,8 @@ export const en: typeof ru = {
     replace: 'Replace',
   },
   msg: {
+    // v0.82: a line's own discount in the customer's message.
+    lineOff: 'discount',
     forwardFrom: 'From customer {{name}} ({{phone}}):',
     forwardFromName: 'From customer {{name}}:',
     forCustomer: 'For customer {{name}}{{phone}} — not sent to them yet:',
@@ -2513,6 +2521,14 @@ export const en: typeof ru = {
     debtText: 'I, {{name}}, acknowledge a debt to the workshop for job no. {{number}} of {{amount}} and undertake to pay it by {{date}}.',
   },
   ownerCheck: {
+    // v0.82: the owner's PDF and message.
+    vatDue: 'VAT to pay',
+    unpriced: 'No price: {{n}}',
+    noCostN: 'No cost: {{n}}',
+    message: 'Message',
+    openPdf: 'Open the PDF',
+    msg: { client: 'Customer: {{sum}}', spent: 'Parts and costs: {{sum}}', profit: 'Profit: {{sum}}', labour: 'How much should we charge for labour?', check: 'Please check.' },
+    pdf: { title: 'For the owner to check', parts: 'Parts', work: 'Work and services', extra: 'Other expenses', item: 'Item', qty: 'Qty', buyNet: 'Buy', buyVat: 'VAT', saleNet: 'Sell', saleVat: 'VAT', saleTotal: 'Customer', margin: 'Margin', noCost: 'no cost', noPrice: 'no price', own: "customer's part", outside: 'outside', noSupplier: 'no supplier', off: 'discount', discount: 'Discount', totals: 'Totals', net: 'excl. VAT', vat: 'VAT', gross: 'incl. VAT', toClient: 'Customer pays', spent: 'Spent', profit: 'Profit', profitGross: "incl. VAT — as the garage's books count it", profitNet: 'excl. VAT — sales excl. VAT less costs excl. VAT', taxes: 'VAT (tax)', vatOut: 'VAT charged to the customer', vatIn: 'VAT paid to suppliers', vatDue: 'VAT to pay', warnUnpriced: 'No price for the customer: {n}', warnNoCost: 'Parts without a cost: {n}', sellers: 'Suppliers', sellerTotal: 'We pay', noSellers: 'No suppliers picked yet', customer: 'Customer', file: 'check' },
     title: 'For the owner to check',
     send: 'Send',
     toOwner: 'To the owner on WhatsApp',

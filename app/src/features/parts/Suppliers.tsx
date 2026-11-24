@@ -11,7 +11,7 @@ import { alreadyInBase, cardName, phonesInText, supplierMatches } from '../../do
 import { starsOf, useOf } from '../../domain/supplierRank';
 import { dayShort } from '../../domain/dates';
 import { suppliersRanked } from '../../services/supplierRank';
-import { StarsPill } from '../job/JobSuppliers';
+import { StarsPill } from '../job/SupplierAsk';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
 import { whatsappUrl } from '../../services/messages';

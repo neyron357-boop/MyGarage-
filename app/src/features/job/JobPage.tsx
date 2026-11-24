@@ -65,7 +65,7 @@ import { lockedMonthOf } from '../../domain/monthLock';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
 import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet } from '../../domain/invoice';
-import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGrossPrice } from '../../domain/items';
+import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGross, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
 import { quickList } from '../../domain/quickLists';
@@ -103,6 +103,8 @@ import { LazySheet, SheetFor } from '../../ui/lazy';
 import { holdKeyboard } from '../../ui/keyboard';
 import { markJobOpened } from '../../ui/recentJobs';
 import { QuickAddSheet } from './QuickAdd';
+import { offLabel } from './LineOff';
+import { SupplierAskSheet } from './SupplierAsk';
 import { PriceSheet } from './PriceSheet';
 import { setJobQuiet } from '../../services/notify';
 import { ReminderSheet } from '../notify/ReminderSheet';
@@ -383,7 +385,7 @@ function PickRow({ onLong, onClick, ...row }: Parameters<typeof ListRow>[0] & { 
 function PriceField({ item, onDone }: { item: OrderItem; onDone: (now: 'draft' | 'agreed' | null) => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
-  const [value, setValue] = useState<number | undefined>(() => itemAmounts({ ...item, qty: 1 }).gross);
+  const [value, setValue] = useState<number | undefined>(() => unitGross(item));
   const several = item.qty !== 1;
   const save = () =>
     run(async () => {
@@ -630,6 +632,8 @@ export function JobPage() {
   };
   // «+ Цена» on a draft line (v0.81, PriceSheet.tsx): its row's price — a tap; its name — its card.
   const [priceFor, setPriceFor] = useState<OrderItem | null>(null);
+  // «Поставщики» (v0.82): the parts to the suppliers that fit, picked in one sheet.
+  const [askOpen, setAskOpen] = useState(false);
   const lastPrice = useRef<OrderItem | null>(null);
   if (priceFor) lastPrice.current = b?.items.find((x) => x.id === priceFor.id) ?? priceFor;
   const openPrice = (i: OrderItem) => {
@@ -911,7 +915,13 @@ export function JobPage() {
             {t('qty.short', { n: qtyShort(i) })}
           </button>
         ),
-        i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(itemAmounts({ ...i, qty: 1 }).gross)}` : '',
+        i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(unitGross(i))}` : '',
+        // Its own discount (v0.82), in green.
+        i.lineOff && (
+          <span key="off" className="line-off-note">
+            {offLabel(i.lineOff, lang)}
+          </span>
+        ),
         // Where the part is, in its colour (to find — orange, ordered — blue, here — green), as on the board.
         partNote(i) && (
           <span key="part" className="part-note" style={{ color: `var(--mantine-color-${PART_COLOR[partStateOf(i)]}-light-color)` }}>
@@ -1302,12 +1312,6 @@ export function JobPage() {
           mechanics.map((m) => (
             <MechanicChip key={m.id} name={m.name} on={crew.includes(m.id)} onToggle={() => void run(() => toggleMechanic(oid, m.id))} onTask={() => setMechanicOpen(true)} />
           ))}
-        {open && (
-          <button type="button" className="chip vin-chip" data-empty aria-label={t('suppliers.forJob')} onClick={() => navigate(`/orders/${oid}/suppliers`)}>
-            <IconTruck size={17} stroke={1.9} aria-hidden />
-            <span>{t('suppliers.forJob')}</span>
-          </button>
-        )}
       </div>
     </Box>
   );
@@ -1437,7 +1441,8 @@ export function JobPage() {
           // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
           <AddBar onAdd={openQuick} flush={!lines.length}>
             {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
-            {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} word={t('job.copyWord')} onClick={() => void copyLines()} />}
+            {/* v0.82 (#22, in «Копия»'s place — the copy is in its sheet): the parts to the suppliers that fit, by WhatsApp. */}
+            {parts.length > 0 && <AddExtra icon={IconTruck} label={t('ask.title')} word={t('ask.title')} onClick={() => setAskOpen(true)} />}
             {/* The AI for every part at once (v0.52): names, numbers, diagrams and photos. */}
             {parts.length > 0 && <AiPartsTile orderId={oid} />}
             {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} word={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
@@ -1591,6 +1596,7 @@ export function JobPage() {
       <LazySheet opened={!!quickKind} warm={editable}>
         {(o) => <QuickAddSheet b={b} kind={quickKind ?? lastQuick.current} opened={o} onClose={() => setQuick(null)} suggestions={suggestions} />}
       </LazySheet>
+      <LazySheet opened={askOpen}>{(o) => <SupplierAskSheet b={b} opened={o} onClose={() => setAskOpen(false)} />}</LazySheet>
       <LazySheet opened={!!priceFor}>
         {(o) => <PriceSheet b={b} item={lastPrice.current} opened={o} onClose={() => setPriceFor(null)} service={!!lastPrice.current && sheetKind(lastPrice.current) === 'service'} />}
       </LazySheet>

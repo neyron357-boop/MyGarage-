@@ -43,7 +43,15 @@ export interface NotifySettings {
   /** A summary once a day: a line a kind. */
   digest: { on: boolean; at: number };
   rules: Record<TaskKind, NotifyRule>;
+  /**
+   * Which defaults the kinds were set by (v0.82: `NOTIFY_V`): settings kept under older ones take the new kinds' rules
+   * once — the user: «оставить самые важные».
+   */
+  v?: number;
 }
+
+/** The defaults the kinds are set by now (v0.82: only the important ones on). */
+export const NOTIFY_V = 2;
 
 /** How each kind stands with time, for its rule and its settings. */
 export type KindTime =
@@ -70,19 +78,25 @@ export const KIND_TIME: Record<TaskKind, KindTime> = {
   service: 'since',
 };
 
+/**
+ * v0.82 (the user: «пуш-уведомления слишком скучные, одни тексты, которых я вообще не замечаю и не читаю — оставить самые
+ * важные»): on by default only what needs the manager now — his own reminders, a booking, a time promised, a customer
+ * silent, parts to order or to collect, a debt overdue; the rest (a car not collected, work outside, a return deadline,
+ * «how is the car», a service due) stay in «Сегодня» and are switched on by hand.
+ */
 export const DEFAULT_RULES: Record<TaskKind, NotifyRule> = {
-  answer: { on: true, after: 120, every: 120 },
-  order: { on: true, after: 60, every: 120 },
-  pickup: { on: true, after: 0, every: 180 },
+  answer: { on: true, after: 120, every: 180 },
+  order: { on: true, after: 60, every: 180 },
+  pickup: { on: true, after: 0, every: 240 },
   promised: { on: true, after: -30, every: 60 },
   booked: { on: true, after: -30, every: 30 },
-  collect: { on: true, after: 0, every: 240 },
-  outsource: { on: true, after: 0, every: 240 },
-  returnBy: { on: true, after: 0, every: 0 },
+  collect: { on: false, after: 0, every: 240 },
+  outsource: { on: false, after: 0, every: 240 },
+  returnBy: { on: false, after: 0, every: 0 },
   debt: { on: true, after: 0, every: 0 },
   reminder: { on: true, after: 0, every: 60 },
-  followUp: { on: true, after: 0, every: 0 },
-  service: { on: true, after: 0, every: 0 },
+  followUp: { on: false, after: 0, every: 0 },
+  service: { on: false, after: 0, every: 0 },
 };
 
 export const DEFAULT_NOTIFY: NotifySettings = { on: true, from: 8 * 60, to: 21 * 60, days: [0, 1, 2, 3, 4, 5, 6], digest: { on: true, at: 9 * 60 }, rules: DEFAULT_RULES };
@@ -100,8 +114,10 @@ export function notifyOf(raw?: Partial<NotifySettings> | null): NotifySettings {
   const d = DEFAULT_NOTIFY;
   const days = Array.isArray(r.days) ? [...new Set(r.days.filter((x) => Number.isInteger(x) && x >= 0 && x <= 6))].sort() : d.days;
   const rules = {} as Record<TaskKind, NotifyRule>;
+  // Kept under older defaults (v0.82): the kinds take the new ones once; the hours, the days, the summary stay.
+  const kept = r.v === NOTIFY_V ? (r.rules as Partial<Record<TaskKind, Partial<NotifyRule>>> | undefined) : undefined;
   for (const k of NOTIFY_KINDS) {
-    const x = (r.rules as Partial<Record<TaskKind, Partial<NotifyRule>>> | undefined)?.[k];
+    const x = kept?.[k];
     const def = DEFAULT_RULES[k];
     rules[k] = { on: typeof x?.on === 'boolean' ? x.on : def.on, after: int(x?.after, -1440, 7 * 1440, def.after), every: int(x?.every, 0, 7 * 1440, def.every) };
   }
@@ -112,6 +128,7 @@ export function notifyOf(raw?: Partial<NotifySettings> | null): NotifySettings {
     days: days.length ? days : d.days,
     digest: { on: typeof r.digest?.on === 'boolean' ? r.digest.on : d.digest.on, at: int(r.digest?.at, 0, 1439, d.digest.at) },
     rules,
+    v: NOTIFY_V,
   };
 }
 
@@ -155,8 +172,10 @@ export interface PushPlan {
 }
 
 export interface PlanWords {
-  /** A kind's title («Назвать цену»). */
+  /** A kind's title as a notification says it (v0.82: bright, with its sign — «📞 Клиент не ответил»). */
   title: (kind: TaskKind) => string;
+  /** A reminder's own title (v0.82: its words, not «Напоминание»). */
+  soloTitle?: (task: Task) => string;
   /** A task as a line: the car and what of it. */
   label: (task: Task) => string;
   /** Where a task opens. */
@@ -232,7 +251,11 @@ export function buildPlan(input: { settings: NotifySettings; now: string; tasksA
       ...(notBefore && notBefore > start ? { notBefore } : {}),
       ...(KIND_TIME[kind] === 'since' ? { since: task.at } : {}),
     });
-    if (kind === 'reminder') for (const m of list) plan.groups.push({ key: m.task.key, title, many: title, every: rule.every, url: words.url(m.task), solo: true, members: [member(m)] });
+    if (kind === 'reminder')
+      for (const m of list) {
+        const own = words.soloTitle?.(m.task) || title;
+        plan.groups.push({ key: m.task.key, title: own, many: own, every: rule.every, url: words.url(m.task), solo: true, members: [member(m)] });
+      }
     else plan.groups.push({ key: kind, title, many: `${title} · {n}`, every: rule.every, url: words.listUrl, members: list.map(member) });
   }
   return plan;

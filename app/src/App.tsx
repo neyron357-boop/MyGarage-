@@ -33,7 +33,6 @@ import { MoneyPage } from './features/money/MoneyPage';
 import { DebtPaymentsPage } from './features/money/DebtPayments';
 import { CustomerMonthsPage } from './features/money/CustomerMonths';
 import { JobPage } from './features/job/JobPage';
-import { JobSuppliersPage } from './features/job/JobSuppliers';
 import { MorePage } from './features/more/MorePage';
 import { GarageNotesPage } from './features/more/GarageNotes';
 import { NotifyPage } from './features/notify/NotifyPage';
@@ -88,8 +87,9 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/orders/:id/intake" element={<JobPage />} />
       <Route path="/orders/:id/invoice" element={<JobPage />} />
       <Route path="/orders/:id/claim" element={<ClaimPage />} />
-      {/* v0.38: the suppliers for a job — its own screen (the user's ask), from the chip under the job. */}
-      <Route path="/orders/:id/suppliers" element={<JobSuppliersPage />} />
+      {/* v0.38–v0.81: the job's suppliers' screen; v0.82 (#21) — gone, its sheet is «Поставщики» under the lines: an old
+          address shows the job. */}
+      <Route path="/orders/:id/suppliers" element={<JobPage />} />
       <Route path="/customers" element={<CustomersPage />} />
       <Route path="/customers/:id" element={<CustomerPage />} />
       <Route path="/vehicles/:id" element={<VehiclePage />} />

@@ -6,7 +6,7 @@ import { discountPctLabel, spreadDiscount } from '../domain/discount';
 import { buyerName, invoiceBuyer } from '../domain/invoice';
 import { REQUIRED_SLOTS } from '../domain/inspection';
 import { checkLabel, lightLabel } from '../domain/quickLists';
-import { itemAmounts, itemTitle, lineName } from '../domain/items';
+import { itemAmounts, itemOff, itemTitle, lineName } from '../domain/items';
 import { formatAed } from '../domain/money';
 import { formatPhone } from '../domain/phone';
 import { formatPlate, normalizePlate } from '../domain/plates';
@@ -288,8 +288,11 @@ function CustomerBlock({ en, ar, party, vehicle, shown }: { en: string; ar: stri
 /** Customer of a quotation (the invoice keeps its own snapshot of the buyer — `invoiceBuyer`). */
 const partyOf = (c: Customer) => ({ name: buyerName(c), phone: c.phone, email: c.email, trn: c.trn, address: c.address });
 
-/** A document's discount without VAT (its discount lines' net, negative); none — 0. */
-const netDiscount = (lines: { kind: string; net: number }[]) => lines.filter((l) => l.kind === 'discount').reduce((a, l) => a + l.net, 0);
+/** A document's discount without VAT (its discount lines' net and the lines' own discounts — v0.82, negative); none — 0. */
+const netDiscount = (lines: { kind: string; net: number; discountFils?: number }[]) =>
+  lines.filter((l) => l.kind === 'discount').reduce((a, l) => a + l.net, 0) - lines.filter((l) => l.kind !== 'discount').reduce((a, l) => a + (l.discountFils ?? 0), 0);
+/** «Discount 10%» only when the job's discount alone is: lines with their own discount say the amount only. */
+const pctLabel = (lines: { kind: string; discountFils?: number }[], titles: string[]) => (lines.some((l) => l.kind !== 'discount' && l.discountFils) ? undefined : discountPctLabel(titles));
 
 /** The one VAT rate of a document's lines (not its discounts) — "VAT 5%"; rates that differ — none ("VAT"). */
 function oneRate(lines: { kind: string; vatRateBp?: number }[]): number | undefined {
@@ -358,12 +361,12 @@ export async function renderVersion(versionId: string): Promise<Blob> {
     ...spread.lines.map(({ line: i, discount, vat, gross }) =>
       ranged(i)
         ? { description: lineName(i.title, i.kind), qty: i.qty, total: i.maxGross!, totalText: `${aed(i.minGross!)} – ${formatAed(i.maxGross!, 'en', false)}` }
-        : { description: lineName(i.title, i.kind) + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round(i.net / (i.qty || 1)), discount, vat, qty: i.qty, total: gross },
+        : { description: lineName(i.title, i.kind) + (i.customerSupplied ? ' (customer supplied part)' : ''), price: Math.round((i.net + (i.discountFils ?? 0)) / (i.qty || 1)), discount, vat, qty: i.qty, total: gross },
     ),
     ...spread.rest.map((i) => ({ description: lineName(i.title, i.kind), price: Math.round(i.net / (i.qty || 1)), vat: i.vat, qty: i.qty, total: i.gross })),
   ];
   const vat = rows.reduce((a, r) => a + (r.vat ?? 0), 0);
-  const discountLabel = discountPctLabel(v.items.filter((i) => i.kind === 'discount').map((i) => i.title));
+  const discountLabel = pctLabel(v.items, v.items.filter((i) => i.kind === 'discount').map((i) => i.title));
   const upTo = v.maxGross !== v.fixedGross;
   const note = [v.reason, v.items.some((i) => i.block === 'B') ? t('msg.bExplain') : ''].filter(Boolean).join(' ');
   return render((fam) => (
@@ -388,7 +391,7 @@ export async function renderVersion(versionId: string): Promise<Blob> {
 export async function renderQuotation(orderId: string): Promise<Blob> {
   const b = (await loadOrderBundle(orderId))!;
   const items = b.items.filter((i) => ['draft', 'pending', 'approved'].includes(i.approvalState));
-  const priced = items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i }));
+  const priced = items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i, ...(itemOff(i) ? { discountFils: itemOff(i) } : {}) }));
   const spread = spreadDiscount(priced);
   const rows: DocRow[] = [
     ...spread.lines.map(({ line: { item: i }, discount, vat, gross }) => ({ description: itemTitle(i, 'en') + (i.customerSupplied ? ' (customer supplied part)' : ''), price: i.customerSupplied ? 0 : i.unitPriceFils, discount, vat, qty: i.qty, total: gross })),
@@ -396,7 +399,7 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
   ];
   const gross = rows.reduce((x, r) => x + r.total, 0);
   const vat = rows.reduce((x, r) => x + (r.vat ?? 0), 0);
-  const discountLabel = discountPctLabel(items.filter((i) => i.kind === 'discount').map((i) => itemTitle(i, 'en')));
+  const discountLabel = pctLabel(priced, items.filter((i) => i.kind === 'discount').map((i) => itemTitle(i, 'en')));
   const now = nowIso();
   return render((fam) => (
     <Document title={`Quotation ${b.order.number}`}>
@@ -514,7 +517,7 @@ export async function invoicePageView(invoiceId: string, paidAt?: string): Promi
     })),
     ...spread.rest.map((l) => ({ description: lineName(l.description, l.kind), price: l.unitPriceFils, vat: l.vat, qty: l.qty, total: l.gross })),
   ];
-  const discountLabel = discountPctLabel(inv.lines.filter((l) => l.kind === 'discount').map((l) => l.description));
+  const discountLabel = pctLabel(inv.lines, inv.lines.filter((l) => l.kind === 'discount').map((l) => l.description));
   const qty = inv.lines.filter((l) => l.kind !== 'discount').reduce((a, l) => a + l.qty, 0);
   const methods = [...new Set(b.payments.filter((p) => p.kind !== 'refund').map((p) => METHOD_EN[p.method]))].join(', ');
   const qrText = [seller.name, `TRN ${seller.trn || '-'}`, `${credit ? 'Tax Credit Note' : 'Tax Invoice'} ${inv.number}`, formatDocDate(inv.issuedAt), `Total ${aed(inv.totalFils)}`, `VAT ${aed(inv.vatFils)}`].join('\n');

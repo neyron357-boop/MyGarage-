@@ -155,6 +155,13 @@ const TAPPABLE = [
   'button.mantine-UnstyledButton-root.choice-card',
   'button.chip',
   'button.price-tap',
+  // v0.81: a draft line's «+ Цена» and its price; the quick sheet's kinds, hints and «×».
+  'button.price-add',
+  'button.price-tap-row',
+  'button.qa-kind',
+  'button.qa-row',
+  'button.qa-added-x',
+  'button.ask-row',
   'button.day-pill-input',
   'button.accent-swatch',
   'button.garage-card',

@@ -678,6 +678,12 @@ export interface OrderItem {
   unitGrossFils?: number;
   /** A discount line given as a percentage (basis points, 1000 = 10 %): it follows the lines while a draft. */
   discountPctBp?: number;
+  /**
+   * This line's own discount (v0.82, the user: «скидки не общую, а в отдельности на каждую позицию»): a percentage of its
+   * total, or an amount off its total with VAT. Counted by `itemAmounts` (everything follows: totals, quotes, invoices,
+   * profit); the documents print it in the line's Discount column. Set on a draft only (`LOCKED_FIELDS`).
+   */
+  lineOff?: { pctBp: number } | { grossFils: number };
   priceMinFils?: number; // block B: net line total
   priceMaxFils?: number; // block B: net line total
   vatRateBp: number;
@@ -846,6 +852,8 @@ export interface SnapshotItem {
   net: number;
   vat: number;
   gross: number;
+  /** The line's own discount without VAT (v0.82): `net` is after it. */
+  discountFils?: number;
   /** VAT rate of the line (not kept on quotations sent before v0.5.1). */
   vatRateBp?: number;
   minGross?: number;
@@ -1002,6 +1010,8 @@ export interface InvoiceLine {
   vat: number;
   gross: number;
   customerSupplied?: boolean;
+  /** The line's own discount without VAT (v0.82, `OrderItem.lineOff`): `net` is after it, unit price × qty before. */
+  discountFils?: number;
 }
 
 export interface PartySnapshot {

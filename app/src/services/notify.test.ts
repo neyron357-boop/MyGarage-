@@ -39,20 +39,21 @@ describe('the notifications’ plan from the garage’s data', () => {
     expect(p.groups.map((x) => x.key)).toEqual(['answer']);
     expect(p.groups.flatMap((x) => x.members.map((m) => m.url))).not.toContain(`#/orders/${price.id}`);
     const g = group(p, 'answer')!;
-    expect([g.title, g.many, g.every, g.url]).toEqual(['Клиент не ответил', 'Клиент не ответил · {n}', 120, '#/?today=1']);
-    expect(g.members.map((m) => [m.id, m.label, m.url])).toEqual([[`answer:${o.id}`, 'Renault Kwid · 67445', `#/orders/${o.id}`]]);
+    // v0.82: bright — its sign first; the line — the car, its plate (code and number) and whose it is.
+    expect([g.title, g.many, g.every, g.url]).toEqual(['📞 Клиент не ответил', '📞 Клиент не ответил · {n}', 180, '#/?today=1']);
+    expect(g.members.map((m) => [m.id, m.label, m.url])).toEqual([[`answer:${o.id}`, 'Renault Kwid · R 67445', `#/orders/${o.id}`]]);
     expect(g.members[0].start).toBe(new Date(Date.parse(v.sentAt) + 2 * 3600_000).toISOString());
     expect(g.members[0].since).toBe(v.sentAt);
-    expect([p.tz, p.from, p.to, p.units, p.digest]).toEqual(['Asia/Dubai', 480, 1260, { m: 'мин', h: 'ч', d: 'д' }, { at: 540, title: 'Сегодня' }]);
+    expect([p.tz, p.from, p.to, p.units, p.digest]).toEqual(['Asia/Dubai', 480, 1260, { m: 'мин', h: 'ч', d: 'д' }, { at: 540, title: '📋 Сегодня' }]);
     // In English on a device set so.
-    expect(group(await makePlan(now, 'en'), 'answer')!.title).toBe('No answer from the customer');
+    expect(group(await makePlan(now, 'en'), 'answer')!.title).toBe('📞 No answer from the customer');
   });
 
   it('the manager’s own settings are kept with the garage’s and the plan follows: half an hour, every 15 minutes; a kind off; all off', async () => {
     await told('Renault', 'Kwid', '67445', ['CLUTCH FULL SET']);
     await saveNotify({ from: 7 * 60, rules: { answer: { on: true, after: 30, every: 15 } } as never });
     const s = notifyOf((await getSettings()).notify);
-    expect([s.from, s.to, s.rules.answer, s.rules.order.every]).toEqual([420, 1260, { on: true, after: 30, every: 15 }, 120]);
+    expect([s.from, s.to, s.rules.answer, s.rules.order.every]).toEqual([420, 1260, { on: true, after: 30, every: 15 }, 180]);
     const p = await makePlan();
     expect([p.from, group(p, 'answer')!.every]).toEqual([420, 15]);
     await saveNotify({ rules: { answer: { on: false, after: 30, every: 15 } } as never });
@@ -68,7 +69,8 @@ describe('the notifications’ plan from the garage’s data', () => {
     const p = await makePlan(nowIso(), 'ru');
     expect(group(p, 'answer')).toBeUndefined();
     const g = group(p, `reminder:${r.id}`)!;
-    expect([g.solo, g.title, g.members[0].label, g.members[0].url, g.members[0].start]).toEqual([true, 'Напоминание', 'Позвонить клиенту · Renault Kwid · 67445', `#/orders/${o.id}`, r.at]);
+    // v0.82: a reminder's words are its title; the car is its line.
+    expect([g.solo, g.title, g.members[0].label, g.members[0].url, g.members[0].start]).toEqual([true, '🔔 Позвонить клиенту', 'Renault Kwid · R 67445', `#/orders/${o.id}`, r.at]);
     await setJobQuiet(o.id, false);
     expect(group(await makePlan(), 'answer')!.members).toHaveLength(1);
     expect((await db.orders.get(o.id))!.notifyOff).toBeUndefined();

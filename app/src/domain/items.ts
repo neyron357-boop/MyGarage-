@@ -29,12 +29,32 @@ export function byPosition(a: Pick<OrderItem, 'position' | 'createdAt'>, b: Pick
  * otherwise VAT is added to the net.
  */
 export function itemAmounts(item: OrderItem): Amounts {
+  const before = amountsBeforeOff(item);
+  const off = item.lineOff;
+  if (!off || item.kind === 'discount' || item.customerSupplied || before.gross <= 0) return before;
+  // Its own discount (v0.82): off its total with VAT, the VAT taken out of what is left (none on a line without VAT).
+  const gross = Math.max(0, 'pctBp' in off ? before.gross - roundFils((before.gross * Math.min(10000, Math.max(0, off.pctBp))) / 10000) : before.gross - Math.min(before.gross, Math.max(0, off.grossFils)));
+  return item.vatRateBp > 0 ? fromGross(gross, item.vatRateBp) : fromNet(gross, 0);
+}
+
+/** A line's amounts before its own discount (the price × the quantity) — the documents' «price» and «discount». */
+export function amountsBeforeOff(item: OrderItem): Amounts {
   if (item.customerSupplied) return fromNet(0, item.vatRateBp);
   const signed = (x: number) => (item.kind === 'discount' ? -Math.abs(x) : x);
   if (item.unitGrossFils !== undefined && item.vatRateBp > 0) {
     return fromGross(signed(roundFils(item.qty * item.unitGrossFils)), item.vatRateBp);
   }
   return fromNet(signed(roundFils(item.qty * item.unitPriceFils)), item.vatRateBp);
+}
+
+/** A line's own discount without VAT (v0.82): what its price × quantity loses — 0 without one. */
+export function itemOff(item: OrderItem): number {
+  return item.lineOff ? amountsBeforeOff(item).net - itemAmounts(item).net : 0;
+}
+
+/** One unit's price with VAT, before the line's own discount («2 × 31,50»). */
+export function unitGross(item: OrderItem): number {
+  return amountsBeforeOff({ ...item, qty: 1 }).gross;
 }
 
 /**

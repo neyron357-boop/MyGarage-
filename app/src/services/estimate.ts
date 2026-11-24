@@ -6,6 +6,7 @@ import {
   decisionPatch,
   isAwaitingDisassembly,
   itemAmounts,
+  itemOff,
   itemRangeGross,
   itemTitle,
   lineName,
@@ -35,7 +36,7 @@ import { typedOwnName } from '../domain/labourName';
 
 export type NewItem = Partial<OrderItem> & Pick<OrderItem, 'kind' | 'block'>;
 
-const LOCKED_FIELDS: (keyof OrderItem)[] = ['kind', 'block', 'qty', 'unitPriceFils', 'unitGrossFils', 'priceMinFils', 'priceMaxFils', 'titleRu', 'titleEn', 'customerSupplied', 'vatRateBp'];
+const LOCKED_FIELDS: (keyof OrderItem)[] = ['kind', 'block', 'qty', 'unitPriceFils', 'unitGrossFils', 'lineOff', 'priceMinFils', 'priceMaxFils', 'titleRu', 'titleEn', 'customerSupplied', 'vatRateBp'];
 
 export async function addItem(orderId: string, input: NewItem): Promise<OrderItem> {
   const settings = await getSettings();
@@ -145,6 +146,8 @@ function snapshotItem(i: OrderItem, lang: 'ru' | 'en'): SnapshotItem {
     net: a.net,
     vat: a.vat,
     gross: a.gross,
+    // Its own discount (v0.82): the quote prints it in the line's Discount column.
+    ...(itemOff(i) ? { discountFils: itemOff(i) } : {}),
     vatRateBp: i.vatRateBp,
     minGross: i.block === 'B' && !i.bNeeded ? r.min : undefined,
     maxGross: i.block === 'B' && !i.bNeeded ? r.max : undefined,

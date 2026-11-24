@@ -175,7 +175,7 @@ function TagSheet({ opened, onClose, n, onTag }: { opened: boolean; onClose: () 
         {WA_TAGS.map((tag) => {
           const I = TAG_ICON[tag];
           return (
-            <ListRow key={tag} left={<I size={20} stroke={1.9} color="var(--mantine-color-cobalt-6)" aria-hidden />} title={t(`wa.who.${tag}`)} onClick={() => onTag(tag)} chevron data-wa-tag={tag} />
+            <ListRow key={tag} left={<I size={20} stroke={1.9} color="var(--mantine-color-cobalt-6)" aria-hidden />} title={t(`wa.who.${tag}`)} onClick={() => onTag(tag)} chevron />
           );
         })}
         <ListRow left={<IconX size={20} stroke={1.9} color="var(--mantine-color-dimmed)" aria-hidden />} title={<Text span inherit c="dimmed">{t('wa.tags.none')}</Text>} onClick={() => onTag(null)} />

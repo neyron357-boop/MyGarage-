@@ -471,6 +471,9 @@ export const ru = {
   // v0.81: быстрый лист «＋» заказа и «+ Цена».
   qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить' },
   price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
+  // v0.82: скидка строки; лист «Поставщики» заказа.
+  lineOff: { title: 'Скидка', amount: 'Сумма', amountLabel: 'Скидка, AED' },
+  ask: { title: 'Поставщики', parts: 'Детали', who: 'Кому', search: 'Найти поставщика', noParts: 'Нет запчастей', noSuppliers: 'Никого не нашлось', send: 'Отправить · {{n}}', noWa: 'WhatsApp не подключён', sent: 'Отправлено поставщикам: {{n}}', noNumber: 'Без номера: {{names}}', used: 'б/у' },
   newOrder: {
     // v0.81: VIN в карточке номера.
     scanVin: 'Сканировать VIN',
@@ -1785,6 +1788,9 @@ export const ru = {
     warranty_order: 'Гарантийный заказ',
   },
   notify: {
+    // v0.82: заголовки уведомлений — знак и что сделать.
+    push: { answer: '📞 Клиент не ответил', order: '📦 Заказать запчасти', pickup: '🚚 Забрать запчасти', promised: '⏰ Срок клиенту', booked: '🚗 Запись — едет', collect: '🔑 Готова — не забрали', outsource: '🏭 Забрать со стороны', returnBy: '↩️ Вернуть деталь', debt: '💰 Долг просрочен', reminder: '🔔 Напоминание', followUp: '💬 Спросить, как машина', service: '🛢 Позвать на ТО' },
+    pushDigest: '📋 Сегодня',
     title: 'Уведомления',
     kind: {
       price: 'Назвать цену',
@@ -2451,6 +2457,8 @@ export const ru = {
     replace: 'Заменить',
   },
   msg: {
+    // v0.82: скидка строки в сообщении клиенту.
+    lineOff: 'скидка',
     // v0.80.3: a customer's message forwarded; the boss sees what goes to the customer first.
     forwardFrom: 'От клиента {{name}} ({{phone}}):',
     forwardFromName: 'От клиента {{name}}:',
@@ -2519,6 +2527,14 @@ export const ru = {
     debtText: 'Я, {{name}}, подтверждаю задолженность перед мастерской по заказу №{{number}} в размере {{amount}} и обязуюсь погасить её до {{date}}.',
   },
   ownerCheck: {
+    // v0.82: PDF и сообщение владельцу.
+    vatDue: 'VAT к уплате',
+    unpriced: 'Без цены: {{n}}',
+    noCostN: 'Без закупки: {{n}}',
+    message: 'Сообщение',
+    openPdf: 'Открыть PDF',
+    msg: { client: 'Клиенту: {{sum}}', spent: 'Закупка и расходы: {{sum}}', profit: 'Прибыль: {{sum}}', labour: 'Сколько ставить за оплату труда?', check: 'Проверьте, пожалуйста.' },
+    pdf: { title: 'Проверка владельцу', parts: 'Запчасти', work: 'Работа и услуги', extra: 'Другие расходы', item: 'Позиция', qty: 'Кол.', buyNet: 'Закупка', buyVat: 'VAT', saleNet: 'Продажа', saleVat: 'VAT', saleTotal: 'Клиенту', margin: 'Маржа', noCost: 'нет закупки', noPrice: 'нет цены', own: 'запчасть клиента', outside: 'на стороне', noSupplier: 'поставщик не выбран', off: 'скидка', discount: 'Скидка', totals: 'Итоги', net: 'без VAT', vat: 'VAT', gross: 'с VAT', toClient: 'Клиент платит', spent: 'Расходы', profit: 'Прибыль', profitGross: 'с VAT — как в учёте мастерской', profitNet: 'без VAT — продажа без VAT минус расходы без VAT', taxes: 'VAT (налог)', vatOut: 'VAT с клиента', vatIn: 'VAT поставщикам', vatDue: 'VAT к уплате', warnUnpriced: 'Без цены клиенту: {n}', warnNoCost: 'Запчасти без закупки: {n}', sellers: 'Поставщики', sellerTotal: 'Платим', noSellers: 'Поставщики ещё не выбраны', customer: 'Клиент', file: 'проверка' },
     title: 'Владельцу на проверку',
     send: 'Отправить',
     // The garage's WhatsApp linked (v0.80): one tap — the owner's chat.

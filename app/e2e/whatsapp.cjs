@@ -535,7 +535,7 @@ let current = null;
   const went2 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'send' || a.path === 'file'), before2);
   check(went2.length === 2 && went2[0].body.chat === A && /Brake pads front/i.test(went2[0].body.text) && went2[1].file.type === 'application/pdf', 'v0.80: «Смета» from the chat’s «＋» sends the words and the PDF to the customer');
 
-  // v0.80: «Владельцу на проверку» — one tap to the owner's WhatsApp (picked the first time, then at once).
+  // v0.80: «Владельцу на проверку» — one tap to the owner's WhatsApp (picked the first time, then at once); v0.82 — a PDF with its message.
   await go(`#/orders/${jobId}`, 1200);
   await top().getByRole('button', { name: /^(Ещё|More)$/ }).first().click();
   await page.locator('.action-tile', { hasText: 'Владельцу' }).click();
@@ -549,7 +549,7 @@ let current = null;
   await page.locator('[data-chat-picker] .list-row').first().click();
   await page.getByText('Отправлено владельцу').first().waitFor({ timeout: 20000 });
   const went3 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file'), before3);
-  check(went3.length === 1 && went3[0].file.type === 'image/jpeg', 'v0.80: the owner’s check went to the chosen chat as a picture');
+  check(went3.length === 1 && went3[0].file.type === 'application/pdf' && went3[0].query.doc === '1' && /(Клиенту|Customer):/.test(went3[0].query.caption ?? ''), 'v0.82: the owner’s check went to the chosen chat as a PDF with its message');
   const boss = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.settings.get('main')).waAuto?.boss);
   check(!!boss?.to?.chat && boss.on === false, 'v0.80: the chat picked is the owner’s from now on — its automatic reports not turned on by it');
   check(went3[0].query.chat === boss.to.chat, 'v0.80: … and the picture went to it');

@@ -3,7 +3,7 @@ import { formatDate, nowIso } from '../domain/dates';
 import { formatAed } from '../domain/money';
 import { normalizePhone, phoneDigits } from '../domain/phone';
 import { formatPlate } from '../domain/plates';
-import { itemAmounts, itemTitle, lineName } from '../domain/items';
+import { itemAmounts, itemTitle, lineName, unitGross } from '../domain/items';
 import type { Channel, Customer, EstimateVersion, Lang, Order, OrderItem, PartOffer, Vehicle } from '../domain/types';
 import { sumAmounts } from '../domain/vat';
 import { tFor } from '../i18n';
@@ -101,9 +101,11 @@ export function linesText(vehicle: Pick<Vehicle, 'make' | 'model' | 'year' | 'pl
   items
     .filter((i) => i.kind !== 'discount')
     .forEach((i, n) => {
-      const each = i.kind === 'part' && i.qty !== 1 ? ` (${i.qty} × ${money(itemAmounts({ ...i, qty: 1 }).gross)})` : '';
+      const each = i.kind === 'part' && i.qty !== 1 ? ` (${i.qty} × ${money(unitGross(i))})` : '';
       const gross = itemAmounts(i).gross;
-      const price = i.customerSupplied ? t('msg.customerPart') : gross ? money(gross) : '?';
+      // Its own discount (v0.82): said with its price.
+      const off = i.lineOff && !i.customerSupplied ? ` (${t('msg.lineOff')} ${'pctBp' in i.lineOff ? `${i.lineOff.pctBp / 100}%` : money(i.lineOff.grossFils)})` : '';
+      const price = i.customerSupplied ? t('msg.customerPart') : gross ? money(gross) + off : '?';
       out.push(`${n + 1}. ${itemTitle(i, lang)}${each} — ${price}`);
     });
   const off = items.filter((i) => i.kind === 'discount');
