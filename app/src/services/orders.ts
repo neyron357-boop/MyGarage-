@@ -113,6 +113,9 @@ export interface CheckInInput {
   plate: Plate;
   make: string;
   model: string;
+  /** Read off the VIN's photo at check-in and looked at (v0.81): into the car — a car in the base only where it has none. */
+  vin?: string;
+  year?: number;
   /** An existing customer picked from the suggestions. */
   customerId?: string;
   name: string;
@@ -138,16 +141,18 @@ export async function checkIn(input: CheckInInput): Promise<Order> {
     let customer: Customer | undefined;
     if (vehicle) {
       customer = await db.customers.get(vehicle.customerId);
-      const patch: { make?: string; model?: string } = {};
+      const patch: { make?: string; model?: string; vin?: string; year?: number } = {};
       if (!vehicle.make && input.make.trim()) patch.make = input.make.trim();
       if (!vehicle.model && input.model.trim()) patch.model = input.model.trim();
-      if (patch.make || patch.model) await updateVehicle(vehicle.id, patch);
+      if (!vehicle.vin && input.vin?.trim()) patch.vin = input.vin.trim().toUpperCase();
+      if (!vehicle.year && input.year) patch.year = input.year;
+      if (Object.keys(patch).length) await updateVehicle(vehicle.id, patch);
     } else {
       if (input.customerId) customer = await db.customers.get(input.customerId);
       if (!customer && input.phone.trim()) customer = await findCustomerByPhone(input.phone);
       if (!customer)
         customer = await createCustomer({ name: input.name, phone: input.phone, preferredChannel: 'whatsapp', docLanguage: input.docLanguage, type: 'individual' });
-      vehicle = await createVehicle(customer.id, { plate: input.plate, make: input.make.trim(), model: input.model.trim() });
+      vehicle = await createVehicle(customer.id, { plate: input.plate, make: input.make.trim(), model: input.model.trim(), vin: input.vin?.trim().toUpperCase() || undefined, year: input.year || undefined });
     }
     if (!customer) throw new AppError('err.notFound');
     const fill: { name?: string; phone?: string } = {};

@@ -1,5 +1,8 @@
-import { ActionIcon, Box, Button, Group, Stack } from '@mantine/core';
-import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
+import { ActionIcon, Box, Button, Group, Modal, Stack } from '@mantine/core';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCheck, IconFilter, IconFilterFilled, IconLayoutGrid, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
+import { boardMatches } from '../../domain/boardSearch';
+import { jobOpenedAt } from '../../ui/recentJobs';
+import { SearchResults } from '../search/SearchPage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { stepMainTab } from '../../ui/mainSwipe';
 import { hintNavigation } from '../../ui/stack';
@@ -19,7 +22,7 @@ import { loadDebtors } from '../../services/debts';
 import { archiveJob, phaseOf, setBoardStatus } from '../../services/flow';
 import { bundleAmountDue, loadOrderBundle, loadRowBundles, prefetchBundle, type OrderBundle } from '../../services/orders';
 import { useBoardView, type BoardTab } from '../../ui/boardView';
-import { EmptyState, List, MediaImage, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs, StickyBar, undoToast, type TabItem } from '../../ui/components';
+import { EmptyState, List, ListRow, MediaImage, Money, PageHeader, PageSkeleton, PlateText, SearchField, StickyBar, undoToast, type TabItem } from '../../ui/components';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
@@ -178,6 +181,48 @@ function DeskArchive({ jobs, byHand, covers, onBack }: { jobs: Job[]; byHand: Se
 }
 
 /**
+ * The board's filters on a phone (v0.81, the user's brief: ««В работе», «В ожидании», «Заявки» и «Архив» доступны через
+ * «Фильтры»… для обычного просмотра выбор статуса не требуется»): a sheet of them — each with its cars' count, the one
+ * shown ticked — and «Вид» at its foot.
+ */
+function FilterSheet({ opened, onClose, tabs, value, onPick, onView }: { opened: boolean; onClose: () => void; tabs: TabItem[]; value: string; onPick: (v: string) => void; onView: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <Modal opened={opened} onClose={onClose} title={t('board.filters')} classNames={{ content: 'sheet-grouped' }}>
+      <List>
+        {tabs.map((x) => {
+          const I = x.icon ?? IconLayoutGrid;
+          return (
+            <ListRow
+              key={x.value}
+              left={
+                <span className="row-icon board-filter-icon" style={{ '--c': x.color ? `var(--mantine-color-${x.color}-6)` : 'var(--mantine-color-gray-6)' } as React.CSSProperties}>
+                  <I size={17} stroke={2.1} aria-hidden />
+                </span>
+              }
+              title={x.label}
+              right={
+                <Group gap={10} wrap="nowrap">
+                  {x.count !== undefined && <span className="filter-count tnum">{x.count}</span>}
+                  {x.value === value ? <IconCheck size={20} stroke={2.4} color="var(--mantine-color-cobalt-6)" aria-label={t('board.filterOn')} /> : <span style={{ width: 20 }} />}
+                </Group>
+              }
+              onClick={() => {
+                onPick(x.value);
+                onClose();
+              }}
+            />
+          );
+        })}
+      </List>
+      <Button mt="md" variant="subtle" fullWidth leftSection={<IconAdjustmentsHorizontal size={18} />} onClick={onView}>
+        {t('board.view')}
+      </Button>
+    </Modal>
+  );
+}
+
+/**
  * The workshop at a glance: every car as one card, newest activity first. The chips
  * on top count the cars on each step (look, price, wait, work, pay…) and filter the list.
  */
@@ -188,6 +233,10 @@ export function BoardPage() {
   const { run } = useAction();
   const mobile = usePhone();
   const [filter, setFilter] = useState<Filter>('all');
+  // The board's own search (v0.81): a plate, a name, a phone — the board's cars first, the rest of the base under them.
+  const [q, setQ] = useState('');
+  const finding = q.trim().length > 0;
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // How the board looks on this device: large cards or rows, the tabs' order and the steps left out («Вид»).
   const view = useBoardView();
   // Cars pinned to the top on this phone (v0.73): first in every tab, the one pinned last on top.
@@ -210,8 +259,13 @@ export function BoardPage() {
   const debtors = useScreenLiveQuery(() => (data ? loadDebtors() : undefined), [refresh, !!data], 300);
   // Every five minutes the rows' "how long" moves on (a row is not rendered again otherwise).
   const tick = Math.floor(Date.now() / 300_000);
-  // The freshest first: the job something last happened on is on top.
-  const fresh = (x: Job, y: Job) => lastChange(y.b).localeCompare(lastChange(x.b));
+  // The freshest first: the job something last happened on — or opened last on this device (v0.81) — is on top.
+  const recency = (j: Job) => {
+    const changed = lastChange(j.b);
+    const seen = jobOpenedAt(j.b.order.id);
+    return seen && seen > changed ? seen : changed;
+  };
+  const fresh = (x: Job, y: Job) => recency(y).localeCompare(recency(x));
   const all: Job[] = (data?.bundles ?? []).map((b) => ({ b, phase: phaseOf(b) })).filter((j) => STEPS.includes(j.phase));
   const jobs = all.filter((j) => !j.b.order.archivedAt).sort(fresh);
   // The archive: the jobs taken off by hand, the latest taken off first.
@@ -263,7 +317,8 @@ export function BoardPage() {
   // own swipes stay at its edges.
   const tabOrder = view.order.filter((k) => k === 'all' || k === 'archive' || ((k === 'debts' || isStatusTab(k)) && !hidden.has(k)) || (isStep(k) && stepShown(k)));
   const tabNow = archive ? 'archive' : debtsTab ? 'debts' : statusFilter ? TAB_OF[statusFilter] : (phaseFilter ?? 'all');
-  const sw = useTabSwipe(tabOrder, tabNow, (v) => setFilter(v as Filter), (dir) => void stepMainTab(navigate, hintNavigation, '/', dir));
+  // v0.81: the filters are a sheet, not a strip — a sideways swipe on the board is the tab bar's (Money beside it).
+  const sw = useTabSwipe(mobile ? [tabNow] : tabOrder, tabNow, (v) => setFilter(v as Filter), (dir) => void stepMainTab(navigate, hintNavigation, '/', dir));
   if (!data) return <PageSkeleton />;
   const { bundles, covers } = data;
   const closed = live?.closed;
@@ -289,6 +344,21 @@ export function BoardPage() {
 
   const dateLabel = dayLong(new Date(), lang);
   const owing = debtors?.length ?? 0;
+  // The board's lists in the order of «Вид»: «Все», the manager's tabs, the steps that have cars and are not left out,
+  // «Долги», «Архив» — a PC's bar, a phone's «Фильтры» (v0.81: no strip on a phone).
+  const tabItem = (k: BoardTab): TabItem | null => {
+    if (k === 'all') return { value: 'all', label: t('board.all'), count: jobs.length };
+    if (k === 'debts') return hidden.has('debts') ? null : { value: 'debts', label: t('board.tabDebts'), count: owing || undefined, color: PHASE_META.debt.color, icon: IconUserDollar };
+    if (isStatusTab(k)) {
+      if (hidden.has(k)) return null;
+      const s = STATUS_OF[k];
+      const m = PHASE_META[STATUS_PHASE[s]];
+      return { value: k, label: t(`board.status.${s}`), count: statusCount(s) || undefined, color: m.color, icon: m.icon };
+    }
+    if (k === 'archive') return { value: 'archive', label: t('board.archive'), count: archived.length || undefined, icon: IconArchive };
+    return isStep(k) && stepShown(k) ? { value: k, label: t(`job.phase.${k}`), count: count(k), color: PHASE_META[k].color, icon: PHASE_META[k].icon } : null;
+  };
+  const filterTabs = () => view.order.map(tabItem).filter((x): x is TabItem => !!x);
   // «Вид»: a round glass button in the head (phone), after «Долги» and «Архив» (PC).
   const viewButton = (
     <ActionIcon variant="default" size={40} radius="xl" aria-label={t('board.view')} onClick={() => setViewOpen(true)}>
@@ -310,7 +380,10 @@ export function BoardPage() {
                 {picking ? <IconX size={22} stroke={2} /> : <IconListCheck size={22} stroke={2} />}
               </ActionIcon>
               <TodayBell bundles={bundles} />
-              {viewButton}
+              {/* «Фильтры» (v0.81): «Все» unless one is picked — then it is lit. */}
+              <ActionIcon variant={filter !== 'all' ? 'filled' : 'default'} size={40} radius="xl" aria-label={t('board.filters')} onClick={() => setFiltersOpen(true)} data-board-filters>
+                {filter !== 'all' ? <IconFilterFilled size={20} /> : <IconFilter size={22} stroke={2} />}
+              </ActionIcon>
             </Group>
           ) : (
             // (v0.75: «Долги» and «Архив» are tabs of the board's own bar on a PC.)
@@ -322,8 +395,34 @@ export function BoardPage() {
         }
       />
       <LazySheet opened={viewOpen}>{(o) => <BoardViewSheet opened={o} onClose={() => setViewOpen(false)} />}</LazySheet>
+      {mobile && (
+        <LazySheet opened={filtersOpen}>
+          {(o) => (
+            <FilterSheet
+              opened={o}
+              onClose={() => setFiltersOpen(false)}
+              tabs={filterTabs()}
+              value={tabNow}
+              onPick={(v) => {
+                setFilter(v as Filter);
+                haptic('selection');
+              }}
+              onView={() => {
+                setFiltersOpen(false);
+                setViewOpen(true);
+              }}
+            />
+          )}
+        </LazySheet>
+      )}
     </>
   );
+  // The search on top of the board (a phone): a plate, a name, a phone.
+  const findBar = mobile ? (
+    <Box mb="md" className="board-find">
+      <SearchField value={q} onChange={setQ} placeholder={t('board.findPlaceholder')} />
+    </Box>
+  ) : null;
 
   const debtList = !debtors ? <PageSkeleton /> : debtors.length ? <DebtorList debtors={debtors} /> : <EmptyState icon={IconUserDollar} title={t('debt.none')} />;
 
@@ -353,11 +452,12 @@ export function BoardPage() {
       <PageSkeleton />
     );
 
-  if (jobs.length === 0 && archived.length === 0 && !archive && !debtsTab)
+  if (jobs.length === 0 && archived.length === 0 && !archive && !debtsTab && !finding)
     return (
       <>
         {header}
         <InsecureWarning />
+        {findBar}
         <Box mt="xl">
           <EmptyState
             icon={IconLayoutKanban}
@@ -391,20 +491,17 @@ export function BoardPage() {
 
   const shown = pinnedFirst(statusFilter ? jobs.filter((j) => statusOf(j) === statusFilter) : phaseFilter ? jobs.filter((j) => j.phase === phaseFilter) : jobs, (j) => j.b.order.id, mobile ? pins : []);
   const pinnedIds = new Set(mobile ? pins : []);
-  // The strip in the order of «Вид»: «Все», the steps that have cars and are not left out, «Долги», «Архив».
-  const tabItem = (k: BoardTab): TabItem | null => {
-    if (k === 'all') return { value: 'all', label: t('board.all'), count: jobs.length };
-    if (k === 'debts') return hidden.has('debts') ? null : { value: 'debts', label: t('board.tabDebts'), count: owing || undefined, color: PHASE_META.debt.color, icon: IconUserDollar };
-    if (isStatusTab(k)) {
-      if (hidden.has(k)) return null;
-      const s = STATUS_OF[k];
-      const m = PHASE_META[STATUS_PHASE[s]];
-      return { value: k, label: t(`board.status.${s}`), count: statusCount(s) || undefined, color: m.color, icon: m.icon };
-    }
-    if (k === 'archive') return { value: 'archive', label: t('board.archive'), count: archived.length || undefined };
-    return isStep(k) && stepShown(k) ? { value: k, label: t(`job.phase.${k}`), count: count(k), color: PHASE_META[k].color, icon: PHASE_META[k].icon } : null;
-  };
-  const tabs = view.order.map(tabItem).filter((x): x is TabItem => !!x);
+  // Searching (v0.81): the board's cars that match — whatever the filter, those taken off the board too — freshest first.
+  const found = finding
+    ? [...jobs, ...archived].filter((j) =>
+        boardMatches(
+          { number: j.b.order.number, plate: j.b.vehicle.plate, make: j.b.vehicle.make, model: j.b.vehicle.model, name: j.b.customer.name, company: j.b.customer.companyName, phone: j.b.customer.phone, driver: j.b.order.driver?.name },
+          q,
+        ),
+      )
+    : [];
+  const foundIds = new Set(found.map((j) => j.b.order.id));
+  const picked1 = filter !== 'all' ? filterTabs().find((x) => x.value === tabNow) : undefined;
   return (
     <>
       <span ref={glowRef} hidden />
@@ -412,8 +509,34 @@ export function BoardPage() {
       <InsecureWarning />
       {mobile ? (
         <>
-          {/* A long press on a tab opens «Вид» — where the tabs are dragged into another order. */}
-          <ScrollTabs value={tabNow} onChange={(v) => setFilter(v as Filter)} onHold={() => setViewOpen(true)} items={tabs} />
+          {findBar}
+          {/* A filter picked (v0.81): said under the search, × — back to «Все». */}
+          {picked1 && !finding && (
+            <div className="board-filter-on rise-enter">
+              <button type="button" className="chip" data-active="true" onClick={() => setFiltersOpen(true)}>
+                {picked1.label}
+                {picked1.count !== undefined && <span className="chip-count">{picked1.count}</span>}
+              </button>
+              <ActionIcon size={32} radius="xl" variant="subtle" color="gray" aria-label={t('board.filterOff')} onClick={() => (setFilter('all'), haptic('selection'))}>
+                <IconX size={18} />
+              </ActionIcon>
+            </div>
+          )}
+          {finding ? (
+            // The board's cars that match, then the rest of the base (closed jobs, cars, customers, suppliers).
+            <div className="tab-panel board-found">
+              {found.length > 0 && (
+                <List animate className={compact ? 'mini-list' : 'board-cards'}>
+                  {found.map((j) => (
+                    <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} variant={compact ? 'row' : 'card'} status={statusOf(j)} />
+                  ))}
+                </List>
+              )}
+              <Box mt={found.length ? 'xl' : 0}>
+                <SearchResults q={q} exclude={foundIds} quiet={found.length > 0} />
+              </Box>
+            </div>
+          ) : (
           <div key={tabNow} ref={sw.panel} className="tab-panel">
             {debtsTab ? (
               debtList
@@ -429,6 +552,7 @@ export function BoardPage() {
               <EmptyState icon={IconLayoutKanban} title={t('board.emptyTitle')} />
             )}
           </div>
+          )}
           {picking && (
             // The jobs picked into a tab (v0.70): its three buttons at the foot (how many — in the head).
             <StickyBar>

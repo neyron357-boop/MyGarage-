@@ -1,5 +1,5 @@
 import { ActionIcon, Autocomplete, Box, Button, Group, Loader, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconCamera, IconCameraOff, IconCar, IconCheck, IconUser, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCamera, IconCameraOff, IconCar, IconCheck, IconKeyboard, IconScan, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,10 +9,13 @@ import { CAR_MAKES, canonicalMake, canonicalModel, modelsFor, POPULAR_MAKES } fr
 import { dubaiDate, nowIso } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
 import { EMIRATES } from '../../domain/plates';
+import { checkDigitOk, isVin, vinChars } from '../../domain/vin';
+import type { VinCar } from '../../domain/vinDecode';
 import { quickList } from '../../domain/quickLists';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
 import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
-import { setCover } from '../../services/cover';
+import { setCover, setVinPhoto } from '../../services/cover';
+import { decodeVin } from '../../services/vinDecode';
 import { checkIn } from '../../services/orders';
 import { carDriver, type DriverDraft } from '../../services/drivers';
 import { DriverFields, PickedDriver } from '../job/Driver';
@@ -59,7 +62,7 @@ function who(c: Customer | undefined, noName: string): string {
  * photo (v0.28), what the reading was not sure of is ringed orange until it is typed over; the camera (a hold — the
  * phone's photos) reads it off a photo.
  */
-function PlateBlock({ plate, onChange, unsure, focus, camera }: { plate: Plate; onChange: (p: Plate) => void; unsure?: { code: boolean; number: boolean }; focus: boolean; camera?: ReactNode }) {
+function PlateBlock({ plate, onChange, unsure, focus, camera, children }: { plate: Plate; onChange: (p: Plate) => void; unsure?: { code: boolean; number: boolean }; focus: boolean; camera?: ReactNode; children?: ReactNode }) {
   const { t } = useTranslation();
   const lang = useLang();
   return (
@@ -117,12 +120,77 @@ function PlateBlock({ plate, onChange, unsure, focus, camera }: { plate: Plate; 
           styles={{ input: { fontFamily: 'var(--font-plate)', fontSize: 24, letterSpacing: '0.08em', fontWeight: 600 } }}
         />
       </Group>
+      {children}
+    </Box>
+  );
+}
+
+type VinState = 'reading' | 'sure' | 'check' | 'none' | 'typed';
+
+/**
+ * The VIN of a car not in the base (v0.81, the user's brief: «если совпадения нет, предложить «Сканировать VIN» в той же
+ * карточке… считать VIN, показать его для проверки»): in the plate's card — «Сканировать VIN» (a tap — the camera, a hold —
+ * the phone's photos) or typed by hand. Read on the phone (services/vinReader.ts, no AI); a VIN that did not prove itself is
+ * ringed orange until it is looked at — ✓ or typed over. The line it was read off is shown under it to check it by.
+ */
+function VinBlock({ vin, state, crop, open, pick, onOpen, onChange, onConfirm }: { vin: string; state?: VinState; crop?: string; open: boolean; pick: ReturnType<typeof usePhotoPick>; onOpen: () => void; onChange: (v: string) => void; onConfirm: () => void }) {
+  const { t } = useTranslation();
+  if (!open)
+    return (
+      <Group gap={8} mt="sm" wrap="nowrap" className="vin-scan">
+        <Button variant="light" style={{ flex: 1 }} leftSection={<IconScan size={18} stroke={2} />} {...pick.handlers} onClick={() => !pick.consumeClick() && pick.camera()}>
+          {t('newOrder.scanVin')}
+        </Button>
+        <ActionIcon size={36} radius="xl" variant="subtle" color="gray" aria-label={t('newOrder.typeVin')} onClick={onOpen}>
+          <IconKeyboard size={20} stroke={1.8} />
+        </ActionIcon>
+      </Group>
+    );
+  const unsure = state === 'check';
+  const proven = !!vin && isVin(vin) && (state === 'sure' || checkDigitOk(vin));
+  return (
+    <Box mt="sm" className="vin-block rise-enter" data-vin-state={state}>
+      <Group gap={8} wrap="nowrap" align="center">
+        <TextInput
+          aria-label="VIN"
+          placeholder={state === 'reading' ? t('newOrder.vinReading') : 'VIN'}
+          value={vin}
+          onChange={(e) => onChange(e.currentTarget.value)}
+          maxLength={17}
+          autoCapitalize="characters"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          style={{ flex: 1, minWidth: 0 }}
+          classNames={{ input: unsure ? 'plate-unsure' : undefined }}
+          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', letterSpacing: '0.04em', fontWeight: 600 } }}
+          rightSection={
+            unsure ? (
+              <ActionIcon size={30} radius="xl" variant="filled" color="orange" aria-label={t('newOrder.vinOk')} onClick={onConfirm}>
+                <IconCheck size={16} stroke={2.6} />
+              </ActionIcon>
+            ) : proven ? (
+              <IconCheck size={18} stroke={2.6} color="var(--mantine-color-green-6)" aria-label={t('newOrder.vinRead')} />
+            ) : undefined
+          }
+          rightSectionPointerEvents="all"
+        />
+        <ActionIcon size={40} radius="xl" variant="light" aria-label={t('newOrder.scanVin')} loading={state === 'reading'} {...pick.handlers} onClick={() => !pick.consumeClick() && pick.camera()}>
+          <IconScan size={20} stroke={2} />
+        </ActionIcon>
+      </Group>
+      {crop && <img className="vin-crop" src={crop} alt="" aria-hidden />}
+      {state === 'none' && (
+        <Text size="sm" c="orange.7" mt={6}>
+          {t('newOrder.vinNone')}
+        </Text>
+      )}
     </Box>
   );
 }
 
 /** Make and model: one tap on a chip or a pick from the built-in list; free text still works (not drawn again while the plate is typed). */
-const MakeModelBlock = memo(function MakeModelBlock({ make, model, onMake, onModel }: { make: string; model: string; onMake: (v: string) => void; onModel: (v: string) => void }) {
+const MakeModelBlock = memo(function MakeModelBlock({ make, model, year, onMake, onModel, onYear }: { make: string; model: string; year?: number; onMake: (v: string) => void; onModel: (v: string) => void; onYear: (y: number | undefined) => void }) {
   const { t } = useTranslation();
   const makes = useLiveQuery(() => popularMakes(POPULAR_MAKES), []) ?? POPULAR_MAKES;
   const canon = canonicalMake(make);
@@ -189,6 +257,18 @@ const MakeModelBlock = memo(function MakeModelBlock({ make, model, onMake, onMod
           />
         </Box>
       )}
+      {/* The year (v0.81): by hand, or from the VIN. */}
+      <TextInput
+        mt="sm"
+        aria-label={t('vehicle.year')}
+        placeholder={t('vehicle.year')}
+        inputMode="numeric"
+        maxLength={4}
+        w={120}
+        value={year ? String(year) : ''}
+        onChange={(e) => onYear(Number(e.currentTarget.value.replace(/\D/g, '')) || undefined)}
+        autoComplete="off"
+      />
     </Box>
   );
 });
@@ -262,6 +342,51 @@ export function NewOrderPage() {
   const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
+  const [year, setYear] = useState<number>();
+  // The VIN of a car not in the base (v0.81): scanned or typed; what it filled is replaced by a newer VIN while untouched.
+  const [vin, setVin] = useState('');
+  const [vinState, setVinState] = useState<VinState>();
+  const [vinOpen, setVinOpen] = useState(false);
+  const [vinShot, setVinShot] = useState<{ file: File; crop?: string }>();
+  const vinFilled = useRef<VinCar>({});
+  const fillFromVin = useCallback((v: string) => {
+    void decodeVin(v).then((car) => {
+      const was = vinFilled.current;
+      // Only into what is empty, or still as a VIN filled it before.
+      setMake((m) => (car.make && (!m.trim() || m === was.make) ? car.make : m));
+      setModel((m) => (car.model && (!m.trim() || m === was.model) ? car.model : m));
+      setYear((y) => (car.year && (!y || y === was.year) ? car.year : y));
+      vinFilled.current = car;
+      if (car.make || car.model || car.year) haptic('success');
+    });
+  }, []);
+  const vinPick = usePhotoPick((files) => {
+    const file = files[0];
+    if (!file) return;
+    setVinOpen(true);
+    setVinShot({ file });
+    setVinState('reading');
+    void import('../../services/vinReader')
+      .then(({ readVinShot }) => readVinShot(file))
+      .then((p) => {
+        if (!p.vin) return setVinState('none');
+        setVin(p.vin);
+        setVinShot({ file, crop: p.crop });
+        setVinState(p.sure ? 'sure' : 'check');
+        haptic(p.sure ? 'success' : 'warning');
+        if (p.sure) fillFromVin(p.vin);
+      })
+      .catch(() => setVinState('none'));
+  });
+  const typeVin = useCallback(
+    (raw: string) => {
+      const v = vinChars(raw).slice(0, 17);
+      setVin(v);
+      setVinState('typed');
+      if (isVin(v)) fillFromVin(v);
+    },
+    [fillFromVin],
+  );
   const [picked, setPicked] = useState<{ vehicle: Vehicle; owner?: Customer; activeOrder?: Order }>();
   const [pickedCustomer, setPickedCustomer] = useState<Customer>();
   const [phone, setPhone] = useState('');
@@ -418,6 +543,9 @@ export function NewOrderPage() {
         plate,
         make: canonicalMake(make),
         model: canonicalModel(make, model),
+        // A VIN that proved itself, was looked at (✓) or typed — not one still to be checked.
+        vin: isVin(vin) && vinState !== 'check' && vinState !== 'reading' ? vin : undefined,
+        year,
         customerId: (car?.owner ?? pickedCustomer)?.id,
         name,
         phone,
@@ -434,6 +562,8 @@ export function NewOrderPage() {
         await setCover(o.vehicleId, shot.file).catch(() => undefined);
         if (shot.id) dropCarShot(shot.id);
       }
+      // The VIN's photo is the car's VIN photo (its «VIN» chip on the job reads it there again, if it was not sure).
+      if (vinShot && !car) await setVinPhoto(o.vehicleId, vinShot.file).catch(() => undefined);
       // Straight to the job: findings, prices and the customer's answer all happen there.
       navigate(`/orders/${o.id}`, { replace: true });
     });
@@ -495,8 +625,27 @@ export function NewOrderPage() {
                         </ActionIcon>
                       )
                     }
-                  />
+                  >
+                    {/* Not in the base (v0.81): its VIN, scanned or typed, in the same card. */}
+                    {!auto && !byNumber.length && (
+                      <VinBlock
+                        vin={vin}
+                        state={vinState}
+                        crop={vinShot?.crop}
+                        open={vinOpen}
+                        pick={vinPick}
+                        onOpen={() => setVinOpen(true)}
+                        onChange={typeVin}
+                        onConfirm={() => {
+                          setVinState('sure');
+                          haptic('selection');
+                          if (isVin(vin)) fillFromVin(vin);
+                        }}
+                      />
+                    )}
+                  </PlateBlock>
                   {shoot.inputs}
+                  {vinPick.inputs}
                   {auto && (
                     <Box className="surface rise-enter" p="sm" mt={10} aria-label={t('newOrder.inBase')}>
                       <Group gap="sm" wrap="nowrap">
@@ -505,8 +654,9 @@ export function NewOrderPage() {
                           <Text fw={600} lineClamp={1}>
                             {[auto.vehicle.make, auto.vehicle.model].filter(Boolean).join(' ') || t('newOrder.noMake')}
                           </Text>
+                          {/* Whose it is (v0.81): the plate typed over a misread one finds the right customer — seen at once. */}
                           <Text size="sm" c="dimmed" lineClamp={1}>
-                            {t('newOrder.inBase')}
+                            {[t('newOrder.inBase'), who(auto.owner, noName)].filter(Boolean).join(' · ')}
                           </Text>
                         </Box>
                       </Group>
@@ -593,7 +743,7 @@ export function NewOrderPage() {
                       <div className="group-title" style={{ marginTop: 22 }}>
                         {t('newOrder.makeModel')}
                       </div>
-                      <MakeModelBlock make={make} model={model} onMake={setMake} onModel={setModel} />
+                      <MakeModelBlock make={make} model={model} year={year} onMake={setMake} onModel={setModel} onYear={setYear} />
                     </>
                   )}
                 </>

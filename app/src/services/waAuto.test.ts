@@ -11,7 +11,8 @@ import { addExpense, addPayment, quickInvoice } from './money';
 import { checkIn } from './orders';
 import { ensureSeed } from './seed';
 import { askSuppliers, readReplies, recordLinkAsk } from './waAsk';
-import { saveWaAuto, sendClientReport, sendWorkReport, setCustomerGroup, setWaAutoDelays, startWaAuto } from './waAuto';
+import { saveWaAuto, sendClientReport, sendExpenseToBoss, sendWorkReport, setCustomerGroup, setWaAutoDelays, startWaAuto } from './waAuto';
+import { updateExpense } from './ledger';
 import type { OutItem } from './waOutbox';
 import { loadChats, refreshWa, setWaTransport, type WaCallInit } from './whatsapp';
 import type { WaMessage } from '../domain/whatsapp';
@@ -86,6 +87,31 @@ describe('the boss', () => {
     expect(pay.parts[0].text).toContain('Payment received* · 200.00 AED · Cash');
     expect(pay.parts[0].text).toContain('Still due: 220.00 AED');
     expect(boss.find((x) => x.key.startsWith('boss:expense:'))!.parts[0].text).toContain('120.00 AED · Cash');
+  });
+
+  it('v0.81: a scanned receipt goes to the boss by hand only, once its job is picked — the expense, its positions and photo, that job', async () => {
+    const { o } = await job();
+    const cat = (await db.expenseCategories.toArray()).find((x) => x.code === 'parts')!;
+    const receipt = new Blob([new Uint8Array(3000)], { type: 'image/jpeg' });
+    const e = await addExpense({ date: '2026-11-24', categoryId: cat.id, amountFils: 36750, vatFils: 1750, vendor: 'Gulf Star Auto Parts', method: 'cash', lines: [{ name: 'BRAKE PADS REAR', qty: 2 }, { name: 'WHEEL BEARING', qty: 1 }], receipt, scanned: true, overLimitComment: 'receipt' });
+    await new Promise((r) => setTimeout(r, 300));
+    // Scanned: not heard by itself — and not sent before a job is picked.
+    expect(keyed('boss:expense:')).toEqual([]);
+    await expect(sendExpenseToBoss(e.id)).rejects.toThrow();
+    // The job picked by hand: one tap sends it — even with the boss's own reports off.
+    await saveWaAuto('boss', { on: false });
+    await updateExpense(e.id, { orderId: o.id, vehicleId: o.vehicleId, customerId: o.customerId });
+    await sendExpenseToBoss(e.id);
+    const sent = keyed('boss:expense:');
+    expect(sent.map((x) => [x.key, x.chat])).toEqual([[`boss:expense:${e.id}:${o.id}`, BOSS.chat]]);
+    const text = sent[0].parts[0].text!;
+    expect(text).toContain('367.50 AED · Cash');
+    expect(text).toContain(`Job #${o.number}`);
+    expect(text).toContain('Customer: Ahmed');
+    expect(text).toContain('1. BRAKE PADS REAR × 2');
+    expect(text).toContain('2. WHEEL BEARING');
+    expect(sent[0].parts.some((p) => !!p.media)).toBe(true);
+    expect((await db.expenses.get(e.id))!.toBoss?.orderId).toBe(o.id);
   });
 
   it('said off: not that one; no boss — nothing', async () => {

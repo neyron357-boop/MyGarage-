@@ -1,7 +1,7 @@
 import { IconAlertCircle, IconBan, IconChartBar, IconCheck, IconChecks, IconClock, IconFile, IconMapPin, IconMicrophone, IconMusic, IconPhone, IconPhoto, IconSticker, IconUser, IconVideo, type Icon } from '@tabler/icons-react';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { marks, previewOf, ticksOf, type WaKind, type WaLast, type WaMessage, type Who, type WhoKind } from '../../domain/whatsapp';
+import { marks, previewOf, ticksOf, type WaKind, type WaLast, type WaMessage, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import { loadPeople, waAvatarSrc } from '../../services/whatsapp';
 import { PersonAvatar } from '../../ui/components';
 import { useScreenLiveQuery } from '../../ui/hooks';
@@ -118,10 +118,10 @@ export const Marked = memo(function Marked({ text }: { text: string }) {
   );
 });
 
-const WHO_COLOR: Record<WhoKind, string> = { customer: 'blue', supplier: 'cyan', employee: 'violet', driver: 'grape' };
+const WHO_COLOR: Record<WhoKind | WaTag, string> = { customer: 'blue', supplier: 'cyan', employee: 'violet', driver: 'grape', service: 'teal', work: 'orange' };
 
 /** Whose chat it is in the garage — a small tag in the kind's colour. */
-export function WhoTag({ kind }: { kind: WhoKind }) {
+export function WhoTag({ kind }: { kind: WhoKind | WaTag }) {
   const { t } = useTranslation();
   return (
     <span className="wa-who" style={{ '--c': `var(--mantine-color-${WHO_COLOR[kind]}-6)` } as React.CSSProperties}>

@@ -9,14 +9,18 @@ import {
   peopleIndex,
   sendKind,
   unreadTotal,
+  type ChatRoles,
   type Person,
   type WaChat,
   type WaEvent,
   type WaMessage,
   type WaStatus,
+  type WaTag,
   type Who,
 } from '../domain/whatsapp';
+import { waAutoOf } from '../domain/waAuto';
 import { AppError } from './errors';
+import { getSettings, saveSettings } from './settings';
 import { callJson, SyncError } from './sync/api';
 import { syncConfig } from './sync/config';
 import { filesBase, onServerSaid } from './sync/engine';
@@ -332,6 +336,43 @@ export async function forwardWa(message: Pick<WaMessage, 'id'>, to: string, note
   }
 }
 
+/** Voice messages that did not go, by their place in the chat: «Повторить» sends the same recording again. */
+const unsentVoices = new Map<string, { blob: Blob; seconds: number }>();
+
+/**
+ * A voice message (v0.81, the user's brief: «удержание микрофона начинает запись, отпускание отправляет голосовое в текущий
+ * чат… сразу показывать голосовое в переписке со статусом отправки; при сбое — ошибка и повтор»): in the chat at once as
+ * on its way (playable from here), sent as WhatsApp's own voice message — the bridge makes it Opus in Ogg, as WhatsApp
+ * records them (server/whatsapp/voice.mjs); failed — kept here, a tap sends it again.
+ */
+export async function sendWaVoice(chat: string, blob: Blob, seconds: number): Promise<WaMessage> {
+  if (!waReady()) throw new AppError('wa.err.notReady');
+  if (blob.size > MAX_FILE_BYTES) throw new AppError('wa.err.tooBig');
+  const id = `p:${uid()}`;
+  const ext = /mp4|aac|m4a/.test(blob.type) ? 'm4a' : /ogg/.test(blob.type) ? 'ogg' : 'webm';
+  const local = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(blob) : undefined;
+  const sec = Math.max(1, Math.round(seconds));
+  putPending(chat, { id, chat, t: Date.now(), me: true, type: 'ptt', text: '', ack: 0, pending: true, local, file: { mime: blob.type, name: `voice.${ext}`, size: blob.size, here: true, sec } });
+  try {
+    const r = await call<{ msg: WaMessage }>('file', { method: 'POST', file: blob, query: { chat, name: `voice.${ext}`, voice: '1' }, timeout: 300_000 });
+    settle(chat, id, { ...r.msg, file: r.msg.file ? { ...r.msg.file, sec: r.msg.file.sec || sec } : r.msg.file }, local);
+    return r.msg;
+  } catch (e) {
+    unsentVoices.set(id, { blob, seconds });
+    settle(chat, id, undefined);
+    throw failure(e);
+  }
+}
+
+/** A voice message that did not go, sent again (its recording kept while the app is open). */
+export function againWaVoice(chat: string, id: string): Promise<WaMessage> | undefined {
+  const v = unsentVoices.get(id);
+  if (!v) return undefined;
+  unsentVoices.delete(id);
+  dropFailed(chat, id);
+  return sendWaVoice(chat, v.blob, v.seconds);
+}
+
 /** A message that did not go: taken out of the chat (to be written again). */
 export function dropFailed(chat: string, id: string) {
   const list = store.messages[chat];
@@ -438,6 +479,27 @@ export async function loadPeople(): Promise<Map<string, Who>> {
   ];
   return peopleIndex(list);
 }
+/**
+ * What makes a chat the garage's (v0.81, «Только гараж»): the statuses given by hand, and the groups the garage writes to
+ * by itself — the work group, the boss, the wash, the customers' own groups.
+ */
+export async function loadChatRoles(): Promise<ChatRoles> {
+  const [settings, customers] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray()]);
+  const auto = waAutoOf(settings.waAuto);
+  const groups = new Set([auto.work.to?.chat, auto.boss.to?.chat, auto.wash.to?.chat, ...customers.map((c) => c.waGroup?.chat)].filter((x): x is string => !!x));
+  return { tags: settings.waChatTags ?? {}, groups };
+}
+
+/** Chats picked in the list given one status (or theirs taken off — null): kept with the garage's settings. */
+export async function tagChats(ids: string[], tag: WaTag | null): Promise<void> {
+  const tags = { ...((await getSettings()).waChatTags ?? {}) };
+  for (const id of ids) {
+    if (tag) tags[id] = tag;
+    else delete tags[id];
+  }
+  await saveSettings({ waChatTags: tags });
+}
+
 /** The same, read once and kept (a lookup from a place that only needs a name now and then). */
 export function knownPeople(): Promise<Map<string, Who>> {
   people ??= loadPeople();
@@ -451,9 +513,11 @@ export interface WaPrefs {
   direct: boolean;
   /** A chat opened here is read on WhatsApp too (the blue ticks go to who wrote). */
   seen: boolean;
+  /** «Только гараж» (v0.81): the list shows the chats that are something to the garage — on by default. */
+  garageOnly: boolean;
 }
 const PREFS_KEY = 'mygarage.wa';
-const DEFAULT_PREFS: WaPrefs = { direct: true, seen: true };
+const DEFAULT_PREFS: WaPrefs = { direct: true, seen: true, garageOnly: true };
 let prefsCache: WaPrefs | undefined;
 export function waPrefs(): WaPrefs {
   if (!prefsCache) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyEvent,
+  chatRole,
   chatIdOf,
   chatTitle,
   clock,
@@ -292,5 +293,34 @@ describe('what WhatsApp says, into the lists', () => {
     expect(out.map((m) => [m.id, m.ack])).toEqual([['a', 3], ['b', 0], ['c', 0]]);
     const same = [msg('a')];
     expect(mergeMessages(same, [])).toBe(same);
+  });
+});
+
+describe('«Только гараж» and the statuses given by hand (v0.81)', () => {
+  const ali = chat('971501234567@c.us', { t: 5000 });
+  const stranger = chat('971554443333@c.us', { t: 4000, unread: 2 });
+  const tagged = chat('971558887777@c.us', { t: 3000, unread: 1 });
+  const workGroup = chat('120363@g.us', { t: 2000 });
+  const family = chat('120999@g.us', { t: 1000 });
+  const me = chat('971500000000@c.us', { self: true, t: 900 });
+  const all = [ali, stranger, tagged, workGroup, family, me];
+  const roles = { tags: { [tagged.id]: 'service' as const }, groups: new Set([workGroup.id]) };
+
+  it('what a chat is to the garage: its person first, then the status given by hand, then a group the garage writes to', () => {
+    expect(all.map((c) => chatRole(c, people, roles))).toEqual(['customer', undefined, 'service', 'work', undefined, undefined]);
+    // A status given by hand does not hide the base's own: a customer's number stays a customer's.
+    expect(chatRole(ali, people, { tags: { [ali.id]: 'supplier' }, groups: new Set() })).toBe('customer');
+  });
+
+  it('on — the garage’s chats (and oneself); off — every chat; a search finds any; a service is among the suppliers', () => {
+    const ids = (garageOnly: boolean, tab: 'all' | 'suppliers' | 'groups' = 'all', query = '') => filterChats(all, { tab, query, people, roles, garageOnly }).map((c) => c.id);
+    expect(ids(true)).toEqual([ali.id, tagged.id, workGroup.id, me.id]);
+    expect(ids(false)).toEqual(all.map((c) => c.id));
+    expect(ids(true, 'suppliers')).toEqual([tagged.id]);
+    expect(ids(true, 'groups')).toEqual([workGroup.id]);
+    expect(ids(true, 'all', '55444')).toEqual([stranger.id]);
+    // The unread of the chats shown.
+    expect(tabCounts(all, people, roles, true).all).toBe(1);
+    expect(tabCounts(all, people, roles, false).all).toBe(2);
   });
 });

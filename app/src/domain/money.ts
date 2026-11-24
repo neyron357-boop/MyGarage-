@@ -6,6 +6,15 @@ export function roundFils(x: number): number {
   return r === 0 ? 0 : r;
 }
 
+/**
+ * The customer's price from a purchase cost at the garage's markup (`Settings.defaultMarkupBp`, 30 % by default): both
+ * without VAT — the cost is typed without it, the VAT goes on the price as the line counts it. One place for it (v0.81:
+ * the line's sheet, «+ Цена», a supplier's answer).
+ */
+export function withMarkup(costFils: number, markupBp: number): number {
+  return roundFils((costFils * (10000 + markupBp)) / 10000);
+}
+
 /** Parse a user-entered amount in AED ("1 234,50", "1234.5") to fils. Returns null if invalid. */
 export function parseAed(input: string | number | null | undefined): number | null {
   if (input === null || input === undefined) return null;

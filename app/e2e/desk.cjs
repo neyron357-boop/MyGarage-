@@ -248,10 +248,10 @@ async function launchBrowser() {
             return main && aside && more ? { mainRight: Math.round(main.right), asideLeft: Math.round(aside.left), top: Math.round(Math.abs(main.top - aside.top)), tiles: document.querySelectorAll('.job-desk-actions .action-tile').length, more: getComputedStyle(more).display } : null;
           });
           check('job: lines and the car side by side, the "…" tiles beside them', !!cols && cols.mainRight < cols.asideLeft && cols.top < 12 && cols.tiles > 3 && cols.more === 'none', cols);
-          // 2 — a part's sheet; Escape closes it.
+          // 2 — the quick sheet on «Запчасть» (v0.81); Escape closes it.
           await p.keyboard.press('2');
           await settle(700);
-          check('keys: 2 on a job adds a part', await p.getByRole('dialog').getByText('Добавить запчасть').isVisible());
+          check('keys: 2 on a job adds a part', await p.getByRole('dialog').getByRole('radio', { name: 'Запчасть', checked: true }).isVisible());
           const sheet = await p.locator('.mantine-Modal-content').last().boundingBox();
           check('sheets: 520 px wide on a PC', !!sheet && Math.abs(sheet.width - 520) <= 2, sheet);
           await p.keyboard.press('Escape');

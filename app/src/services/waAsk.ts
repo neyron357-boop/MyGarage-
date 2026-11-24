@@ -1,7 +1,7 @@
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
-import { roundFils } from '../domain/money';
+import { withMarkup } from '../domain/money';
 import { askFor, kindOnly, netUnit, parseReply, type AskLine } from '../domain/supplierReply';
 import type { Order, OrderItem, PartAsk, PartOffer, Supplier, Vehicle } from '../domain/types';
 import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
@@ -265,7 +265,7 @@ async function applyReply(orderId: string, askId: string, m: { id: string; t: nu
       if (s.ask.prices === 'price' && item.approvalState === 'draft' && !item.unitPriceFils && best.costFils !== undefined) {
         const rate = item.vatRateBp || settings.vatRateBp;
         const mode = vatModeOf(item, settings.pricesIncludeVat);
-        const net = roundFils(best.costFils * (1 + settings.defaultMarkupBp / 10000));
+        const net = withMarkup(best.costFils, settings.defaultMarkupBp);
         Object.assign(patch, priceFromEntered(enteredPrice({ unitPriceFils: net }, rate, mode), rate, mode));
       }
     }

@@ -12,13 +12,13 @@ import type { Reminder } from './types';
  * days the manager set; and a summary once a morning.
  *
  * The app cannot wake itself on an iPhone, so it leaves a PLAN on the garage's server (server/src/push.mjs), which
- * keeps the time and sends: groups (a kind — «Назвать цену»), each with its members (a car, from when) and its
+ * keeps the time and sends: groups (a kind — «Ждём ответа»), each with its members (a car, from when) and its
  * repeat. The plan looks a week ahead — «Сегодня» as it will be at each coming hour and morning — so a time promised
  * for tomorrow, a part to collect on Thursday, a reminder for Monday come by themselves, though nobody opens the app.
  */
 
 /** Every kind of «Сегодня» can be notified of. In the order the settings and the summary show them. */
-export const NOTIFY_KINDS: TaskKind[] = ['price', 'answer', 'order', 'pickup', 'promised', 'booked', 'collect', 'outsource', 'returnBy', 'debt', 'reminder', 'followUp', 'service'];
+export const NOTIFY_KINDS: TaskKind[] = ['answer', 'order', 'pickup', 'promised', 'booked', 'collect', 'outsource', 'returnBy', 'debt', 'reminder', 'followUp', 'service'];
 
 export interface NotifyRule {
   on: boolean;
@@ -55,7 +55,6 @@ export type KindTime =
   | 'day';
 
 export const KIND_TIME: Record<TaskKind, KindTime> = {
-  price: 'since',
   answer: 'since',
   order: 'since',
   collect: 'since',
@@ -72,8 +71,6 @@ export const KIND_TIME: Record<TaskKind, KindTime> = {
 };
 
 export const DEFAULT_RULES: Record<TaskKind, NotifyRule> = {
-  // The user's own example: a job whose lines have no price told — after an hour, then every hour.
-  price: { on: true, after: 60, every: 60 },
   answer: { on: true, after: 120, every: 120 },
   order: { on: true, after: 60, every: 120 },
   pickup: { on: true, after: 0, every: 180 },

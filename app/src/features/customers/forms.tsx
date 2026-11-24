@@ -7,7 +7,7 @@ import type { Customer, Plate, Vehicle, VehicleType } from '../../domain/types';
 import { VEHICLE_TYPES, vehicleTypeOf } from '../../domain/vehicleType';
 import { createCustomer, createVehicle, suggestCustomers, updateCustomer, updateVehicle, type CustomerInput, type VehicleInput } from '../../services/customers';
 import { setJobCustomer } from '../../services/orders';
-import { PersonAvatar } from '../../ui/components';
+import { FormRow, PersonAvatar } from '../../ui/components';
 import { Fold } from '../../ui/Fold';
 import { haptic } from '../../ui/haptics';
 import { PlateInput } from '../../ui/PlateInput';
@@ -51,10 +51,51 @@ function More({ label, children, open: initial = false }: { label: string; child
   );
 }
 
-export function CustomerFields({ value, onChange, compact, after }: { value: CustomerInput; onChange: (v: CustomerInput) => void; compact?: boolean; after?: ReactNode }) {
+/**
+ * Everything of a customer but the name and the number (v0.81: under «Ещё» in their card — the documents' language, the
+ * channel, a WhatsApp of its own, the company, TRN, the source, notes).
+ */
+export function CustomerMore({ value, onChange }: { value: CustomerInput; onChange: (v: CustomerInput) => void }) {
   const { t } = useTranslation();
   const set = <K extends keyof CustomerInput>(k: K, v: CustomerInput[K]) => onChange({ ...value, [k]: v });
-  const extra = (
+  return (
+    <Stack gap="md">
+      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+        <div>
+          <Label>{t('customer.docLanguage')}</Label>
+          <SegmentedControl
+            fullWidth
+            value={value.docLanguage}
+            onChange={(v) => set('docLanguage', v as CustomerInput['docLanguage'])}
+            data={[
+              { value: 'ru', label: 'Русский' },
+              { value: 'en', label: 'English' },
+            ]}
+          />
+        </div>
+        <div>
+          <Label>{t('customer.channel')}</Label>
+          <SegmentedControl
+            fullWidth
+            value={value.preferredChannel}
+            onChange={(v) => set('preferredChannel', v as CustomerInput['preferredChannel'])}
+            data={[
+              { value: 'whatsapp', label: 'WhatsApp' },
+              { value: 'telegram', label: 'Telegram' },
+              { value: 'call', label: t('customer.call') },
+            ]}
+          />
+        </div>
+      </SimpleGrid>
+      <CustomerExtra value={value} onChange={onChange} />
+    </Stack>
+  );
+}
+
+function CustomerExtra({ value, onChange }: { value: CustomerInput; onChange: (v: CustomerInput) => void }) {
+  const { t } = useTranslation();
+  const set = <K extends keyof CustomerInput>(k: K, v: CustomerInput[K]) => onChange({ ...value, [k]: v });
+  return (
     <Stack gap="sm">
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <TextInput label={t('customer.whatsapp')} description={t('customer.whatsappHint')} type="tel" value={value.whatsapp ?? ''} onChange={(e) => set('whatsapp', e.currentTarget.value)} />
@@ -89,43 +130,6 @@ export function CustomerFields({ value, onChange, compact, after }: { value: Cus
         data={['referral', 'google_maps', 'social', 'signage', 'repeat', 'other'].map((s) => ({ value: s, label: t(`source.${s}`) }))}
       />
       <Textarea label={t('common.notes')} placeholder={t('customer.notesHint')} autosize minRows={2} value={value.notes ?? ''} onChange={(e) => set('notes', e.currentTarget.value)} />
-    </Stack>
-  );
-  return (
-    <Stack gap="md">
-      <SimpleGrid cols={{ base: 1, sm: 2 }}>
-        <TextInput label={t('customer.name')} required value={value.name} onChange={(e) => set('name', e.currentTarget.value)} data-autofocus autoCapitalize="words" autoComplete="off" />
-        <TextInput label={t('customer.phone')} required type="tel" inputMode="tel" placeholder="050 123 4567" value={value.phone} onChange={(e) => set('phone', e.currentTarget.value)} />
-      </SimpleGrid>
-      {after}
-      <SimpleGrid cols={{ base: 1, sm: 2 }}>
-        <div>
-          <Label>{t('customer.docLanguage')}</Label>
-          <SegmentedControl
-            fullWidth
-            value={value.docLanguage}
-            onChange={(v) => set('docLanguage', v as CustomerInput['docLanguage'])}
-            data={[
-              { value: 'ru', label: 'Русский' },
-              { value: 'en', label: 'English' },
-            ]}
-          />
-        </div>
-        <div>
-          <Label>{t('customer.channel')}</Label>
-          <SegmentedControl
-            fullWidth
-            value={value.preferredChannel}
-            onChange={(v) => set('preferredChannel', v as CustomerInput['preferredChannel'])}
-            data={[
-              { value: 'whatsapp', label: 'WhatsApp' },
-              { value: 'telegram', label: 'Telegram' },
-              { value: 'call', label: t('customer.call') },
-            ]}
-          />
-        </div>
-      </SimpleGrid>
-      {compact ? <More label={t('customer.moreFields')}>{extra}</More> : extra}
     </Stack>
   );
 }
@@ -240,17 +244,49 @@ export function CustomerModal({
       } else onSaved?.(await createCustomer(v));
       onClose();
     }, 'common.saved');
+  // A compact card (v0.81, the user's brief: «имя, один контактный номер для звонка и WhatsApp и кнопка «Сохранить». Все
+  // поля и кнопка доступны без прокрутки»): two rows and «Сохранить» right under them — in sight above the keyboard;
+  // everything else under «Ещё».
   return (
-    <Modal opened={opened} onClose={onClose} title={customer ? t('customer.edit') : t('customer.new')} size="lg">
-      <CustomerFields value={v} onChange={setV} after={suggestions || undefined} />
-      <Group justify="flex-end" mt="lg">
-        <Button variant="default" onClick={onClose}>
-          {t('common.cancel')}
-        </Button>
-        <Button onClick={save} loading={busy}>
+    <Modal opened={opened} onClose={onClose} title={customer ? t('customer.edit') : t('customer.new')} size="md" classNames={{ content: 'sheet-grouped customer-sheet' }}>
+      <Stack gap="md">
+        <div className="ios-group">
+          <FormRow label={t('customer.name')}>
+            <TextInput
+              aria-label={t('customer.name')}
+              placeholder={t('newOrder.namePlaceholder')}
+              value={v.name}
+              onChange={(e) => setV({ ...v, name: e.currentTarget.value })}
+              data-autofocus
+              autoCapitalize="words"
+              autoComplete="off"
+              enterKeyHint="next"
+              w="100%"
+            />
+          </FormRow>
+          <FormRow label={t('customer.phoneWa')}>
+            <TextInput
+              aria-label={t('customer.phone')}
+              type="tel"
+              inputMode="tel"
+              placeholder="050 123 4567"
+              value={v.phone}
+              onChange={(e) => setV({ ...v, phone: e.currentTarget.value })}
+              autoComplete="off"
+              enterKeyHint="done"
+              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && (e.preventDefault(), void save())}
+              w="100%"
+            />
+          </FormRow>
+        </div>
+        {suggestions}
+        <Button size="lg" fullWidth onClick={save} loading={busy}>
           {t('common.save')}
         </Button>
-      </Group>
+        <More label={t('customer.more')}>
+          <CustomerMore value={v} onChange={setV} />
+        </More>
+      </Stack>
     </Modal>
   );
 }

@@ -73,6 +73,11 @@ export interface Settings {
    * requests to suppliers and their answers. Missing — the defaults (`waAutoOf`); written only by `saveWaAuto`.
    */
   waAuto?: { [K in keyof WaAuto]?: Partial<WaAuto[K]> };
+  /**
+   * The statuses the manager gave WhatsApp chats by hand (v0.81, domain/whatsapp.ts `WaTag`): by chat id. Written only by
+   * `tagChats` (services/whatsapp.ts).
+   */
+  waChatTags?: Record<string, 'customer' | 'supplier' | 'service' | 'work'>;
 }
 
 export interface Customer {
@@ -1181,6 +1186,14 @@ export interface Expense {
    * share of the VAT); the parts share this id (domain/expenseParts.ts). Each is changed and deleted as any expense.
    */
   splitId?: string;
+  /**
+   * Recorded off a scanned receipt (v0.81, the user's brief: «отключить автоматическую привязку расхода к заказу… отправка
+   * только после сохранения ручной привязки»): it is put on a job by hand, and goes to the boss only by «Отправить
+   * руководителю» — never by itself (services/waAuto.ts).
+   */
+  scanned?: true;
+  /** Sent to the boss by hand (v0.81): when, and for which job — the sheet says so; another job picked sends again. */
+  toBoss?: { at: string; orderId: string };
   /** Entered by mistake: cancelled (a cash entry is reversed in the cash book, nothing is deleted). */
   voidedAt?: string;
 }

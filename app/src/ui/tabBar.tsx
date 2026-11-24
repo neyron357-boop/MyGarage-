@@ -1,4 +1,4 @@
-import { IconBrandWhatsappFilled, IconCashBanknoteFilled, IconDotsFilled, IconLayoutKanbanFilled, IconPlus, IconSearch, type Icon } from '@tabler/icons-react';
+import { IconBrandWhatsappFilled, IconCashBanknoteFilled, IconDotsFilled, IconLayoutKanbanFilled, IconPlus, type Icon } from '@tabler/icons-react';
 import { animate, type AnimationPlaybackControls } from 'motion';
 import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,16 +9,16 @@ import { haptic } from './haptics';
 import { hintNavigation, scrollToTop } from './stack';
 import { mayLeave } from './unsaved';
 
-// Filled symbols, as Apple asks for tab bars (the magnifier of Search stays a line, as in iOS).
+// Filled symbols, as Apple asks for tab bars. No «Поиск» (v0.81, the user's brief: «из нижней навигации убрать пункт «Поиск»»):
+// the search is the board's own field, on top of «Все».
 type Tab = { to: string; icon: Icon; key: string };
 const BOARD: Tab = { to: '/', icon: IconLayoutKanbanFilled, key: 'nav.board' };
-const SEARCH: Tab = { to: '/search', icon: IconSearch, key: 'nav.search' };
 const MONEY: Tab = { to: '/money', icon: IconCashBanknoteFilled, key: 'nav.money' };
 const MORE: Tab = { to: '/more', icon: IconDotsFilled, key: 'nav.more' };
 /** The garage's WhatsApp (v0.80, «поместить модуль ватсап прямо тут»): a tab of its own while there is its server. */
 const WHATSAPP: Tab = { to: '/whatsapp', icon: IconBrandWhatsappFilled, key: 'nav.whatsapp' };
-const TABS_PLAIN: Tab[] = [BOARD, SEARCH, MONEY, MORE];
-const TABS_WA: Tab[] = [BOARD, SEARCH, MONEY, WHATSAPP, MORE];
+const TABS_PLAIN: Tab[] = [BOARD, MONEY, MORE];
+const TABS_WA: Tab[] = [BOARD, MONEY, WHATSAPP, MORE];
 const MORE_PATHS = ['/more', '/notes', '/whatsapp', '/customers', '/vehicles', '/parts', '/reports', '/settings'];
 
 /** WhatsApp has its tab: the app is the garage server's device (WhatsApp lives on that server). */

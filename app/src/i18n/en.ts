@@ -220,6 +220,11 @@ export const en: typeof ru = {
     storage: 'Storage {{days}} d',
   },
   board: {
+    // v0.81: the search on top of the board, «Filters» in place of the tabs.
+    filters: 'Filters',
+    filterOn: 'Selected',
+    filterOff: 'Show all',
+    findPlaceholder: 'Plate, name, phone',
     kanbanHint: 'Empty stages are folded — hover to see the name',
     title: 'Workshop',
     inShop: 'In the workshop',
@@ -291,6 +296,9 @@ export const en: typeof ru = {
     },
   },
   customer: {
+    // v0.81: one number — calls and WhatsApp.
+    phoneWa: 'Phone',
+    more: 'More',
     noName: 'Customer without a name',
     contact: 'Contact person',
     visits: 'visits',
@@ -458,7 +466,17 @@ export const en: typeof ru = {
     declinedRecs: 'Declined recommendations',
     mileageHistory: 'Mileage by visit',
   },
+  // v0.81: the job's quick «＋» sheet and «+ Price».
+  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add' },
+  price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   newOrder: {
+    // v0.81: the VIN in the plate's card.
+    scanVin: 'Scan VIN',
+    typeVin: 'Type VIN',
+    vinReading: 'Reading VIN…',
+    vinOk: 'VIN is right',
+    vinRead: 'VIN checked',
+    vinNone: 'VIN not read',
     photo: 'Camera',
     retake: 'Retake',
     removePhoto: 'Remove photo',
@@ -1124,6 +1142,11 @@ export const en: typeof ru = {
     reissued: 'Done: credit note {{credit}}, new invoice {{invoice}}',
   },
   job: {
+    // v0.81: the quote's state in the job.
+    quoteUnsent: 'Quote not sent',
+    quoteNewUnsent: 'New lines not sent',
+    quoteSend: 'Send',
+    quoteSentAgo: 'Quote sent · {{time}}',
     tab: { main: 'Job', notes: 'Notes' },
     handedOver: 'Handed over',
     due: 'Due',
@@ -1863,6 +1886,11 @@ export const en: typeof ru = {
   },
   // The garage's WhatsApp in the app (v0.78): the garage's server is a linked device of the account.
   wa: {
+    // v0.81: «Garage only», chats' statuses, voice messages, an expense to the boss.
+    garageOnly: 'Garage only',
+    tags: { pick: 'Select', give: 'Status · {{n}}', title: 'Status of chats · {{n}}', none: 'No status', done: 'Status «{{tag}}» — chats: {{n}}', cleared: 'Status removed — chats: {{n}}' },
+    voice: { mic: 'Voice message', hold: 'Hold to record', slide: 'cancel' },
+    boss: { send: 'Send to the boss', sentAt: 'Sent · {{time}}', pickJob: 'Pick the job first', noJob: 'Pick the job first', noChat: 'The boss\'s chat is not set', sent: 'Sent to the boss' },
     setup: 'Setup',
     unreadN_one: '{{count}} unread',
     unreadN_few: '{{count}} unread',
@@ -1891,7 +1919,7 @@ export const en: typeof ru = {
     pickBoss: "The boss's chat",
     search: 'Name or number',
     tab: { all: 'All', unread: 'Unread', customers: 'Customers', suppliers: 'Suppliers', groups: 'Groups' },
-    who: { customer: 'Customer', supplier: 'Supplier', employee: 'Staff', driver: 'Driver' },
+    who: { customer: 'Customer', supplier: 'Supplier', employee: 'Staff', driver: 'Driver', service: 'Services', work: 'Work' },
     kind: { photo: 'Photo', video: 'Video', voice: 'Voice message', audio: 'Audio', file: 'File', sticker: 'Sticker', place: 'Location', card: 'Contact', call: 'Call', gone: 'Message deleted', poll: 'Poll', other: 'Open in WhatsApp', text: 'Message' },
     ticks: { failed: 'Not sent', wait: 'Sending', sent: 'Sent', got: 'Delivered', read: 'Read' },
     unit: { kb: 'KB', mb: 'MB' },

@@ -12,8 +12,8 @@ import { ownsSideways } from './swipe';
  */
 
 /** The tab bar's places, in its order (WhatsApp's — v0.80, while the garage has its server: as `ui/tabBar.tsx` shows it). */
-export const MAIN_TABS = ['/', '/search', '/money', '/more'] as const;
-const MAIN_TABS_WA = ['/', '/search', '/money', '/whatsapp', '/more'] as const;
+export const MAIN_TABS = ['/', '/money', '/more'] as const;
+const MAIN_TABS_WA = ['/', '/money', '/whatsapp', '/more'] as const;
 export const mainTabs = (): readonly string[] => (waCan() ? MAIN_TABS_WA : MAIN_TABS);
 
 /** What a sideways swipe never takes from. */

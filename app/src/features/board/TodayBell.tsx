@@ -15,7 +15,6 @@ import {
   IconMessageCircle,
   IconPlus,
   IconShoppingCart,
-  IconTag,
   IconTruckDelivery,
   IconX,
   type Icon,
@@ -49,7 +48,6 @@ const NO_REMINDERS: Reminder[] = [];
 export const TASK_META: Record<TaskKind, { icon: Icon; color: string }> = {
   promised: { icon: IconClock, color: 'orange' },
   answer: { icon: IconHourglassHigh, color: 'orange' },
-  price: { icon: IconTag, color: 'grape' },
   order: { icon: IconShoppingCart, color: 'orange' },
   pickup: { icon: IconTruckDelivery, color: 'cobalt' },
   returnBy: { icon: IconArrowBackUp, color: 'red' },
@@ -109,8 +107,6 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
         return t('today.promised', { when: dueLabel(task.at, lang) });
       case 'answer':
         return t('today.answer', { time: shortDuration(hoursBetween(task.at), lang) });
-      case 'price':
-        return t('today.price');
       case 'order':
         return t('today.order', { n: task.count });
       case 'pickup':

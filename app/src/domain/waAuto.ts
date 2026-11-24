@@ -199,7 +199,7 @@ export type BossEvent =
   | { kind: 'invoice'; number: string; car: CarFace; customer: string; total: number; jobNumber: number }
   | { kind: 'payment'; amount: number; method: string; car?: CarFace; customer: string; jobNumber?: number; due?: number }
   | { kind: 'income'; amount: number; method: string; what: string; customer?: string; debt: boolean }
-  | { kind: 'expense'; amount: number; method: string; category: string; vendor?: string; note?: string; car?: CarFace; jobNumber?: number; parts?: { method: string; amount: number }[] };
+  | { kind: 'expense'; amount: number; method: string; category: string; vendor?: string; note?: string; car?: CarFace; jobNumber?: number; parts?: { method: string; amount: number }[]; customer?: string; lines?: { name: string; qty?: number }[] };
 
 const EMOJI: Record<BossEvent['kind'], string> = { estimate: '📋', invoice: '🧾', payment: '💵', income: '💵', expense: '💸' };
 
@@ -232,6 +232,9 @@ export function bossText(e: BossEvent, lang: Lang): string {
         [e.category, e.vendor].filter(Boolean).join(' · '),
         e.note?.trim() ? e.note.trim() : '',
         e.jobNumber || e.car ? `${w.for}: ${job(e.jobNumber, e.car)}` : '',
+        e.customer ? `${w.customer}: ${e.customer}` : '',
+        // The paper's positions (v0.81, sent by hand once its job is picked): one a line.
+        ...(e.lines?.length ? ['', ...e.lines.map((l, i) => `${i + 1}. ${l.name}${l.qty && l.qty !== 1 ? ` × ${l.qty}` : ''}`)] : []),
       ]
         .filter(Boolean)
         .join('\n');

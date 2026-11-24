@@ -49,11 +49,14 @@ describe('Today list', () => {
     expect(run([job({ phase: 'out', promisedReadyAt: dubaiAt('2026-11-12', 10) })])).toEqual([]);
   });
 
-  it('a customer who has not answered for hours, a price not sent', () => {
+  it('a customer who has not answered for hours; a price not sent is no task of its own (v0.81)', () => {
     expect(run([job({ phase: 'wait', waitingSince: '2026-11-12T07:00:00.000Z' })])).toEqual([]);
     expect(run([job({ phase: 'wait', waitingSince: '2026-11-12T05:00:00.000Z' })])).toMatchObject([{ kind: 'answer', late: false }]);
     expect(run([job({ phase: 'wait', waitingSince: '2026-11-10T05:00:00.000Z' })])).toMatchObject([{ kind: 'answer', late: true }]);
-    expect(run([job({ phase: 'price', stageChangedAt: '2026-11-12T03:00:00.000Z' })])).toMatchObject([{ kind: 'price' }]);
+    // v0.81: draft lines with no price told, for hours and for days — the job says it itself, «Сегодня» lists nothing.
+    const draft = item({ approvalState: 'draft', unitPriceFils: 0, createdAt: '2026-11-12T03:00:00.000Z' });
+    expect(run([job({ phase: 'price', stageChangedAt: '2026-11-12T03:00:00.000Z', items: [draft] })])).toEqual([]);
+    expect(run([job({ phase: 'price', stageChangedAt: '2026-11-09T03:00:00.000Z', items: [{ ...draft, createdAt: '2026-11-09T03:00:00.000Z' }] })])).toEqual([]);
   });
 
   it('parts: agreed and not ordered, ordered and due, a return deadline close', () => {

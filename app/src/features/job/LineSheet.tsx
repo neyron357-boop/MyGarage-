@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
 import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
 import { itemAmounts, itemCostPaid, itemTitle, lineName } from '../../domain/items';
-import { formatAed, roundFils } from '../../domain/money';
+import { formatAed, roundFils, withMarkup } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import { buildSuggestions, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
 import type { OrderItem, Outsource, PartOffer } from '../../domain/types';
@@ -258,7 +258,7 @@ export function LineSheet({
     haptic('selection');
   };
   /** The customer's price from the purchase cost and the garage's markup, as prices are typed now. */
-  const fromCost = (c: number | undefined) => (c === undefined ? undefined : enteredPrice({ unitPriceFils: roundFils(c * (1 + b.settings.defaultMarkupBp / 10000)) }, taxRate, mode));
+  const fromCost = (c: number | undefined) => (c === undefined ? undefined : enteredPrice({ unitPriceFils: withMarkup(c, b.settings.defaultMarkupBp) }, taxRate, mode));
   const own = kind === 'part' && part === 'customer';
   // Work is one (an edited line keeps the quantity it has); a part and a service — as many as typed (v0.68: a service's
   // quantity, the user: «по услугам добавить количество»).

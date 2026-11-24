@@ -1,18 +1,19 @@
-import { ActionIcon, Button, Group, Loader, Modal, Stack, Text } from '@mantine/core';
+import { ActionIcon, Button, Group, Loader, Modal, Stack, Switch, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconCloudOff, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconBriefcase, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { dayShort, dubaiDate, dubaiTime } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
-import { CHAT_TABS, chatPath, chatTitle, filterChats, tabCounts, waDigits, whoOf, type ChatTab, type WaChat, type Who, type WhoKind } from '../../domain/whatsapp';
+import { CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROLES, tabCounts, WA_TAGS, waDigits, whoOf, type ChatTab, type WaChat, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
-import { loadChats, numberOnWa, refreshWa, waCan, waReady, type WaStore } from '../../services/whatsapp';
+import { loadChatRoles, loadChats, numberOnWa, refreshWa, setWaPrefs, tagChats, waCan, waPrefs, waReady, type WaStore } from '../../services/whatsapp';
+import { haptic } from '../../ui/haptics';
 import { useWaStatus } from '../../ui/waSel';
 import { copyText } from '../../ui/clipboard';
-import { EmptyState, List, ListRow, PageHeader, ScrollTabs, SearchField } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, ScrollTabs, SearchField, StickyBar } from '../../ui/components';
 import { useDesk } from '../../ui/desk';
 import { setWaSideHidden, useWaSideHidden } from '../../ui/deskSide';
 import { useAction, useErrorText, useScreenLiveQuery } from '../../ui/hooks';
@@ -115,18 +116,27 @@ export function WaGate({ s }: { s: WaStore }) {
 
 /* ---------- The list ---------- */
 
-const ChatRow = memo(function ChatRow({ c, who, when, active, onOpen }: { c: WaChat; who?: Who; when: string; active: boolean; onOpen: (c: WaChat) => void }) {
+const ChatRow = memo(function ChatRow({ c, who, role, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
   const { t } = useTranslation();
   const title = c.self ? t('wa.self') : chatTitle(c, who);
   return (
     <ListRow
-      selected={active}
+      selected={active || picked}
       onClick={() => onOpen(c)}
-      left={<WaAvatar id={c.id} name={title} group={c.group} size={48} />}
+      left={
+        <span className="wa-row-left">
+          {picking && (
+            <span className="wa-pick" aria-hidden>
+              {picked ? <IconCircleCheckFilled size={24} color="var(--mantine-color-cobalt-6)" /> : <IconCircle size={24} stroke={1.6} color="var(--app-label-3)" />}
+            </span>
+          )}
+          <WaAvatar id={c.id} name={title} group={c.group} size={48} />
+        </span>
+      }
       title={
-        <span className="wa-row-title" data-wa-chat={c.id}>
+        <span className="wa-row-title" data-wa-chat={c.id} data-wa-picked={picked || undefined}>
           <span className="wa-row-name">{title}</span>
-          {who && <WhoTag kind={who.kind} />}
+          {role && <WhoTag kind={role} />}
         </span>
       }
       subtitle={c.last ? <LastLine last={c.last} group={c.group} /> : undefined}
@@ -150,17 +160,86 @@ const ChatRow = memo(function ChatRow({ c, who, when, active, onOpen }: { c: WaC
   );
 });
 
+/** The statuses a chat can be given by hand, each with its symbol (v0.81). */
+const TAG_ICON: Record<WaTag, Icon> = { customer: IconUser, supplier: IconTruck, service: IconTool, work: IconBriefcase };
+
+/**
+ * The statuses for the chats picked (v0.81, the user's brief: «отметить несколько чатов и одним действием присвоить им общий
+ * статус»): one tap — all of them; «Без статуса» takes the hand-given one off (the base's own — a customer's number — stays).
+ */
+function TagSheet({ opened, onClose, n, onTag }: { opened: boolean; onClose: () => void; n: number; onTag: (tag: WaTag | null) => void }) {
+  const { t } = useTranslation();
+  return (
+    <Modal opened={opened} onClose={onClose} title={t('wa.tags.title', { n })} classNames={{ content: 'sheet-grouped' }}>
+      <List>
+        {WA_TAGS.map((tag) => {
+          const I = TAG_ICON[tag];
+          return (
+            <ListRow key={tag} left={<I size={20} stroke={1.9} color="var(--mantine-color-cobalt-6)" aria-hidden />} title={t(`wa.who.${tag}`)} onClick={() => onTag(tag)} chevron data-wa-tag={tag} />
+          );
+        })}
+        <ListRow left={<IconX size={20} stroke={1.9} color="var(--mantine-color-dimmed)" aria-hidden />} title={<Text span inherit c="dimmed">{t('wa.tags.none')}</Text>} onClick={() => onTag(null)} />
+      </List>
+    </Modal>
+  );
+}
+
 function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<string, Who>; active?: string; onOpen: (c: WaChat) => void }) {
   const { t } = useTranslation();
   const when = useWhen();
+  const { run } = useAction();
   const [tab, setTab] = useState<ChatTab>('all');
   const [query, setQuery] = useState('');
-  const rows = useMemo(() => filterChats(s.chats, { tab, query, people }), [s.chats, tab, query, people]);
-  const counts = useMemo(() => tabCounts(s.chats, people), [s.chats, people]);
-  const { limit, more } = useMoreRows(rows.length, `${tab}|${query}`);
+  // «Только гараж» (v0.81): on by default, kept on the device; the garage's chats are its people's, those given a status,
+  // its groups.
+  const [garageOnly, setGarageOnly] = useState(() => waPrefs().garageOnly);
+  const roles = useScreenLiveQuery(loadChatRoles, []) ?? NO_ROLES;
+  const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly }), [s.chats, tab, query, people, roles, garageOnly]);
+  const counts = useMemo(() => tabCounts(s.chats, people, roles, garageOnly), [s.chats, people, roles, garageOnly]);
+  const { limit, more } = useMoreRows(rows.length, `${tab}|${query}|${garageOnly}`);
+  // «Выбрать чаты» (v0.81): several picked, one status to all of them.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [tagging, setTagging] = useState(false);
+  const endPick = () => {
+    setPicking(false);
+    setPicked(new Set());
+  };
+  const tap = useCallback(
+    (c: WaChat) => {
+      if (!picking) return onOpen(c);
+      haptic('selection');
+      setPicked((p) => {
+        const n = new Set(p);
+        if (n.has(c.id)) n.delete(c.id);
+        else n.add(c.id);
+        return n;
+      });
+    },
+    [picking, onOpen],
+  );
+  const tag = (to: WaTag | null) =>
+    void run(async () => {
+      const n = picked.size;
+      await tagChats([...picked], to);
+      haptic('success');
+      setTagging(false);
+      endPick();
+      notifications.show({ color: 'green', message: to ? t('wa.tags.done', { n, tag: t(`wa.who.${to}`) }) : t('wa.tags.cleared', { n }) });
+    });
   return (
     <>
       <SearchField value={query} onChange={setQuery} placeholder={t('wa.search')} />
+      <div className="wa-list-tools">
+        <Button variant={picking ? 'light' : 'subtle'} size="compact-md" leftSection={picking ? <IconX size={16} /> : <IconListCheck size={16} />} onClick={() => (picking ? endPick() : setPicking(true))} data-wa-pick>
+          {picking ? t('common.cancel') : t('wa.tags.pick')}
+        </Button>
+        <Switch label={t('wa.garageOnly')} labelPosition="left" checked={garageOnly} onChange={(e) => {
+            const on = e.currentTarget.checked;
+            setGarageOnly(on);
+            setWaPrefs({ garageOnly: on });
+          }} data-wa-garage-only />
+      </div>
       <ScrollTabs value={tab} onChange={(v) => setTab(v as ChatTab)} items={CHAT_TABS.map((k) => ({ value: k, label: t(`wa.tab.${k}`), count: k === 'all' ? undefined : counts[k] || undefined }))} mb="sm" />
       {rows.length === 0 ? (
         s.chatsLoading && !s.chatsAt ? (
@@ -173,11 +252,19 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       ) : (
         <List className="wa-chats">
           {rows.slice(0, limit).map((c) => (
-            <ChatRow key={c.id} c={c} who={whoOf(c, people)} when={when(c.t)} active={c.id === active} onOpen={onOpen} />
+            <ChatRow key={c.id} c={c} who={whoOf(c, people)} role={chatRole(c, people, roles)} when={when(c.t)} active={!picking && c.id === active} onOpen={tap} picking={picking} picked={picked.has(c.id)} />
           ))}
           {more()}
         </List>
       )}
+      {picking && (
+        <StickyBar>
+          <Button fullWidth disabled={!picked.size} leftSection={<IconTag size={18} />} onClick={() => setTagging(true)} data-wa-tag-picked>
+            {t('wa.tags.give', { n: picked.size })}
+          </Button>
+        </StickyBar>
+      )}
+      <LazySheet opened={tagging}>{(o) => <TagSheet opened={o} onClose={() => setTagging(false)} n={picked.size} onTag={tag} />}</LazySheet>
     </>
   );
 }

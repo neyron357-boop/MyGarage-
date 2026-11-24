@@ -117,16 +117,24 @@ async function launchBrowser() {
     await page.evaluate(() => localStorage.setItem('mygarage.board', JSON.stringify({ hidden: ['look', 'price', 'wait', 'work', 'pay', 'out', 'booked'], size: 'large' })));
     await page.reload();
     await settle(900);
-    await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /Долги|Debts/ }).click();
-    await settle(600);
+    // v0.81: the board's lists are «Фильтры» — a sheet from the head (no strip of tabs on a phone).
+    const boardFilter = async (label, pic) => {
+      await page.locator('[data-board-filters]').filter({ visible: true }).click();
+      await settle(500);
+      if (pic) await shot(pic);
+      await page.getByRole('dialog').locator('.list-row').filter({ hasText: label }).first().click();
+      await settle(600);
+    };
+    await boardFilter(/Долги|Debts/, `${prefix}-01g-board-filters`);
     await shot(`${prefix}-01c-board-debts`);
     // v0.22: the archive — small rows with their date.
-    await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /Архив|Archive/ }).click();
-    await settle(700);
+    await boardFilter(/Архив|Archive/);
     await shot(`${prefix}-01d-board-archive`);
-    await page.locator('.screen[data-role="top"] [role="tab"]').filter({ hasText: /^(Все|All)/ }).click();
-    // v0.22: «Вид» — the sheet, and the board in «Компактно» (then back to large cards for the rest of the tour).
-    await page.locator('.screen[data-role="top"]').getByRole('button', { name: /^(Вид|View)$/ }).click();
+    await boardFilter(/^(Все|All)/);
+    // v0.22: «Вид» — the sheet (v0.81: at the foot of «Фильтры»), and the board in «Компактно» (then back to large cards).
+    await page.locator('[data-board-filters]').filter({ visible: true }).click();
+    await settle(400);
+    await page.getByRole('dialog').getByRole('button', { name: /^(Вид|View)$/ }).click();
     await settle(700);
     await shot(`${prefix}-01e-board-view`);
     await page.getByRole('dialog').locator('.mantine-SegmentedControl-label', { hasText: /Компактно|Compact/ }).click();

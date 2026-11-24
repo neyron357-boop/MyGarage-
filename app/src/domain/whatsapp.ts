@@ -156,6 +156,32 @@ export function chatTitle(chat: Pick<WaChat, 'name' | 'phone' | 'group'>, who?: 
   return who?.name?.trim() || chat.name.trim() || (chat.phone ? `+${chat.phone}` : '');
 }
 
+/* ---------- The garage's chats (v0.81) ---------- */
+
+/**
+ * A status the manager gives chats by hand (v0.81, the user's brief: «отметить несколько чатов и одним действием присвоить им
+ * общий статус — «Клиент», «Поставщик» или «Услуги»»): kept with the garage's settings (`Settings.waChatTags`), the same
+ * on every device; it is only what the chat is to the garage — no customer or supplier is made of it.
+ */
+export type WaTag = 'customer' | 'supplier' | 'service' | 'work';
+export const WA_TAGS: WaTag[] = ['customer', 'supplier', 'service', 'work'];
+
+/** What makes a chat the garage's own: its statuses given by hand, and the groups the garage writes to by itself. */
+export interface ChatRoles {
+  tags: Record<string, WaTag>;
+  /** The work group, the boss, the wash, the customers' own groups (domain/waAuto.ts, `Customer.waGroup`). */
+  groups: Set<string>;
+}
+export const NO_ROLES: ChatRoles = { tags: {}, groups: new Set() };
+
+/**
+ * What a chat is to the garage, if anything: the person behind its number (a customer, a supplier, a mechanic, a driver —
+ * the statuses the base gives by itself), else the status given by hand, else a group the garage writes to («work»).
+ */
+export function chatRole(chat: Pick<WaChat, 'id' | 'phone' | 'group'>, people: Map<string, Who>, roles: ChatRoles): WhoKind | WaTag | undefined {
+  return whoOf(chat, people)?.kind ?? roles.tags[chat.id] ?? (roles.groups.has(chat.id) ? 'work' : undefined);
+}
+
 /* ---------- The list ---------- */
 
 export type ChatTab = 'all' | 'unread' | 'customers' | 'suppliers' | 'groups';
@@ -172,20 +198,24 @@ const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е').trim();
  * The chats of a tab, in the list's order. Archived chats are out of every tab (WhatsApp hides them too) — a search
  * finds them. A search goes by the garage's name, WhatsApp's name and the number as it is said («050…»).
  */
-export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who> }): WaChat[] {
+export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who>; roles?: ChatRoles; garageOnly?: boolean }): WaChat[] {
   const q = fold(opts.query ?? '');
   const qDigits = q.replace(/\D/g, '').replace(/^0+/, '');
+  const roles = opts.roles ?? NO_ROLES;
   const out = chats.filter((c) => {
     const who = whoOf(c, opts.people);
+    const role = chatRole(c, opts.people, roles);
     if (q) {
       const names = fold(`${who?.name ?? ''} ${c.name}`);
       const byName = names.includes(q);
       const byNumber = qDigits.length >= 3 && c.phone.includes(qDigits);
       if (!byName && !byNumber) return false;
     } else if (c.archived) return false;
+    // «Только гараж» (v0.81): the chats that are something to the garage (and oneself) — a search finds any.
+    else if (opts.garageOnly && !role && !c.self) return false;
     if (opts.tab === 'unread') return c.unread > 0;
-    if (opts.tab === 'customers') return who?.kind === 'customer';
-    if (opts.tab === 'suppliers') return who?.kind === 'supplier';
+    if (opts.tab === 'customers') return role === 'customer';
+    if (opts.tab === 'suppliers') return role === 'supplier' || role === 'service';
     if (opts.tab === 'groups') return c.group;
     return true;
   });
@@ -193,15 +223,16 @@ export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: strin
 }
 
 /** How many chats of each tab wait to be read (the tab's number). */
-export function tabCounts(chats: WaChat[], people: Map<string, Who>): Record<ChatTab, number> {
+export function tabCounts(chats: WaChat[], people: Map<string, Who>, roles: ChatRoles = NO_ROLES, garageOnly = false): Record<ChatTab, number> {
   const n: Record<ChatTab, number> = { all: 0, unread: 0, customers: 0, suppliers: 0, groups: 0 };
   for (const c of chats) {
     if (c.archived || !c.unread) continue;
+    const role = chatRole(c, people, roles);
+    if (garageOnly && !role && !c.self) continue;
     n.all++;
     n.unread++;
-    const who = whoOf(c, people);
-    if (who?.kind === 'customer') n.customers++;
-    if (who?.kind === 'supplier') n.suppliers++;
+    if (role === 'customer') n.customers++;
+    if (role === 'supplier' || role === 'service') n.suppliers++;
     if (c.group) n.groups++;
   }
   return n;

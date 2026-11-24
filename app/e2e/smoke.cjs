@@ -108,6 +108,34 @@ async function launchBrowser() {
     await settled();
     await page.screenshot({ path: `${SP}/shots/${n}.png`, fullPage: full });
   };
+  // v0.81: a new line — the quick sheet (its tile: work, a part, a service): the name typed, the keyboard's key adds it, the
+  // sheet closed; a price — the row's «+ Цена» (the cost and the price). `keep` — the sheet stays open for the next.
+  const TILE = { labor: 'Работа', part: 'Запчасть', service: 'Услуга' };
+  const addLine = async (kind, name, { price, cost, keep } = {}) => {
+    const open = await page.locator('.mantine-Modal-content .qa-field').filter({ visible: true }).count();
+    if (!open) await front('.add-btn').filter({ hasText: TILE[kind] }).first().click();
+    const dlg = page.locator('.mantine-Modal-content').filter({ has: page.locator('.qa-field') });
+    await dlg.waitFor();
+    if (open) await dlg.getByRole('radio', { name: TILE[kind] }).click();
+    const was = await dlg.locator('.qa-added-name').count();
+    await dlg.locator('.qa-field input').fill(name);
+    await dlg.locator('.qa-field input').press('Enter');
+    await page.waitForFunction((n) => document.querySelectorAll('.mantine-Modal-content .qa-added-name').length > n, was);
+    if (!keep) {
+      await dlg.locator('.mantine-Modal-close').click();
+      await dlg.waitFor({ state: 'detached' });
+    }
+    if (price !== undefined || cost !== undefined) await priceLine(name, { price, cost });
+  };
+  const priceLine = async (name, { price, cost } = {}) => {
+    await front('.list-row').filter({ hasText: name }).first().locator('.price-add, .price-tap-row').click();
+    const dlg = page.locator('.mantine-Modal-content.price-sheet');
+    await dlg.waitFor();
+    if (cost !== undefined) await dlg.getByLabel('Закупка').fill(String(cost));
+    if (price !== undefined) await dlg.getByLabel('Продажа').fill(String(price));
+    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await dlg.waitFor({ state: 'detached' });
+  };
   const step = async (name, fn) => { try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n').filter((l) => l.trim() && !/^=+/.test(l.trim())).slice(0, 4).join(' | ')); await shot('fail-' + name.replace(/\W+/g, '_')); throw e; } };
 
   await step('board empty', async () => { await page.goto(BASE); await page.getByText('Мастерская', { exact: true }).first().waitFor(); await shot('01-board-empty'); });
@@ -221,6 +249,27 @@ async function launchBrowser() {
   });
 
   const closeModal = () => page.locator('.mantine-Modal-close').first().click();
+  // v0.81: the board's lists are «Фильтры» — a sheet from the head's button (no strip of tabs on a phone).
+  const filters = async () => {
+    await page.locator('[data-board-filters]').filter({ visible: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'Фильтры' });
+    await sheet.waitFor();
+    return sheet;
+  };
+  const boardFilter = async (label) => {
+    const sheet = await filters();
+    await sheet.locator('.list-row').filter({ hasText: label }).first().click();
+    await sheet.waitFor({ state: 'hidden' });
+  };
+  /** The board's lists as «Фильтры» names them, in their order. */
+  const filterNames = async () => {
+    const sheet = await filters();
+    await sheet.locator('.list-row').first().waitFor();
+    const names = (await sheet.locator('.list-row').allInnerTexts()).map((x) => x.split('\n')[0].replace(/\s*\d+$/, '').trim());
+    await closeModal();
+    await sheet.waitFor({ state: 'hidden' });
+    return names;
+  };
   // A small PDF with text pieces at given places — a scanner report's layout, for the OBD import.
   const makePdf = (lines) => {
     const esc = (s) => s.replace(/[\\()]/g, (c) => '\\' + c);
@@ -349,14 +398,14 @@ async function launchBrowser() {
     // The board: "Debts" beside "Archive" — one card for the customer with both cars. v0.70: off the strip at first (the
     // few tabs: «Все · В работе · Ожидание · Заявки · Архив») — switched on in «Вид».
     await page.goto(BASE + '#/');
-    await front('[role="tab"]').filter({ hasText: /^Все/ }).waitFor();
-    if (await front('[role="tab"]').filter({ hasText: 'Долги' }).count()) throw new Error('«Долги» on the board’s strip at first');
-    await page.getByRole('button', { name: 'Вид' }).click();
+    if ((await filterNames()).includes('Долги')) throw new Error('«Долги» among the board’s filters at first');
+    // «Вид» — at the foot of «Фильтры» (v0.81).
+    await (await filters()).getByRole('button', { name: 'Вид' }).click();
     const viewSheet = page.getByRole('dialog', { name: 'Вид' });
     await viewSheet.locator('.list-row').filter({ hasText: 'Долги' }).locator('.mantine-Switch-track').click();
     await closeModal();
     await viewSheet.waitFor({ state: 'hidden' });
-    await front('[role="tab"]').filter({ hasText: 'Долги' }).click();
+    await boardFilter('Долги');
     const card = front('.debt-card').filter({ hasText: 'Rashid Debtor' });
     await card.filter({ hasText: '1 000,00' }).waitFor();
     // v0.30: a customer is folded — a tap unfolds the cars and the papers.
@@ -446,10 +495,10 @@ async function launchBrowser() {
     await dlg.waitFor({ state: 'hidden' });
     await front('.debt-card').filter({ hasText: 'Rashid Debtor' }).waitFor({ state: 'detached' });
     await page.goto(BASE + '#/');
-    await front('[role="tab"]').filter({ hasText: 'Архив' }).click();
+    await boardFilter('Архив');
     await front('.job-row').filter({ hasText: 'Altima' }).waitFor();
     await front('.job-row').filter({ hasText: 'Sunny' }).waitFor();
-    await front('[role="tab"]').filter({ hasText: /^Все/ }).click();
+    await boardFilter(/^Все/);
     // The board as it comes, for the steps after this one.
     await page.evaluate(() => localStorage.removeItem('mygarage.board'));
   });
@@ -686,20 +735,20 @@ async function launchBrowser() {
     if (JSON.stringify(marks) !== JSON.stringify([['top', 'dent', true]])) throw new Error('the job card point: ' + JSON.stringify(marks));
     const dlg = page.getByRole('dialog');
     // What the mechanic found: a job and a part (the part first without a price: still to find).
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Замена масла');
-    await dlg.getByLabel('Цена', { exact: true }).fill('150');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
-    await dlg.getByLabel('Запчасть').fill('Фильтр салона');
-    await dlg.getByLabel('Кол-во').fill('2');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    // v0.81: one quick sheet for both — the work, then (the kind switched in the sheet) the part, no prices yet.
+    await addLine('labor', 'Замена масла', { keep: true });
+    await shot('30q-quick-add');
+    await addLine('part', 'Фильтр салона');
+    await priceLine('Замена масла', { price: 150 });
     // v0.49: the app's own dictionary names it in English at once (no AI): the line reads CABIN FILTER.
     await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().waitFor();
-    // No price yet: the quote cannot go.
+    // No price yet (v0.81: «+ Цена» on its row): the quote cannot go.
+    await front('.list-row').filter({ hasText: 'CABIN FILTER' }).first().locator('.price-add').waitFor();
     if (!(await page.getByRole('button', { name: /^Клиенту/ }).isDisabled())) throw new Error('a line without a price must hold the quote');
     if (await page.getByRole('button', { name: /Спросить запчасти/ }).count()) throw new Error('no ask-for-parts button on the job');
+    // Its name opens its card: two of them, the cost, the price, ordered.
     await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().click();
+    await dlg.getByLabel('Кол-во').fill('2');
     await dlg.getByLabel('Закупка за шт.').fill('20');
     await dlg.getByLabel('Цена за шт.').fill('30');
     await dlg.getByText('Заказано', { exact: true }).click();
@@ -720,8 +769,9 @@ async function launchBrowser() {
     await page.getByText('Запчасти скопированы').first().waitFor();
     await shot('31b-copy-lines');
     // A line without VAT (a fee paid for the customer): 100 AED stays 100 AED.
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('RTA test fee');
+    // Added quickly, then its card (its name — a tap): the price and its VAT.
+    await addLine('labor', 'RTA test fee');
+    await front('.list-row').filter({ hasText: 'RTA TEST FEE' }).first().click();
     await dlg.getByLabel('Цена', { exact: true }).fill('100');
     // v0.32: the line's money at a glance — what the customer pays, the VAT in it.
     await dlg.locator('.line-sum [data-sum="total"]').filter({ hasText: '105,00' }).filter({ hasText: 'в т. ч. VAT 5,00' }).waitFor();
@@ -767,10 +817,7 @@ async function launchBrowser() {
     await page.getByRole('dialog').getByText('Изменить инвойс?').waitFor();
     await page.getByRole('dialog').getByRole('button', { name: 'Изменить', exact: true }).click();
     await page.getByRole('button', { name: /^Готово/ }).waitFor();
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Air filter clean');
-    await dlg.getByLabel('Цена', { exact: true }).fill('20');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await addLine('labor', 'Air filter clean', { price: 20 });
     await page.getByText('AIR FILTER CLEAN', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.getByRole('button', { name: /^Готово/ }).click();
@@ -801,10 +848,7 @@ async function launchBrowser() {
     // Several lines off at once: “…” → Select, tap two, Delete · 2; Undo brings them back.
     const dlg = page.getByRole('dialog');
     for (const [name, price] of [['Wash', '30'], ['Polish', '80']]) {
-      await page.getByRole('button', { name: 'Работа', exact: true }).click();
-      await dlg.getByLabel('Что сделали').fill(name);
-      await dlg.getByLabel('Цена', { exact: true }).fill(price);
-      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await addLine('labor', name, { price });
       await page.locator('.list-row').filter({ hasText: name }).first().waitFor();
     }
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
@@ -941,12 +985,8 @@ async function launchBrowser() {
     });
     await page.goto(BASE + '#/orders/' + id);
     const dlg = page.getByRole('dialog');
-    await front('.add-btn').filter({ hasText: 'Услуга' }).click();
-    await dlg.getByText('Добавить услугу').waitFor();
-    await dlg.getByLabel('Услуга').fill('Car wash');
-    await dlg.getByLabel('Цена', { exact: true }).fill('35');
-    await dlg.getByLabel('Платим').fill('25');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    // v0.81: added in the quick sheet; «+ Цена» — what we pay them (its cost) and the customer's price.
+    await addLine('service', 'Car wash', { cost: 25, price: 35 });
     await front('.list-row').filter({ hasText: 'CAR WASH' }).waitFor();
     await page.getByRole('button', { name: 'Согласен' }).first().click();
     await page.waitForTimeout(600);
@@ -1105,19 +1145,19 @@ async function launchBrowser() {
     // screens move, a swipe is nobody's.)
     await front('.job-row').filter({ hasText: '31415' }).first().waitFor();
     await page.waitForTimeout(700);
-    const tabNow = () => page.evaluate(() => document.querySelector('.screen[data-role="top"] .scroll-tabs [aria-selected="true"]')?.textContent ?? '');
-    if (!/^Все/.test(await tabNow())) throw new Error('the board does not open on «Все»: ' + (await tabNow()));
+    // The board opens on «Все» (v0.81: no filter picked — none said under the search).
+    if (await front('.board-filter-on').count()) throw new Error('the board does not open on «Все»');
     await swipeLeft(row, true);
-    await page.waitForFunction(() => !/^Все/.test(document.querySelector('.screen[data-role="top"] .scroll-tabs [aria-selected="true"]')?.textContent ?? 'Все'), null, { timeout: 5000 });
-    if (!/#\/$/.test(page.url())) throw new Error('a swipe on the board left it: ' + page.url());
-    await page.getByRole('tab', { name: /^Все/ }).click();
+    // v0.81: the board has no tabs of its own — a sideways drag from a card's middle is the tab bar's: «Деньги» beside.
+    await page.waitForFunction(() => location.hash.startsWith('#/money'), null, { timeout: 5000 });
+    await page.goto(BASE + '#/');
     await front('.job-row').filter({ hasText: '31415' }).first().waitFor();
     await page.waitForTimeout(700);
     if ((await row.evaluate((el) => el.style.getPropertyValue('--swipe'))) !== '0px') throw new Error('a swipe begun in the middle of a card moved it');
     await swipeLeft(row);
     await page.getByText(/в архиве$/).first().waitFor();
     await page.locator('.job-row', { hasText: '31415' }).waitFor({ state: 'detached' });
-    await page.getByRole('tab', { name: /Архив/ }).click();
+    await boardFilter('Архив');
     const back = page.locator('.job-row', { hasText: '31415' }).first();
     await back.waitFor();
     // v0.22: the archive's rows are small and dated — no 2 : 1 cards there; the job just taken off is «Сегодня».
@@ -1130,7 +1170,7 @@ async function launchBrowser() {
     await shot('02c-archive');
     await swipeLeft(back);
     await page.getByText('Заказ снова на доске').first().waitFor();
-    await page.getByRole('tab', { name: /^Все/ }).click();
+    await boardFilter(/^Все/);
     await page.locator('.job-row', { hasText: '31415' }).first().waitFor();
   });
   await step('refused: the job closes without an invoice', async () => {
@@ -1138,10 +1178,7 @@ async function launchBrowser() {
     await page.getByLabel('Номер').fill('16180');
     await page.getByRole('button', { name: 'Принять' }).click();
     const dlg = page.getByRole('dialog');
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Engine overhaul');
-    await dlg.getByLabel('Цена', { exact: true }).fill('5000');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await addLine('labor', 'Engine overhaul', { price: '5000' });
     await page.getByRole('button', { name: /^Клиенту/ }).waitFor();
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await dlg.getByRole('button', { name: 'Отказ' }).click();
@@ -1160,10 +1197,7 @@ async function launchBrowser() {
     await page.getByLabel('Номер').fill('57721');
     await page.getByRole('button', { name: 'Принять' }).click();
     const dlg = page.getByRole('dialog');
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Warranty rework');
-    await dlg.getByLabel('Цена', { exact: true }).fill('200');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await addLine('labor', 'Warranty rework', { price: '200' });
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
@@ -1213,10 +1247,7 @@ async function launchBrowser() {
     await page.getByLabel('Номер').fill('24680');
     await page.getByRole('button', { name: 'Принять', exact: true }).click();
     const dlg = page.getByRole('dialog');
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Gearbox repair');
-    await dlg.getByLabel('Цена', { exact: true }).fill('1000');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await addLine('labor', 'Gearbox repair', { price: '1000' });
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
@@ -1244,12 +1275,9 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
     const id = page.url().split('/orders/')[1].split(/[/?]/)[0];
     const dlg = page.getByRole('dialog');
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Front brake pads replacement');
-    await dlg.getByLabel('Цена', { exact: true }).fill('120');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
-    await dlg.getByLabel('Запчасть').fill('Spark plug');
+    await addLine('labor', 'Front brake pads replacement', { price: '120' });
+    await addLine('part', 'Spark plug');
+    await front('.list-row').filter({ hasText: 'Spark plug' }).first().click();
     await dlg.getByLabel('Кол-во').fill('4');
     await dlg.getByLabel('Цена за шт.').fill('30');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
@@ -1288,10 +1316,7 @@ async function launchBrowser() {
     }, id);
     if (JSON.stringify(kept) !== JSON.stringify({ kinds: ['initial', 'price_change', 'price_change'], first: [12600, 12600], changed: [[12600, 10000], [12600, 10000]] })) throw new Error('the price change must keep what was agreed: ' + JSON.stringify(kept));
     // Waiting for the answer: a new price takes the line back — the job asks to send the price again.
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Brake fluid flush');
-    await dlg.getByLabel('Цена', { exact: true }).fill('80');
-    await dlg.getByRole('button', { name: 'Сохранить' }).click();
+    await addLine('labor', 'Brake fluid flush', { price: '80' });
     await page.getByRole('button', { name: 'Клиенту · 284,00 AED' }).waitFor();
     await page.evaluate(async (orderId) => {
       const { sendVersion } = await import('/src/services/estimate.ts');
@@ -1447,8 +1472,8 @@ async function launchBrowser() {
     await front('.scroll-tabs > button').filter({ hasText: 'Основная' }).click();
     await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
     // A part with its number and two offers: the first one goes on the line (cost + markup).
-    await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
-    await dlg.getByLabel('Запчасть').fill('Headlight LH');
+    await addLine('part', 'Headlight LH');
+    await front('.list-row').filter({ hasText: 'Headlight LH' }).first().click();
     await dlg.getByLabel('Номер').fill('81150-06B20');
     await dlg.getByRole('button', { name: /^Варианты/ }).click();
     await dlg.getByText('Вариант', { exact: true }).click();
@@ -1465,10 +1490,10 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('409,50').first().waitFor(); // 300 + 30 % markup + 5 % VAT
     // Work outside: the paint shop, what we pay them.
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
-    await dlg.getByLabel('Что сделали').fill('Bumper paint');
+    // (v0.81: added quickly — its card is a service's: what we pay them is right there.)
+    await addLine('service', 'Bumper paint');
+    await front('.list-row').filter({ hasText: 'Bumper paint' }).first().click();
     await dlg.getByLabel('Цена', { exact: true }).fill('500');
-    await dlg.getByRole('button', { name: 'На стороне' }).click();
     await dlg.getByLabel('Платим').fill('300');
     await shot('34c-outside');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
@@ -1603,10 +1628,7 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Принять', exact: true }).click();
     const dlg = page.getByRole('dialog');
     for (const [name, price] of [['Oil change', '100'], ['Wheel alignment', '120']]) {
-      await page.getByRole('button', { name: 'Работа', exact: true }).click();
-      await dlg.getByLabel('Что сделали').fill(name);
-      await dlg.getByLabel('Цена', { exact: true }).fill(price);
-      await dlg.getByRole('button', { name: 'Сохранить' }).click();
+      await addLine('labor', name, { price: price });
       await front('.list-row').filter({ hasText: name }).first().waitFor();
     }
     // The way of the job: six segments, the one it is on marked.
@@ -1856,23 +1878,13 @@ async function launchBrowser() {
     await page.goto(BASE + '#/');
     await front('.job-card').first().waitFor();
     // The strip's tabs by name (their counts come in as the board and the debtors are read).
-    const strip = async () => (await front('.scroll-tabs > button').allInnerTexts()).map((x) => x.replace(/\s*\d+$/, '').trim());
+    // v0.81: the board's lists are «Фильтры» (a sheet) — the order «Вид» sets is theirs.
+    const strip = filterNames;
     const before = await strip();
-    // The first tab after «Все» (v0.70: «В работе», the manager's own): left out below.
+    // The first list after «Все» (v0.70: «В работе», the manager's own): left out below.
     const step1 = before[1];
-    // A long press on a tab opens «Вид».
-    await front('.scroll-tabs > button').first().evaluate(async (el) => {
-      const r = el.getBoundingClientRect();
-      const touch = () => new Touch({ identifier: 7, target: el, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
-      el.dispatchEvent(new TouchEvent('touchstart', { touches: [touch()], changedTouches: [touch()], bubbles: true, cancelable: true }));
-      await new Promise((ok) => setTimeout(ok, 600));
-      el.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch()], bubbles: true, cancelable: true }));
-    });
+    await (await filters()).getByRole('button', { name: 'Вид' }).click();
     const v = page.getByRole('dialog', { name: 'Вид' });
-    await v.waitFor();
-    await closeModal();
-    await v.waitFor({ state: 'hidden' });
-    await page.getByRole('button', { name: 'Вид' }).click();
     await v.waitFor();
     await v.locator('.mantine-SegmentedControl-label', { hasText: 'Компактно' }).click();
     await v.getByRole('radio', { name: 'Компактно', checked: true }).waitFor({ state: 'attached' });
@@ -1890,7 +1902,7 @@ async function launchBrowser() {
     await v.waitFor({ state: 'hidden' });
     const check = async (when) => {
       const now = await strip();
-      if (now[1] !== 'Архив' || now.includes(step1)) throw new Error(`${when}: the strip is ${JSON.stringify(now)}`);
+      if (now[1] !== 'Архив' || now.includes(step1)) throw new Error(`${when}: the filters are ${JSON.stringify(now)}`);
       await front('.job-mini').first().waitFor();
       if (await front('.job-card').count()) throw new Error(`${when}: large cards on a compact board`);
     };
@@ -2184,10 +2196,7 @@ async function launchBrowser() {
       // A part typed with mistakes: saved as typed, then put right by the app's own dictionary (v0.49: no AI asked for a
       // name it knows) — and its English name for the documents.
       const dlg = page.getByRole('dialog');
-      await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
-      await dlg.getByLabel('Запчасть').fill('колодки тормазные передние');
-      await dlg.getByRole('button', { name: 'Сохранить' }).click();
-      await dlg.waitFor({ state: 'detached' });
+      await addLine('part', 'колодки тормазные передние');
       // Its card: the name as it is now, the one typed crossed out under it.
       const nameCard = page.locator('[data-ai-notice="name"]');
       await nameCard.filter({ hasText: 'Название исправлено' }).waitFor({ timeout: 15000 });
@@ -2293,10 +2302,7 @@ async function launchBrowser() {
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb img.part-thumb-outlined').waitFor();
       // The same part again on the same car (v0.49): the garage's own memory answers — the web search made a minute ago
       // serves again, its number and pictures with it; the server is not asked.
-      await page.getByRole('button', { name: 'Запчасть', exact: true }).click();
-      await dlg.getByLabel('Запчасть').fill('Front brake pads');
-      await dlg.getByRole('button', { name: 'Сохранить' }).click();
-      await dlg.waitFor({ state: 'detached' });
+      await addLine('part', 'Front brake pads');
       // v0.53: picked on the job («…» → «Править», a tap) and given to the AI from the picking bar.
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).nth(1).waitFor();
       await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
@@ -2648,7 +2654,7 @@ async function launchBrowser() {
     await page.locator('[data-quick="note"]').click();
     await page.waitForURL(/#\/notes/);
   });
-  await step('v0.50: «Расход» in the quick actions is the receipt’s camera — the paper read on the garage’s server, the expense recorded with the photo and tied to the job its parts are for; not read — the plain sheet, the photo attached', async () => {
+  await step('v0.50: «Расход» in the quick actions is the receipt’s camera — the paper read on the garage’s server, the expense recorded with the photo; v0.81: no job put on it by itself, its likely job a tap away, the lines untouched; not read — the plain sheet, the photo attached', async () => {
     await page.goto(BASE + '#/');
     await page.waitForTimeout(500);
     // A part that one open job alone has on its lines (by the dictionary's key, as the guess compares), with no purchase
@@ -2770,7 +2776,9 @@ async function launchBrowser() {
         vendor: e.vendor,
         method: e.method,
         code: cat?.code,
-        job: e.orderId === orderId,
+        job: e.orderId ?? null,
+        scanned: !!e.scanned,
+        orderId,
         media: (await db.media.where('ownerId').equals(e.id).toArray()).map((m) => m.slot),
         moves: await db.cashMovements.filter((m) => m.expenseId === e.id).count(),
         cost: it.costPriceFils ?? null,
@@ -2783,11 +2791,15 @@ async function launchBrowser() {
       };
     }, target);
     if (got.suppliers.length !== 1 || got.suppliers[0].phone !== '+971504421190' || got.suppliers[0].address !== 'Al Quoz Ind. Area 3' || got.suppliers[0].notes !== 'TRN 100234567800003') throw new Error('the supplier: ' + JSON.stringify(got.suppliers));
-    if (target.supplierId === null && got.lineSupplier !== got.suppliers[0].id) throw new Error('the line’s supplier: ' + got.lineSupplier);
-    if (got.amount !== 3675 || got.vat !== 175 || got.vendor !== 'GULF STAR AUTO PARTS' || got.method !== 'cash' || got.code !== 'parts' || !got.job || got.media.join() !== 'receipt' || got.moves !== 1)
+    // v0.81 (the user's brief: «отключить автоматическую привязку расхода к заказу… поле заказа пустое»): no job, the job's
+    // line as it was — its cost, number and supplier untouched.
+    if (got.amount !== 3675 || got.vat !== 175 || got.vendor !== 'GULF STAR AUTO PARTS' || got.method !== 'cash' || got.code !== 'parts' || got.job !== null || !got.scanned || got.media.join() !== 'receipt' || got.moves !== 1)
       throw new Error('the expense: ' + JSON.stringify(got));
-    if (target.cost === null && (got.cost !== 3500 || got.pv !== 175)) throw new Error('the line’s price off the paper: ' + JSON.stringify(got));
-    if (target.pn === null && got.pn !== '90915YZZE1') throw new Error('the line’s number off the paper: ' + got.pn);
+    if (got.cost !== target.cost || got.pv !== target.pv || got.lineSupplier !== target.supplierId || got.pn !== (target.pn ?? '').replace(/\W/g, '')) throw new Error('the job’s line changed by itself: ' + JSON.stringify(got));
+    // Its likely job is offered — put on by a tap (and only then).
+    await dlg.locator('[data-suggest-jobs] .chip').filter({ hasText: `№${target.number}` }).click();
+    await page.waitForFunction(async ({ id, orderId }) => (await (await import('/src/db/db.ts')).db.expenses.get(id))?.orderId === orderId, { id: got.id, orderId: target.orderId });
+    await shot('40g-receipt-job-picked');
     if (got.asked.length !== 1 || got.asked[0].path !== 'receipt' || got.asked[0].type !== 'image/jpeg' || got.asked[0].size < 1000) throw new Error('asked: ' + JSON.stringify(got.asked));
     // «Отменить» on the card: the expense goes, its movement and photo with it; the line keeps its price (put back here).
     await page.locator('[data-ai-notice="expense"]').getByRole('button', { name: 'Отменить' }).click();
@@ -2990,8 +3002,8 @@ async function launchBrowser() {
     await fingerSwipe(card.x + 30, card.y + card.height / 2, card.width - 50);
     await page.waitForFunction(() => window.__opened.some((u) => u.startsWith('https://wa.me/')));
     await shot('42b-board-cards');
-    // A sideways swipe on the board (not on a card): Search; on Search — Money. (A swipe begun while the screen still
-    // slides in is the stack's, not a new one: it is tried again once the screen has settled.)
+    // A sideways swipe on the board (not on a card): Money (v0.81 — no «Поиск» in the bar); on Money — the next tab of it.
+    // (A swipe begun while the screen still slides in is the stack's, not a new one: tried again once it has settled.)
     const swipeTo = async (x, y, dx, url) => {
       for (let i = 0; i < 3; i++) {
         await page.waitForTimeout(600);
@@ -3000,8 +3012,8 @@ async function launchBrowser() {
       }
       throw new Error('a sideways swipe did not go to ' + url);
     };
-    await swipeTo(330, 70, -260, /#\/search$/);
-    await swipeTo(330, 260, -260, /#\/money/);
+    await swipeTo(330, 70, -260, /#\/money/);
+    if (await page.locator('.tab-bar button[data-href="/search"]').count()) throw new Error('v0.81: «Поиск» is still in the tab bar');
     // Money → Debts: the two sums are tabs; the list under them turns by a swipe (and stays in Debts).
     await page.goto(BASE + '#/money?tab=debts');
     await front('.kpi-tab[data-side="owed"][data-active]').waitFor();
@@ -3913,16 +3925,18 @@ async function launchBrowser() {
     const notify = () => page.evaluate(async () => (await (await import('/src/db/db.ts')).db.settings.get('main'))?.notify ?? null);
     await page.goto(BASE + '#/notify');
     await front('[data-rule]').first().waitFor();
-    if ((await front('[data-rule]').count()) !== 13) throw new Error('thirteen kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
-    // The user's own example: a price not told — after an hour, every hour; then his own timing.
-    const price = front('.list-row').filter({ has: page.locator('[data-rule="price"]') }).first();
-    if (!(await price.innerText()).replace(/\s+/g, ' ').includes('через 1 ч · каждые 1 ч')) throw new Error('«Назвать цену» must be an hour, every hour, by default: ' + (await price.innerText()));
-    await price.click({ position: { x: 120, y: 20 } });
-    await page.locator('[data-rule-sheet="price"] [data-first="30"]').click();
-    await page.locator('[data-rule-sheet="price"] [data-every="15"]').click();
+    // v0.81 (the user's brief: «убрать автоматические уведомления «Нужно отправить цену»»): twelve kinds — no price.
+    if ((await front('[data-rule]').count()) !== 12) throw new Error('twelve kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
+    if (await front('[data-rule="price"]').count()) throw new Error('«Назвать цену» is still a notification');
+    // A customer who has not answered — after two hours, every two hours; then the manager's own timing.
+    const answer = front('.list-row').filter({ has: page.locator('[data-rule="answer"]') }).first();
+    if (!(await answer.innerText()).replace(/\s+/g, ' ').includes('через 2 ч · каждые 2 ч')) throw new Error('«Ждём ответа» must be two hours, every two hours, by default: ' + (await answer.innerText()));
+    await answer.click({ position: { x: 120, y: 20 } });
+    await page.locator('[data-rule-sheet="answer"] [data-first="30"]').click();
+    await page.locator('[data-rule-sheet="answer"] [data-every="15"]').click();
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
-    if (JSON.stringify((await notify())?.rules?.price) !== JSON.stringify({ on: true, after: 30, every: 15 })) throw new Error('the kind’s own timing was not kept: ' + JSON.stringify(await notify()));
+    if (JSON.stringify((await notify())?.rules?.answer) !== JSON.stringify({ on: true, after: 30, every: 15 })) throw new Error('the kind’s own timing was not kept: ' + JSON.stringify(await notify()));
     await front('[data-notify-from]').first().fill('07:30');
     await front('[data-day="5"]').first().click();
     await page.waitForTimeout(400);
@@ -3952,10 +3966,11 @@ async function launchBrowser() {
       if (id && (await db.orders.get(id))) await setJobQuiet(id, true);
       const after = await makePlan();
       if (id) await setJobQuiet(id, false);
-      return { from: before.from, days: before.days, every: before.groups.find((g) => g.key === 'price')?.every, had: urls(before).filter((u) => u === first).length, has: urls(after).filter((u) => u === first).length, id };
+      return { from: before.from, days: before.days, every: before.groups.find((g) => g.key === 'answer')?.every, price: before.groups.some((g) => g.key === 'price'), had: urls(before).filter((u) => u === first).length, has: urls(after).filter((u) => u === first).length, id };
     });
     if (plan.from !== 450 || plan.days.includes(5)) throw new Error('the plan must carry the hours and days set: ' + JSON.stringify(plan));
     if (plan.every !== undefined && plan.every !== 15) throw new Error('the plan must carry the kind’s own repeat: ' + JSON.stringify(plan));
+    if (plan.price) throw new Error('a job whose price is not told is in the plan (v0.81: never by itself)');
     if (plan.id && !(plan.had > 0 && plan.has === 0)) throw new Error('a job kept quiet must leave the plan: ' + JSON.stringify(plan));
     // Back as it was for the steps after this one.
     await page.evaluate(async () => {

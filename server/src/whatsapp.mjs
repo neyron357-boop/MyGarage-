@@ -382,7 +382,7 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     }
     if (req.method === 'POST' && what === 'file') {
       if (Number(req.headers['content-length']) > MAX_FILE) throw httpError(413, 'file too large');
-      await pipe(req, res, `/file${query(url, ['chat', 'name', 'caption', 'doc', 'quote'])}`, { body: true });
+      await pipe(req, res, `/file${query(url, ['chat', 'name', 'caption', 'doc', 'quote', 'voice'])}`, { body: true });
       return true;
     }
     if (get && (what === 'media' || what === 'avatar')) {

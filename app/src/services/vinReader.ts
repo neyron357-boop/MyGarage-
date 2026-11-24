@@ -1,5 +1,5 @@
 import type { Line, Page, Worker as OcrWorker } from 'tesseract.js';
-import { db } from '../db/db';
+import { db, uid } from '../db/db';
 import type { Vehicle } from '../domain/types';
 import { aiReadVinLater } from './ai';
 import { fitCode39Row, readBarcodeRow, runsOf, vinOfBarcode } from '../domain/barcode';
@@ -1678,6 +1678,25 @@ export async function readCarVin(vehicleId: string): Promise<CarVinRead> {
   // A VIN read off the photo and written: the garage's AI reads what car it is (v0.48), not waited for.
   if (patch.vin) aiReadVinLater(vehicleId);
   return { ...pick, photos, filled: Object.keys(patch) as ('vin' | 'year')[], before, differs, crop: pick.vin ? crops[pick.vin] : undefined };
+}
+
+/**
+ * A VIN off a photo taken while a car is being taken in (v0.81, «Сканировать VIN» on «Новый заказ»): no car in the base
+ * yet — the photo itself, read once (a plate or label, or a Mulkiya's side). Proven or not, it is only shown to be looked
+ * at and corrected in the form; nothing is written here. The pieces read are learned off once a proven VIN is kept.
+ */
+export async function readVinShot(blob: Blob): Promise<VinPick & { crop?: string }> {
+  const r = await readPhoto(blob, `shot:${uid()}`, 'plate');
+  let pick = pickVin(r.reads, r.years, {});
+  // A label read as a card too (its year, the «Chassis No.» line) when the plate's way found no VIN.
+  if (!pick.vin) {
+    const card = await readPhoto(blob, `shot:${uid()}`, 'card');
+    pick = pickVin([...r.reads, ...card.reads], [...r.years, ...card.years], {});
+    Object.assign(r.crops, card.crops);
+    r.rows.push(...card.rows);
+  }
+  if (pick.sure && pick.vin) void learnVin(r.rows, pick.vin).catch(() => 0);
+  return { ...pick, crop: pick.vin ? r.crops[pick.vin] : undefined };
 }
 
 /** The characters of a VIN learned off the photos it was read off, where it is on them (the photos read lately). */

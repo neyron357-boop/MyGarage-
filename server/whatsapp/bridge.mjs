@@ -17,7 +17,8 @@
  *   GET  /media?id=                   — a message's file (in parts when asked: a video plays as it comes)
  *   GET  /avatar?id=                  — a chat's picture
  *   POST /send {chat, text, quote}    — a text
- *   POST /file?chat=&name=&caption=&doc=&quote= — a file (the body is its bytes)
+ *   POST /file?chat=&name=&caption=&doc=&quote=&voice= — a file (the body is its bytes); voice=1 — a recording, sent as
+ *        WhatsApp's own voice message (Opus in Ogg — voice.mjs)
  *   POST /seen {chat}                 — the chat is read
  *   GET  /number?phone=               — is this number on WhatsApp, and its chat
  *   GET  /events                      — a stream: a message, its ticks, a chat's unread, the state
@@ -35,6 +36,7 @@ import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 import { findBrowser } from './browser.mjs';
 import { CHAT_ID, chatRow, lastRow, MESSAGE_ID, messageRow, phoneOf, sortChats } from './rows.mjs';
+import { oggOpus, PAGE_OPUS } from './voice.mjs';
 
 const { Client, LocalAuth, MessageMedia } = wweb;
 
@@ -760,6 +762,12 @@ async function forwardMessage(body) {
   return { ok: true, how: 'anew' };
 }
 
+/** A recording as WhatsApp's voice message: Opus packets from this Chrome (WebCodecs), put in Ogg here. */
+async function toVoice(c, bytes) {
+  const r = await within(c.pupPage.evaluate(PAGE_OPUS, bytes.toString('base64')), 60_000, 'voice');
+  return oggOpus(r.packets.map((p) => Buffer.from(p, 'base64')), { samples: r.samples });
+}
+
 async function sendFile(url, bytes, type) {
   const c = need();
   const chat = chatParam(url.searchParams.get('chat'));
@@ -771,8 +779,20 @@ async function sendFile(url, bytes, type) {
   const shown = /^image\/(jpeg|png|webp)$/.test(mime) || mime === 'video/mp4' || /^audio\//.test(mime);
   const doc = url.searchParams.get('doc') === '1' || !shown;
   allow();
-  const media = new MessageMedia(mime, bytes.toString('base64'), name, bytes.length);
-  const m = await within(c.sendMessage(chat, media, { ...(caption ? { caption } : {}), sendMediaAsDocument: doc, ...quoteOpt(url.searchParams.get('quote')) }), 300_000, 'send');
+  let media = new MessageMedia(mime, bytes.toString('base64'), name, bytes.length);
+  // A voice message (v0.81): Opus in Ogg, as WhatsApp records them (voice.mjs) — not made so, it goes as a sound file.
+  const voice = url.searchParams.get('voice') === '1' && /^audio\//.test(mime);
+  let asVoice = false;
+  if (voice) {
+    try {
+      const ogg = /ogg/.test(mime) ? bytes : await toVoice(c, bytes);
+      media = new MessageMedia('audio/ogg; codecs=opus', ogg.toString('base64'), 'voice.ogg', ogg.length);
+      asVoice = true;
+    } catch (e) {
+      log('voice: sent as a sound file —', e?.message ?? e);
+    }
+  }
+  const m = await within(c.sendMessage(chat, media, { ...(caption ? { caption } : {}), sendMediaAsDocument: doc && !asVoice, ...(asVoice ? { sendAudioAsVoice: true } : {}), ...quoteOpt(url.searchParams.get('quote')) }), 300_000, 'send');
   const row = messageRow(m?._data, { me: meId });
   if (!row) throw httpError(502, 'not sent');
   // What was just sent is its own file here: the app shows it without asking WhatsApp for it back.

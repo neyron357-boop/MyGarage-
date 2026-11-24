@@ -9,7 +9,7 @@ import type { Debt, Order, OrderItem, Reminder, Vehicle } from './types';
  * debt, and the customers to write to (how is the car, time for a service). Nothing is typed in — but the manager's
  * own reminders (v0.74): what he set for himself is due here on its day. v0.74 too: a car booked for today.
  */
-export type TaskKind = 'promised' | 'answer' | 'price' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder';
+export type TaskKind = 'promised' | 'answer' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder';
 
 export interface Task {
   kind: TaskKind;
@@ -95,13 +95,9 @@ export function todayTasks(input: TodayInput): Task[] {
       tasks.push({ ...base, kind: 'promised', key: `promised:${o.id}`, at: o.promisedReadyAt, late: o.promisedReadyAt < now });
     if (j.phase === 'wait' && j.waitingSince && since(j.waitingSince) >= input.warnHours)
       tasks.push({ ...base, kind: 'answer', key: `answer:${o.id}`, at: j.waitingSince, late: since(j.waitingSince) >= input.alertHours });
-    if (j.phase === 'price') {
-      // Since its newest line not told yet was written (v0.74: the car may have stood for days before — the price waits
-      // from the line, and a line just typed is not «late» at once).
-      const written = j.items.filter((i) => i.approvalState === 'draft' && i.kind !== 'discount').map((i) => i.createdAt).sort().pop();
-      const at = written && written > o.stageChangedAt ? written : o.stageChangedAt;
-      if (since(at) >= input.warnHours) tasks.push({ ...base, kind: 'price', key: `price:${o.id}`, at, late: since(at) >= input.alertHours });
-    }
+    // A price not told yet is no task of its own (v0.81, the user's brief: «убрать автоматические уведомления «Нужно
+    // отправить цену»… напоминание — только по явному действию для конкретного заказа»): the job says it itself (its quote
+    // «not sent»), a reminder is set on the job by hand.
     // Parts the customer agreed to and nobody ordered yet.
     const toOrder = j.items.filter((i) => i.kind === 'part' && !i.customerSupplied && i.approvalState === 'approved' && !i.done && (i.procurementStatus ?? 'needed') === 'needed');
     if (toOrder.length) {

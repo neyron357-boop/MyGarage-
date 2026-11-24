@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dubaiAt } from './dates';
-import { buildPlan, clock, DEFAULT_NOTIFY, minutesOf, nextTime, notifyOf, planInstants, quickTimes, type NotifySettings, type PlanWords } from './notify';
+import { buildPlan, clock, DEFAULT_NOTIFY, minutesOf, nextTime, NOTIFY_KINDS, notifyOf, planInstants, quickTimes, type NotifySettings, type PlanWords } from './notify';
 import { todayTasks, type OpenJob, type Task, type TodayInput } from './today';
 import type { OrderItem } from './types';
 
@@ -29,34 +29,42 @@ const plan = (now: string, input: Parameters<typeof tasksOf>[0], settings: Notif
 const group = (p: ReturnType<typeof plan>, key: string) => p.groups.find((g) => g.key === key);
 
 describe('the settings of notifications', () => {
-  it('nothing stored — the defaults: the user’s own example, a price not told is said after an hour and every hour', () => {
+  it('nothing stored — the defaults: a customer who has not answered is said after two hours and every two; no «price not told» kind any more (v0.81)', () => {
     const s = notifyOf(undefined);
     expect([s.on, clock(s.from), clock(s.to), s.days.length, s.digest]).toEqual([true, '08:00', '21:00', 7, { on: true, at: 540 }]);
-    expect(s.rules.price).toEqual({ on: true, after: 60, every: 60 });
+    expect(NOTIFY_KINDS[0]).toBe('answer');
+    expect(s.rules.answer).toEqual({ on: true, after: 120, every: 120 });
     expect(s.rules.promised.after).toBe(-30);
+    expect(Object.keys(s.rules)).toEqual(NOTIFY_KINDS);
+    expect(NOTIFY_KINDS).not.toContain('price');
   });
 
-  it('what is stored stands over the defaults, field by field; nonsense is not taken', () => {
-    const s = notifyOf({ from: 600, days: [5, 5, 9, 1], digest: { on: false, at: 9999 }, rules: { price: { on: true, after: 30, every: 15 }, answer: { on: false } } as never });
+  it('what is stored stands over the defaults, field by field; nonsense is not taken — a «price» rule kept by an older app neither (v0.81)', () => {
+    const s = notifyOf({ from: 600, days: [5, 5, 9, 1], digest: { on: false, at: 9999 }, rules: { answer: { on: true, after: 30, every: 15 }, order: { on: false }, price: { on: true, after: 60, every: 60 } } as never });
     expect([s.from, s.to, s.days, s.digest]).toEqual([600, 1260, [1, 5], { on: false, at: 1439 }]);
-    expect(s.rules.price).toEqual({ on: true, after: 30, every: 15 });
-    expect(s.rules.answer).toEqual({ on: false, after: 120, every: 120 });
+    expect(s.rules.answer).toEqual({ on: true, after: 30, every: 15 });
+    expect(s.rules.order).toEqual({ on: false, after: 60, every: 120 });
+    expect('price' in s.rules).toBe(false);
     expect(notifyOf({ days: [] }).days).toEqual([0, 1, 2, 3, 4, 5, 6]);
     expect([minutesOf('08:30'), minutesOf('24:00'), minutesOf('x'), clock(1260)]).toEqual([510, undefined, undefined, '21:00']);
   });
 });
 
 describe('the plan left on the server', () => {
-  it('a job whose lines have no price told: from an hour after its newest line, then every hour — and «how long» from that line', () => {
-    const open = [job('a', { phase: 'price', items: [line({ createdAt: at(9, 0) }), line({ createdAt: at(9, 40) })] })];
+  it('v0.81: a job whose lines have no price told is not in the plan; a customer who has not answered — two hours after the price went, then every two hours, «how long» from then', () => {
+    const price = job('p', { phase: 'price', items: [line({ createdAt: at(9, 0) }), line({ createdAt: at(9, 40) })] });
+    const open = [price, job('a', { phase: 'wait', waitingSince: at(9, 40) })];
     const p = plan(at(9, 50), { open });
-    const g = group(p, 'price')!;
-    expect([g.title, g.many, g.every, g.url, g.solo]).toEqual(['T:price', 'T:price · {n}', 60, '#/?today=1', undefined]);
-    expect(g.members).toEqual([{ id: 'price:a', label: 'car a', url: '#/orders/a', start: at(10, 40), since: at(9, 40) }]);
+    expect(p.groups.map((g) => g.key)).toEqual(['answer']);
+    const g = group(p, 'answer')!;
+    expect([g.title, g.many, g.every, g.url, g.solo]).toEqual(['T:answer', 'T:answer · {n}', 120, '#/?today=1', undefined]);
+    expect(g.members).toEqual([{ id: 'answer:a', label: 'car a', url: '#/orders/a', start: at(11, 40), since: at(9, 40) }]);
     expect([p.tz, p.from, p.to, p.digest]).toEqual(['Asia/Dubai', 480, 1260, { at: 540, title: 'Сегодня' }]);
     // Made again an hour and a day later: the same start (the server does not take it for a new one).
-    expect(group(plan(at(11, 5), { open }), 'price')!.members[0].start).toBe(at(10, 40));
-    expect(group(plan(at(13, 0, '2026-11-25'), { open }), 'price')!.members[0].start).toBe(at(10, 40));
+    expect(group(plan(at(11, 5), { open }), 'answer')!.members[0].start).toBe(at(11, 40));
+    expect(group(plan(at(13, 0, '2026-11-25'), { open }), 'answer')!.members[0].start).toBe(at(11, 40));
+    // The price job alone, all the week ahead: nothing to say.
+    expect(plan(at(9, 50), { open: [price] }).groups).toEqual([]);
   });
 
   it('a time promised for tomorrow comes by itself: half an hour before it; a part to collect on Thursday — that morning', () => {
@@ -97,23 +105,26 @@ describe('the plan left on the server', () => {
   });
 
   it('a kind switched off is not in the plan; all off — nothing; the summary off — none; the manager’s own delay and repeat', () => {
-    const open = [job('a', { phase: 'price', items: [line({ createdAt: at(9) })] }), job('b', { phase: 'wait', waitingSince: at(9) })];
-    const mine = notifyOf({ digest: { on: false, at: 540 }, rules: { price: { on: true, after: 15, every: 30 }, answer: { on: false, after: 120, every: 120 } } as never });
+    const open = [job('a', { phase: 'work', items: [line({ approvalState: 'approved', createdAt: at(9) })] }), job('b', { phase: 'wait', waitingSince: at(9) })];
+    const both = plan(at(10), { open });
+    expect(both.groups.map((g) => g.key)).toEqual(['answer', 'order']);
+    const mine = notifyOf({ digest: { on: false, at: 540 }, rules: { answer: { on: true, after: 15, every: 30 }, order: { on: false, after: 60, every: 120 } } as never });
     const p = plan(at(10), { open }, mine);
-    expect(p.groups.map((g) => g.key)).toEqual(['price']);
+    expect(p.groups.map((g) => g.key)).toEqual(['answer']);
     expect([p.groups[0].every, p.groups[0].members[0].start, p.digest]).toEqual([30, at(9, 15), undefined]);
     expect(plan(at(10), { open }, notifyOf({ on: false })).groups).toEqual([]);
   });
 
   it('the groups go in one order (as the summary lists them), the members by their time', () => {
     const open = [
-      job('b', { phase: 'price', items: [line({ createdAt: at(9, 30) })] }),
-      job('a', { phase: 'price', items: [line({ createdAt: at(9) })] }),
-      job('c', { phase: 'wait', waitingSince: at(7) }),
+      job('b', { phase: 'wait', waitingSince: at(9, 30) }),
+      job('a', { phase: 'wait', waitingSince: at(9) }),
+      job('c', { phase: 'work', items: [line({ approvalState: 'approved', createdAt: at(7) })] }),
     ];
     const p = plan(at(10), { open, reminders: [{ id: 'r', text: 'x', at: at(12) }] });
-    expect(p.groups.map((g) => g.key)).toEqual(['price', 'answer', 'reminder:r']);
-    expect(group(p, 'price')!.members.map((m) => m.id)).toEqual(['price:a', 'price:b']);
+    // «order» starts first (07:00 + an hour), yet goes after «answer»: the kinds keep the summary's order.
+    expect(p.groups.map((g) => g.key)).toEqual(['answer', 'order', 'reminder:r']);
+    expect(group(p, 'answer')!.members.map((m) => m.id)).toEqual(['answer:a', 'answer:b']);
   });
 
   it('the moments looked at: now, each hour of the coming day, each morning of the week', () => {
@@ -166,14 +177,17 @@ describe('«Сегодня» (v0.74)', () => {
     ]);
   });
 
-  it('a price waits since the newest line not told yet — a line just written is not listed as waiting', () => {
+  it('v0.81: lines waiting for their price are not listed — just written or days old; the customer’s answer waits from the moment the price went', () => {
     const old = { stageChangedAt: at(8, 0, '2026-11-20') };
-    const open = [job('a', { phase: 'price', items: [line({ createdAt: at(9, 30) })] }, old)];
-    const tasks = (now: string) => todayTasks({ open, past: [], vehicles: new Map(), warnHours: 2, alertHours: 24, now });
-    expect(tasks(at(10))).toEqual([]);
-    expect(tasks(at(11, 30)).map((t) => [t.kind, t.at, t.late])).toEqual([['price', at(9, 30), false]]);
-    // No line with a time later than the step's (older data): since the step, as before.
-    const bare = [job('b', { phase: 'price', items: [line({ createdAt: at(7, 0, '2026-11-19') })] }, old)];
-    expect(todayTasks({ open: bare, past: [], vehicles: new Map(), warnHours: 2, alertHours: 24, now: at(10) })[0].at).toBe(old.stageChangedAt);
+    const tasks = (open: OpenJob[], now: string) => todayTasks({ open, past: [], vehicles: new Map(), warnHours: 2, alertHours: 24, now });
+    const price = [job('a', { phase: 'price', items: [line({ createdAt: at(9, 30) })] }, old)];
+    expect(tasks(price, at(10))).toEqual([]);
+    expect(tasks(price, at(11, 30))).toEqual([]);
+    // Older data — no line later than the step: nothing either, however long ago the step was.
+    expect(tasks([job('b', { phase: 'price', items: [line({ createdAt: at(7, 0, '2026-11-19') })] }, old)], at(10))).toEqual([]);
+    // Told, and not answered: listed from two hours after it went.
+    const wait = [job('c', { phase: 'wait', waitingSince: at(9, 30) }, old)];
+    expect(tasks(wait, at(10))).toEqual([]);
+    expect(tasks(wait, at(11, 30)).map((t) => [t.kind, t.at, t.late])).toEqual([['answer', at(9, 30), false]]);
   });
 });

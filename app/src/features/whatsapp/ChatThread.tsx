@@ -14,6 +14,7 @@ import {
   IconFile,
   IconMapPin,
   IconMessage2,
+  IconMicrophone,
   IconPhone,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
@@ -27,7 +28,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next';
 import { dayHeading, dubaiTime } from '../../domain/dates';
 import { clock, fileSize, groupDays, kindOf, MAX_FILE_BYTES, sendKind, type WaMessage, type Who } from '../../domain/whatsapp';
-import { dropFailed, forwardWa, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
+import { againWaVoice, dropFailed, forwardWa, loadMessages, moreMessages, seenWa, sendWaFile, sendWaText, sendWaVoice, useWaPrefs, waFileBlob, waFileSrc, waReady } from '../../services/whatsapp';
+import { canRecord, useRecorder } from '../../ui/recorder';
 import { copyText } from '../../ui/clipboard';
 import { StickyBar } from '../../ui/components';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
@@ -410,7 +412,102 @@ function FilesSheet({ files, to, opened, onClose, onSend }: { files: Picked[]; t
   );
 }
 
-/* ---------- The bottom: «＋», the words, the camera ---------- */
+/* ---------- The microphone (v0.81) ---------- */
+
+/** Slid this far to the left while held: the recording is thrown away. */
+const CANCEL_PX = 90;
+/** Shorter than this: no voice message (a tap, not a hold) — a hint instead. */
+const SHORTEST_S = 0.6;
+
+/**
+ * The chat's microphone (v0.81, the user's brief: «удержание микрофона начинает запись, отпускание отправляет голосовое в
+ * текущий чат… во время записи показать, что она идёт, и дать отменить её до отправки… начинать отправку сразу после
+ * отпускания»): held — it records (the strip in the field's place says so, the seconds run); let go — the voice is in the
+ * chat at once, on its way (`sendWaVoice`); slid left — thrown away. Let go before the microphone was given (the phone's
+ * first question) — nothing is kept. The voice as the notes record it (ui/recorder.ts: one channel, 48 kHz, the
+ * phone's noise reduction and level).
+ */
+function useHoldMic(chatId: string, onSent: () => void, say: (e: unknown) => void) {
+  const { t } = useTranslation();
+  const rec = useRecorder();
+  const [slide, setSlide] = useState(0);
+  const g = useRef<{ x0: number; held: boolean; cancelled: boolean } | null>(null);
+  // Let go before the recording began (the microphone still being asked for): stopped as soon as it begins.
+  const dropOnStart = useRef(false);
+  useEffect(() => {
+    if (rec.recording && dropOnStart.current) {
+      dropOnStart.current = false;
+      rec.cancel();
+    }
+  }, [rec.recording, rec]);
+  const begin = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0 || g.current) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // the finger is followed all the same
+    }
+    const cur = { x0: e.clientX, held: true, cancelled: false };
+    g.current = cur;
+    dropOnStart.current = false;
+    setSlide(0);
+    haptic('light');
+    void rec
+      .start()
+      .then((r) => {
+        if (!r || cur.cancelled) return;
+        if (r.seconds < SHORTEST_S) {
+          notifications.show({ message: t('wa.voice.hold') });
+          return;
+        }
+        haptic('success');
+        void sendWaVoice(chatId, r.blob, r.seconds).catch(say);
+        onSent();
+      })
+      .catch((err) => {
+        g.current = null;
+        say(err);
+      });
+  };
+  const follow = (e: React.PointerEvent) => {
+    const cur = g.current;
+    if (!cur?.held) return;
+    const dx = Math.min(0, e.clientX - cur.x0);
+    setSlide(dx);
+    if (dx < -CANCEL_PX && !cur.cancelled) {
+      cur.cancelled = true;
+      haptic('warning');
+      end(true);
+    }
+  };
+  const end = (drop = false) => {
+    const cur = g.current;
+    if (!cur) return;
+    cur.held = false;
+    g.current = null;
+    setSlide(0);
+    if (drop) cur.cancelled = true;
+    if (rec.recording) {
+      if (cur.cancelled) rec.cancel();
+      else rec.stop();
+    } else {
+      // Not begun yet: what begins is thrown away.
+      cur.cancelled = true;
+      dropOnStart.current = true;
+    }
+  };
+  const handlers = {
+    onPointerDown: begin,
+    onPointerMove: follow,
+    onPointerUp: () => end(false),
+    onPointerCancel: () => end(true),
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+  };
+  return { recording: rec.recording || !!g.current, seconds: rec.seconds, slide, handlers };
+}
+
+/* ---------- The bottom: «＋», the words, the camera, the microphone ---------- */
 
 /** What was typed and not sent, by chat: back in its field when the chat is opened again. */
 const drafts = new Map<string, string>();
@@ -445,6 +542,7 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field, quick, des
     void sendWaText(chatId, words, answered).catch(say);
     onSent();
   };
+  const mic = useHoldMic(chatId, onSent, say);
   const pick = (list: File[]) => {
     if (!list.length) return;
     setPicked(list.map((file) => ({ file, url: sendKind(file) === 'photo' ? URL.createObjectURL(file) : undefined })));
@@ -512,7 +610,17 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field, quick, des
         >
           <IconPlus size={22} />
         </ActionIcon>
-        <div className="notes-field glass">
+        {mic.recording && (
+          // Recording (v0.81): in the field's place — the red dot and the seconds; slide left to throw it away.
+          <div className="notes-field glass wa-rec" role="status" aria-live="polite" data-wa-rec>
+            <span className="wa-rec-dot" aria-hidden />
+            <span className="wa-rec-time tnum">{clock(mic.seconds)}</span>
+            <span className="wa-rec-cancel" style={{ transform: `translateX(${Math.max(-CANCEL_PX, mic.slide)}px)`, opacity: 1 - Math.min(1, -mic.slide / CANCEL_PX) * 0.6 }}>
+              ‹ {t('wa.voice.slide')}
+            </span>
+          </div>
+        )}
+        <div className="notes-field glass" hidden={mic.recording}>
           <Textarea
             ref={field}
             aria-label={t('wa.message')}
@@ -544,9 +652,19 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field, quick, des
             <IconArrowUp size={22} stroke={2.4} />
           </ActionIcon>
         ) : (
-          <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('wa.camera')} onClick={() => camera.current?.click()}>
-            <IconCamera size={21} />
-          </ActionIcon>
+          <>
+            {!mic.recording && (
+              <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('wa.camera')} onClick={() => camera.current?.click()} data-wa-camera>
+                <IconCamera size={21} />
+              </ActionIcon>
+            )}
+            {/* The microphone (v0.81): held — it records; let go — it is sent; slid left — thrown away. */}
+            {canRecord() && (
+              <button type="button" className="wa-mic glass" data-rec={mic.recording || undefined} aria-label={t('wa.voice.mic')} {...mic.handlers} data-wa-mic>
+                <IconMicrophone size={22} stroke={2} />
+              </button>
+            )}
+          </>
         )}
         {input(gallery, { multiple: true, 'data-wa-file': '' } as React.InputHTMLAttributes<HTMLInputElement>)}
         {input(camera, { accept: 'image/*', capture: 'environment' })}
@@ -713,6 +831,8 @@ export function ChatThread({ chatId, title, group, people, desk, quick, who, pho
       // Not sent: the same words once more (a file is picked again).
       dropFailed(chatId, m.id);
       if (m.type === 'chat' && m.text) void sendWaText(chatId, m.text).catch((e) => notifications.show({ color: 'red', message: errorText(e) }));
+      // A voice message (v0.81): the same recording again.
+      else if (m.type === 'ptt') void againWaVoice(chatId, m.id)?.catch((e) => notifications.show({ color: 'red', message: errorText(e) }));
     },
     [chatId, errorText],
   );

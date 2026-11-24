@@ -123,24 +123,29 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
   );
 }
 
-export function SearchPage() {
+/**
+ * What the search finds for `q`: the cars and customers (each car with its job in the workshop and its last visits), the
+ * jobs by what was done in them, the suppliers; nothing at all — «Новый заказ». v0.81: the board's own field (the user's
+ * brief: «строка поиска вверху экрана «Все»… по госномеру или имени клиента можно искать сразу с главного экрана») shows
+ * it under the board's cars that match — `exclude`: the jobs it shows already, `quiet`: it found some itself.
+ */
+export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<string>; quiet?: boolean }) {
   const { t } = useTranslation();
   const phone = usePhone();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const [q, setQ] = useState(params.get('q') ?? '');
-  useEffect(() => {
-    const p = params.get('q');
-    if (p !== null) setQ(p);
-  }, [params]);
   const lang = useLang();
-  const nameOf = useCustomerName();
   // Typing stays instant; the lists follow a moment later.
   const dq = useDeferredValue(q);
-  const hits = useSearch(dq);
+  const found = useSearch(dq);
+  const hits = exclude && found ? found.filter((h) => !(h.activeOrder && exclude.has(h.activeOrder.id))) : found;
   // Read once (and again when the data changes); each letter only filters it.
   const jobIndex = useScreenLiveQuery(() => loadJobIndex(lang), [lang], 600);
-  const jobs = useMemo(() => (jobIndex && dq.trim() ? matchJobs(jobIndex, dq) : undefined), [jobIndex, dq]);
+  const jobs = useMemo(() => {
+    const all = jobIndex && dq.trim() ? matchJobs(jobIndex, dq) : undefined;
+    if (!all || !exclude?.size) return all;
+    const matches = all.matches.filter((m) => !exclude.has(m.doc.orderId));
+    return { matches, total: all.total - (all.matches.length - matches.length) };
+  }, [jobIndex, dq, exclude]);
   // Suppliers too: "toyota headlights" — who to write to, one tap from the result.
   const allSuppliers = useScreenLiveQuery(() => db.suppliers.filter((s) => !s.archivedAt).toArray(), []);
   const suppliers = useMemo(() => {
@@ -153,11 +158,6 @@ export function SearchPage() {
       })
       .slice(0, 6);
   }, [allSuppliers, dq]);
-  const recent = useScreenLiveQuery(async () => {
-    const orders = await db.orders.orderBy('createdAt').reverse().limit(8).toArray();
-    const [vs, cs] = await Promise.all([db.vehicles.bulkGet(orders.map((o) => o.vehicleId)), db.customers.bulkGet(orders.map((o) => o.customerId))]);
-    return orders.map((o, i) => ({ o, v: vs[i], c: cs[i] }));
-  }, []);
   // What was found: the cars and customers, the jobs, the suppliers.
   const carsSec = q && !!hits?.length && (
     <Section title={t('search.cars')} mt={0}>
@@ -252,12 +252,7 @@ export function SearchPage() {
   );
   return (
     <>
-      <PageHeader title={t('search.title')} />
-      <Box mb="lg" maw={phone ? undefined : 720}>
-        {/* On a phone the keyboard waits for a tap on the field (opening the tab only shows the search). */}
-        <SearchField autoFocus={!phone} placeholder={t('search.placeholder')} value={q} onChange={setQ} />
-      </Box>
-      {q && hits?.length === 0 && jobs?.total === 0 && !suppliers.length && (
+      {q && !quiet && hits?.length === 0 && jobs?.total === 0 && !suppliers.length && (
         <EmptyState
           icon={IconUserSearch}
           title={t('search.noResults')}
@@ -286,6 +281,34 @@ export function SearchPage() {
           <div>{jobsSec}</div>
         </div>
       )}
+    </>
+  );
+}
+
+export function SearchPage() {
+  const { t } = useTranslation();
+  const phone = usePhone();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(params.get('q') ?? '');
+  useEffect(() => {
+    const p = params.get('q');
+    if (p !== null) setQ(p);
+  }, [params]);
+  const nameOf = useCustomerName();
+  const recent = useScreenLiveQuery(async () => {
+    const orders = await db.orders.orderBy('createdAt').reverse().limit(8).toArray();
+    const [vs, cs] = await Promise.all([db.vehicles.bulkGet(orders.map((o) => o.vehicleId)), db.customers.bulkGet(orders.map((o) => o.customerId))]);
+    return orders.map((o, i) => ({ o, v: vs[i], c: cs[i] }));
+  }, []);
+  return (
+    <>
+      <PageHeader back={phone} title={t('search.title')} />
+      <Box mb="lg" maw={phone ? undefined : 720}>
+        {/* On a phone the keyboard waits for a tap on the field (opening the screen only shows the search). */}
+        <SearchField autoFocus={!phone} placeholder={t('search.placeholder')} value={q} onChange={setQ} />
+      </Box>
+      <SearchResults q={q} />
       {!q && (
         <Stack gap={0} maw={phone ? undefined : 720}>
           {/* What can be searched for is said only while there is nothing to show yet (a new device). */}

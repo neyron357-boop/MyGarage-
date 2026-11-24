@@ -64,11 +64,19 @@ const job = async (make: string, model: string, parts: string[]) => {
   for (const p of parts) ids.push((await addItem(o.id, { kind: 'part', block: 'A', titleEn: p, qty: 1, unitPriceFils: 0 })).id);
   return { id: o.id, lines: ids };
 };
+/** A job as the expense's sheet offers it (a tap puts the expense on it). */
+const option = async (orderId: string, car: string) => {
+  const o = (await db.orders.get(orderId))!;
+  return { orderId, vehicleId: o.vehicleId, customerId: o.customerId, number: o.number, car };
+};
+/** The job's lines as they are now (v0.81: a receipt never changes them by itself). */
+const linesOf = (ids: string[]) => Promise.all(ids.map((id) => db.items.get(id)));
 
 describe('a receipt scanned', () => {
-  it('records the expense in «Запчасти» with the photo, ties it to the job its parts are for, and prices the job’s lines off it; the seller known to the base is that supplier, in the garage’s words', async () => {
+  it('v0.81: records the expense in «Запчасти» with the photo, on no job — the job its parts are for is offered first, its lines left as they are; the seller known to the base is that supplier, in the garage’s words', async () => {
     await job('Toyota', 'Camry', ['FRONT BRAKE PADS']);
     const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER', 'AIR FILTER']);
+    const before = await linesOf(lc.lines);
     const known = await saveSupplier({ name: 'Al Quoz Auto Parts', phone: '0501234567' });
     const r = await scanReceipt(PHOTO());
     expect(r.failed).toBeUndefined();
@@ -78,7 +86,11 @@ describe('a receipt scanned', () => {
     expect(img.data.length).toBeGreaterThan(100);
     const e = (await db.expenses.get(r.expense!.id))!;
     const cat = (await db.expenseCategories.get(e.categoryId))!;
-    expect([e.amountFils, e.vatFils, e.vendor, e.method, cat.code, e.orderId, e.supplierId]).toEqual([12600, 600, 'Al Quoz Auto Parts', 'cash', 'parts', lc.id, known.id]);
+    expect([e.amountFils, e.vatFils, e.vendor, e.method, cat.code, e.supplierId, e.scanned]).toEqual([12600, 600, 'Al Quoz Auto Parts', 'cash', 'parts', known.id, true]);
+    // No job, no car, no customer: the manager picks the job in the sheet.
+    expect([e.orderId, e.vehicleId, e.customerId]).toEqual([undefined, undefined, undefined]);
+    expect(r.job).toBeUndefined();
+    expect(r.others[0]).toEqual(await option(lc.id, 'Toyota Land Cruiser'));
     // The seller: the supplier already in the base (by its name), not a second one; its empty address filled off the paper.
     expect(r.supplier).toEqual({ id: known.id, name: 'Al Quoz Auto Parts', added: false });
     expect(await db.suppliers.count()).toBe(1);
@@ -98,34 +110,31 @@ describe('a receipt scanned', () => {
     const media = await db.media.where('ownerId').equals(e.id).toArray();
     expect(media.map((m) => m.slot)).toEqual(['receipt']);
     expect(await db.cashMovements.filter((m) => m.expenseId === e.id).count()).toBe(1);
-    // The job's lines: the purchase price and the seller's VAT off the paper, the number and the supplier on the one that had none.
-    const [oil, air] = await Promise.all(lc.lines.map((id) => db.items.get(id)));
-    expect([oil!.costPriceFils, oil!.purchaseVatFils, oil!.partNumber, oil!.supplierId]).toEqual([3500, 175, '90915-YZZE1', known.id]);
-    expect([air!.costPriceFils, air!.purchaseVatFils]).toEqual([8500, 425]);
-    expect(r.costed).toBe(2);
-    expect(r.job).toMatchObject({ orderId: lc.id, car: 'Toyota Land Cruiser' });
-    // Said once, with «Отменить»: the expense goes, its movement and photo with it; the lines keep their prices.
+    // The job's lines: no purchase price, VAT, number or supplier off the paper — as they were.
+    expect(await linesOf(lc.lines)).toEqual(before);
+    expect(r.costed).toBe(0);
+    // Said once, with «Отменить»: the expense goes, its movement and photo with it.
     const n = notices.find((x) => x.kind === 'expense')!;
     expect(n).toMatchObject({ amountFils: 12600, vendor: 'Al Quoz Auto Parts', items: 2, close: false, supplier: { name: 'Al Quoz Auto Parts', added: false } });
-    expect(n.kind === 'expense' && n.job?.car).toBe('Toyota Land Cruiser');
+    expect(n.kind === 'expense' && n.job).toBeUndefined();
     await n.undo();
     expect(await db.expenses.get(e.id)).toBeUndefined();
     expect(await db.cashMovements.filter((m) => m.expenseId === e.id).count()).toBe(0);
-    expect((await db.items.get(lc.lines[0]))!.costPriceFils).toBe(3500);
-    // The known supplier stays (the line keeps it too); what the paper filled on it is emptied again.
+    // The known supplier stays; what the paper filled on it is emptied again; the lines are still as they were.
     expect((await db.suppliers.get(known.id))!.address).toBeUndefined();
-    expect((await db.items.get(lc.lines[0]))!.supplierId).toBe(known.id);
+    expect(await linesOf(lc.lines)).toEqual(before);
   });
 
-  it('a seller not in the base is added off the paper — the phone as the app keeps numbers, the car’s make, what it sold, the TRN — and put on the job’s lines; «Отменить» takes it away with the expense', async () => {
+  it('a seller not in the base is added off the paper — the phone as the app keeps numbers, the make of the likeliest job’s car, what it sold, the TRN — the job’s lines not touched (v0.81); «Отменить» takes it away with the expense', async () => {
     const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER']);
     answer = { ...base(), vendor: 'NEW PARTS LLC', vendorPhone: '050 442 1190', vendorTrn: '100999999900003', items: [{ name: 'Oil filter', total: 40 }], subtotal: undefined, vat: undefined, total: 40 };
     const r = await scanReceipt(PHOTO());
     expect(r.supplier).toMatchObject({ name: 'NEW PARTS LLC', added: true });
     const s = (await db.suppliers.get(r.supplier!.id))!;
     expect([s.name, s.phone, s.address, s.makes, s.parts, s.notes, s.service]).toEqual(['NEW PARTS LLC', '+971504421190', 'Al Quoz Ind. 3', ['Toyota'], 'OIL FILTER', 'TRN 100999999900003', undefined]);
-    expect((await db.items.get(lc.lines[0]))!.supplierId).toBe(s.id);
-    expect(r.expense!.vendor).toBe('NEW PARTS LLC');
+    expect((await db.items.get(lc.lines[0]))!.supplierId).toBeUndefined();
+    expect([r.expense!.vendor, r.expense!.supplierId, r.expense!.orderId, r.expense!.scanned]).toEqual(['NEW PARTS LLC', s.id, undefined, true]);
+    expect(r.others.map((o) => o.orderId)).toEqual([lc.id]);
     const n = notices.find((x) => x.kind === 'expense')!;
     expect(n.kind === 'expense' && n.supplier).toEqual({ name: 'NEW PARTS LLC', added: true });
     // The same seller on the next paper (its number typed as it is said) — the same supplier, not another.
@@ -142,88 +151,98 @@ describe('a receipt scanned', () => {
 
   // v0.73 (the user: «независимо в каком статусе находится заказ… даже если в архиве»): the paper of a job closed weeks
   // ago, taken off the board, found and put on it; a cancelled one too; a job opened over a year before is not looked at.
-  it('a job in any state is looked through — closed weeks before the paper and in the archive, cancelled; its lines priced', async () => {
+  it('a job in any state is looked through — closed weeks before the paper and in the archive, cancelled — and offered, nothing written on it (v0.81)', async () => {
     const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
     const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER', 'AIR FILTER']);
     await db.orders.update(lc.id, { stage: 'closed', createdAt: day(40), closedAt: day(30), stageChangedAt: day(30), archivedAt: day(29) });
+    const before = await linesOf(lc.lines);
     await job('Nissan', 'Patrol', ['FRONT BRAKE PADS']);
     const r = await scanReceipt(PHOTO());
-    expect(r.expense!.orderId).toBe(lc.id);
-    expect(r.job).toMatchObject({ orderId: lc.id, close: false });
-    expect((await db.items.get(lc.lines[0]))!.costPriceFils).toBe(3500);
+    expect([r.expense!.orderId, r.expense!.scanned, r.job]).toEqual([undefined, true, undefined]);
+    expect(r.others[0]).toEqual(await option(lc.id, 'Toyota Land Cruiser'));
+    expect(await linesOf(lc.lines)).toEqual(before);
     // Cancelled: found as well.
     await removeEntry({ source: 'expense', id: r.expense!.id });
     await db.orders.update(lc.id, { stage: 'cancelled' });
-    expect((await scanReceipt(PHOTO())).expense!.orderId).toBe(lc.id);
+    const cancelled = await scanReceipt(PHOTO());
+    expect([cancelled.expense!.orderId, cancelled.others[0]?.orderId]).toEqual([undefined, lc.id]);
     // Opened over a year before the paper: not looked at.
     await db.orders.update(lc.id, { stage: 'closed', createdAt: day(400), closedAt: day(390) });
-    expect((await scanReceipt(PHOTO())).expense!.orderId).toBeUndefined();
+    const old = await scanReceipt(PHOTO());
+    expect(old.expense!.orderId).toBeUndefined();
+    expect(old.others.map((o) => o.orderId)).not.toContain(lc.id);
   });
 
-  it('a job of a closed month gets the expense, its lines are left as they are', async () => {
+  it('a job of a closed month is offered like any other, nothing written on it (v0.81)', async () => {
     const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER', 'AIR FILTER']);
     const order = (await db.orders.get(lc.id))!;
     const month = dubaiDate(order.createdAt).slice(0, 7);
     await db.orders.update(lc.id, { stage: 'closed', closedAt: order.createdAt });
     await db.customers.update(order.customerId, { lockedMonths: [month] });
+    const before = await linesOf(lc.lines);
     const r = await scanReceipt(PHOTO());
-    expect(r.expense!.orderId).toBe(lc.id);
+    expect([r.expense!.orderId, r.expense!.scanned]).toEqual([undefined, true]);
+    expect(r.others[0]?.orderId).toBe(lc.id);
     expect(r.costed).toBe(0);
-    expect((await db.items.get(lc.lines[0]))!.costPriceFils ?? 0).toBe(0);
+    expect(await linesOf(lc.lines)).toEqual(before);
   });
 
-  it('a contractor’s bill: in «Подрядчики», the contractor added as one, the outsourced line paid by it', async () => {
+  it('a contractor’s bill: in «Подрядчики», the contractor added as one; its job offered, the outsourced line not paid by it by itself (v0.81)', async () => {
     const o = await checkIn({ plate: { emirate: 'DXB', code: 'R', number: '70707' }, make: 'Nissan', model: 'Patrol', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
     const line = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'FRONT BUMPER PAINT', qty: 1, unitPriceFils: 80000, outsource: { state: 'out' } });
+    const before = (await db.items.get(line.id))!;
     answer = { ...base(), kind: 'service', vendor: 'SPEED PAINT SHOP', vendorPhone: '04 338 7712', vendorAddress: '', vendorTrn: '', items: [{ name: 'Bumper paint', total: 500 }], subtotal: undefined, vat: undefined, total: 500, carText: 'Patrol' };
     const r = await scanReceipt(PHOTO());
     const e = (await db.expenses.get(r.expense!.id))!;
     const cat = (await db.expenseCategories.get(e.categoryId))!;
-    expect([cat.code, e.orderId, e.amountFils, e.vendor]).toEqual(['subcontract', o.id, 50000, 'SPEED PAINT SHOP']);
+    expect([cat.code, e.orderId, e.amountFils, e.vendor, e.scanned]).toEqual(['subcontract', undefined, 50000, 'SPEED PAINT SHOP', true]);
     const s = (await db.suppliers.get(r.supplier!.id))!;
     expect([s.service, s.phone, s.makes]).toEqual([true, '+97143387712', ['Nissan']]);
+    expect(r.others[0]).toEqual(await option(o.id, 'Nissan Patrol'));
+    // The outsourced line: no price, contractor or expense off the paper — as it was.
     const it = (await db.items.get(line.id))!;
-    expect([it.costPriceFils, it.outsource?.supplierId, it.outsource?.expenseId]).toEqual([50000, s.id, e.id]);
+    expect(it).toEqual(before);
+    expect([it.outsource?.supplierId, it.outsource?.expenseId]).toEqual([undefined, undefined]);
     await notices.find((x) => x.kind === 'expense')!.undo();
-    const back = (await db.items.get(line.id))!;
-    expect([back.outsource?.expenseId, back.outsource?.supplierId, back.costPriceFils]).toEqual([undefined, undefined, 50000]);
+    expect(await db.items.get(line.id)).toEqual(before);
     expect(await db.suppliers.get(s.id)).toBeUndefined();
+    expect(await db.expenses.get(e.id)).toBeUndefined();
   });
 
-  it('two jobs alike: the fresher one, to be looked at — its lines left alone; the other a tap away; the day as read, said', async () => {
+  it('two jobs alike: both offered, the fresher one first — neither written on (v0.81); the day as read, said', async () => {
     const older = await job('Toyota', 'Corolla', ['OIL FILTER']);
     await new Promise((r) => setTimeout(r, 5));
     const fresher = await job('Toyota', 'Corolla', ['OIL FILTER']);
+    const before = await linesOf([...older.lines, ...fresher.lines]);
     // A year under a stamp: today's day and month, read two years back — put right to today, said unsure. (Built from
     // today: a fixed «19-Nov-2024» became yesterday on 20/11/2026, before both jobs — and no job fitted.)
     const [y, m, d] = dubaiDate().split('-');
     const misread = `${Number(y) - 2}-${m}-${d}`;
     answer = { ...base(), carText: '', dateText: `${d}/${m}/${Number(y) - 2}`, date: misread, dateSure: false, items: [{ name: 'Oil filter', total: 35 }], subtotal: undefined, vat: undefined, total: 35 };
     const r = await scanReceipt(PHOTO());
-    expect(r.job).toMatchObject({ orderId: fresher.id, close: true });
-    expect((await db.items.get(fresher.lines[0]))!.costPriceFils ?? 0).toBe(0);
-    expect(r.others).toEqual([{ orderId: older.id, vehicleId: (await db.orders.get(older.id))!.vehicleId, customerId: (await db.orders.get(older.id))!.customerId, number: (await db.orders.get(older.id))!.number, car: 'Toyota Corolla' }]);
+    expect([r.job, r.expense!.orderId, r.expense!.scanned]).toEqual([undefined, undefined, true]);
+    expect(r.others).toEqual([await option(fresher.id, 'Toyota Corolla'), await option(older.id, 'Toyota Corolla')]);
+    expect(await linesOf([...older.lines, ...fresher.lines])).toEqual(before);
     const n = notices.find((x) => x.kind === 'expense')!;
-    expect(n).toMatchObject({ close: true, dateSure: false });
+    expect(n).toMatchObject({ close: false, dateSure: false });
     expect(n.kind === 'expense' && n.date).toBe(r.expense!.date);
     expect(r.expense!.date).toBe(dubaiDate());
   });
 
-  it('a price already typed on a line stays; a receipt naming no job’s parts is recorded without a job', async () => {
+  it('a price already typed on a line stays; a receipt naming no job’s parts offers no job (v0.81: neither is on a job)', async () => {
     const lc = await job('Toyota', 'Land Cruiser', ['OIL FILTER']);
     await db.items.update(lc.lines[0], { costPriceFils: 3000 });
     answer = { isReceipt: true, vendor: 'X', items: [{ name: 'Oil filter', total: 40 }], total: 40, confidence: 0.9 };
     const one = await scanReceipt(PHOTO());
-    expect(one.expense!.orderId).toBe(lc.id);
+    expect([one.expense!.orderId, one.others[0]?.orderId]).toEqual([undefined, lc.id]);
     // A seller's name of a letter or two is not a supplier.
     expect(one.supplier).toBeUndefined();
     expect(await db.suppliers.count()).toBe(0);
     expect((await db.items.get(lc.lines[0]))!.costPriceFils).toBe(3000);
     answer = { isReceipt: true, vendor: 'Y', items: [{ name: 'Wiper blades', total: 40 }], total: 40, confidence: 0.9 };
     const two = await scanReceipt(PHOTO());
-    expect(two.expense!.orderId).toBeUndefined();
-    expect(two.job).toBeUndefined();
-    expect(notices.filter((n) => n.kind === 'expense').map((n) => n.kind === 'expense' && !!n.job)).toEqual([true, false]);
+    expect([two.expense!.orderId, two.job, two.others]).toEqual([undefined, undefined, []]);
+    expect(notices.filter((n) => n.kind === 'expense').map((n) => n.kind === 'expense' && !!n.job)).toEqual([false, false]);
   });
 
   it('nothing recorded when the server did not read it, the paper has no sum, or it is fuel or food — that one waits in the sheet, filled in, for the manager’s category', async () => {

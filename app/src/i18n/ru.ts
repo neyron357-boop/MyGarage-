@@ -222,6 +222,11 @@ export const ru = {
     storage: 'Стоянка {{days}} д',
   },
   board: {
+    // v0.81: поиск сверху доски и «Фильтры» вместо вкладок.
+    filters: 'Фильтры',
+    filterOn: 'Выбрано',
+    filterOff: 'Показать все',
+    findPlaceholder: 'Номер, имя, телефон',
     kanbanHint: 'Пустые этапы свёрнуты — наведите, чтобы увидеть название',
     title: 'Мастерская',
     inShop: 'В мастерской',
@@ -293,6 +298,9 @@ export const ru = {
     },
   },
   customer: {
+    // v0.81: один номер — звонок и WhatsApp.
+    phoneWa: 'Телефон',
+    more: 'Ещё',
     noName: 'Клиент без имени',
     contact: 'Контактное лицо',
     visits: 'визитов',
@@ -460,7 +468,17 @@ export const ru = {
     declinedRecs: 'Отказанные рекомендации',
     mileageHistory: 'Пробег по визитам',
   },
+  // v0.81: быстрый лист «＋» заказа и «+ Цена».
+  qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить' },
+  price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
   newOrder: {
+    // v0.81: VIN в карточке номера.
+    scanVin: 'Сканировать VIN',
+    typeVin: 'Ввести VIN',
+    vinReading: 'Читаю VIN…',
+    vinOk: 'VIN верный',
+    vinRead: 'VIN проверен',
+    vinNone: 'VIN не прочитан',
     photo: 'Камера',
     retake: 'Переснять',
     removePhoto: 'Убрать фото',
@@ -1126,6 +1144,11 @@ export const ru = {
     reissued: 'Готово: кредит-нота {{credit}}, новый инвойс {{invoice}}',
   },
   job: {
+    // v0.81: состояние сметы в заказе.
+    quoteUnsent: 'Смета не отправлена',
+    quoteNewUnsent: 'Новые строки не отправлены',
+    quoteSend: 'Отправить',
+    quoteSentAgo: 'Смета отправлена · {{time}}',
     tab: { main: 'Основная', notes: 'Заметки' },
     handedOver: 'Выдана',
     due: 'Срок',
@@ -1865,6 +1888,11 @@ export const ru = {
   },
   // WhatsApp мастерской в приложении (v0.78): сервер мастерской — связанное устройство аккаунта.
   wa: {
+    // v0.81: «Только гараж», статусы чатов, голосовые, расход руководителю.
+    garageOnly: 'Только гараж',
+    tags: { pick: 'Выбрать', give: 'Статус · {{n}}', title: 'Статус чатов · {{n}}', none: 'Без статуса', done: 'Статус «{{tag}}» — чатов: {{n}}', cleared: 'Статус снят — чатов: {{n}}' },
+    voice: { mic: 'Голосовое', hold: 'Удерживайте, чтобы записать', slide: 'отмена' },
+    boss: { send: 'Отправить руководителю', sentAt: 'Отправлено · {{time}}', pickJob: 'Сначала выберите заказ', noJob: 'Сначала выберите заказ', noChat: 'Чат руководителя не выбран', sent: 'Отправлено руководителю' },
     setup: 'Настройка',
     unreadN_one: '{{count}} непрочитанное',
     unreadN_few: '{{count}} непрочитанных',
@@ -1895,7 +1923,7 @@ export const ru = {
     pickBoss: 'Чат босса',
     search: 'Имя или номер',
     tab: { all: 'Все', unread: 'Новые', customers: 'Клиенты', suppliers: 'Поставщики', groups: 'Группы' },
-    who: { customer: 'Клиент', supplier: 'Поставщик', employee: 'Сотрудник', driver: 'Водитель' },
+    who: { customer: 'Клиент', supplier: 'Поставщик', employee: 'Сотрудник', driver: 'Водитель', service: 'Услуги', work: 'Работа' },
     kind: { photo: 'Фото', video: 'Видео', voice: 'Голосовое', audio: 'Аудио', file: 'Файл', sticker: 'Стикер', place: 'Место', card: 'Контакт', call: 'Звонок', gone: 'Сообщение удалено', poll: 'Опрос', other: 'Откройте в WhatsApp', text: 'Сообщение' },
     ticks: { failed: 'Не отправлено', wait: 'Отправляется', sent: 'Отправлено', got: 'Доставлено', read: 'Прочитано' },
     unit: { kb: 'КБ', mb: 'МБ' },

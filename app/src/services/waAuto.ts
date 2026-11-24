@@ -219,6 +219,43 @@ async function bossExpense(list: Expense[]) {
   );
 }
 
+/**
+ * «Отправить руководителю» in an expense's sheet (v0.81, the user's brief: «после привязки кнопка «Отправить руководителю»
+ * одним нажатием отправляет данные расхода и вручную выбранного заказа прямо в настроенный чат»): the expense — its sum,
+ * way, seller, the paper's positions and its photo — and the job it was put on by hand (its number, car, customer), to the
+ * boss's chat (`to` — picked just now, the first time). Only with a job: a scanned receipt is not sent before. Through the
+ * server's queue, as every message of the garage's (one key per expense and job: another job picked sends again).
+ */
+export async function sendExpenseToBoss(expenseId: string, to?: WaTarget): Promise<void> {
+  const e = await db.expenses.get(expenseId);
+  if (!e || e.voidedAt) throw new AppError('err.notFound');
+  if (!e.orderId) throw new AppError('wa.boss.noJob');
+  const s = await waAutoSettings();
+  const chat = to ?? s.boss.to;
+  if (!chat) throw new AppError('wa.boss.noChat');
+  const parts = (e.splitId ? await db.expenses.where('splitId').equals(e.splitId).toArray() : [e]).filter((x) => !x.voidedAt);
+  const cat = await db.expenseCategories.get(e.categoryId);
+  const supplier = e.supplierId ? await db.suppliers.get(e.supplierId) : undefined;
+  const { order, customer, car } = await jobFace(e.orderId);
+  const total = parts.reduce((n, x) => n + x.amountFils, 0);
+  const photo = parts.map((x) => x.receiptMediaId).find(Boolean);
+  const event: BossEvent = {
+    kind: 'expense',
+    amount: total,
+    method: e.method,
+    category: cat ? (s.boss.lang === 'ru' ? cat.nameRu : cat.nameEn) : '',
+    vendor: supplier?.name || e.vendor,
+    note: e.note,
+    car,
+    jobNumber: order.number,
+    customer: nameOf(customer) || undefined,
+    parts: parts.length > 1 ? parts.map((x) => ({ method: x.method, amount: x.amountFils })) : undefined,
+    lines: e.lines?.map((l) => ({ name: l.name, qty: l.qty })),
+  };
+  await queueWa([{ key: `boss:expense:${e.splitId ?? e.id}:${e.orderId}`, chat: chat.chat, parts: [{ text: bossText(event, s.boss.lang) }, ...(photo ? [{ media: photo }] : [])], title: chat.name }]);
+  await db.expenses.update(e.id, { toBoss: { at: nowIso(), orderId: e.orderId } });
+}
+
 /* ---------- Heard as it is kept ---------- */
 
 const hashOf = (ids: string[]) => {
@@ -299,7 +336,8 @@ async function heard(writes: LocalWrite[]) {
     for (const x of created('incomes') as unknown as Income[]) void bossIncome(x).catch(() => undefined);
     const expenses = created('expenses') as unknown as Expense[];
     const groups = new Map<string, Expense[]>();
-    for (const e of expenses) groups.set(e.splitId ?? e.id, [...(groups.get(e.splitId ?? e.id) ?? []), e]);
+    // A scanned receipt (v0.81) goes to the boss by hand only — once its job is picked (`sendExpenseToBoss`).
+    for (const e of expenses) if (!e.scanned) groups.set(e.splitId ?? e.id, [...(groups.get(e.splitId ?? e.id) ?? []), e]);
     for (const g of groups.values()) void bossExpense(g).catch(() => undefined);
   }
   // The customer agreed: the lines to do, to the work group (a moment later: one agreement writes in steps).

@@ -1,4 +1,5 @@
 import { ActionIcon, Box, Button, Group, Modal, Stack, Text, TextInput, ThemeIcon, UnstyledButton } from '@mantine/core';
+import { BossSend } from './BossSend';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { IconArrowDownLeft, IconArrowUpRight, IconBook2, IconCash, IconCheck, IconCreditCard, IconLock, IconPaperclip, IconPencil, IconTrash, IconUserDollar } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -299,6 +300,8 @@ export function EntryDetails({
         ) : (
           entry.note && <Text size="sm">{entry.note}</Text>
         )}
+        {/* To the boss's WhatsApp by hand (v0.81): an expense on a job — a scanned one only so. */}
+        {live && entry.source === 'expense' && <BossSend expenseId={entry.id} />}
         {/* To the owner (v0.68): what it was, its photos and — money for a job — the job's invoice. */}
         {entry.source !== 'closing' && <ShareEntryButton entry={entry} label={label} />}
         <Group justify="space-between">

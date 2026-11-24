@@ -366,7 +366,15 @@ export function BackButton({ to, label }: { to?: string; label?: ReactNode }) {
   );
 }
 
-type HeaderProps = { title: ReactNode; back?: string | boolean; right?: ReactNode; subtitle?: ReactNode; eyebrow?: ReactNode };
+type HeaderProps = {
+  title: ReactNode;
+  back?: string | boolean;
+  right?: ReactNode;
+  subtitle?: ReactNode;
+  eyebrow?: ReactNode;
+  /** A phone: the title in the bar only, no large title under it (v0.81: a job's chat — the room is the messages'). */
+  inline?: boolean;
+};
 
 /**
  * A screen's head. Phone: the iOS navigation bar and the large title under it. PC (v0.42): the window's toolbar — one
@@ -451,7 +459,7 @@ function DeskBack({ to }: { to?: string }) {
  * one has scrolled under it) above a large title that fades as it goes. On a phone the bar lives
  * outside the screen's scroll view, so it never moves when the content bounces.
  */
-function PhoneHeader({ title, back, right, subtitle, eyebrow }: HeaderProps) {
+function PhoneHeader({ title, back, right, subtitle, eyebrow, inline }: HeaderProps) {
   const screen = useScreen();
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);
@@ -497,9 +505,9 @@ function PhoneHeader({ title, back, right, subtitle, eyebrow }: HeaderProps) {
       target.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
     };
-  }, [screen]);
+  }, [screen, inline]);
   const bar = (
-    <div className="nav-bar" data-compact={compact} ref={barRef}>
+    <div className="nav-bar" data-compact={inline || compact} data-inline={inline || undefined} ref={barRef}>
       <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} />}</div>
       <div className="nav-title" aria-hidden>
         {title}
@@ -510,6 +518,7 @@ function PhoneHeader({ title, back, right, subtitle, eyebrow }: HeaderProps) {
   return (
     <>
       {screen ? createPortal(bar, screen.nav) : bar}
+      {!inline && (
       <header className="page-head" ref={headRef}>
         {eyebrow && (
           <div className="page-eyebrow">{eyebrow}</div>
@@ -523,6 +532,7 @@ function PhoneHeader({ title, back, right, subtitle, eyebrow }: HeaderProps) {
           </Text>
         )}
       </header>
+      )}
     </>
   );
 }

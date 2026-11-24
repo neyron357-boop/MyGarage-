@@ -8532,3 +8532,296 @@ html.desk .mark-layer-body {
   align-items: center;
   gap: 4px;
 }
+
+/* ---------- v0.81: faster at the car (the user's brief) ----------
+   The board's search and filters, a job's quick «＋» sheet, «+ Цена», the VIN in the plate's card, the chats' «Только
+   гараж», the chat's microphone. */
+
+/* The board: the search on top of «Все»; a filter picked — said under it, × back to «Все». */
+.board-find {
+  margin-top: 4px;
+}
+.board-filter-on {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: -4px 0 12px;
+}
+.board-filter-on .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chip-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.board-filter-icon {
+  background: var(--c);
+}
+.filter-count {
+  color: var(--app-label-2);
+  font-size: 15px;
+}
+/* Whose car it is, on the card and the row (after the plate). */
+.job-card-who,
+.job-mini-who {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+}
+.job-card-who {
+  font-weight: 600;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.35);
+}
+.job-mini-who {
+  color: var(--app-label-2);
+}
+
+/* A job's quick «＋» sheet: what was added (× takes it off), what fits what is typed, the field, the kind above the keys. */
+.qa-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.qa-added {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 72px;
+  overflow-y: auto;
+}
+.qa-added-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px 2px 2px 12px;
+  border-radius: 999px;
+  background: var(--mantine-color-green-light);
+  color: var(--mantine-color-green-8);
+  font-size: 13px;
+  font-weight: 600;
+}
+.qa-added-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.qa-added-x {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+}
+.qa-list {
+  /* One height while typing — the sheet does not jump with each letter; it fits above the keyboard. */
+  height: clamp(120px, calc(var(--vv-h, 100dvh) - 330px), 288px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.qa-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 0.5px solid var(--app-hairline);
+  background: transparent;
+  color: var(--mantine-color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.qa-row:last-child {
+  border-bottom: 0;
+}
+.qa-row:active {
+  background: var(--app-press);
+}
+.qa-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+.qa-new {
+  color: var(--mantine-color-cobalt-6);
+}
+.qa-new .qa-name {
+  text-transform: none;
+}
+.qa-price {
+  flex: none;
+  font-size: 15px;
+  color: var(--app-label-2);
+}
+.qa-field .mantine-Input-input {
+  min-height: 48px;
+  font-size: 17px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.qa-field .mantine-Input-input::placeholder {
+  text-transform: none;
+}
+.qa-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.qa-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--app-card);
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), transform var(--dur-0) var(--spring);
+}
+.qa-kind svg {
+  color: var(--c);
+  flex: none;
+}
+.qa-kind[data-active='true'] {
+  background: var(--c);
+  color: #fff;
+}
+.qa-kind[data-active='true'] svg {
+  color: #fff;
+}
+.qa-kind:active {
+  transform: scale(0.95);
+}
+[data-mantine-color-scheme='dark'] .qa-kind:not([data-active='true']) {
+  background: var(--app-soft);
+}
+
+/* «+ Цена» on a draft line; its price, a tap to change it. */
+.price-add,
+.price-tap-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform var(--dur-0) var(--spring);
+}
+.price-add {
+  background: var(--mantine-color-orange-light);
+  color: var(--mantine-color-orange-7);
+}
+.price-tap-row {
+  margin-right: -12px;
+  background: transparent;
+  color: var(--mantine-color-text);
+}
+.price-add:active,
+.price-tap-row:active {
+  transform: scale(0.95);
+}
+
+/* The VIN in the plate's card (a car not in the base): the line it was read off, under it. */
+.vin-crop {
+  display: block;
+  max-width: 100%;
+  max-height: 36px;
+  margin-top: 8px;
+  border-radius: 6px;
+}
+
+/* The chats: «Выбрать» and «Только гараж» over the list; a chat picked. */
+.wa-list-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.wa-row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.wa-pick {
+  display: grid;
+  place-items: center;
+}
+
+/* The chat's microphone: held — it records (red, larger), the strip in the field's place. */
+.wa-mic {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--mantine-color-text);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform var(--dur-1) var(--spring), background-color var(--dur-1) var(--ease-out);
+}
+.wa-mic[data-rec] {
+  background: var(--mantine-color-red-6) !important;
+  color: #fff;
+  transform: scale(1.18);
+}
+.wa-rec {
+  gap: 10px;
+  overflow: hidden;
+}
+.wa-rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--mantine-color-red-6);
+  animation: mg-rec 1.1s ease-in-out infinite;
+  flex: none;
+}
+.wa-rec-time {
+  font-size: 17px;
+  font-weight: 500;
+  flex: none;
+}
+.wa-rec-cancel {
+  margin-left: auto;
+  color: var(--app-label-2);
+  font-size: 15px;
+  white-space: nowrap;
+}
+.notes-field[hidden] {
+  display: none !important;
+}

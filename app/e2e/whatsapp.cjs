@@ -20,7 +20,7 @@ async function launchBrowser() {
   const channels = forced ? [forced] : ['chromium', 'chrome', 'msedge'];
   for (const channel of channels) {
     try {
-      return await chromium.launch({ ...(channel === 'chromium' ? {} : { channel }), args: ['--enable-unsafe-swiftshader'] });
+      return await chromium.launch({ ...(channel === 'chromium' ? {} : { channel }), args: ['--enable-unsafe-swiftshader', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
     } catch {
       // try the next one
     }
@@ -155,7 +155,7 @@ async function playServer(page, phase) {
         if (path === 'forward') return { ok: true };
         if (path === 'send' || path === 'file') {
           const chatId = path === 'send' ? init.body.chat : init.query.chat;
-          const type = path === 'send' ? 'chat' : init.query.doc ? 'document' : /^image/.test(init.file.type) ? 'image' : 'document';
+          const type = path === 'send' ? 'chat' : init.query.voice ? 'ptt' : init.query.doc ? 'document' : /^image/.test(init.file.type) ? 'image' : 'document';
           const sent = msg(chatId, { me: true, t: Date.now(), type, text: path === 'send' ? init.body.text : (init.query.caption ?? ''), ack: 1, file: path === 'file' ? { mime: init.file.type, name: init.query.name, size: init.file.size, here: true } : undefined });
           if (path === 'file' && type === 'image') files[sent.id] = URL.createObjectURL(init.file);
           (world.messages[chatId] ??= []).push(sent);
@@ -185,7 +185,7 @@ let current = null;
   };
 
   /* ---------------- A phone ---------------- */
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: false, locale: 'ru-RU' });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: false, locale: 'ru-RU', permissions: ['microphone'] });
   await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
   const page = await ctx.newPage();
   current = page;
@@ -244,8 +244,30 @@ let current = null;
   // 3. The chats: whose they are, how many wait, the tabs, a search.
   await go('#/whatsapp');
   await top().locator('[data-wa-chat]').first().waitFor();
+  // v0.81: «Только гараж» on by default — the customers', the supplier's and one's own chat; a stranger, a group the garage
+  // does not write to, an old muted chat — not.
+  const garage = await top().locator('.wa-row-name').allInnerTexts();
+  check(garage.length === 4 && !garage.includes('+971 52 444 0000') && !garage.includes('Garage team'), `v0.81: «Только гараж» lists the garage's chats only (${garage.join(' | ')})`);
+  await shot('phone-06a-garage-only');
+  // Off — every chat.
+  await top().locator('.wa-list-tools .mantine-Switch-track').click();
+  await settle(400);
   const names = await top().locator('.wa-row-name').allInnerTexts();
   check(names.length === 7, `seven chats are listed, the archived one is not (${names.length})`);
+  // Two chats without a status picked and given one — «Работа»; back on «Только гараж», they are in it.
+  await top().locator('[data-wa-pick]').click();
+  await top().locator('.list-row').filter({ hasText: '+971 52 444 0000' }).click();
+  await top().locator('.list-row').filter({ hasText: 'Old muted chat' }).click();
+  check((await top().locator('[data-wa-picked]').count()) === 2, 'v0.81: two chats picked');
+  await shot('phone-06b-chats-picked');
+  await page.locator('[data-wa-tag-picked]').click();
+  await page.getByRole('dialog').locator('.list-row').filter({ hasText: /^Работа$/ }).click();
+  await page.locator('[data-wa-tag-picked]').waitFor({ state: 'detached' });
+  await top().locator('.wa-list-tools .mantine-Switch-track').click();
+  await settle(500);
+  const tagged = await top().locator('.wa-row-name').allInnerTexts();
+  check(tagged.length === 6 && tagged.includes('+971 52 444 0000') && tagged.includes('Old muted chat') && !tagged.includes('Garage team'), `v0.81: the chats given «Работа» are among the garage's now (${tagged.join(' | ')})`);
+  check((await top().locator('.list-row').filter({ hasText: 'Old muted chat' }).locator('.wa-who').innerText()) === 'Работа', 'v0.81: their status is shown on them');
   const demo = await page.evaluate(async () => {
     const { db } = await import('/src/db/db.ts');
     const { waDigits } = await import('/src/domain/whatsapp.ts');
@@ -323,6 +345,39 @@ let current = null;
   await say(page, { t: 'ack', chat: A, id: sentId, ack: 3 });
   await settle(200);
   check((await top().locator('.note-row').last().locator('.wa-ticks').getAttribute('data-state')) === 'read', 'read: two blue ticks');
+
+  // v0.81: the microphone — held, it records (the strip says so); let go, the voice message is in the chat at once and goes
+  // as WhatsApp's own (voice=1); slid left — nothing goes.
+  {
+    const mic = top().locator('[data-wa-mic]');
+    await mic.waitFor();
+    const before = await top().locator('.note-row').count();
+    const asked = await page.evaluate(() => window.__wa.asked.length);
+    const box = await mic.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await top().locator('[data-wa-rec]').waitFor();
+    await page.waitForTimeout(1500);
+    // (Straight away: the recording's dot pulses for as long as it records — shot() would wait for it to stop.)
+    await page.screenshot({ path: `${OUT}/phone-07c-recording.png` });
+    await page.mouse.up();
+    await top().locator('[data-wa-rec]').waitFor({ state: 'detached' });
+    await top().locator('.note-row .wa-sound').last().waitFor();
+    await settle(600);
+    check((await top().locator('.note-row').count()) === before + 1, 'v0.81: the voice message is in the chat at once');
+    const went = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file'), asked);
+    check(went.length === 1 && went[0].query.voice === '1' && /^audio\//.test(went[0].file.type) && went[0].file.size > 500, 'v0.81: it went as a voice message: ' + JSON.stringify(went.map((a) => ({ q: a.query, t: a.file.type, n: a.file.size }))));
+    // Slid left while held: thrown away.
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await top().locator('[data-wa-rec]').waitFor();
+    await page.waitForTimeout(900);
+    await page.mouse.move(box.x - 150, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await top().locator('[data-wa-rec]').waitFor({ state: 'detached' });
+    await settle(800);
+    check((await top().locator('.note-row').count()) === before + 1, 'v0.81: a recording slid away is not sent');
+  }
 
   // A file: shown before it goes, then sent with its caption.
   await top().locator('[data-wa-file]').setInputFiles({ name: 'INV-2026-351.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test') });
@@ -589,7 +644,9 @@ let current = null;
       await p.locator('.notes-reply').waitFor();
       check(true, 'PC: a right click answers a message');
       await p.screenshot({ path: `${OUT}/pc-${scheme}-03-reply.png` });
-      // Another chat: the group, with who wrote.
+      // Another chat: the group, with who wrote — a group the garage does not write to: in the whole list (v0.81, «Только
+      // гараж» off).
+      await p.locator('.wa-list-tools .mantine-Switch-track').click();
       await p.locator('.wa-row-name', { hasText: 'Garage team' }).click();
       await p.locator('.wa-author').first().waitFor();
       check((await p.locator('.wa-author').first().innerText()) === 'Rashid', 'PC: in a group a run of messages says who wrote it');

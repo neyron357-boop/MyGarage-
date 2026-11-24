@@ -65,7 +65,9 @@ export function jobFacts(b: OrderBundle, phase: Phase, lang: Lang) {
   const doc: 'invoice' | 'quote' | null = inv ? 'invoice' : liveLines(b.items).some((i) => i.kind !== 'discount') ? 'quote' : null;
   // The customer's WhatsApp, when there is a number to write to.
   const wa = b.customer.whatsapp || b.customer.phone;
-  return { manual, m, flags, hours, booked, late, amount, car, working, find, coming, outside, due, dueLate, dueText, tone, name, what, inv, doc, wa };
+  // Whose it is (v0.81, the user's brief: «на карточке показать автомобиль, госномер и имя клиента, если оно указано»).
+  const who = (b.customer.type === 'company' && b.customer.companyName) || b.customer.name.trim();
+  return { manual, m, flags, hours, booked, late, amount, car, working, find, coming, outside, due, dueLate, dueText, tone, name, what, inv, doc, wa, who };
 }
 
 export type JobFacts = ReturnType<typeof jobFacts>;

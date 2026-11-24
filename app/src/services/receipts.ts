@@ -1,6 +1,5 @@
 import { db } from '../db/db';
 import { dubaiDate } from '../domain/dates';
-import { formatNumber } from '../domain/partNumbers';
 import {
   guessJob,
   rankJobs,
@@ -12,14 +11,12 @@ import {
   type ReceiptRead,
 } from '../domain/receipt';
 import { alreadyInBase, sellerKey } from '../domain/suppliers';
-import type { Expense, OrderItem, Supplier } from '../domain/types';
+import type { Expense, Supplier } from '../domain/types';
 import { mergePapers, readPaper, type KnownSeller, type PaperRead } from '../domain/receiptText';
 import { aiOn, askAi, notifyAi } from './ai';
 import { getSettings } from './settings';
 import { removeEntry } from './entries';
-import { updateItem } from './estimate';
 import { addExpense } from './money';
-import { assertJobOpen } from './monthLock';
 import { saveSupplier, subcontractCategory } from './parts';
 import { shrinkPhoto } from './photoSize';
 
@@ -30,10 +27,12 @@ import { shrinkPhoto } from './photoSize';
  * garage's server, which has Gemini read it (server/src/ai.mjs `receipt`); the app turns the reading into an expense
  * (domain/receipt.ts — nothing invented, the date read day first, a year under a stamp put right), knows the seller as a
  * supplier of the garage's, finds the job the parts were bought for (`rankJobs`: what the parts are, their numbers,
- * the car on the paper, the job's days — the app alone, no AI) — records the expense in
- * «Запчасти» (a contractor's bill — «Подрядчики») with the photo as its receipt, and, the job sure, puts the purchase
- * price and the supplier on its matched lines. What it did is said once (AiNotices), with «Отменить»; the expense's
- * sheet opens for a look, the other likely jobs a tap away.
+ * the car on the paper, the job's days — the app alone, no AI) — records the expense in «Запчасти» (a contractor's bill —
+ * «Подрядчики») with the photo as its receipt. What it did is said once (AiNotices), with «Отменить»; the expense's sheet
+ * opens for a look, the likely jobs a tap away. v0.81 (the user's brief: «отключить автоматическую привязку расхода к
+ * заказу по распознанным позициям… пользователь выбирает нужный заказ вручную… отправка руководителю только после
+ * ручной привязки»): no job is put on it and no job's lines change by themselves; the boss hears of it only by
+ * «Отправить руководителю» in its sheet, once a job is picked.
  */
 
 /** Another job the receipt may be for: a tap in the expense's sheet puts it there. */
@@ -229,12 +228,15 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     date: fields.date,
     supplierId: found?.id,
   });
-  // The job is the app's own guess (no AI is asked: «чтобы токены не тратились зря»); not sure — the likely ones a tap away.
+  // The likely jobs are only offered (v0.81, the user's brief: «отключить автоматическую привязку расхода к заказу по
+  // распознанным позициям… поле заказа пустое, пользователь выбирает нужный заказ вручную»): a tap each in the sheet, the
+  // likeliest first — one paper's parts may fit several jobs. Nothing of any job changes by itself.
   const guess = guessJob(ranked);
   const job = guess ? jobs.list.find((j) => j.id === guess.orderId) : undefined;
   const cats = await db.expenseCategories.filter((c) => c.active).toArray();
   const categoryId = fields.kind === 'service' ? await subcontractCategory() : (cats.find((c) => c.code === 'parts') ?? cats[0])?.id;
   if (!categoryId) return { costed: 0, failed: 'amount', read, fields, others: [] };
+  // (The likeliest job's make only says what the seller sells — a supplier added off the paper.)
   const seller = await sellerOf(fields, found, job?.car.make ?? '');
   const expense = await addExpense({
     date: fields.date,
@@ -249,48 +251,14 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     // What the paper lists — a list of its own in the sheet, not one line of the note (v0.77).
     lines: fields.items.map((i) => ({ name: i.name, qty: i.qty })),
     receipt: file,
-    orderId: guess?.orderId,
+    // No job (v0.81): the manager picks it in the sheet — and only then may it go to the boss, by hand.
+    scanned: true,
     // The category's monthly limit is the manager's own warning: a receipt in hand is already spent.
     overLimitComment: 'receipt',
   });
-  // The job sure: its matched lines get the purchase price and the seller's VAT off the paper (only where none was
-  // typed), the supplier where the line has none, the part number when the line has none; an outsourced work — who
-  // did it and that it is paid (its «Платим» is this expense). Not sure — the lines are left alone (the job may change).
-  let costed = 0;
-  const linked: string[] = [];
-  const paid: { id: string; supplier: boolean }[] = [];
-  // A job gone in a closed month of its customer (v0.69) keeps its lines as they are: the expense is on it, nothing more.
-  const locked = guess ? await assertJobOpen(guess.orderId).then(() => false, () => true) : false;
-  if (guess && job && !guess.close && !locked) {
-    for (const m of guess.matched) {
-      const it = fields.items[m.item];
-      const cur = await db.items.get(m.lineId);
-      if (!it || !cur) continue;
-      const patch: Partial<OrderItem> = {};
-      if (!(cur.costPriceFils ?? 0) && it.unitNetFils !== undefined && it.unitNetFils > 0) {
-        patch.costPriceFils = it.unitNetFils;
-        if (fields.vatShareBp > 0 && it.lineNetFils !== undefined) patch.purchaseVatFils = Math.round((it.lineNetFils * fields.vatShareBp) / 10000);
-      }
-      if (cur.kind === 'part') {
-        if (seller && !cur.supplierId) {
-          patch.supplierId = seller.supplier.id;
-          linked.push(cur.id);
-        }
-        if (!cur.partNumber && it.partNumber) patch.partNumber = formatNumber(job.car.make, it.partNumber);
-      } else if (cur.outsource && !cur.outsource.expenseId) {
-        const supplierId = cur.outsource.supplierId ?? seller?.supplier.id;
-        patch.outsource = { ...cur.outsource, supplierId, expenseId: expense.id };
-        paid.push({ id: cur.id, supplier: !cur.outsource.supplierId && !!supplierId });
-      }
-      if (Object.keys(patch).length) {
-        await updateItem(m.lineId, patch).catch(() => undefined);
-        if (patch.costPriceFils) costed++;
-      }
-    }
-  }
-  const car = guess ? (jobs.links.get(guess.orderId)?.car ?? '') : '';
+  // The likely jobs, the likeliest first (at most three): a tap each in the expense's sheet.
   const others: JobOption[] = ranked
-    .filter((r) => r.orderId !== guess?.orderId && r.score > 0)
+    .filter((r) => r.score > 0)
     .slice(0, 3)
     .map((r) => {
       const l = jobs.links.get(r.orderId)!;
@@ -303,28 +271,16 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     vendor: expense.vendor,
     date: fields.date,
     dateSure: fields.dateSure,
-    job: guess ? { number: guess.number, car } : undefined,
     supplier: seller ? { name: seller.supplier.name, added: seller.added } : undefined,
     items: fields.items.length,
-    close: !!guess?.close,
+    close: false,
     // «Отменить»: the expense goes (its cash movement and photo with it — services/entries.ts), a supplier added here goes
-    // too (off the lines it was put on), what the paper filled on a known one is emptied again if untouched since; the
-    // lines keep their prices.
+    // too, what the paper filled on a known one is emptied again if untouched since.
     undo: async () => {
-      // (An outsourced line's «paid» goes with the expense — removeEntry.)
       await removeEntry({ source: 'expense', id: expense.id });
       if (!seller) return;
-      for (const p of paid) {
-        const cur = await db.items.get(p.id);
-        if (p.supplier && cur?.outsource?.supplierId === seller.supplier.id) await updateItem(p.id, { outsource: { ...cur.outsource, supplierId: undefined } }).catch(() => undefined);
-      }
-      if (seller.added) {
-        for (const id of linked) {
-          const cur = await db.items.get(id);
-          if (cur?.supplierId === seller.supplier.id) await updateItem(id, { supplierId: undefined }).catch(() => undefined);
-        }
-        await db.suppliers.delete(seller.supplier.id);
-      } else if (Object.keys(seller.filled).length) {
+      if (seller.added) await db.suppliers.delete(seller.supplier.id);
+      else if (Object.keys(seller.filled).length) {
         const cur = await db.suppliers.get(seller.supplier.id);
         if (!cur) return;
         const back: Partial<Supplier> = {};
@@ -338,9 +294,8 @@ export async function scanReceipt(file: File): Promise<ReceiptScan> {
     expense,
     fields,
     read,
-    job: guess ? { ...guess, car } : undefined,
     others,
     supplier: seller ? { id: seller.supplier.id, name: seller.supplier.name, added: seller.added } : undefined,
-    costed,
+    costed: 0,
   };
 }

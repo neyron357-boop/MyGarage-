@@ -2,6 +2,7 @@ import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Te
 import { AiLineWork, AiPartsTile, AiPickedButton } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
+  IconPlus,
   IconBuildingCommunity,
   IconUsersGroup,
   IconBuildingStore,
@@ -99,6 +100,10 @@ import { useDesk, useDeskHotkeys, useDeskPane } from '../../ui/desk';
 import { openTwin, useTwin } from '../../ui/deskTwin';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
+import { holdKeyboard } from '../../ui/keyboard';
+import { markJobOpened } from '../../ui/recentJobs';
+import { QuickAddSheet } from './QuickAdd';
+import { PriceSheet } from './PriceSheet';
 import { setJobQuiet } from '../../services/notify';
 import { ReminderSheet } from '../notify/ReminderSheet';
 import { OwnerCheckSheet } from './OwnerCheck';
@@ -550,6 +555,10 @@ export function JobPage() {
   const lang = useLang();
   const navigate = useNavigate();
   const b = useOrderBundle(id);
+  // Opened (v0.81): the board puts it on top — remembered on this device only, nothing of the job is written.
+  useEffect(() => {
+    if (id) markJobOpened(id);
+  }, [id]);
   // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…» — and (v0.80) a tab of the job.
   const waLinked = useWaSel(waReady);
   const chatPhone = b ? jobChatPhone(b) : '';
@@ -610,6 +619,23 @@ export function JobPage() {
   // While the sheet slides away it keeps showing what it showed (not "Add labour" for a part).
   const lastSheet = useRef(sheet);
   if (sheet) lastSheet.current = sheet;
+  // New lines (v0.81): the quick sheet — search, one tap adds, the keyboard stays (QuickAdd.tsx); a tile's tap holds the
+  // keyboard up for its field (ui/keyboard.ts).
+  const [quickKind, setQuick] = useState<LineKind | null>(null);
+  const lastQuick = useRef<LineKind>('part');
+  if (quickKind) lastQuick.current = quickKind;
+  const openQuick = (k: LineKind) => {
+    holdKeyboard();
+    setQuick(k);
+  };
+  // «+ Цена» on a draft line (v0.81, PriceSheet.tsx): its row's price — a tap; its name — its card.
+  const [priceFor, setPriceFor] = useState<OrderItem | null>(null);
+  const lastPrice = useRef<OrderItem | null>(null);
+  if (priceFor) lastPrice.current = b?.items.find((x) => x.id === priceFor.id) ?? priceFor;
+  const openPrice = (i: OrderItem) => {
+    holdKeyboard();
+    setPriceFor(i);
+  };
   const shownSheet = sheet ?? lastSheet.current;
   const [act, setAct] = useState<OrderItem | null>(null);
   const [more, setMore] = useState(false);
@@ -678,9 +704,9 @@ export function JobPage() {
   const addable = !!b && !!phase && !['closed', 'cancelled', 'booked'].includes(phase) && !activeInvoice(b.invoices);
   useDeskHotkeys(
     [
-      ['1', () => setSheet({ kind: 'labor' })],
-      ['2', () => setSheet({ kind: 'part' })],
-      ['3', () => setSheet({ kind: 'service' })],
+      ['1', () => setQuick('labor')],
+      ['2', () => setQuick('part')],
+      ['3', () => setQuick('service')],
     ],
     !phone && addable && tab === 'main',
   );
@@ -897,7 +923,28 @@ export function JobPage() {
         i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : '',
       ])}
       right={
-        unpriced.includes(i) ? (
+        editable && !picking && i.approvalState === 'draft' && !i.customerSupplied ? (
+          // A draft's price (v0.81): «+ Цена» while it has none — a tap, the cost and the price; then the price itself,
+          // a tap to change it (the row's name opens its card).
+          <button
+            type="button"
+            className={unpriced.includes(i) ? 'price-add' : 'price-tap-row tnum'}
+            aria-label={unpriced.includes(i) ? t('price.add') : t('job.changePrice')}
+            onClick={(e) => {
+              e.stopPropagation();
+              openPrice(i);
+            }}
+          >
+            {unpriced.includes(i) ? (
+              <>
+                <IconPlus size={15} stroke={2.6} aria-hidden />
+                {t('price.word')}
+              </>
+            ) : (
+              <Money fils={itemAmounts(i).gross} />
+            )}
+          </button>
+        ) : unpriced.includes(i) ? (
           // No price yet (a part still to find): it cannot go to the customer like this.
           <Text fw={700} c="orange.7" aria-label={t('qi.price')}>
             ?
@@ -1326,7 +1373,7 @@ export function JobPage() {
         {amendable && (
           // Something forgotten or to change after the invoice: the same tiles, the invoice is redone. "%" — a
           // discount on the invoice out (a credit note and a new invoice at once), while money is due.
-          <AddBar onAdd={(kind) => setAmend({ then: () => setSheet({ kind }) })}>
+          <AddBar onAdd={(kind) => setAmend({ then: () => setQuick(kind) })}>
             {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
             <AddExtra icon={IconPencil} label={t('job.amend')} word={t('job.amend')} onClick={() => setAmend({})} />
           </AddBar>
@@ -1351,12 +1398,30 @@ export function JobPage() {
             <FirstRows rows={lines.map(row)} />
             {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
             {refusedLines.map(row)}
+            {/* The quote's state (v0.81, the user's brief: «убрать автоматические уведомления «Нужно отправить цену».
+                Внутри заказа показать состояние отправки сметы и дать отправить её вручную»): not sent — said here, sent by
+                hand; sent — since when, and a reminder to the customer by hand. */}
+            {phase === 'price' && editable && (
+              <ListRow
+                left={<IconSend size={20} stroke={1.9} color="var(--mantine-color-grape-6)" aria-hidden />}
+                title={
+                  <Text span inherit c="dimmed" data-quote-state="unsent">
+                    {b.versions.length ? t('job.quoteNewUnsent') : t('job.quoteUnsent')}
+                  </Text>
+                }
+                right={
+                  <Button variant="light" color="grape" size="compact-md" disabled={unpriced.length > 0} onClick={toClient}>
+                    {t('job.quoteSend')}
+                  </Button>
+                }
+              />
+            )}
             {sentAt && (
               <ListRow
                 left={<IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />}
                 title={
-                  <Text span inherit c="orange.7">
-                    {shortDuration(hoursBetween(sentAt), lang)}
+                  <Text span inherit c="orange.7" data-quote-state="sent">
+                    {t('job.quoteSentAgo', { time: shortDuration(hoursBetween(sentAt), lang) })}
                   </Text>
                 }
                 right={
@@ -1370,7 +1435,7 @@ export function JobPage() {
         )}
         {editable && phase !== 'booked' && (
           // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
-          <AddBar onAdd={(kind) => setSheet({ kind })} flush={!lines.length}>
+          <AddBar onAdd={openQuick} flush={!lines.length}>
             {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
             {parts.length > 0 && <AddExtra icon={IconCopy} label={t('job.copyLines')} word={t('job.copyWord')} onClick={() => void copyLines()} />}
             {/* The AI for every part at once (v0.52): names, numbers, diagrams and photos. */}
@@ -1437,6 +1502,8 @@ export function JobPage() {
     <>
       <PageHeader
         back="/"
+        // The customer's chat (v0.81, «заголовок с названием автомобиля компактнее»): the car in the bar only — room for messages.
+        inline={phone && tab === 'chat'}
         eyebrow={`№${b.order.number}`}
         // The VIN alone, one tap (v0.70) — small, under the car's name (v0.71, «переместить наверх под названием авто мелко»).
         subtitle={
@@ -1520,6 +1587,12 @@ export function JobPage() {
             suggestions={shownSheet ? suggestions?.[shownSheet.kind] : undefined}
           />
         )}
+      </LazySheet>
+      <LazySheet opened={!!quickKind} warm={editable}>
+        {(o) => <QuickAddSheet b={b} kind={quickKind ?? lastQuick.current} opened={o} onClose={() => setQuick(null)} suggestions={suggestions} />}
+      </LazySheet>
+      <LazySheet opened={!!priceFor}>
+        {(o) => <PriceSheet b={b} item={lastPrice.current} opened={o} onClose={() => setPriceFor(null)} service={!!lastPrice.current && sheetKind(lastPrice.current) === 'service'} />}
       </LazySheet>
       <LineActions b={b} item={act} onClose={() => setAct(null)} onEdit={(i) => setSheet({ kind: sheetKind(i), item: i })} />
       <LazySheet opened={more}>

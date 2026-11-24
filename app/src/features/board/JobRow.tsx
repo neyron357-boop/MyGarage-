@@ -114,7 +114,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
   // WhatsApp, when there is a number to write to. Only from the card's edge (v0.36): a card is most of what a thumb
   // touches on the board, and a scroll that drifted sideways sent cars to the archive.
   // What the card says, read off the job's facts (jobFacts.ts — the PC's card reads the same).
-  const { manual, m, flags, hours, booked, amount, car, find, coming, outside, due, dueLate, dueText, tone, name, what, inv, doc, wa } = jobFacts(b, phase, lang);
+  const { manual, m, flags, hours, booked, amount, car, find, coming, outside, due, dueLate, dueText, tone, name, what, inv, doc, wa, who } = jobFacts(b, phase, lang);
   // The customer's chat in the app while the garage's WhatsApp is linked (v0.80), WhatsApp itself when not.
   const openChat = useOpenChat();
   const openWa = () => openChat(wa);
@@ -208,6 +208,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
         </span>
         <span className="job-mini-line">
           <PlateText plate={b.vehicle.plate} size="xs" />
+          {who && <span className="job-mini-who">{who}</span>}
           {!dated && dueChip}
           {rowAmount > 0 && (
             <span className="job-mini-amount">
@@ -323,6 +324,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
                 {what && <span className="job-card-what">{what}</span>}
                 <span className="job-card-meta">
                   <PlateText plate={b.vehicle.plate} size="sm" />
+                  {who && <span className="job-card-who">{who}</span>}
                   {dueChip}
                   {amount > 0 && (
                     <span className="job-card-amount">

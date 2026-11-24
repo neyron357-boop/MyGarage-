@@ -340,6 +340,8 @@ export interface ExpenseInput {
   lines?: PaperLine[];
   overLimitComment?: string;
   receipt?: Blob;
+  /** Read off a scanned receipt (v0.81): on a job by hand, to the boss by hand only. */
+  scanned?: boolean;
   /**
    * Paid in parts (v0.58, the user: «часть наличными, а часть в кредит остаётся»): a part a way, adding up to
    * `amountFils` — each saved as an expense of its own (its cash moves, its credit is owed), the VAT shared by their sums,
@@ -398,6 +400,7 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
       note: input.note?.trim() || undefined,
       lines: cleanPaperLines(input.lines),
       overLimitComment: input.overLimitComment?.trim() || undefined,
+      ...(input.scanned ? { scanned: true as const } : {}),
       createdAt,
       splitId: split ? ids[0] : undefined,
     });
