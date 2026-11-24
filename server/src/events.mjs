@@ -54,6 +54,14 @@ export function createEvents({ pingMs = 15_000 } = {}) {
       const line = `data: ${JSON.stringify({ rev })}\n\n`;
       for (const s of [...streams]) if (s.deviceId !== by) send(s, line);
     },
+    /**
+     * Something other than a change of the data, said to every device at once (v0.78: WhatsApp — a message, its ticks,
+     * the state): `data: {"wa": …}`. An app that does not know the word passes it by (it reads `rev` only).
+     */
+    tell(payload) {
+      const line = `data: ${JSON.stringify(payload)}\n\n`;
+      for (const s of [...streams]) send(s, line);
+    },
     /** A device cut off (or leaving): its streams end. */
     drop(deviceId) {
       for (const s of [...streams]) if (s.deviceId === deviceId) close(s);

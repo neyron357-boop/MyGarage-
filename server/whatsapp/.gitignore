@@ -1,0 +1,4 @@
+node_modules/
+# never here, but never in the repo either: the session is the whole WhatsApp account
+.wwebjs_auth/
+.wwebjs_cache/

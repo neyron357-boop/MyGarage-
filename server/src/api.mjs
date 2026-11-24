@@ -23,6 +23,7 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
  *   POST /api/push/test {title, body}    — one notification to this device now
+ *   /api/wa/…                            — the garage's WhatsApp, this computer a linked device of it (v0.78, whatsapp.mjs)
  *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
  *   GET  /api/media/:id/:variant         — the file back, in parts when asked (Range: a video plays as it comes);
@@ -123,7 +124,7 @@ export function createPairing() {
   };
 }
 
-export function createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai, push }) {
+export function createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai, push, wa }) {
   return async function api(req, res) {
     const origin = req.headers.origin;
     const allowed = origin && config.origins.includes(origin);
@@ -163,6 +164,14 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.removeHeader('Vary');
         return sendFile(req, res, f);
+      }
+
+      // WhatsApp (v0.78): a message's file, a chat's picture — for a picture or a video element, by the device's media key.
+      if ((req.method === 'GET' || req.method === 'HEAD') && wa && parts[0] === 'api' && parts[1] === 'wa' && parts.length === 3 && (parts[2] === 'media' || parts[2] === 'avatar') && url.searchParams.has('k')) {
+        if (!store.mediaDevice(url.searchParams.get('d'), url.searchParams.get('k'))) throw httpError(401, 'not paired');
+        res.removeHeader('Vary');
+        res.removeHeader('Access-Control-Allow-Origin');
+        return await wa.file(req, res, { url, parts });
       }
 
       const modern = Number(req.headers['x-sync']) >= SYNC;
@@ -230,6 +239,9 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           }
         }
       }
+
+      // The garage's WhatsApp (v0.78, whatsapp.mjs): asked of the bridge on this computer — the device never talks to it.
+      if (wa && parts[0] === 'api' && parts[1] === 'wa' && (await wa.api(req, res, { url, parts, send, readJson, device }))) return;
 
       if (req.method === 'POST' && url.pathname === '/api/forget') {
         push?.unsubscribe(device.id);

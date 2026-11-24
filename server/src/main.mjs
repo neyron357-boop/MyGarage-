@@ -12,6 +12,7 @@ import { createRelay } from './relay.mjs';
 import { loadConfig, VERSION } from './config.mjs';
 import { DIRS, openStore } from './store.mjs';
 import { createTunnel } from './tunnel.mjs';
+import { createWhatsApp } from './whatsapp.mjs';
 
 /*
  * MyGarage's server: the app's data and files in one folder on this computer, synced to every paired device.
@@ -51,6 +52,10 @@ try {
 // Notifications on the phones (v0.74): the plan the app leaves here, sent through the browsers' push services.
 const push = createPush({ store, log, contact: config.pushContact });
 push.start();
+// The garage's WhatsApp (v0.78): this computer as a linked device of it — a bridge of its own beside the server,
+// started when it was linked (server/whatsapp, whatsapp.mjs).
+const wa = createWhatsApp({ config, store, log, events });
+wa.start();
 pairing.issue();
 
 /** The address the phone uses: given, the Cloudflare tunnel's, learnt from a request through a tunnel, or Tailscale's. */
@@ -101,7 +106,7 @@ function backupNow() {
   }
 }
 
-const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai, push }));
+const api = createServer(createApi({ store, config, pairing, log, onSeen, events, cards, relay, ai, push, wa }));
 // Streams stay open (events): no idle cut-off on this side.
 api.keepAliveTimeout = 65_000;
 api.requestTimeout = 0;
@@ -112,7 +117,7 @@ api.listen(config.port, config.host, () => {
   // A permanent address (Docker and Tailscale, or given): the devices have it from the start.
   if (config.publicUrl) relay?.publish(config.publicUrl);
 });
-const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push }));
+const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push, wa }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();
@@ -128,6 +133,7 @@ function stop() {
   // The tunnel goes on: the server started next keeps it, and its address.
   tunnel.detach();
   push.stop();
+  wa.stop();
   relay?.stop();
   events.closeAll();
   api.close();

@@ -4,6 +4,7 @@ import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
 import {
   IconBell,
+  IconBrandWhatsapp,
   IconCash,
   IconChartBar,
   IconInfoCircle,
@@ -38,6 +39,9 @@ import { PartsPage } from './features/parts/PartsPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { SearchPage } from './features/search/SearchPage';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { WaSetupPage } from './features/whatsapp/WaSetupPage';
+import { WhatsAppPage } from './features/whatsapp/WhatsAppPage';
+import { refreshWa, useWa, waUnread } from './services/whatsapp';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
 import { useResolvedScheme } from './ui/scheme';
@@ -90,6 +94,10 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/more" element={<MorePage />} />
       <Route path="/notes" element={<GarageNotesPage />} />
       <Route path="/notify" element={<NotifyPage />} />
+      {/* v0.78: the garage's WhatsApp — its chats, a chat, its setup (the server is a linked device of the account). */}
+      <Route path="/whatsapp" element={<WhatsAppPage />} />
+      <Route path="/whatsapp/chat/:id" element={<WhatsAppPage />} />
+      <Route path="/whatsapp/setup" element={<WaSetupPage />} />
       <Route path="*" element={<BoardPage />} />
     </Routes>
   );
@@ -129,6 +137,8 @@ const NAV_GROUPS = [
       { to: '/parts', icon: IconPackage, key: 'nav.parts' },
       { to: '/parts?tab=suppliers', icon: IconTruck, key: 'nav.suppliers' },
       { to: '/notes', icon: IconNotes, key: 'notes.title' },
+      // The garage's WhatsApp (v0.78): its chats beside the work.
+      { to: '/whatsapp', icon: IconBrandWhatsapp, key: 'nav.whatsapp' },
     ],
   },
   {
@@ -177,6 +187,8 @@ function SideNav() {
   const location = useLocation();
   const cash = useLiveQuery(cashState, []);
   const settings = useSettings();
+  // WhatsApp messages waiting to be read (v0.78): a number beside its item.
+  const unread = waUnread(useWa());
   // "Parts" and "Suppliers" share a route: highlight by the tab, not just the path.
   const isActive = (to: string, end?: boolean) => {
     const [path, query] = to.split('?');
@@ -210,6 +222,7 @@ function SideNav() {
                 <Link key={s.to} to={s.to} className="desk-nav-item" data-active={on || undefined} aria-current={on ? 'page' : undefined}>
                   <s.icon size={18} stroke={1.9} aria-hidden />
                   <span>{t(s.key)}</span>
+                  {s.to === '/whatsapp' && unread > 0 && <span className="desk-nav-count tnum">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
               );
             })}
@@ -368,6 +381,12 @@ function Shell() {
   useBackClosesSheets(mobile);
   useEscapeClosesTopSheet();
   useStatusBarColor();
+  // The garage's WhatsApp (v0.78): whether it is linked and how many messages wait — asked once, a moment after the
+  // start (the chats themselves are read when its screen is opened); the server's stream keeps it right after.
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refreshWa(), 2500);
+    return () => window.clearTimeout(timer);
+  }, []);
   const { pathname } = useLocation();
   // Toasts of the previous screen do not follow onto the next one.
   useEffect(() => {

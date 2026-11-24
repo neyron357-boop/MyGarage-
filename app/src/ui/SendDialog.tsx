@@ -9,7 +9,9 @@ import { notifications } from '@mantine/notifications';
 import { downloadBlob } from '../services/backup';
 import { copyText } from './clipboard';
 import { haptic } from './haptics';
+import { AppError } from '../services/errors';
 import { logMessage, telegramUrl, whatsappUrl } from '../services/messages';
+import { numberOnWa, sendWaFile, sendWaText, useWa, useWaPrefs, waReady } from '../services/whatsapp';
 import { SelectCard } from './components';
 import { useErrorText } from './hooks';
 import { LazySheet } from './lazy';
@@ -71,6 +73,13 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
   const [sharing, setSharing] = useState(false);
   const files = usePhotoFiles(request?.photos);
   const canSharePhotos = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
+  // The garage's WhatsApp is linked (v0.78): the message goes from the app itself — the words, the PDF, the photos —
+  // and is logged at once; nobody is asked «was it sent?». Opening WhatsApp by hand stays, under it.
+  const wa = useWa();
+  const prefs = useWaPrefs();
+  const [sending, setSending] = useState(false);
+  const [withPdf, setWithPdf] = useState(true);
+  const [withPhotos, setWithPhotos] = useState(true);
 
   useEffect(() => {
     if (live) {
@@ -84,7 +93,9 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
   const phone = customer.whatsapp || customer.phone;
   const url = channel === 'whatsapp' ? whatsappUrl(phone, text) : telegramUrl(text);
 
-  const confirm = async () => {
+  const direct = channel === 'whatsapp' && prefs.direct && waReady(wa) && !!phone;
+
+  const confirm = async (said = 'send.logged') => {
     try {
       await request.onConfirm?.();
     } catch (e) {
@@ -93,9 +104,30 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
     }
     await logMessage({ orderId: request.orderId, customerId: customer.id, channel, template: request.template, language: request.lang, text });
     haptic('light');
-    notifications.show({ color: 'green', message: t('send.logged') });
+    notifications.show({ color: 'green', message: t(said), icon: <IconCheck size={18} stroke={2.6} /> });
     onSent?.();
     onClose();
+  };
+
+  /** Sent by the garage's server: the words, then the document, then the photos — as they would go by hand. */
+  const sendDirect = async () => {
+    setSending(true);
+    try {
+      const to = await numberOnWa(phone);
+      if (!to.ok) throw new AppError('wa.notOnWa');
+      await sendWaText(to.chat, text);
+      if (request.pdf && withPdf) {
+        const { blob, filename } = await request.pdf();
+        await sendWaFile(to.chat, blob, { name: filename, doc: true });
+      }
+      if (withPhotos) for (const f of files) await sendWaFile(to.chat, f, { name: f.name });
+      await confirm('wa.sentDirect');
+    } catch (e) {
+      haptic('error');
+      notifications.show({ color: 'red', message: errorText(e), autoClose: 7000 });
+    } finally {
+      setSending(false);
+    }
   };
 
   const shareFile = async () => {
@@ -156,6 +188,27 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
           <Textarea value={text} onChange={(e) => setText(e.currentTarget.value)} autosize minRows={5} maxRows={14} variant="unstyled" styles={{ input: { fontSize: 14, lineHeight: 1.45 } }} />
         </Box>
         <Stack gap="xs">
+          {direct && (
+            <>
+              {(request.pdf || files.length > 0) && (
+                <div className="chip-row wrap" data-send-with>
+                  {request.pdf && (
+                    <button type="button" className="chip" data-active={withPdf} aria-pressed={withPdf} onClick={() => setWithPdf((v) => !v)} data-send-pdf>
+                      PDF
+                    </button>
+                  )}
+                  {files.length > 0 && (
+                    <button type="button" className="chip" data-active={withPhotos} aria-pressed={withPhotos} onClick={() => setWithPhotos((v) => !v)} data-send-photos>
+                      {t('wa.withPhotos', { n: files.length })}
+                    </button>
+                  )}
+                </div>
+              )}
+              <Button fullWidth size="md" color="green" loading={sending} leftSection={<IconBrandWhatsapp size={20} />} onClick={() => void sendDirect()} data-send-direct>
+                {t('wa.sendDirect')}
+              </Button>
+            </>
+          )}
           <Button
             fullWidth
             size="md"
@@ -163,6 +216,7 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
             href={url}
             target="_blank"
             rel="noopener"
+            variant={direct ? 'default' : 'filled'}
             color={channel === 'whatsapp' ? 'green' : 'cobalt'}
             leftSection={channel === 'whatsapp' ? <IconBrandWhatsapp size={20} /> : <IconBrandTelegram size={20} />}
             onClick={() => setOpened(true)}
@@ -206,7 +260,7 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
               <Button size="compact-md" variant="default" onClick={() => setOpened(false)}>
                 {t('common.no')}
               </Button>
-              <Button size="compact-md" onClick={confirm}>
+              <Button size="compact-md" onClick={() => void confirm()}>
                 {t('send.yesSent')}
               </Button>
             </Group>

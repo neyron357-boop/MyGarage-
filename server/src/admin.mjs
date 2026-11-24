@@ -43,6 +43,8 @@ const page = `<!doctype html>
 <div class="card" id="ai">…</div>
 <h2>Уведомления</h2>
 <div class="card" id="push">…</div>
+<h2>WhatsApp</h2>
+<div class="card" id="wa">…</div>
 <h2>Устройства</h2>
 <div class="card" id="devices">…</div>
 <h2>Где данные</h2>
@@ -51,7 +53,7 @@ const page = `<!doctype html>
 <script>
 // Questions are asked on the page itself, not by confirm()/alert(): a browser built into an app answers them «no» at
 // once without showing anything — and the button did nothing.
-let code = null, addr = '', asking = false, revoking = '';
+let code = null, addr = '', asking = false, revoking = '', waAsking = false, waBusy = false, waQr = 0;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const when = (s) => s ? new Date(s).toLocaleString('ru-RU', { timeZone: 'Asia/Dubai' }) : '—';
 const mb = (b) => (b / 1024 / 1024).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' МБ';
@@ -71,6 +73,9 @@ async function load() {
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel, s.relay);
   if (!aiTyping) document.getElementById('ai').innerHTML = aiHtml(s.ai);
   document.getElementById('push').innerHTML = pushHtml(s.push);
+  // (The QR is the same picture until WhatsApp renews it: not drawn again each time — it would blink.)
+  if (!s.wa || s.wa.phase !== 'qr' || s.wa.qrAt !== waQr) document.getElementById('wa').innerHTML = waHtml(s.wa);
+  waQr = s.wa && s.wa.phase === 'qr' ? s.wa.qrAt : 0;
   document.getElementById('devices').innerHTML = s.devices.length ? s.devices.map((d) =>
     '<div class="row"><span>' + esc(d.name) + (s.main && s.main.id === d.id ? ' <span class="ok">· главное</span>' : '') + '<br>' + (d.live ? '<span class="ok">● на связи сейчас</span>' : '<span class="dim">был на связи: ' + when(d.last_seen) + '</span>') + '</span>' +
     (d.revoked ? '<span class="bad">отключено</span>' : revoking === d.id
@@ -99,6 +104,32 @@ function pushHtml(p) {
   return '<div class="row"><span>Устройств с уведомлениями</span><span>' + (p.devices ? '<span class="ok">● ' + p.devices + '</span>' : '<span class="dim">нет — включаются в приложении: Ещё → Уведомления</span>') + '</span></div>' +
     '<div class="row"><span>В плане</span><span>' + (p.groups ? p.groups + ' · обновлён ' + esc(when(p.madeAt)) : '<span class="dim">пусто</span>') + '</span></div>' +
     '<div class="row"><span>Последнее отправлено</span><span>' + (p.lastAt ? esc(when(p.lastAt)) + ' · всего ' + p.sent : '<span class="dim">—</span>') + (p.error ? ' <span class="bad">' + esc(p.error) + '</span>' : '') + '</span></div>';
+}
+// WhatsApp (v0.78, whatsapp.mjs): this computer as a linked device of the garage's account — linked here by the QR
+// (or from the app by a code), unlinked here or on the phone.
+function waHtml(w) {
+  if (!w) return '<span class="dim">—</span>';
+  if (!w.installed) return '<span class="dim">Не установлен. В папке сервера <span class="mono">server/whatsapp</span> выполните <span class="mono">npm install</span> и перезапустите сервер.</span>';
+  if (!w.browser) return '<span class="bad">Нужен Chrome или Edge на этом компьютере.</span>';
+  const names = { off: 'не привязан', starting: 'запускается…', qr: 'ждёт привязки', loading: 'загрузка' + (w.loading ? ' ' + w.loading + ' %' : '…'), ready: 'связан', offline: 'нет связи — пробует снова' };
+  const cls = w.phase === 'ready' ? 'ok' : w.phase === 'offline' ? 'bad' : 'dim';
+  const busy = waBusy ? ' disabled' : '';
+  let h = '<div class="row"><span>Состояние</span><span class="' + cls + '">' + (w.phase === 'ready' ? '● ' : '') + esc(names[w.phase] || w.phase) + '</span></div>';
+  if (w.me && w.linked) h += '<div class="row"><span>Номер</span><span>+' + esc(w.me.phone) + (w.me.name ? ' · ' + esc(w.me.name) : '') + '</span></div>';
+  if (w.phase === 'ready') h += '<div class="row"><span>Чатов</span><span>' + w.chats + (w.unread ? ' · непрочитанных ' + w.unread : '') + '</span></div>';
+  if (w.error && w.phase !== 'ready') h += '<div class="row"><span>Причина</span><span class="dim mono">' + esc(w.error) + '</span></div>';
+  if (w.phase === 'qr' && w.qr) h += '<div style="padding:14px 0;text-align:center"><img alt="QR" src="' + esc(w.qr) + '" style="width:280px;height:280px;border-radius:12px;background:#fff;padding:8px"><p class="dim" style="margin:10px 0 0">WhatsApp на телефоне → Настройки → Связанные устройства → Привязка устройства → наведите камеру на код.</p></div>';
+  h += '<p class="dim" style="margin:8px 0 12px">Этот компьютер — связанное устройство WhatsApp мастерской: приложение показывает чаты и отправляет сообщения и файлы. Переписка не копируется — читается из WhatsApp. Сессия хранится только здесь.</p>';
+  if (waAsking) return h + '<p style="margin:0 0 12px">Отвязать этот компьютер от WhatsApp? В приложении чаты пропадут до новой привязки.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="red" onclick="wa(\\'logout\\')"' + busy + '>Отвязать</button><button class="ghost" onclick="waAsk(false)">Отмена</button></div>';
+  if (w.phase === 'off') return h + '<button onclick="wa(\\'link\\')"' + busy + '>Привязать WhatsApp</button>';
+  return h + '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (w.linked ? '<button class="ghost" onclick="wa(\\'restart\\')"' + busy + '>Перезапустить</button>' : '') + '<button class="red" onclick="waAsk(true)">' + (w.linked ? 'Отвязать' : 'Отмена') + '</button></div>';
+}
+function waAsk(v) { waAsking = v; waQr = -1; load(); }
+async function wa(what) {
+  waAsking = false; waBusy = true; waQr = -1;
+  try { await fetch('wa/' + what, { method: 'POST' }); } catch {}
+  waBusy = false;
+  load();
 }
 // The key is typed or pasted here only: it stays on this computer (Служебное/ai.json), the page shows its last four.
 let aiTyping = false;
@@ -147,10 +178,10 @@ async function copyLink() {
   }
   note.textContent = ok ? 'Скопировано. Отправьте себе на телефон и вставьте в поле «Адрес сервера».' : 'Скопируйте ссылку выше вручную.';
 }
-load(); setInterval(load, 5000);
+load(); setInterval(load, 3000);
 </script></body></html>`;
 
-export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push }) {
+export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push, wa }) {
   return async function admin(req, res) {
     const url = new URL(req.url, 'http://local');
     const json = (body) => {
@@ -177,6 +208,7 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
         relay: relay?.status() ?? null,
         ai: ai?.status() ?? null,
         push: push?.status() ?? null,
+        wa: wa?.status() ?? null,
         ...store.counts(),
       });
     }
@@ -220,6 +252,14 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
       }
       ai.setKey(key);
       return json({ ok: true, ai: ai.status() });
+    }
+    // WhatsApp (v0.78): linked, unlinked, started again — here on this computer, as from the app.
+    if (req.method === 'POST' && wa && /^\/wa\/(link|logout|restart)$/.test(url.pathname)) {
+      try {
+        return json({ ok: true, wa: await wa.admin(url.pathname.slice(4)) });
+      } catch (e) {
+        return json({ ok: false, error: e.message, wa: wa.status() });
+      }
     }
     if (req.method === 'POST' && url.pathname === '/revoke') {
       store.revoke(url.searchParams.get('id') || '');

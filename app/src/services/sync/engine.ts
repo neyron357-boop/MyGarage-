@@ -630,6 +630,45 @@ export function eventRev(block: string): number | undefined {
 }
 
 /**
+ * What the server says on the stream besides the data's changes (v0.78: `{"wa": …}` — the garage's WhatsApp: a
+ * message, its ticks, the state): handed to whoever listens for that word. The data's own events (`rev`) are not these.
+ */
+type Said = (value: unknown) => void;
+const said = new Map<string, Set<Said>>();
+export function onServerSaid(word: string, fn: Said): () => void {
+  const set = said.get(word) ?? new Set<Said>();
+  said.set(word, set);
+  set.add(fn);
+  return () => void set.delete(fn);
+}
+/** An event's block read for such words (exported for the tests). */
+export function tellSaid(block: string) {
+  if (!said.size || !block.includes('data:')) return;
+  const data = block
+    .split('\n')
+    .filter((l) => l.startsWith('data:'))
+    .map((l) => l.slice(5).trim())
+    .join('');
+  if (!data || data.startsWith('{"rev"')) return;
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(data) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  for (const [word, set] of said) {
+    if (!(word in event)) continue;
+    for (const fn of set) {
+      try {
+        fn(event[word]);
+      } catch {
+        // a listener's own trouble does not close the stream
+      }
+    }
+  }
+}
+
+/**
  * One stream open to the server: each time another device's changes are kept there, this device takes them at once.
  * Gone (no network, the app in the background, the server restarted): opened again; the minute's check stays as the net.
  */
@@ -663,8 +702,10 @@ function listen() {
         buf += dec.decode(value, { stream: true }).replace(/\r/g, '');
         let i: number;
         while ((i = buf.indexOf('\n\n')) >= 0) {
-          const rev = eventRev(buf.slice(0, i));
+          const block = buf.slice(0, i);
+          const rev = eventRev(block);
           buf = buf.slice(i + 2);
+          tellSaid(block);
           if (!through) {
             through = true;
             streamTries = 0;

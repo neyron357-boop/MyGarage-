@@ -173,12 +173,30 @@ export function VehicleFields({ value, onChange, compact }: { value: VehicleInpu
  * on a job (`orderId`) they show under the fields — one tap, the job (and its car) is theirs; a new
  * customer (`onPick`) — one tap opens the one that is there instead of making a second.
  */
-export function CustomerModal({ opened, onClose, customer, onSaved, orderId, onPick }: { opened: boolean; onClose: () => void; customer?: Customer; onSaved?: (c: Customer) => void; orderId?: string; onPick?: (c: Customer) => void }) {
+export function CustomerModal({
+  opened,
+  onClose,
+  customer,
+  onSaved,
+  orderId,
+  onPick,
+  initial,
+}: {
+  opened: boolean;
+  onClose: () => void;
+  customer?: Customer;
+  onSaved?: (c: Customer) => void;
+  orderId?: string;
+  onPick?: (c: Customer) => void;
+  /** A new customer's card opens with this filled in (v0.78: a WhatsApp chat's number and name). */
+  initial?: Partial<CustomerInput>;
+}) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
   const [v, setV] = useState<CustomerInput>(EMPTY_CUSTOMER);
   useEffect(() => {
-    if (opened) setV(customer ? { ...customer } : EMPTY_CUSTOMER);
+    if (opened) setV(customer ? { ...customer } : { ...EMPTY_CUSTOMER, ...initial });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, customer]);
   // Only what was typed here is looked up (not the name the card opened with).
   const typedName = v.name !== (customer?.name ?? '') ? v.name : '';

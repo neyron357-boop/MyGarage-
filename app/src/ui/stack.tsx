@@ -22,8 +22,11 @@ import { stepMainTab, watchMainSwipe } from './mainSwipe';
 
 /** The screens of the bottom tab bar. */
 export const TAB_ROOTS = new Set(['/', '/search', '/money', '/more']);
-/** Work at the car gets the whole screen: no tab bar under its buttons. */
-const FOCUS_RE = /^\/orders\/(new|[^/]+\/invoice)$/;
+/**
+ * Work at the car gets the whole screen: no tab bar under its buttons. A WhatsApp chat too (v0.78): its composer sits
+ * at the bottom edge, as in a messenger.
+ */
+const FOCUS_RE = /^\/(orders\/(new|[^/]+\/invoice)|whatsapp\/chat\/[^/]+)$/;
 /** Presented from the bottom (and dismissed down), like composing a new message. */
 const MODAL_RE = /^\/orders\/new$/;
 
@@ -216,6 +219,7 @@ export function useScreenTitle() {
         [/^\/more$/, t('nav.more')],
         [/^\/notes$/, t('notes.title')],
         [/^\/notify$/, t('notify.title')],
+        [/^\/whatsapp$/, 'WhatsApp'],
         [/^\/customers$/, t('nav.customers')],
         [/^\/parts$/, t('nav.parts')],
         [/^\/reports$/, t('nav.reports')],

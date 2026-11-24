@@ -76,6 +76,8 @@ import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../se
 import { addItem, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { chatPath } from '../../domain/whatsapp';
+import { numberOnWa, useWa, waReady } from '../../services/whatsapp';
 import { copyText } from '../../ui/clipboard';
 import { quickInvoice } from '../../services/money';
 import { bundleAmountDue, changeStage, toggleMechanic, updateOrder, type OrderBundle } from '../../services/orders';
@@ -168,6 +170,7 @@ interface Tile {
 /** Each tile of "…" in its own colour (like app icons): found by colour, not read. Red and orange stay with the tiles that warn. */
 const TILE_COLOR: Record<string, string> = {
   customer: 'blue',
+  whatsapp: 'green',
   car: 'indigo',
   driver: 'violet',
   scanner: 'cyan',
@@ -546,6 +549,8 @@ export function JobPage() {
   const stackBack = useStackBack();
   const { run, busy } = useAction();
   const b = useOrderBundle(id);
+  // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…».
+  const waLinked = waReady(useWa());
   // Shown to the customer (v0.67): the job locked to its customer's view until the lock is held.
   const locked = useClientLock();
   // Quick lines in the language of this job's documents (English by default), as they will be printed.
@@ -950,6 +955,19 @@ export function JobPage() {
   // task); the discount — "%" under the lines; the check-in act's photo screen — the job card is the inspection.
   const tiles: Tile[] = [];
   tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
+  // The customer's WhatsApp chat in the app (v0.78): while the garage's WhatsApp is linked and there is a number.
+  const waPhone = b.customer.whatsapp || b.customer.phone;
+  if (waLinked && waPhone)
+    tiles.push({
+      key: 'whatsapp',
+      icon: IconBrandWhatsapp,
+      onClick: () =>
+        void run(async () => {
+          const r = await numberOnWa(waPhone);
+          if (!r.ok) throw new AppError('wa.notOnWa');
+          navigate(chatPath(r.chat));
+        }),
+    });
   tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
   // Who brought the car: a company's job has it on its card too; a private customer's — here only.
   tiles.push({ key: 'driver', icon: IconSteeringWheel, onClick: () => setDriverOpen(true) });

@@ -2056,3 +2056,124 @@ html.desk .today-add {
   min-height: 36px;
   font-size: 14px;
 }
+
+/* ---------- WhatsApp on a PC (v0.78) ----------
+   The chats and the open chat side by side, as WhatsApp's own window: the list scrolls in its column, the chat in its
+   pane, the composer stays at the pane's foot. The window itself does not scroll here. */
+html.desk .page-shell:is([data-page='whatsapp'], [data-page='whatsapp-one']) {
+  --page-max: 1600px;
+}
+html.desk .wa-desk {
+  display: grid;
+  grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+  gap: 16px;
+  height: calc(100vh - var(--app-nav-h, 64px) - 48px);
+  min-height: 420px;
+}
+html.desk .wa-desk-list {
+  min-height: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+html.desk .wa-chats .list-row {
+  min-height: 64px;
+}
+html.desk .wa-desk-chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--app-hairline);
+  border-radius: 16px;
+  overflow: hidden;
+}
+html.desk .wa-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  height: 56px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--app-hairline);
+  background: var(--app-card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+html.desk .wa-chat-head-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.desk .wa-chat-head-phone {
+  margin-left: auto;
+  color: var(--app-label-2);
+  font-size: 13px;
+}
+html.desk .wa-pane {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+html.desk .wa-pane-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 20px;
+  overflow-y: auto;
+}
+html.desk .wa-pane-scroll > .wa-chat {
+  flex: 1 0 auto;
+}
+html.desk .wa-pane-foot {
+  flex-shrink: 0;
+  padding: 10px 16px 14px;
+}
+html.desk .wa-desk-none {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+html.desk .wa-chat .note-swipe {
+  max-width: min(72%, 620px);
+}
+/* A mouse selects a message's words (a phone holds a message for its menu). */
+html.desk .wa-chat .note-bubble,
+html.desk .wa-caption {
+  -webkit-user-select: text;
+  user-select: text;
+  font-size: 15px;
+}
+html.desk .wa-jump {
+  right: 16px;
+}
+/* How many messages wait, beside «WhatsApp» in the side menu. */
+html.desk .desk-nav-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--mantine-color-green-6);
+  color: var(--mantine-color-white);
+  font-size: 12px;
+  font-weight: 600;
+}
+html.desk .wa-link,
+html.desk .wa-state {
+  max-width: 560px;
+}
