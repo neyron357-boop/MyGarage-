@@ -22,6 +22,7 @@ import {
   IconCopy,
   IconDiscount,
   IconDots,
+  IconLayoutSidebarRightExpand,
   IconLock,
   IconEngine,
   IconFileInvoice,
@@ -78,8 +79,8 @@ import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../se
 import { addItem, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
-import { chatPath } from '../../domain/whatsapp';
-import { numberOnWa, useWa, waReady } from '../../services/whatsapp';
+import { chatOfPhone, loadChats, useWa, waReady } from '../../services/whatsapp';
+import { JobChat, jobChatPhone } from '../whatsapp/JobChat';
 import { waAutoOf } from '../../domain/waAuto';
 import { getSettings } from '../../services/settings';
 import { sendClientReport, sendWorkReport } from '../../services/waAuto';
@@ -93,7 +94,7 @@ import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from '../../ui/hooks';
-import { useDesk, useDeskHotkeys } from '../../ui/desk';
+import { useDesk, useDeskHotkeys, useDeskPane } from '../../ui/desk';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { setJobQuiet } from '../../services/notify';
@@ -529,6 +530,11 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
 
 /** The job's tabs, in their order on screen: the job, and its notes. */
 const JOB_TABS = ['main', 'notes'] as const;
+/**
+ * The garage's WhatsApp linked (v0.80, «при свайпе вместо заметки открылась чат с клиентом»): the customer's chat next
+ * to the job — a swipe from it — and the notes after it.
+ */
+const JOB_TABS_WA = ['main', 'chat', 'notes'] as const;
 
 /**
  * The job, on one screen: who and what, the lines (work and parts) with what the customer said to
@@ -540,24 +546,53 @@ export function JobPage() {
   const { t } = useTranslation();
   const lang = useLang();
   const navigate = useNavigate();
-  // Two tabs — the job, and its notes (a chat with oneself); the address keeps which, without a step in the history.
+  const b = useOrderBundle(id);
+  // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…» — and (v0.80) a tab of the job.
+  const wa = useWa();
+  const waLinked = waReady(wa);
+  const chatPhone = b ? jobChatPhone(b) : '';
+  const tabs = waLinked && chatPhone ? JOB_TABS_WA : JOB_TABS;
+  // Its unread messages light the tab: the chats are read once WhatsApp is there (kept right by the server after).
+  useEffect(() => {
+    if (waLinked) void loadChats();
+  }, [waLinked]);
+  const chatUnread = tabs === JOB_TABS_WA ? (chatOfPhone(chatPhone, wa)?.unread ?? 0) : 0;
+  // The tabs — the job, the customer's chat, its notes (a chat with oneself); the address keeps which, without a step
+  // in the history (and keeps the rest of itself: a job beside it on a PC, v0.80).
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'notes' ? 'notes' : 'main';
+  const asked = params.get('tab');
+  const tab = asked === 'notes' ? 'notes' : asked === 'chat' && tabs === JOB_TABS_WA ? 'chat' : 'main';
   const pickTab = (v: string) => {
     if (v === tab) return;
-    setParams(v === 'notes' ? { tab: 'notes' } : {}, { replace: true });
-    if (v !== 'notes') scrollToTop();
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        if (v === 'main') next.delete('tab');
+        else next.set('tab', v);
+        return next;
+      },
+      { replace: true },
+    );
+    if (v === 'main') scrollToTop();
   };
-  // The two tabs move like pages: the page follows the finger sideways, the other one comes in beside it.
-  const sw = useTabSwipe(JOB_TABS, tab, pickTab);
+  // The tabs move like pages: the page follows the finger sideways, the other one comes in beside it.
+  const sw = useTabSwipe(tabs, tab, pickTab);
+  // A PC (v0.80): another job taken in beside this one — the window's address keeps it (`side`), this job stays.
+  const pane = useDeskPane();
+  const openBeside = () =>
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        next.set('side', 'new');
+        return next;
+      },
+      { replace: true },
+    );
   // The tabs stay in reach under the navigation bar (a long chat, a long job): backed only once stuck.
   const tabsMark = useRef<HTMLDivElement>(null);
   const tabsBar = useRef<HTMLDivElement>(null);
   const stackBack = useStackBack();
   const { run, busy } = useAction();
-  const b = useOrderBundle(id);
-  // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…».
-  const waLinked = waReady(useWa());
   // Where its reports go (v0.79): the work group, set in «WhatsApp → Автоматизация».
   const waGroups = useScreenLiveQuery(async () => ({ work: !!waAutoOf((await getSettings()).waAuto).work.to }), []);
   // Shown to the customer (v0.67): the job locked to its customer's view until the lock is held.
@@ -970,12 +1005,8 @@ export function JobPage() {
     tiles.push({
       key: 'whatsapp',
       icon: IconBrandWhatsapp,
-      onClick: () =>
-        void run(async () => {
-          const r = await numberOnWa(waPhone);
-          if (!r.ok) throw new AppError('wa.notOnWa');
-          navigate(chatPath(r.chat));
-        }),
+      // v0.80: the chat is the job's own tab.
+      onClick: () => pickTab('chat'),
     });
   // The reports by hand (v0.79): the job to the work group, the visit to the company's own group — no prices.
   if (waLinked && waGroups?.work) tiles.push({ key: 'toWork', icon: IconUsersGroup, onClick: () => void run(() => sendWorkReport(oid), 'wa.sentToGroup') });
@@ -1182,9 +1213,16 @@ export function JobPage() {
         )}
         {c.phone && (
           <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
-            <ActionIcon component="a" href={whatsappUrl(c.whatsapp || c.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp">
-              <IconBrandWhatsapp size={21} />
-            </ActionIcon>
+            {tabs === JOB_TABS_WA ? (
+              // The garage's WhatsApp linked (v0.80): the customer's chat is this job's own tab.
+              <ActionIcon variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp" onClick={() => pickTab('chat')} data-job-chat-btn>
+                <IconBrandWhatsapp size={21} />
+              </ActionIcon>
+            ) : (
+              <ActionIcon component="a" href={whatsappUrl(c.whatsapp || c.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp">
+                <IconBrandWhatsapp size={21} />
+              </ActionIcon>
+            )}
             <ActionIcon component="a" href={`tel:${c.phone}`} variant="light" color="green" size={40} radius="xl" aria-label={t('customer.call')}>
               <IconPhone size={20} />
             </ActionIcon>
@@ -1240,12 +1278,15 @@ export function JobPage() {
         segmented
         items={[
           { value: 'main', label: t('job.tab.main') },
+          ...(tabs === JOB_TABS_WA ? [{ value: 'chat', label: 'WhatsApp', icon: IconBrandWhatsapp, color: 'green', count: chatUnread || undefined }] : []),
           { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
         ]}
       />
     </div>
     <div key={tab} ref={sw.panel} className="job-panel">
-    {tab === 'notes' ? (
+    {tab === 'chat' ? (
+      <JobChat b={b} />
+    ) : tab === 'notes' ? (
       <NotesChat orderId={oid} notes={b.notes} editable={open} />
     ) : (
     <>
@@ -1436,6 +1477,12 @@ export function JobPage() {
             </ActionIcon>
             {/* The job to the garage's group: the car's photo, the car, the customer's name, the lines. */}
             <ShareJobButton b={b} />
+            {/* A PC (v0.80): a new job beside this one, both on one screen. */}
+            {!phone && !pane && (
+              <ActionIcon variant="default" size={40} radius="md" aria-label={t('desk.twin')} onClick={openBeside} data-twin-btn>
+                <IconLayoutSidebarRightExpand size={20} />
+              </ActionIcon>
+            )}
             {/* On a wide PC its tiles are beside the job already: the button goes (desk.css). */}
             <ActionIcon variant="default" size={40} radius="md" aria-label={t('common.more')} onClick={() => setMore(true)} className={phone ? undefined : 'job-more-btn'}>
               <IconDots size={20} />

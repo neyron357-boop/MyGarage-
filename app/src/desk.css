@@ -111,6 +111,13 @@ html.desk .desk-main {
   margin-left: calc(var(--desk-side-w) + 2 * var(--desk-side-gap));
   min-width: 0;
 }
+/* WhatsApp with the side menu put away (v0.80): the chats and the open chat get the whole window. */
+html.desk .desk-shell[data-side-hidden] {
+  --desk-side-w: 0px;
+}
+html.desk .desk-shell[data-side-hidden] .desk-side {
+  display: none;
+}
 /* A job shown to its customer (v0.67): no side menu — the job in the middle of the window. */
 html.desk[data-client-lock] .desk-main {
   margin-left: var(--desk-side-gap);
@@ -1380,6 +1387,69 @@ html.desk .job-desk-main .job-panel > .chip-row {
     display: none;
   }
 }
+/* ---------- Two jobs side by side (v0.80) ----------
+   «Заказ рядом» on a job: the window in two panes — the job, and beside it a new one (then that job). Each pane scrolls
+   by itself, with its own toolbar; a job in a pane is one column (the car, then the lines; its tiles behind «…»). */
+html.desk .page-shell[data-page='twin'] {
+  --page-max: 100000px;
+  padding-bottom: 0;
+}
+html.desk .desk-twin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  height: 100dvh;
+  margin: 0 calc(-1 * var(--page-pad));
+}
+html.desk .desk-twin-pane {
+  position: relative;
+  min-width: 0;
+  height: 100dvh;
+  padding: 0 var(--page-pad) 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+html.desk .desk-twin-pane + .desk-twin-pane {
+  box-shadow: inset 0.5px 0 0 var(--app-hairline);
+}
+html.desk .desk-twin .job-body.job-desk {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: none;
+}
+html.desk .desk-twin .job-desk-main,
+html.desk .desk-twin .job-desk-aside {
+  grid-area: auto;
+}
+html.desk .desk-twin .job-desk-aside {
+  position: static;
+  max-height: none;
+  overflow: visible;
+  padding-bottom: 0;
+  margin-bottom: 18px;
+}
+html.desk .desk-twin .job-desk-actions {
+  display: none;
+}
+/* Work, part, service keep their words whole in a half of the window: the extras go on to the next line instead. */
+html.desk .desk-twin .add-row {
+  flex-wrap: wrap;
+}
+html.desk .desk-twin .add-row > .add-btn {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+html.desk .desk-twin .desk-split,
+html.desk .desk-twin .desk-split.desk-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+html.desk .desk-twin [data-pane-page='new'] .sticky-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+html.desk .desk-twin [data-pane-page='new'] .sticky-bar > .mantine-Button-root {
+  width: auto;
+  min-width: 280px;
+}
 /* Below the two columns (a narrow window): the car first, as on a phone. */
 @media (max-width: 74.99em) {
   html.desk .job-desk-aside {
@@ -2147,6 +2217,19 @@ html.desk .wa-desk-none {
 }
 html.desk .wa-chat .note-swipe {
   max-width: min(72%, 620px);
+}
+/* A job's «WhatsApp» tab (v0.80): the customer's chat as a pane of the job's column — its messages scroll in it, the
+   composer at its foot; the window does not grow with the chat. */
+html.desk .job-chat {
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  height: calc(100vh - var(--app-nav-h, 64px) - 96px);
+  min-height: 420px;
+  margin-top: 12px;
+  border: 1px solid var(--app-hairline);
+  border-radius: 16px;
+  overflow: hidden;
 }
 /* A mouse selects a message's words (a phone holds a message for its menu). */
 html.desk .wa-chat .note-bubble,

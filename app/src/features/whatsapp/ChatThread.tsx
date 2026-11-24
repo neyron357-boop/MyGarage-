@@ -39,6 +39,7 @@ import { downloadFile, shareOrDownload } from '../../ui/share';
 import { useScreen } from '../../ui/stack';
 import { useSwipeReply } from '../../ui/swipeReply';
 import { startVideo, VideoPlayer } from '../../ui/VideoPlayer';
+import { ChatQuick, type QuickFor } from './ChatQuick';
 import { KIND_ICON, Marked, Ticks } from './WaParts';
 
 /*
@@ -410,11 +411,13 @@ function FilesSheet({ files, to, opened, onClose, onSend }: { files: Picked[]; t
 /** What was typed and not sent, by chat: back in its field when the chat is opened again. */
 const drafts = new Map<string, string>();
 
-function Composer({ chatId, title, reply, onReplyDone, onSent, field }: { chatId: string; title: string; reply: WaMessage | null; onReplyDone: () => void; onSent: () => void; field: React.RefObject<HTMLTextAreaElement> }) {
+function Composer({ chatId, title, reply, onReplyDone, onSent, field, quick, desk }: { chatId: string; title: string; reply: WaMessage | null; onReplyDone: () => void; onSent: () => void; field: React.RefObject<HTMLTextAreaElement>; quick?: QuickFor; desk: boolean }) {
   const { t } = useTranslation();
   const errorText = useErrorText();
   const [text, setTextState] = useState(drafts.get(chatId) ?? '');
   const [picked, setPicked] = useState<Picked[] | null>(null);
+  // «＋» of a customer's chat (v0.80): what can be done for them at once; anyone else's — a file, as before.
+  const [quickAt, setQuickAt] = useState<{ x: number; y: number } | null>(null);
   const gallery = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const setText = (v: string) => {
@@ -490,7 +493,20 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field }: { chatId
         </div>
       )}
       <div className="notes-composer" data-wa-composer>
-        <ActionIcon size={44} radius="xl" variant="default" className="notes-round glass" aria-label={t('wa.attach')} onClick={() => gallery.current?.click()}>
+        <ActionIcon
+          size={44}
+          radius="xl"
+          variant="default"
+          className="notes-round glass"
+          aria-label={t(quick ? 'wa.quick.title' : 'wa.attach')}
+          aria-haspopup={quick ? 'menu' : undefined}
+          onClick={(e) => {
+            if (!quick) return gallery.current?.click();
+            const r = e.currentTarget.getBoundingClientRect();
+            setQuickAt({ x: r.left, y: r.top - 4 });
+          }}
+          data-wa-plus
+        >
           <IconPlus size={22} />
         </ActionIcon>
         <div className="notes-field glass">
@@ -533,6 +549,7 @@ function Composer({ chatId, title, reply, onReplyDone, onSent, field }: { chatId
         {input(camera, { accept: 'image/*', capture: 'environment' })}
       </div>
       <SheetFor value={picked}>{(list, o) => <FilesSheet files={list} to={title} opened={o} onClose={closePicked} onSend={sendFiles} />}</SheetFor>
+      {quick && <ChatQuick chatId={chatId} quick={quick} desk={desk} at={quickAt} opened={!!quickAt} onClose={() => setQuickAt(null)} onFiles={() => gallery.current?.click()} />}
     </div>
   );
 }
@@ -545,7 +562,7 @@ function useScroller(pane: React.RefObject<HTMLDivElement>) {
   return useCallback(() => screen?.scroller.current ?? pane.current, [screen, pane]);
 }
 
-export function ChatThread({ chatId, title, group, people, desk }: { chatId: string; title: string; group: boolean; people: Map<string, Who>; desk: boolean }) {
+export function ChatThread({ chatId, title, group, people, desk, quick }: { chatId: string; title: string; group: boolean; people: Map<string, Who>; desk: boolean; /** Whose chat it is, for «＋»'s quick actions (v0.80). */ quick?: QuickFor }) {
   const { t } = useTranslation();
   const lang = useLang();
   const errorText = useErrorText();
@@ -758,7 +775,7 @@ export function ChatThread({ chatId, title, group, people, desk }: { chatId: str
     </div>
   );
 
-  const composer = ready ? <Composer chatId={chatId} title={title} reply={reply} onReplyDone={() => setReply(null)} onSent={() => window.setTimeout(() => toEnd(true), 30)} field={field} /> : null;
+  const composer = ready ? <Composer chatId={chatId} title={title} reply={reply} onReplyDone={() => setReply(null)} onSent={() => window.setTimeout(() => toEnd(true), 30)} field={field} quick={quick} desk={desk} /> : null;
   const jump = down ? (
     <button type="button" className="wa-jump glass tap" aria-label={t('wa.toEnd')} onClick={() => toEnd(true)}>
       <IconArrowDown size={20} stroke={2.2} />

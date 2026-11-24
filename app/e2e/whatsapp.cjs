@@ -257,6 +257,11 @@ let current = null;
   check((await top().locator('.list-row').first().locator('.wa-badge').innerText()) === '2', 'what waits to be read is counted on the chat');
   check(names.includes(demo.supplier), 'a supplier’s chat has the name the garage keeps');
   check(names.includes('Вы (себе)'), 'the account’s own chat is named so');
+  // v0.80: WhatsApp is a tab of its own in the bar, with how many wait.
+  const waTabBtn = page.locator('.tab-bar button[data-href="/whatsapp"]');
+  check(await waTabBtn.isVisible(), 'v0.80: WhatsApp has its own tab in the bar');
+  check(/active/.test((await waTabBtn.getAttribute('class')) ?? ''), 'v0.80: its tab is lit on its screen');
+  check(Number(await waTabBtn.locator('.tab-badge').innerText()) > 0, 'v0.80: the tab says how many messages wait');
   await shot('phone-06-chats');
   await top().getByRole('tab', { name: /^Поставщики/ }).click();
   await settle(400);
@@ -288,6 +293,20 @@ let current = null;
   check(await top().locator('.note-bubble a[href="https://maps.app.goo.gl/garage"]').isVisible(), 'a link is a link');
   check(await page.evaluate(() => window.__wa.asked.some((a) => a.path === 'seen')), 'opened, the chat is marked read on WhatsApp');
   await shot('phone-07-chat');
+  // v0.80: «＋» of a customer's chat — what can be done for them at once (a file, a new job, their card, their jobs).
+  await top().locator('[data-wa-plus]').click();
+  await page.locator('[data-wa-quick]').waitFor();
+  await page.locator('[data-wa-quick-act="newJob"]').waitFor();
+  await settle(500);
+  check(await page.locator('[data-wa-quick-act="files"]').isVisible(), 'v0.80: «＋» of a customer’s chat keeps photos and files');
+  check(await page.locator('[data-wa-quick-act="customer"]').isVisible(), 'v0.80: … and offers the customer’s card and a new job for them');
+  await shot('phone-07b-chat-quick');
+  await page.locator('[data-wa-quick-act="newJob"]').click();
+  await settle(900);
+  check(page.url().includes(`/orders/new?customerId=${demo.customerId}`), 'v0.80: «Новый заказ» from the chat opens a new job for this customer');
+  await page.goBack();
+  await top().locator('[data-wa-list]').waitFor();
+  await settle(600);
 
   // A text: in the chat at once, then with its tick.
   await top().locator('[data-wa-field]').fill('Car is ready, you can come');
@@ -389,10 +408,32 @@ let current = null;
     return o.id;
   }, demo.customerId);
   await go(`#/orders/${jobId}`, 1200);
+  // v0.80: the job has the whole screen — the tab bar goes, «＋» stays (over the job's own bar at the bottom edge).
+  await settle(500);
+  check(await page.evaluate(() => getComputedStyle(document.querySelector('.tab-bar')).opacity === '0'), 'v0.80: on a job the tab bar is away');
+  check(await page.locator('.tab-plus').isVisible(), 'v0.80: … «＋» stays');
+  const plusBox = await page.locator('.tab-plus').boundingBox();
+  const barBox = await top().locator('.screen-bottom .sticky-bar').boundingBox();
+  check(!!plusBox && !!barBox && plusBox.y + plusBox.height <= barBox.y + 1 && barBox.y + barBox.height >= 844 - 2, 'v0.80: … over the job’s own bar, which takes the bottom edge');
+  await shot('phone-14-job-full');
+  // The customer's chat is a tab of the job, next to it (a swipe from it); «…» → «Чат» opens it too.
+  check(await top().getByRole('tab', { name: /WhatsApp/ }).isVisible(), 'v0.80: the job has a «WhatsApp» tab');
   await top().getByRole('button', { name: /^(Ещё|More)$/ }).first().click();
   await page.locator('.action-tile', { hasText: 'Чат' }).click();
-  await top().locator('[data-wa-list]').waitFor();
-  check(page.url().includes(encodeURIComponent(A)), 'the job’s «Чат» opens the customer’s chat');
+  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
+  await settle(700);
+  check(page.url().includes(`/orders/${jobId}`) && page.url().includes('tab=chat'), 'the job’s «Чат» is the customer’s chat, on the job itself (v0.80)');
+  check((await top().locator('[data-job-chat] .note-row').count()) >= 8, 'v0.80: the chat on the job shows the customer’s messages');
+  check(await page.evaluate(() => getComputedStyle(document.querySelector('.tab-bar-wrap')).opacity === '0'), 'v0.80: the job’s chat — the whole screen, its composer at the bottom');
+  await shot('phone-15-job-chat');
+  // «＋» in the job's chat: this job first, its estimate a tap away.
+  await top().locator('[data-wa-plus]').click();
+  await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
+  await settle(500);
+  check(await page.locator('[data-wa-quick-doc="estimate"]').first().isVisible(), 'v0.80: in the job’s chat its estimate is a tap away');
+  await shot('phone-16-job-chat-quick');
+  await page.keyboard.press('Escape');
+  await settle(400);
 
   // 8. An estimate sent from the app: the words and the PDF go by themselves.
   await go(`#/orders/${jobId}`, 1200);
@@ -406,7 +447,50 @@ let current = null;
   const went = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'send' || a.path === 'file'), before);
   check(went.length === 2 && went[0].path === 'send' && went[0].body.chat === A && /Brake pads front/i.test(went[0].body.text), 'the estimate’s words went to the customer’s chat');
   check(went[1].path === 'file' && went[1].file.type === 'application/pdf' && went[1].query.doc === '1' && /\.pdf$/.test(went[1].query.name), 'its PDF went after them, as a document');
-  check(await page.locator('[data-send-direct]').isHidden(), 'the sheet closed: nobody is asked whether it was sent');
+  check(await page.locator('[data-send-direct]').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false), 'the sheet closed: nobody is asked whether it was sent');
+
+  // v0.80: the estimate again from the job's chat («＋» → «Смета»): the version waiting for the answer, its PDF.
+  await go(`#/orders/${jobId}?tab=chat`, 1200);
+  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
+  await top().locator('[data-wa-plus]').click();
+  await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
+  const before2 = await page.evaluate(() => window.__wa.asked.length);
+  await page.locator('[data-wa-quick-doc="estimate"]').first().click();
+  await page.locator('[data-send-direct]').waitFor();
+  await settle(400);
+  await page.locator('[data-send-direct]').click();
+  await page.locator('[data-send-direct]').waitFor({ state: 'hidden', timeout: 20000 });
+  const went2 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'send' || a.path === 'file'), before2);
+  check(went2.length === 2 && went2[0].body.chat === A && /Brake pads front/i.test(went2[0].body.text) && went2[1].file.type === 'application/pdf', 'v0.80: «Смета» from the chat’s «＋» sends the words and the PDF to the customer');
+
+  // v0.80: «Владельцу на проверку» — one tap to the owner's WhatsApp (picked the first time, then at once).
+  await go(`#/orders/${jobId}`, 1200);
+  await top().getByRole('button', { name: /^(Ещё|More)$/ }).first().click();
+  await page.locator('.action-tile', { hasText: 'Владельцу' }).click();
+  await page.locator('[data-owner-check]').waitFor({ timeout: 15000 });
+  await settle(500);
+  await shot('phone-17-owner-check');
+  await page.locator('[data-owner-wa]').click();
+  await page.locator('[data-chat-picker] .list-row').first().waitFor();
+  await settle(400);
+  const before3 = await page.evaluate(() => window.__wa.asked.length);
+  await page.locator('[data-chat-picker] .list-row').first().click();
+  await page.getByText('Отправлено владельцу').first().waitFor({ timeout: 20000 });
+  const went3 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file'), before3);
+  check(went3.length === 1 && went3[0].file.type === 'image/jpeg', 'v0.80: the owner’s check went to the chosen chat as a picture');
+  const boss = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.settings.get('main')).waAuto?.boss);
+  check(!!boss?.to?.chat && boss.on === false, 'v0.80: the chat picked is the owner’s from now on — its automatic reports not turned on by it');
+  check(went3[0].query.chat === boss.to.chat, 'v0.80: … and the picture went to it');
+  await settle(900);
+  await top().getByRole('button', { name: /^(Ещё|More)$/ }).first().click();
+  await page.locator('.action-tile', { hasText: 'Владельцу' }).click();
+  await page.locator('[data-owner-check]').waitFor({ timeout: 15000 });
+  await settle(400);
+  const before4 = await page.evaluate(() => window.__wa.asked.length);
+  await page.locator('[data-owner-wa]').click();
+  await page.getByText('Отправлено владельцу').first().waitFor({ timeout: 20000 });
+  const went4 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file'), before4);
+  check(went4.length === 1 && went4[0].query.chat === boss.to.chat, 'v0.80: the second time one tap sends it to the owner');
 
   // «Ещё»: WhatsApp with how many wait.
   await go('#/more');
@@ -480,6 +564,81 @@ let current = null;
       await wait(400);
       await p.screenshot({ path: `${OUT}/pc-${scheme}-05-setup.png` });
       check((await p.locator('.desk-nav-item', { hasText: 'WhatsApp' }).count()) === 1, 'PC: WhatsApp is in the side menu');
+
+      // v0.80: on WhatsApp the side menu is put away by a button — the chats get the whole window — and brought back.
+      await p.goto(BASE + '#/whatsapp');
+      await p.locator('[data-wa-chat]').first().waitFor();
+      await p.locator('[data-wa-side-btn]').click();
+      await wait(400);
+      check(await p.locator('.desk-side').isHidden(), 'PC v0.80: the side menu is put away on WhatsApp');
+      check(((await p.locator('.wa-desk').boundingBox())?.x ?? 999) < 60, 'PC v0.80: … the chats start at the window’s edge');
+      await p.locator('[data-wa-chat]').first().click();
+      await p.locator('[data-wa-list]').waitFor();
+      await wait(700);
+      await p.screenshot({ path: `${OUT}/pc-${scheme}-06-menu-away.png` });
+      // «＋» of a customer's chat: a menu where it is — files, the customer's jobs, a new job.
+      await p.locator('[data-wa-plus]').click();
+      await p.getByRole('menuitem', { name: 'Фото и файлы' }).waitFor();
+      await p.getByRole('menuitem', { name: 'Новый заказ' }).waitFor();
+      await wait(300);
+      await p.screenshot({ path: `${OUT}/pc-${scheme}-07-quick.png` });
+      await p.keyboard.press('Escape');
+      await p.goto(BASE + '#/');
+      await p.locator('.desk-side').waitFor();
+      check(await p.locator('.desk-side').isVisible(), 'PC v0.80: other screens keep their side menu');
+      await p.goto(BASE + '#/whatsapp');
+      await p.locator('[data-wa-side-btn]').click();
+      await wait(300);
+      check(await p.locator('.desk-side').isVisible(), 'PC v0.80: the same button brings the menu back');
+
+      // v0.80: a card's «WhatsApp» (right click on the board) opens the chat in the app.
+      await p.goto(BASE + '#/');
+      await p.locator('article.dcard').first().waitFor();
+      await wait(600);
+      const cards = p.locator('article.dcard');
+      let opened = false;
+      for (let i = 0; i < (await cards.count()) && !opened; i++) {
+        await cards.nth(i).click({ button: 'right' });
+        const item = p.getByRole('menuitem', { name: 'WhatsApp' });
+        if (await item.isVisible().catch(() => false)) {
+          await item.click();
+          opened = true;
+        } else await p.keyboard.press('Escape');
+      }
+      check(opened, 'PC v0.80: a card with a customer’s number has «WhatsApp» in its menu');
+      await p.waitForURL(/#\/whatsapp\/chat\//, { timeout: 15000 });
+      check(true, 'PC v0.80: the card’s «WhatsApp» opens the chat in the app, not WhatsApp outside');
+
+      // v0.80: a job beside the job — «Заказ рядом»: a new job taken in on the right, both on one screen.
+      const pcJob = await p.evaluate(async () => {
+        const { db } = await import('/src/db/db.ts');
+        const o = (await db.orders.toArray()).find((x) => !['closed', 'cancelled'].includes(x.stage));
+        return o.id;
+      });
+      await p.goto(BASE + `#/orders/${pcJob}`);
+      await p.locator('[data-twin-btn]').click();
+      const side = p.locator('.desk-twin-pane[data-pane="side"]');
+      await side.locator('[data-pane-page="new"]').waitFor();
+      await side.getByLabel('Номер').fill('27183');
+      await side.getByRole('button', { name: 'Принять' }).click();
+      await side.locator('[data-pane-page="job"]').waitFor({ timeout: 15000 });
+      await wait(900);
+      const twinUrl = p.url();
+      check(twinUrl.includes(`/orders/${pcJob}`) && /side=[^&]+/.test(twinUrl) && !twinUrl.includes('side=new'), 'PC v0.80: the new job is taken in beside the first, the window keeps both');
+      check(await p.locator('.desk-twin-pane[data-pane="main"] .desk-title').isVisible() && (await side.locator('.desk-title').innerText()).length > 0, 'PC v0.80: both jobs are on the screen, each with its toolbar');
+      check(await p.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 2), 'PC v0.80: the window does not scroll — each pane does');
+      await p.screenshot({ path: `${OUT}/pc-${scheme}-08-twin.png` });
+      // The keys act in the pane last clicked: «1» — work on that job only.
+      await side.locator('.desk-title').click();
+      await p.keyboard.press('1');
+      await p.locator('.mantine-Modal-content').first().waitFor();
+      await wait(400);
+      check((await p.locator('.mantine-Modal-content').count()) === 1, 'PC v0.80: «1» opens one sheet — in the pane last clicked');
+      await p.keyboard.press('Escape');
+      await wait(500);
+      await side.locator('[data-pane-back]').click();
+      await p.locator('.desk-twin').waitFor({ state: 'detached' });
+      check(!p.url().includes('side='), 'PC v0.80: × closes the pane, the first job stays');
     }
     await desk.close();
   }

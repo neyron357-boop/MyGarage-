@@ -1,4 +1,5 @@
 import type { NavigateFunction } from 'react-router-dom';
+import { waCan } from '../services/whatsapp';
 import { haptic } from './haptics';
 import { ownsSideways } from './swipe';
 
@@ -10,8 +11,10 @@ import { ownsSideways } from './swipe';
  * (`useTabSwipe`'s `onEdge`). The strip along the left edge is "Back"'s.
  */
 
-/** The tab bar's places, in its order. */
+/** The tab bar's places, in its order (WhatsApp's — v0.80, while the garage has its server: as `ui/tabBar.tsx` shows it). */
 export const MAIN_TABS = ['/', '/search', '/money', '/more'] as const;
+const MAIN_TABS_WA = ['/', '/search', '/money', '/whatsapp', '/more'] as const;
+export const mainTabs = (): readonly string[] => (waCan() ? MAIN_TABS_WA : MAIN_TABS);
 
 /** What a sideways swipe never takes from. */
 const OWN =
@@ -27,9 +30,10 @@ const FOLLOW = 0.28;
 
 /** Where `dir` (1 — to the right of the bar, −1 — to the left) leads from `path`, if anywhere. */
 export function mainTabBeside(path: string, dir: 1 | -1): string | undefined {
-  const i = MAIN_TABS.indexOf(path as (typeof MAIN_TABS)[number]);
+  const tabs = mainTabs();
+  const i = tabs.indexOf(path);
   if (i < 0) return undefined;
-  return MAIN_TABS[i + dir];
+  return tabs[i + dir];
 }
 
 /** The navigation hint the stack's slide takes (set by the caller just before navigating). */
@@ -59,7 +63,7 @@ export function watchMainSwipe(root: HTMLElement, top: () => { el: HTMLElement |
     if (e.touches.length !== 1) return void (g = null);
     const t = e.touches[0];
     const now = top();
-    if (!now.el || !MAIN_TABS.includes(now.path as (typeof MAIN_TABS)[number])) return;
+    if (!now.el || !mainTabs().includes(now.path)) return;
     if (t.clientX < EDGE || t.clientX > window.innerWidth - 8) return;
     if (ownsSideways(e.target, t.clientX, OWN)) return;
     g = { id: t.identifier, x0: t.clientX, y0: t.clientY, el: now.el, samples: [[e.timeStamp, 0]], dx: 0 };

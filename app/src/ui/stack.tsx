@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { NavigationType, UNSAFE_LocationContext as LocationContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { project, springEase, Velocity } from './fling';
 import { layers } from './historyLayer';
-import { stepMainTab, watchMainSwipe } from './mainSwipe';
+import { mainTabs, stepMainTab, watchMainSwipe } from './mainSwipe';
 
 /*
  * The phone's navigation stack, built like UINavigationController.
@@ -20,17 +20,27 @@ import { stepMainTab, watchMainSwipe } from './mainSwipe';
  * forward) and asks it to go back when the user swipes or taps "Back".
  */
 
-/** The screens of the bottom tab bar. */
-export const TAB_ROOTS = new Set(['/', '/search', '/money', '/more']);
+/** The screens of the bottom tab bar (WhatsApp's — while the garage has its server, v0.80: `ui/mainSwipe.ts`). */
+const isTabRoot = (pathname: string) => mainTabs().includes(pathname);
 /**
  * Work at the car gets the whole screen: no tab bar under its buttons. A WhatsApp chat too (v0.78): its composer sits
  * at the bottom edge, as in a messenger.
  */
 const FOCUS_RE = /^\/(orders\/(new|[^/]+\/invoice)|whatsapp\/chat\/[^/]+)$/;
+/**
+ * A job (v0.80, «карточка заказа должна открываться на полный экран… нижнее меню должно скрываться… кроме кнопки плюса»):
+ * the tab capsule goes, «＋» stays. Its chat and its notes — the whole screen: their composer is at the bottom edge.
+ */
+const JOB_RE = /^\/orders\/(?!new$)[^/]+(\/intake)?$/;
 /** Presented from the bottom (and dismissed down), like composing a new message. */
 const MODAL_RE = /^\/orders\/new$/;
 
-export const showsTabBar = (pathname: string) => !FOCUS_RE.test(pathname);
+/** What stays at the bottom under a screen: the tab bar with «＋» ('true'), «＋» alone ('plus'), nothing ('false'). */
+export function barOf(loc: Pick<Location, 'pathname' | 'search'>): 'true' | 'plus' | 'false' {
+  if (FOCUS_RE.test(loc.pathname)) return 'false';
+  if (JOB_RE.test(loc.pathname)) return /[?&]tab=(chat|notes)(&|$)/.test(loc.search) ? 'false' : 'plus';
+  return 'true';
+}
 const isModal = (pathname: string) => MODAL_RE.test(pathname);
 
 /** UIKit's navigation curve and timings. */
@@ -103,7 +113,7 @@ function next(model: Model, loc: Location, action: string, idx: number, h: Hint 
   }
 
   // Bottom tabs: a fresh stack for the tab, a quick cross-fade.
-  const tabSwitch = h === 'tab' || (TAB_ROOTS.has(top.location.pathname) && TAB_ROOTS.has(loc.pathname) && h !== 'pop');
+  const tabSwitch = h === 'tab' || (isTabRoot(top.location.pathname) && isTabRoot(loc.pathname) && h !== 'pop');
   if (tabSwitch) {
     const e = fresh();
     // Swiped (v0.30): side by side — the old tab stays until it has slid out.
@@ -347,7 +357,7 @@ const Screen = memo(function Screen({ entry, role, render }: { entry: Entry; rol
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const where = useMemo(() => ({ location: entry.location, navigationType: NavigationType.Pop }), [pathname, search, hash, key]);
   return (
-    <section ref={ref} className="screen" data-id={entry.id} data-role={role} data-tabbar={showsTabBar(entry.location.pathname)} data-modal={isModal(entry.location.pathname) || undefined}>
+    <section ref={ref} className="screen" data-id={entry.id} data-role={role} data-tabbar={barOf(entry.location)} data-modal={isModal(entry.location.pathname) || undefined}>
       <div className="screen-scroll" ref={scroller}>
         <div className="screen-body">
           <LocationContext.Provider value={where}>

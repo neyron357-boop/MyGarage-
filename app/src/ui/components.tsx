@@ -40,7 +40,7 @@ import { telegramChatUrl, whatsappUrl } from '../services/messages';
 import { useLang, usePhone } from './hooks';
 import { useScreen, useScreenTitle, useStack } from './stack';
 import { useSwipeRow, type SwipeSpec } from './swipe';
-import { useDesk } from './desk';
+import { useDesk, useDeskPane } from './desk';
 import { onCelebrate, useAutoAnimate, useRolling } from './motion';
 import { createPortal } from 'react-dom';
 
@@ -391,13 +391,16 @@ function DeskBar({ title, back, right, subtitle, eyebrow }: HeaderProps) {
   });
   useEffect(() => {
     let shown = '';
+    // Two jobs side by side (v0.80): each pane scrolls itself — the bar follows its own pane, not the window.
+    const pane = ref.current?.closest<HTMLElement>('.desk-twin-pane') ?? null;
     const update = () => {
-      const now = String(window.scrollY > 2);
+      const now = String((pane ? pane.scrollTop : window.scrollY) > 2);
       if (now !== shown && ref.current) ref.current.dataset.scrolled = shown = now;
     };
     update();
-    window.addEventListener('scroll', update, { passive: true });
-    return () => window.removeEventListener('scroll', update);
+    const target: HTMLElement | Window = pane ?? window;
+    target.addEventListener('scroll', update, { passive: true });
+    return () => target.removeEventListener('scroll', update);
   }, []);
   const sub = [eyebrow, subtitle].filter((x) => x !== undefined && x !== null && x !== false && x !== '');
   return (
@@ -425,6 +428,15 @@ function DeskBack({ to }: { to?: string }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const title = useScreenTitle();
+  // The job beside the main one (v0.80): «Назад» goes back in its own pane — and at its first screen closes it (×).
+  const pane = useDeskPane();
+  const back = pane?.back;
+  if (back)
+    return (
+      <button type="button" className="desk-back" aria-label={t(pane.closes ? 'common.close' : 'common.back')} onClick={back} data-pane-back>
+        {pane.closes ? <IconX size={20} stroke={2.2} aria-hidden /> : <IconChevronLeft size={20} stroke={2.2} aria-hidden />}
+      </button>
+    );
   const name = to ? title(to) : t('common.back');
   const label = typeof name === 'string' && name ? name : t('common.back');
   return (

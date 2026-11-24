@@ -26,7 +26,7 @@ import { leftBoardAt } from '../../domain/flow';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
 import { setBoardStatus } from '../../services/flow';
 import { haptic } from '../../ui/haptics';
-import { openWhatsApp } from '../../services/messages';
+import { useOpenChat } from '../whatsapp/openChat';
 import { prefetchBundle, type OrderBundle } from '../../services/orders';
 import { List, ListRow, MediaImage, Money, PlateText } from '../../ui/components';
 import { DeskMenu } from '../../ui/desk';
@@ -115,7 +115,9 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
   // touches on the board, and a scroll that drifted sideways sent cars to the archive.
   // What the card says, read off the job's facts (jobFacts.ts — the PC's card reads the same).
   const { manual, m, flags, hours, booked, amount, car, find, coming, outside, due, dueLate, dueText, tone, name, what, inv, doc, wa } = jobFacts(b, phase, lang);
-  const openWa = () => openWhatsApp(wa);
+  // The customer's chat in the app while the garage's WhatsApp is linked (v0.80), WhatsApp itself when not.
+  const openChat = useOpenChat();
+  const openWa = () => openChat(wa);
   const sw = useSwipeRow({ trailing: swipe ? { onCommit: () => swipe.onCommit() } : undefined, leading: wa ? { onCommit: openWa } : undefined }, 92, { edge: EDGE });
   const swiping = !!swipe || !!wa;
   // A long press and a swipe on the same row: both see the finger.

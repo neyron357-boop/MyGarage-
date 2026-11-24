@@ -700,6 +700,30 @@ html.kb .tab-bar-wrap {
   opacity: 0;
   pointer-events: none;
 }
+/* A job (v0.80): the whole screen is the job's — the tab capsule sinks away, «＋» stays where it always is; over the
+   job's step bar when it has one (the bar takes the bottom edge, as on the screens of work at the car). */
+.tab-bar {
+  transition: transform var(--dur-4) var(--ease-ios), opacity var(--dur-3) ease;
+}
+.app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plus']) > .tab-bar-wrap {
+  pointer-events: none;
+}
+html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plus']) > .tab-bar-wrap > .tab-plus {
+  pointer-events: auto;
+}
+.app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plus']) > .tab-bar-wrap > .tab-bar {
+  transform: translate3d(0, calc(100% + var(--bar-inset) + 24px), 0);
+  opacity: 0;
+}
+html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plus'] > .screen-bottom > .sticky-bar) > .tab-bar-wrap {
+  transform: translate3d(0, calc(var(--bar-inset) - 80px - env(safe-area-inset-bottom, 0px)), 0);
+}
+.screen[data-tabbar='plus'] .screen-body {
+  padding-bottom: calc(var(--bar-zone) + 28px);
+}
+.screen[data-tabbar='plus'] {
+  --edge-h: calc(var(--bar-zone) + 26px);
+}
 
 /* ---------- Suppliers: their stars, counts, the job's suppliers (v0.38) ---------- */
 .supplier-name {
@@ -3159,6 +3183,11 @@ html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] .count {
   background: var(--app-fill);
   color: var(--app-label-2);
 }
+/* A job's «WhatsApp» tab (v0.80): the customer's messages not yet read — WhatsApp's green number, chosen or not. */
+html .job-tabs .scroll-tabs button[data-tint='green'][role='tab'] .count {
+  background: var(--mantine-color-green-6);
+  color: #fff;
+}
 
 /* ---------- Navigation bar + large title (every screen) ---------- */
 /* The UIKit navigation bar: 44 pt under the status bar, transparent while the large title shows,
@@ -3910,6 +3939,24 @@ html:not(.desk) .scroll-tabs[data-segmented] button[data-active='true'] .count {
 }
 .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-6);
+}
+/* WhatsApp's waiting messages on its tab (v0.80): the iPhone's red badge at the symbol's corner. */
+.tab-badge {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 4px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--mantine-color-red-6);
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  pointer-events: none;
 }
 [data-mantine-color-scheme='dark'] .tab-bar button[data-href].active {
   color: var(--mantine-color-cobalt-4);
@@ -8461,4 +8508,27 @@ html.desk .mark-layer-body {
 .wa-queue-actions {
   display: inline-flex;
   gap: 6px;
+}
+
+/* ---------- A chat's «＋» for its customer (v0.80, features/whatsapp/ChatQuick.tsx) ----------
+   The quick tiles, then the customer's jobs: the car, its step and plate, its documents as chips at its end. */
+.wa-quick-title {
+  margin-top: 20px;
+}
+.wa-quick-sub {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.wa-quick-docs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.wa-quick-docs .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

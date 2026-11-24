@@ -366,6 +366,24 @@ export function chatOfPhone(phone: string | undefined, s: WaStore = store): WaCh
   return digits ? s.chats.find((c) => !c.group && c.phone === digits) : undefined;
 }
 
+/** Numbers already asked about (v0.80): their chat, or null — not on WhatsApp; asked once while the app is open. */
+const numberChats = new Map<string, string | null>();
+/**
+ * A number's chat (a job's customer, a card of the board): among the chats read, else asked of the server once — the
+ * next time it is there at once. Null: the number has no WhatsApp. A server away throws (nothing is remembered then).
+ */
+export async function chatOfNumber(phone: string | undefined): Promise<string | null> {
+  const listed = chatOfPhone(phone);
+  if (listed) return listed.id;
+  const digits = chatIdOf(phone).split('@')[0];
+  if (!digits) return null;
+  const kept = numberChats.get(digits);
+  if (kept !== undefined) return kept;
+  const r = await numberOnWa(digits);
+  numberChats.set(digits, r.ok ? r.chat : null);
+  return r.ok ? r.chat : null;
+}
+
 /* ---------- Files ---------- */
 
 function fileAddress(kind: 'media' | 'avatar', id: string): string | undefined {

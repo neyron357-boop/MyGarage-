@@ -1,25 +1,33 @@
-import { IconCashBanknoteFilled, IconDotsFilled, IconLayoutKanbanFilled, IconPlus, IconSearch, type Icon } from '@tabler/icons-react';
+import { IconBrandWhatsappFilled, IconCashBanknoteFilled, IconDotsFilled, IconLayoutKanbanFilled, IconPlus, IconSearch, type Icon } from '@tabler/icons-react';
 import { animate, type AnimationPlaybackControls } from 'motion';
 import { useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useWa, waCan, waUnread } from '../services/whatsapp';
 import { haptic } from './haptics';
 import { hintNavigation, scrollToTop } from './stack';
 import { mayLeave } from './unsaved';
 
 // Filled symbols, as Apple asks for tab bars (the magnifier of Search stays a line, as in iOS).
-const TABS: { to: string; icon: Icon; key: string }[] = [
-  { to: '/', icon: IconLayoutKanbanFilled, key: 'nav.board' },
-  { to: '/search', icon: IconSearch, key: 'nav.search' },
-  { to: '/money', icon: IconCashBanknoteFilled, key: 'nav.money' },
-  { to: '/more', icon: IconDotsFilled, key: 'nav.more' },
-];
+type Tab = { to: string; icon: Icon; key: string };
+const BOARD: Tab = { to: '/', icon: IconLayoutKanbanFilled, key: 'nav.board' };
+const SEARCH: Tab = { to: '/search', icon: IconSearch, key: 'nav.search' };
+const MONEY: Tab = { to: '/money', icon: IconCashBanknoteFilled, key: 'nav.money' };
+const MORE: Tab = { to: '/more', icon: IconDotsFilled, key: 'nav.more' };
+/** The garage's WhatsApp (v0.80, «поместить модуль ватсап прямо тут»): a tab of its own while there is its server. */
+const WHATSAPP: Tab = { to: '/whatsapp', icon: IconBrandWhatsappFilled, key: 'nav.whatsapp' };
+const TABS_PLAIN: Tab[] = [BOARD, SEARCH, MONEY, MORE];
+const TABS_WA: Tab[] = [BOARD, SEARCH, MONEY, WHATSAPP, MORE];
 const MORE_PATHS = ['/more', '/notes', '/whatsapp', '/customers', '/vehicles', '/parts', '/reports', '/settings'];
 
+/** WhatsApp has its tab: the app is the garage server's device (WhatsApp lives on that server). */
+export const waTab = (): boolean => waCan();
+
 /** The tab a screen belongs to: its own root, or the tab it was opened from (a job, a customer). */
-function tabOf(pathname: string): string | undefined {
+function tabOf(pathname: string, tabs: Tab[]): string | undefined {
+  if (tabs === TABS_WA && pathname.startsWith('/whatsapp')) return '/whatsapp';
   if (MORE_PATHS.some((p) => pathname.startsWith(p))) return '/more';
-  return TABS.find((s) => s.to === pathname)?.to;
+  return tabs.find((s) => s.to === pathname)?.to;
 }
 
 /**
@@ -38,8 +46,12 @@ export function TabBar({ plus }: { /** «＋» with its quick actions (features/
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  // WhatsApp's tab, and how many of its messages wait (the number on it, as the iPhone badges an app).
+  const wa = useWa();
+  const TABS = waTab() ? TABS_WA : TABS_PLAIN;
+  const unread = TABS === TABS_WA ? waUnread(wa) : 0;
   const last = useRef('/');
-  const current = tabOf(pathname) ?? last.current;
+  const current = tabOf(pathname, TABS) ?? last.current;
   last.current = current;
   const index = TABS.findIndex((s) => s.to === current);
   const go = (to: string) => {
@@ -49,7 +61,7 @@ export function TabBar({ plus }: { /** «＋» with its quick actions (features/
   };
   const nav = useRef<HTMLElement>(null);
   const lens = useRef<HTMLSpanElement>(null);
-  const dragged = useLensDrag(nav, lens, index, (i) => {
+  const dragged = useLensDrag(nav, lens, index, TABS.length, (i) => {
     // A slide is no click: the unsaved-edits guard is asked here, as it is for a tapped tab.
     if (!mayLeave(TABS[i].to)) return false;
     go(TABS[i].to);
@@ -71,6 +83,11 @@ export function TabBar({ plus }: { /** «＋» with its quick actions (features/
           >
             <s.icon stroke={2.2} aria-hidden />
             <span>{t(s.key)}</span>
+            {s === WHATSAPP && unread > 0 && (
+              <i className="tab-badge tnum" aria-label={t('wa.unreadN', { count: unread })}>
+                {unread > 99 ? '99+' : unread}
+              </i>
+            )}
           </button>
         ))}
       </nav>
@@ -203,7 +220,7 @@ interface Gesture {
  * not re-render while the finger moves. `pick(i)` opens a tab and says whether it did (unsaved edits
  * may hold it back). Returns a ref that is true right after a slide (a click that may follow is no tap).
  */
-function useLensDrag(navRef: RefObject<HTMLElement>, lensRef: RefObject<HTMLElement>, index: number, pick: (i: number) => boolean) {
+function useLensDrag(navRef: RefObject<HTMLElement>, lensRef: RefObject<HTMLElement>, index: number, n: number, pick: (i: number) => boolean) {
   const dragged = useRef(false);
   const live = useRef({ index, pick });
   live.current = { index, pick };
@@ -213,7 +230,6 @@ function useLensDrag(navRef: RefObject<HTMLElement>, lensRef: RefObject<HTMLElem
     const nav = navRef.current;
     const el = lensRef.current;
     if (!nav || !el) return;
-    const n = TABS.length;
     const slot = () => (nav.clientWidth - 4) / n;
     const lens = new LensMotion(el);
     const home = () => Math.max(0, live.current.index) * slot();
@@ -420,7 +436,7 @@ function useLensDrag(navRef: RefObject<HTMLElement>, lensRef: RefObject<HTMLElem
       document.removeEventListener('visibilitychange', hidden);
       machine.current = null;
     };
-  }, [navRef, lensRef]);
+  }, [navRef, lensRef, n]);
 
   // Another tab is open (a tap, a link, Back): the lens springs there from wherever it is now.
   useLayoutEffect(() => {

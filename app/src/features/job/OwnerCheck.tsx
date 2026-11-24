@@ -1,5 +1,5 @@
-import { Box, Button, Modal, Skeleton, Stack } from '@mantine/core';
-import { IconSend } from '@tabler/icons-react';
+import { ActionIcon, Box, Button, Group, Modal, Skeleton, Stack, Text } from '@mantine/core';
+import { IconBrandWhatsapp, IconSend, IconShare } from '@tabler/icons-react';
 import type { TFunction } from 'i18next';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -14,8 +14,13 @@ import type { Expense, Lang, OrderItem } from '../../domain/types';
 import { coverOf } from '../../services/cover';
 import { cardUrl } from '../../services/media';
 import type { OrderBundle } from '../../services/orders';
-import { useLang } from '../../ui/hooks';
+import { waAutoOf, type WaTarget } from '../../domain/waAuto';
+import { saveWaAuto } from '../../services/waAuto';
+import { sendWaFile, useWa, waReady } from '../../services/whatsapp';
+import { haptic } from '../../ui/haptics';
+import { useAction, useLang } from '../../ui/hooks';
 import { shareOrDownload } from '../../ui/share';
+import { ChatPicker } from '../whatsapp/ChatPicker';
 import { drawOwnerCheck, type CheckData, type CheckLine } from './ownerCheckImage';
 
 /** What the picture says, from the job as it is now: names in the job's documents' language, words in the app's. */
@@ -90,6 +95,8 @@ async function checkData(b: OrderBundle, expenses: Expense[], partsCategoryId: s
 /**
  * The job for the owner to check (v0.29): the picture as it will go, and «Отправить» — the phone's share sheet
  * (WhatsApp first), a download on a PC. The picture is ready before the tap (the iPhone shares only right in a tap).
+ * The garage's WhatsApp linked (v0.80, «нажал — и уже отправилось прямо к владельцу»): one tap sends it to the owner's
+ * chat (the boss of «WhatsApp → Автоматизация»; picked here the first time); the share sheet stays beside it.
  */
 export function OwnerCheckSheet({
   b,
@@ -109,6 +116,24 @@ export function OwnerCheckSheet({
   const { t } = useTranslation();
   const lang = useLang();
   const [shot, setShot] = useState<{ file: File; url: string }>();
+  const ready = waReady(useWa());
+  const owner = waAutoOf(b.settings.waAuto).boss.to;
+  const [picking, setPicking] = useState(false);
+  const { run, busy } = useAction({ exclusive: true });
+  const toOwner = (to: WaTarget) =>
+    run(async () => {
+      if (!shot) return;
+      const caption = [`№${b.order.number}`, [b.vehicle.make, b.vehicle.model, b.vehicle.year].filter(Boolean).join(' '), formatPlate(b.vehicle.plate, 'en')].filter(Boolean).join(' · ');
+      await sendWaFile(to.chat, shot.file, { name: shot.file.name, caption });
+      haptic('success');
+      onClose();
+    }, 'ownerCheck.sent');
+  // The owner's chat picked here: it is the boss of the automation from now on — its reports stay as they were set
+  // (never turned on from here: picked for this picture, not for the money's every step).
+  const pickOwner = (to: WaTarget) => {
+    void saveWaAuto('boss', b.settings.waAuto?.boss?.on === undefined ? { to, on: false } : { to });
+    void toOwner(to);
+  };
   useEffect(() => {
     if (!opened) return;
     let alive = true;
@@ -129,10 +154,29 @@ export function OwnerCheckSheet({
     <Modal opened={opened} onClose={onClose} title={t('ownerCheck.title')}>
       <Stack gap="md">
         <Box className="owner-check">{shot ? <img src={shot.url} alt={t('ownerCheck.title')} data-owner-check /> : <Skeleton height={520} radius="lg" />}</Box>
-        <Button size="lg" fullWidth leftSection={<IconSend size={20} />} disabled={!shot} onClick={() => shot && shareOrDownload(shot.file)}>
-          {t('ownerCheck.send')}
-        </Button>
+        {ready ? (
+          <Stack gap={4}>
+            <Group gap={10} wrap="nowrap">
+              <Button size="lg" color="green" style={{ flex: 1 }} leftSection={<IconBrandWhatsapp size={22} />} loading={busy} disabled={!shot} onClick={() => (owner ? void toOwner(owner) : setPicking(true))} data-owner-wa>
+                {t('ownerCheck.toOwner')}
+              </Button>
+              <ActionIcon size={50} radius="xl" variant="default" aria-label={t('ownerCheck.share')} disabled={!shot} onClick={() => shot && shareOrDownload(shot.file)}>
+                <IconShare size={22} />
+              </ActionIcon>
+            </Group>
+            {owner && (
+              <Text size="xs" c="dimmed" ta="center" className="dt-clip">
+                {owner.name}
+              </Text>
+            )}
+          </Stack>
+        ) : (
+          <Button size="lg" fullWidth leftSection={<IconSend size={20} />} disabled={!shot} onClick={() => shot && shareOrDownload(shot.file)}>
+            {t('ownerCheck.send')}
+          </Button>
+        )}
       </Stack>
+      {ready && <ChatPicker opened={picking} onClose={() => setPicking(false)} onPick={pickOwner} kind="person" title={t('ownerCheck.pickOwner')} />}
     </Modal>
   );
 }

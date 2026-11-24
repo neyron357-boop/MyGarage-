@@ -18,9 +18,9 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ContextType } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HashRouter, Link, Route, Routes, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
+import { HashRouter, Link, MemoryRouter, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { ClaimPage } from './features/claims/ClaimPage';
 import { BoardPage } from './features/board/BoardPage';
 import { CustomerPage } from './features/customers/CustomerPage';
@@ -54,8 +54,9 @@ import { useBackClosesSheets } from './ui/backCloses';
 import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useViewportSync } from './ui/stack';
-import { DeskContext, DeskKeys, MOD_KEY, deskPage, sheetOpen, useDeskShell, useDeskWheel } from './ui/desk';
+import { DeskContext, DeskKeys, DeskPaneContext, MOD_KEY, deskPage, setActivePane, sheetOpen, useDeskShell, useDeskWheel, type DeskPaneInfo } from './ui/desk';
 import { DeskTips } from './ui/deskTips';
+import { useWaSideHidden } from './ui/deskSide';
 import { DeskPalette } from './features/search/DeskPalette';
 import { TabBar } from './ui/tabBar';
 import { UnsavedGuard } from './ui/unsaved';
@@ -314,29 +315,126 @@ function ScrollManager() {
   return null;
 }
 
+/* ---------------- PC: a job beside the job (v0.80) ---------------- */
+
+/** A job's own address (the side pane follows it into the window's: `?side=`). `new` — a new job being taken in. */
+const SIDE_JOB = /^\/orders\/([^/]+)$/;
+const MAIN_PANE: DeskPaneInfo = { id: 'main' };
+
+/** The screens of the side pane, on its own address: what it shows goes into the window's address; the board — it closes. */
+function SidePaneRoutes({ onShow, onClose }: { onShow: (side: string) => void; onClose: () => void }) {
+  const location = useLocation();
+  const type = useNavigationType();
+  const navigate = useNavigate();
+  // How deep in its own history (where its «Назад» leads): at the first screen «Назад» closes the pane.
+  const [depth, setDepth] = useState(0);
+  const last = useRef(location.key);
+  useEffect(() => {
+    if (last.current === location.key) return;
+    last.current = location.key;
+    setDepth((d) => (type === 'PUSH' ? d + 1 : type === 'POP' ? Math.max(0, d - 1) : d));
+  }, [location.key, type]);
+  useEffect(() => {
+    if (location.pathname === '/') return onClose();
+    const m = SIDE_JOB.exec(location.pathname);
+    if (m) onShow(m[1]);
+    return undefined;
+  }, [location.pathname, onShow, onClose]);
+  const pane = useMemo<DeskPaneInfo>(() => ({ id: 'side', closes: depth === 0, back: () => (depth > 0 ? navigate(-1) : onClose()) }), [depth, navigate, onClose]);
+  return (
+    <DeskPaneContext.Provider value={pane}>
+      <ErrorBoundary resetKey={location.pathname}>
+        <div key={location.pathname} className="page-enter" data-pane-page={deskPage(location.pathname)}>
+          <AppRoutes location={location} />
+        </div>
+      </ErrorBoundary>
+    </DeskPaneContext.Provider>
+  );
+}
+
+/**
+ * The side pane: a router of its own (its screens open, go back and take in a new job there, the window's screen stays).
+ * React Router keeps one router to a page — the window's is left out of this one (its contexts cleared for it).
+ */
+function SidePane({ start, onShow, onClose }: { start: string; onShow: (side: string) => void; onClose: () => void }) {
+  const [first] = useState(() => `/orders/${start}`);
+  return (
+    <UNSAFE_LocationContext.Provider value={null as unknown as ContextType<typeof UNSAFE_LocationContext>}>
+      <UNSAFE_RouteContext.Provider value={{ outlet: null, matches: [], isDataRoute: false }}>
+        <MemoryRouter initialEntries={[first]}>
+          <SidePaneRoutes onShow={onShow} onClose={onClose} />
+        </MemoryRouter>
+      </UNSAFE_RouteContext.Provider>
+    </UNSAFE_LocationContext.Provider>
+  );
+}
+
 function DesktopShell() {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
+  // A job beside the job (v0.80): `?side=` of a job's address — `new` or the other job's id.
+  const side = new URLSearchParams(location.search).get('side');
+  const twin = !!side && /^\/orders\/(?!new$)[^/]+$/.test(location.pathname);
+  const here = useRef(location);
+  here.current = location;
+  const setSide = useCallback(
+    (v: string | null) => {
+      const loc = here.current;
+      const p = new URLSearchParams(loc.search);
+      if ((p.get('side') ?? null) === v) return;
+      if (v) p.set('side', v);
+      else p.delete('side');
+      const search = p.toString();
+      navigate({ pathname: loc.pathname, search: search ? `?${search}` : '' }, { replace: true });
+    },
+    [navigate],
+  );
+  const showSide = useCallback((v: string) => setSide(v), [setSide]);
+  const closeSide = useCallback(() => setSide(null), [setSide]);
+  useEffect(() => {
+    if (!twin) setActivePane('main');
+  }, [twin]);
   // The computer's own layout (v0.41): every rule of it is under html.desk, which the phone never has.
   useDeskShell();
   useDeskWheel();
+  // WhatsApp's screens may put the side menu away (v0.80): the chats get the whole window.
+  const sideHidden = useWaSideHidden() && /^\/whatsapp(\/chat\/[^/]+)?$/.test(location.pathname);
   return (
     <DeskContext.Provider value>
-      <div className="desk-shell">
+      <div className="desk-shell" data-side-hidden={sideHidden || undefined}>
         <ScrollManager />
         <nav className="app-nav desk-side" aria-label={t('nav.menu')}>
           <SideNav />
         </nav>
         <main className="desk-main">
           {/* The screen decides its width (desk.css): the board the whole window, a job two columns, a form one. */}
-          <div className="page-shell" data-page={deskPage(location.pathname)}>
+          <div className="page-shell" data-page={twin ? 'twin' : deskPage(location.pathname)}>
             <div className="desk-page">
               <PreviewNotice />
-              <ErrorBoundary resetKey={location.pathname}>
-                <div key={location.pathname} className="page-enter">
-                  <AppRoutes location={location} />
+              {twin ? (
+                // Two jobs in one window: each pane scrolls by itself; the keys act in the one last clicked.
+                <div className="desk-twin">
+                  <section className="desk-twin-pane" data-pane="main" onPointerDownCapture={() => setActivePane('main')} onFocusCapture={() => setActivePane('main')}>
+                    <DeskPaneContext.Provider value={MAIN_PANE}>
+                      <ErrorBoundary resetKey={location.pathname}>
+                        <div key={location.pathname} className="page-enter">
+                          <AppRoutes location={location} />
+                        </div>
+                      </ErrorBoundary>
+                    </DeskPaneContext.Provider>
+                  </section>
+                  <section className="desk-twin-pane" data-pane="side" aria-label={t('desk.twin')} onPointerDownCapture={() => setActivePane('side')} onFocusCapture={() => setActivePane('side')}>
+                    <SidePane start={side} onShow={showSide} onClose={closeSide} />
+                  </section>
                 </div>
-              </ErrorBoundary>
+              ) : (
+                <ErrorBoundary resetKey={location.pathname}>
+                  <div key={location.pathname} className="page-enter">
+                    <AppRoutes location={location} />
+                  </div>
+                </ErrorBoundary>
+              )}
             </div>
           </div>
         </main>

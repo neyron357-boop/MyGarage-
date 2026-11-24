@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Group, Loader, Modal, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconCloudOff, IconCopy, IconExternalLink, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCloudOff, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -13,13 +13,17 @@ import { loadChats, numberOnWa, refreshWa, useWaStatus, waCan, waReady, type WaS
 import { copyText } from '../../ui/clipboard';
 import { EmptyState, List, ListRow, PageHeader, ScrollTabs, SearchField } from '../../ui/components';
 import { useDesk } from '../../ui/desk';
-import { useAction, useErrorText } from '../../ui/hooks';
+import { setWaSideHidden, useWaSideHidden } from '../../ui/deskSide';
+import { useAction, useErrorText, useScreenLiveQuery } from '../../ui/hooks';
+import { customerOfGroup } from '../../services/chatJobs';
 import { LazySheet } from '../../ui/lazy';
 import { useMoreRows } from '../../ui/moreRows';
 import { useScreen } from '../../ui/stack';
+import { waTab } from '../../ui/tabBar';
 import { CustomerModal } from '../customers/forms';
 import { SupplierSheet } from '../parts/Suppliers';
 import { ChatThread } from './ChatThread';
+import type { QuickFor } from './ChatQuick';
 import { LastLine, useWaPeople, WaAvatar, WhoTag } from './WaParts';
 
 /*
@@ -316,8 +320,16 @@ function useChatFace(s: WaStore, people: Map<string, Who>, chatId: string | unde
 function HeaderButtons({ onNew, ready }: { onNew: () => void; ready: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const desk = useDesk();
+  const sideHidden = useWaSideHidden();
   return (
     <Group gap="xs" wrap="nowrap">
+      {/* A PC (v0.80): the side menu put away — the chats get the whole window; the same button brings it back. */}
+      {desk && (
+        <ActionIcon variant="default" size={40} radius="xl" aria-label={t(sideHidden ? 'nav.showMenu' : 'nav.hideMenu')} onClick={() => setWaSideHidden(!sideHidden)} data-wa-side-btn>
+          {sideHidden ? <IconLayoutSidebarLeftExpand size={21} stroke={1.9} /> : <IconLayoutSidebarLeftCollapse size={21} stroke={1.9} />}
+        </ActionIcon>
+      )}
       {ready && (
         <ActionIcon variant="default" size={40} radius="xl" aria-label={t('wa.newChat')} onClick={onNew} data-wa-new-btn>
           <IconPlus size={22} stroke={2} />
@@ -342,6 +354,12 @@ export function WhatsAppPage() {
   const people = useWaPeople();
   const ready = waReady(s);
   const face = useChatFace(s, people, chatId);
+  // «＋» of the chat (v0.80): the customer's quick actions — by their number, or a company's own group (no prices).
+  const groupOwner = useScreenLiveQuery(async () => (chatId?.endsWith('@g.us') ? ((await customerOfGroup(chatId)) ?? null) : null), [chatId]);
+  const quick = useMemo<QuickFor | undefined>(
+    () => (face?.who?.kind === 'customer' ? { customerId: face.who.id } : groupOwner ? { customerId: groupOwner.id, group: true } : undefined),
+    [face?.who?.kind, face?.who?.id, groupOwner],
+  );
   const [adding, setAdding] = useState(false);
   const [info, setInfo] = useState(false);
 
@@ -399,7 +417,7 @@ export function WhatsAppPage() {
                     {face.who && <WhoTag kind={face.who.kind} />}
                     {face.c.phone && <span className="wa-chat-head-phone tnum">{formatPhone(`+${face.c.phone}`)}</span>}
                   </button>
-                  <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk />
+                  <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk quick={quick} />
                 </>
               ) : (
                 <div className="wa-desk-none">
@@ -437,7 +455,7 @@ export function WhatsAppPage() {
         />
         {gate ?? (
           <div className="notes-page">
-            <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk={false} />
+            <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk={false} quick={quick} />
           </div>
         )}
         {sheets}
@@ -446,7 +464,8 @@ export function WhatsAppPage() {
   }
   return (
     <>
-      <PageHeader title="WhatsApp" eyebrow={eyebrow} back="/more" right={<HeaderButtons ready={ready} onNew={() => setAdding(true)} />} />
+      {/* A tab of its own on the phone (v0.80) — a root, no «Назад»; without the server it is reached from «Ещё». */}
+      <PageHeader title="WhatsApp" eyebrow={eyebrow} back={waTab() ? undefined : '/more'} right={<HeaderButtons ready={ready} onNew={() => setAdding(true)} />} />
       {gate ?? <ChatList s={s} people={people} onOpen={openChat} />}
       {sheets}
     </>

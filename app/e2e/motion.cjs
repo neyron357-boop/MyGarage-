@@ -287,7 +287,16 @@ const check = (name, ok, detail) => {
   );
   check('short swipe: springs back, stays', short.hash === orderHash && short.left === 0 && short.prevVis === 'hidden', short);
 
-  // 5. Tab switch: a cross-fade, a fresh stack.
+  // 5. A job has the whole screen (v0.80): the tab capsule is away, «＋» stays.
+  const jobBar = await page.evaluate(() => ({
+    bar: getComputedStyle(document.querySelector('.tab-bar')).opacity,
+    plus: getComputedStyle(document.querySelector('.tab-plus')).visibility !== 'hidden' && document.querySelector('.tab-plus').getBoundingClientRect().height > 0,
+  }));
+  check('job: the tab bar is away, «＋» stays', jobBar.bar === '0' && jobBar.plus, jobBar);
+  await page.goBack();
+  await page.waitForTimeout(700);
+
+  // Tab switch: a cross-fade, a fresh stack.
   await page.locator('.tab-bar button', { hasText: 'Деньги' }).click();
   await page.waitForTimeout(500);
   const tab = await page.evaluate(() => ({ hash: location.hash, screens: document.querySelectorAll('.stack > .screen').length }));
@@ -546,20 +555,20 @@ const check = (name, ok, detail) => {
   check('tab bar: a second tap mid-flight keeps the lens moving (no stop-and-go)', bend.steps.length >= 5 && (bend.steps[2] + bend.steps[3] + bend.steps[4]) / 3 >= 0.8 * bend.steps[0] && Math.abs(bend.end - tMore.x) <= 1, bend);
 
   // A sloppy tap (a few px of slide that never left the tab) on the lit tab from a deeper screen: back to the
-  // tab's first screen, as a clean tap does.
-  await touch('touchStart', tBoard.x, ty);
+  // tab's first screen, as a clean tap does. (A job has no tab bar since v0.80 — Money's payments are deeper here.)
+  await touch('touchStart', tMoney.x, ty);
   await touch('touchEnd');
   await page.waitForTimeout(900);
-  await page.locator('.screen[data-role="top"] .job-row').first().click();
+  await page.evaluate(() => (location.hash = '#/money/payments'));
   await page.waitForTimeout(900);
   const deeper = await page.evaluate(() => location.hash);
-  await touch('touchStart', tBoard.x - 8, ty);
-  await glide(tBoard.x - 8, tBoard.x + 8, 120);
+  await touch('touchStart', tMoney.x - 8, ty);
+  await glide(tMoney.x - 8, tMoney.x + 8, 120);
   await touch('touchEnd');
   await page.waitForTimeout(800);
   const sloppy = { deeper, hash: await page.evaluate(() => location.hash) };
   await routes();
-  check('tab bar: a sloppy tap on the lit tab goes back to its first screen', sloppy.deeper.startsWith('#/orders/') && sloppy.hash === '#/', sloppy);
+  check('tab bar: a sloppy tap on the lit tab goes back to its first screen', sloppy.deeper.startsWith('#/money/payments') && sloppy.hash === '#/money', sloppy);
 
   // 13. One action per confirmation: two taps on "Accept" before the screen re-renders make one job.
   await page.goto(BASE + '#/orders/new');
@@ -627,9 +636,8 @@ const check = (name, ok, detail) => {
   await page.waitForTimeout(1500);
   const out = { ...(await facts()), notes: await notes() };
   check('double tap on "Hand over": handed over, not reopened', out.stage === 'closed' && !out.notes.some((n) => n.includes('возобнов')), out);
-  // To the board as a finger goes there: its tab.
-  await touch('touchStart', tBoard.x, ty);
-  await touch('touchEnd');
+  // To the board (a job has no tab bar since v0.80: by its address).
+  await page.evaluate(() => (location.hash = '#/'));
   await page.waitForTimeout(1300);
   await page.evaluate(() => {
     window.__pushes = [];

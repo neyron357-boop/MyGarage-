@@ -16,6 +16,9 @@ export const ru = {
   lang: { ru: 'Русский', en: 'English' },
   nav: {
     menu: 'Меню',
+    // WhatsApp's screens on a PC (v0.80): the side menu put away and back.
+    hideMenu: 'Скрыть меню',
+    showMenu: 'Показать меню',
     board: 'Доска',
     search: 'Поиск',
     add: 'Добавить',
@@ -37,6 +40,8 @@ export const ru = {
   // The computer (v0.41): its keys, the job's actions beside it, the columns of its tables.
   desk: {
     keys: 'Клавиши',
+    // A new job beside the job (v0.80).
+    twin: 'Заказ рядом',
     keyLines: 'Работа · Запчасть · Услуга в заказе',
     keyClose: 'Закрыть окно',
     actions: 'Действия',
@@ -1860,6 +1865,25 @@ export const ru = {
   // WhatsApp мастерской в приложении (v0.78): сервер мастерской — связанное устройство аккаунта.
   wa: {
     setup: 'Настройка',
+    unreadN_one: '{{count}} непрочитанное',
+    unreadN_few: '{{count}} непрочитанных',
+    unreadN_many: '{{count}} непрочитанных',
+    unreadN_other: '{{count}} непрочитанных',
+    // A chat's «＋» for its customer (v0.80).
+    quick: {
+      title: 'Быстрые действия',
+      files: 'Фото и файлы',
+      newJob: 'Новый заказ',
+      customer: 'Клиент',
+      statement: 'Выписка',
+      statementAsk: 'Отправить выписку?',
+      estimate: 'Смета',
+      invoice: 'Инвойс',
+      report: 'Отчёт в группу',
+      job: 'Заказ',
+      jobs: 'Работы',
+      sent: 'Отправлено',
+    },
     search: 'Имя или номер',
     tab: { all: 'Все', unread: 'Новые', customers: 'Клиенты', suppliers: 'Поставщики', groups: 'Группы' },
     who: { customer: 'Клиент', supplier: 'Поставщик', employee: 'Сотрудник', driver: 'Водитель' },
@@ -2457,6 +2481,11 @@ export const ru = {
   ownerCheck: {
     title: 'Владельцу на проверку',
     send: 'Отправить',
+    // The garage's WhatsApp linked (v0.80): one tap — the owner's chat.
+    toOwner: 'В WhatsApp владельцу',
+    share: 'Поделиться',
+    pickOwner: 'Чат владельца',
+    sent: 'Отправлено владельцу',
     parts: 'Запчасти',
     work: 'Работа',
     // Buy / Sell — the user's words (v0.36), as the owner reads them.

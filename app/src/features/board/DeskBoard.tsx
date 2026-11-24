@@ -36,7 +36,7 @@ import type { Phase } from '../../domain/flow';
 import { formatPhone } from '../../domain/phone';
 import type { Lang, Order } from '../../domain/types';
 import { invoicePdf, openPdf, quotationPdf } from '../../services/documents';
-import { openWhatsApp } from '../../services/messages';
+import { useOpenChat } from '../whatsapp/openChat';
 import { prefetchBundle, type OrderBundle } from '../../services/orders';
 import type { BoardTab } from '../../ui/boardView';
 import { EmptyState, List, MediaImage, Money, PlateText, undoToast } from '../../ui/components';
@@ -226,6 +226,8 @@ function JobMenu({ target, onClose, archive, canvas }: { target: { j: DeskJob; a
   const navigate = useNavigate();
   const { run } = useAction();
   const desk = useDeskBoard();
+  // The customer's chat in the app while the garage's WhatsApp is linked (v0.80), WhatsApp itself when not.
+  const openChat = useOpenChat();
   const [remove, setRemove] = useState<Pick<Order, 'id' | 'number'> | null>(null);
   const j = target?.j;
   let items: DeskMenuItem[] = [];
@@ -241,7 +243,7 @@ function JobMenu({ target, onClose, archive, canvas }: { target: { j: DeskJob; a
     items = [
       { key: 'open', label: t('common.open'), icon: IconExternalLink, onClick: () => navigate(`/orders/${id}`) },
       ...(f.doc ? [{ key: 'doc', label: t(f.doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote'), icon: f.doc === 'invoice' ? IconFileInvoice : IconFileTypePdf, onClick: () => void run(async () => openPdf(f.inv ? await invoicePdf(f.inv.id) : await quotationPdf(id))) }] : []),
-      ...(f.wa ? [{ key: 'wa', label: 'WhatsApp', icon: IconBrandWhatsapp, onClick: () => openWhatsApp(f.wa) }] : []),
+      ...(f.wa ? [{ key: 'wa', label: 'WhatsApp', icon: IconBrandWhatsapp, onClick: () => openChat(f.wa) }] : []),
       { key: 'important', label: t(important ? 'deskBoard.notImportant' : 'deskBoard.important'), icon: important ? IconStarFilled : IconStar, divided: true, onClick: () => toggleImportant(id) },
       { key: 'pin', label: t(pinned ? 'deskBoard.unpin' : 'deskBoard.pin'), icon: pinned ? IconPinnedFilled : IconPin, onClick: () => togglePinned(id) },
       ...(canvas

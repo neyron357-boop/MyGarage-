@@ -19,6 +19,27 @@ import { useLocation, useNavigate } from 'react-router-dom';
 export const DeskContext = createContext(false);
 export const useDesk = () => useContext(DeskContext);
 
+/**
+ * Two jobs side by side on a PC (v0.80, the owner: «создать новый другой заказ, не переходя в другой экран — справа
+ * новая вкладка, чтобы в одном экране видел оба заказа и управлял»): the window's screen is the main pane, the job beside
+ * it — the side pane with its own history. A screen in a pane asks which it is in; outside the two — null.
+ */
+export type DeskPaneId = 'main' | 'side';
+export interface DeskPaneInfo {
+  id: DeskPaneId;
+  /** «Назад» of a screen in the pane: a step back in its own history; at its first screen it closes the pane. */
+  back?: () => void;
+  /** At the pane's first screen: «Назад» closes it (an × then). */
+  closes?: boolean;
+}
+export const DeskPaneContext = createContext<DeskPaneInfo | null>(null);
+export const useDeskPane = () => useContext(DeskPaneContext);
+/** The pane last clicked or typed in: its screen's keys (1 · 2 · 3) are the ones that act. */
+let activePane: DeskPaneId = 'main';
+export const setActivePane = (id: DeskPaneId) => {
+  activePane = id;
+};
+
 /** Marks the document as the PC's while the PC shell is on (before the first paint: no frame without its layout). */
 export function useDeskShell() {
   useLayoutEffect(() => {
@@ -54,6 +75,7 @@ export function useDeskWheel() {
  * window, a job two columns, the lists their tables, a form a readable column.
  */
 export function deskPage(pathname: string): string {
+  // (Two jobs side by side — 'twin' — is decided by the shell: the address's `side`, see App.tsx.)
   const seg = pathname.split('/').filter(Boolean);
   if (!seg.length) return 'board';
   if (seg[0] === 'orders') return seg[1] === 'new' ? 'new' : seg[2] === 'claim' || seg[2] === 'suppliers' ? seg[2] : 'job';
@@ -71,10 +93,13 @@ export const sheetOpen = () => !!document.querySelector('.mantine-Modal-content,
  * not while a sheet is open. Letters by their place on the keyboard: N is N in the Russian layout too.
  */
 export function useDeskHotkeys(keys: [string, () => void][], enabled = true) {
+  // Two jobs side by side (v0.80): a screen's keys act in the pane last clicked only — not in both jobs at once.
+  const pane = useContext(DeskPaneContext)?.id;
   const items: HotkeyItem[] = enabled
     ? keys.map(([key, fn]) => [
         key,
         () => {
+          if (pane && pane !== activePane) return;
           // A job shown to its customer (v0.67): the keys do nothing — no new job, no search over the lock.
           if (!sheetOpen() && !document.documentElement.hasAttribute('data-client-lock')) fn();
         },
@@ -169,11 +194,11 @@ export interface DeskMenuItem {
  * the point of the click; null — closed (nothing is in the page then: a list's rows keep their neighbours). It lives
  * in the body, so a row's list never gets an element between its rows.
  */
-export function DeskMenu({ at, items, onClose, label }: { at: { x: number; y: number } | null; items: DeskMenuItem[]; onClose: () => void; label?: string }) {
+export function DeskMenu({ at, items, onClose, label, width = 240 }: { at: { x: number; y: number } | null; items: DeskMenuItem[]; onClose: () => void; label?: string; width?: number }) {
   if (!at) return null;
   return createPortal(
     // (No fade: a right click's menu is there at once, as the system's own.)
-    <Menu opened onChange={(o) => !o && onClose()} position="bottom-start" offset={2} width={240} withinPortal closeOnItemClick returnFocus={false} transitionProps={{ duration: 0 }}>
+    <Menu opened onChange={(o) => !o && onClose()} position="bottom-start" offset={2} width={width} withinPortal closeOnItemClick returnFocus={false} transitionProps={{ duration: 0 }}>
       <Menu.Target>
         <span aria-hidden className="desk-menu-anchor" style={{ left: at.x, top: at.y }} />
       </Menu.Target>

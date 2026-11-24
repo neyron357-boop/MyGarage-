@@ -18,6 +18,8 @@ export const en: typeof ru = {
   lang: { ru: 'Русский', en: 'English' },
   nav: {
     menu: 'Menu',
+    hideMenu: 'Hide the menu',
+    showMenu: 'Show the menu',
     board: 'Board',
     search: 'Search',
     add: 'Add',
@@ -38,6 +40,7 @@ export const en: typeof ru = {
   },
   desk: {
     keys: 'Keyboard',
+    twin: 'Job beside',
     keyLines: 'Work · Part · Service on a job',
     keyClose: 'Close the sheet',
     actions: 'Actions',
@@ -1860,6 +1863,24 @@ export const en: typeof ru = {
   // The garage's WhatsApp in the app (v0.78): the garage's server is a linked device of the account.
   wa: {
     setup: 'Setup',
+    unreadN_one: '{{count}} unread',
+    unreadN_few: '{{count}} unread',
+    unreadN_many: '{{count}} unread',
+    unreadN_other: '{{count}} unread',
+    quick: {
+      title: 'Quick actions',
+      files: 'Photos and files',
+      newJob: 'New job',
+      customer: 'Customer',
+      statement: 'Statement',
+      statementAsk: 'Send the statement?',
+      estimate: 'Estimate',
+      invoice: 'Invoice',
+      report: 'Report to the group',
+      job: 'Job',
+      jobs: 'Jobs',
+      sent: 'Sent',
+    },
     search: 'Name or number',
     tab: { all: 'All', unread: 'Unread', customers: 'Customers', suppliers: 'Suppliers', groups: 'Groups' },
     who: { customer: 'Customer', supplier: 'Supplier', employee: 'Staff', driver: 'Driver' },
@@ -2456,6 +2477,10 @@ export const en: typeof ru = {
   ownerCheck: {
     title: 'For the owner to check',
     send: 'Send',
+    toOwner: 'To the owner on WhatsApp',
+    share: 'Share',
+    pickOwner: "The owner's chat",
+    sent: 'Sent to the owner',
     parts: 'Parts',
     work: 'Labour',
     cost: 'Buy',
