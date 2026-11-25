@@ -19,6 +19,8 @@ import { addMedia } from './media';
 import { bundleAmountDue, loadOrderBundle, logEvent, tryStage } from './orders';
 import { setProcurement } from './parts';
 import { oneAtATime } from './serial';
+import { syncNow } from './sync/engine';
+import { jobsSure, jobUnsure, takeKeptNumber } from './sync/numbers';
 
 const year = () => Number(dubaiDate().slice(0, 4));
 
@@ -94,7 +96,29 @@ export function quickInvoice(orderId: string, { day }: { day?: string } = {}): P
   return oneAtATime(`invoice:${orderId}`, () => issueQuick(orderId, day));
 }
 
+/**
+ * The job's number made sure before its paper (v0.84.2, audit 25/11): a job made here that the garage's server has not
+ * had yet is sent first (a few seconds at most — in touch, its number is the server's at once); still not — it takes a
+ * number the server keeps for this device, nobody else's, so its invoice is never another job's. Without one kept (an
+ * older server, never in touch since) it stays as it was.
+ */
+async function sureJobNumber(orderId: string): Promise<void> {
+  if (!jobUnsure(orderId)) return;
+  await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 4000))]);
+  if (!jobUnsure(orderId)) return;
+  const order = await db.orders.get(orderId);
+  if (!order) return;
+  const n = await takeKeptNumber();
+  if (n === undefined) return;
+  await db.transaction('rw', db.orders, db.events, async () => {
+    await db.orders.update(orderId, { number: n });
+    await logEvent(orderId, 'renumbered', { from: order.number, to: n, kept: true });
+  });
+  jobsSure([orderId]);
+}
+
 async function issueQuick(orderId: string, day: string | undefined): Promise<Invoice> {
+  await sureJobNumber(orderId);
   // Everything that would stop the invoice — said before anything is written (audit 25/11: a day of a closed month
   // refused only after the version and the customer's answers were recorded for good).
   const b = await loadOrderBundle(orderId);
@@ -141,6 +165,7 @@ function invoiceCheck(b: NonNullable<Awaited<ReturnType<typeof loadOrderBundle>>
  * job's own day. Its number takes that day's year.
  */
 export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 'credit_note'>, { day }: { day?: string } = {}): Promise<Invoice> {
+  await sureJobNumber(orderId);
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
   const issuedAt = invoiceCheck(b, day);

@@ -56,6 +56,10 @@ export interface SyncState {
    * `fillHoles`): records an old version skipped while its list of tables already said it took them.
    */
   holes?: 1;
+  /** Job numbers the server keeps for this device, not taken yet (v0.84.2, sync/numbers.ts). */
+  numbers?: number[];
+  /** Jobs made here whose number the server has not had yet — the device's guess (v0.84.2). */
+  unsure?: string[];
 }
 
 const CONFIG_KEY = 'mygarage.sync';

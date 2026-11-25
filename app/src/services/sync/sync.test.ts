@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../../db/db';
 import { addItem } from '../estimate';
 import { addMedia, mediaBlob } from '../media';
+import { quickInvoice } from '../money';
 import { checkIn } from '../orders';
 import { ensureSeed } from '../seed';
 import { forgetSyncMemory, installId, resetSyncState, restoreInstallId, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
@@ -208,11 +209,18 @@ describe('syncing with the garage’s server (v0.40)', () => {
     expect(syncState().main?.name).toBe('iPhone');
     expect(store.record('orders', o.id)?.complaint).toBe('Brake noise');
     expect(store.record('orders', demoId)).toBeUndefined();
-    expect(store.record('counters', 'order')?.value).toBe(counterBefore);
+    // Past its numbers only the few kept for it (v0.84.2), one after another above its jobs; the computer's kept
+    // numbers went with its data.
+    const kept = syncState().numbers ?? [];
+    expect(kept).toHaveLength(3);
+    expect(kept[2] - kept[0]).toBe(2);
+    expect(kept[0]).toBeGreaterThan(counterBefore);
+    expect(store.record('counters', 'order')?.value).toBe(kept[2]);
     // The phone is as it was: nothing of the computer's came in, its numbers did not jump.
     expect(await db.orders.count()).toBe(ordersBefore);
     expect(await db.orders.get(demoId)).toBeUndefined();
-    expect((await db.counters.get('order'))?.value).toBe(counterBefore);
+    // Its counter moved only past the numbers kept for it — a job made next in touch goes after them.
+    expect((await db.counters.get('order'))?.value).toBe(kept[2]);
     expect(store.record('orders', o.id)?.complaint).toBe('Brake noise');
     expect(store.record('orders', o.id)?._t).toBeUndefined();
     expect(store.file(photo.id, 'blob')?.size).toBe(70_000);
@@ -378,6 +386,55 @@ describe('syncing with the garage’s server (v0.40)', () => {
     await syncNow();
     expect(await db.drivers.get(id)).toBeUndefined();
   });
+
+  it('two devices cut off from the server never give two customers one invoice number: each takes a number kept for it (v0.84.2)', async () => {
+    // In touch: each device has numbers kept for it, and both know the counter past all of them.
+    for (const name of ['phone', 'pc', 'phone', 'pc']) {
+      as(name);
+      await syncNow();
+    }
+    as('phone');
+    const phoneKept = [...(syncState().numbers ?? [])];
+    as('pc');
+    const pcKept = [...(syncState().numbers ?? [])];
+    expect(phoneKept.length).toBeGreaterThanOrEqual(2);
+    expect(pcKept.length).toBeGreaterThanOrEqual(2);
+    expect(phoneKept.some((n) => pcKept.includes(n))).toBe(false);
+    const dead = 'http://127.0.0.1:1';
+    const job = async () => {
+      const o = await checkIn({ plate: { emirate: 'DXB', code: 'Z', number: String(10000 + Math.floor(Math.random() * 89999)) }, make: 'Toyota', model: 'Yaris', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
+      await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+      return o;
+    };
+    // The tunnel down: both cut off (the relay too — no other address to find).
+    const pcCfg = syncConfig()!;
+    setSyncConfig({ ...pcCfg, url: dead, relayUrl: dead });
+    const pcJob = await job();
+    as('phone');
+    const phoneCfg = syncConfig()!;
+    setSyncConfig({ ...phoneCfg, url: dead, relayUrl: dead });
+    const phoneJob = await job();
+    // The same guess on both — as before.
+    expect(phoneJob.number).toBe(pcJob.number);
+    const phoneInv = await quickInvoice(phoneJob.id);
+    as('pc');
+    const pcInv = await quickInvoice(pcJob.id);
+    // Each invoice on a number kept for its own device: never the same.
+    expect(phoneInv.number).not.toBe(pcInv.number);
+    expect(phoneKept.map((n) => `INV-${phoneInv.number.split('-')[1]}-${n}`)).toContain(phoneInv.number);
+    expect(pcKept.map((n) => `INV-${pcInv.number.split('-')[1]}-${n}`)).toContain(pcInv.number);
+    // Back in touch: both stay as they were issued — on the server and on the other device.
+    setSyncConfig(pcCfg);
+    await syncNow();
+    as('phone');
+    setSyncConfig(phoneCfg);
+    await syncNow();
+    as('pc');
+    await syncNow();
+    expect(store.record('invoices', pcInv.id)?.number).toBe(pcInv.number);
+    expect(store.record('invoices', phoneInv.id)?.number).toBe(phoneInv.number);
+    expect((await db.invoices.get(phoneInv.id))?.number).toBe(phoneInv.number);
+  }, 30_000);
 
   it('a photo’s record goes only once its file is on the server — the rest does not wait for it', async () => {
     as('phone');

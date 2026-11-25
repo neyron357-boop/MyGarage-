@@ -4,6 +4,7 @@ import { LOCAL_TABLES, markRemote, nextStamp, onLocalChange, STAMP } from '../..
 import { nowIso } from '../../domain/dates';
 import { cardOf } from '../photoSize';
 import { addressAllowed, callJson, getFile, parseAddress, putFile, SyncError } from './api';
+import { jobsSure, topUpNumbers } from './numbers';
 import { readRelay, RELAY } from './relay';
 import { installId, offloadOn, resetSyncState, setSyncConfig, setSyncState, syncConfig, syncState, type SyncConfig } from './config';
 
@@ -109,6 +110,8 @@ async function pushRecords(cfg: SyncConfig): Promise<number> {
     size += s;
   }
   await flush();
+  // The server has these jobs now: their numbers are its own (taken as they were, or renumbered — that comes next).
+  jobsSure(changes.filter((c) => c.t === 'orders').map((c) => c.k));
   if (tombs.length) await db.syncTombs.bulkDelete(tombs.map((t) => t.n!));
   setSyncState({ pushedT: Math.max(st.pushedT, mark), initialDone: true, held: [...held] });
   return changes.length;
@@ -155,6 +158,8 @@ export async function applyChanges(changes: Change[]): Promise<void> {
         // Numbers only go up — unless the main device's own are given (`reset`): taken as they are.
         const { reset, ...counter } = c.d;
         if (local && Number(local.value) > Number(counter.value) && !reset) continue;
+        // The main device's numbers (v0.84.2): those kept for this device went with the data before — asked anew.
+        if (reset && c.k === 'order') setSyncState({ numbers: [] });
         await table.put({ ...counter, [key]: c.k, [STAMP]: 0 });
         continue;
       }
@@ -283,7 +288,8 @@ async function replaceServer(cfg: SyncConfig): Promise<void> {
       counters = ((await table.toArray()) as { name: string; value: number; _t?: number }[]).filter((c) => c._t !== 0).map((c) => ({ name: c.name, value: c.value }));
   }
   await callJson(cfg, '/api/sync/replace', { method: 'POST', body: { keys, counters }, timeout: 90_000 });
-  setSyncState({ replacing: false, main: { id: cfg.deviceId, name: cfg.deviceName } });
+  // The numbers kept for devices went with the data replaced (v0.84.2): kept anew from this device's.
+  setSyncState({ replacing: false, main: { id: cfg.deviceId, name: cfg.deviceName }, numbers: [] });
 }
 
 /* ---------- Photos and files ---------- */
@@ -557,6 +563,9 @@ function syncRecords(): Promise<void> {
         await pushRecords(cfg);
         if (replacing) await replaceServer(cfg);
         await pullRecords(cfg);
+        // A few job numbers kept for this device, for jobs made without the server (v0.84.2). Inside the loop: a sync
+        // asked for meanwhile (making this device the main one) is not lost.
+        await topUpNumbers(cfg);
       } while (recAgain);
       failures = 0;
       setSyncState({ lastAt: nowIso(), lastError: undefined, busy: false });

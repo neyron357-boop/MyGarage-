@@ -101,3 +101,29 @@ describe('job and invoice numbers (v0.42.3)', () => {
     for (const c of back.filter((x) => x.d && (x.t === 'orders' || x.t === 'invoices'))) assert.equal(c.d.id, c.k);
   });
 });
+
+describe('job numbers kept for a device (v0.84.2)', () => {
+  it('each device gets its own; jobs made without the server take them — nobody else’s, and never handed out again', () => {
+    const top = () => Math.max(...['a', 'b', 'c', 'old'].map((id) => store.record('orders', id)?.number ?? 0));
+    const phone = store.reserveNumbers('phone-k', 3);
+    assert.equal(phone.length, 3);
+    assert.ok(phone.every((n) => n > top()));
+    // Asked again: the same, not more.
+    assert.deepEqual(store.reserveNumbers('phone-k', 3), phone);
+    const pc = store.reserveNumbers('pc-k', 3);
+    assert.equal(new Set([...phone, ...pc]).size, 6);
+    // The counter is past them: a device in touch numbers its next job above them.
+    assert.ok(store.record('counters', 'order').value >= Math.max(...pc));
+    // The phone, without the server, gave a job its first kept number: it stays — and is no longer kept.
+    store.push('phone-k', [{ t: 'orders', k: 'kept-1', d: { id: 'kept-1', number: phone[0], createdAt: '2026-11-25T08:00:00.000Z' } }]);
+    assert.equal(store.record('orders', 'kept-1').number, phone[0]);
+    // The computer, behind, sends a job with a number kept for the phone: it gets the next free one, past every kept one.
+    store.push('pc-k', [{ t: 'orders', k: 'stray', d: { id: 'stray', number: phone[1], createdAt: '2026-11-25T08:01:00.000Z' } }]);
+    assert.ok(store.record('orders', 'stray').number > Math.max(...phone, ...pc));
+    // Topped up: the one taken is gone, a new one comes; the one still kept stays.
+    const again = store.reserveNumbers('phone-k', 3);
+    assert.ok(!again.includes(phone[0]));
+    assert.ok(again.includes(phone[1]) && again.includes(phone[2]));
+    assert.equal(again.length, 3);
+  });
+});

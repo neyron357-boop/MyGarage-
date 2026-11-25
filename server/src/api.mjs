@@ -15,6 +15,7 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/sync/pull?since=N          — other devices' changes after N
  *   GET  /api/sync/events                — a stream: told at once when other devices' changes are kept (v0.41.2)
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
+ *   POST /api/sync/numbers               — job numbers kept for this device, for jobs made without the server (v0.84.2)
  *   POST /api/forget                     — this device leaves (its key no longer works)
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
  *        /api/ai/part-find {part, make, model, year, engine, vin, track}, /api/ai/receipt {image} — the garage's AI (v0.48, ai.mjs);
@@ -258,6 +259,15 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         // The other devices are told at once: they take it now, not at the minute's check.
         if (body.changes.length) events?.changed(rev, device.id);
         return send(res, 200, { ok: true, rev, n: body.changes.length });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/sync/numbers') {
+        if (!modern) throw httpError(426, UPDATE);
+        const before = store.lastRev();
+        const numbers = store.reserveNumbers(device.id, 3);
+        // The counter moved past them: the other devices take it now, not at the minute's check.
+        if (store.lastRev() !== before) events?.changed(store.lastRev(), device.id);
+        return send(res, 200, { ok: true, numbers });
       }
 
       if (req.method === 'GET' && url.pathname === '/api/sync/events' && events) {

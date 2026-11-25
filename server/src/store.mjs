@@ -92,6 +92,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     );
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS ai_cache (k TEXT PRIMARY KEY, kind TEXT NOT NULL, at INTEGER NOT NULL, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS reserved (number INTEGER PRIMARY KEY, device TEXT NOT NULL, at TEXT NOT NULL);
   `);
   // v0.41.2: the app's own install number on each device (the same app connected again is the same device).
   if (!db.prepare('PRAGMA table_info(devices)').all().some((c) => c.name === 'install')) db.exec('ALTER TABLE devices ADD COLUMN install TEXT');
@@ -110,15 +111,21 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const topNumber = db.prepare("SELECT MAX(json_extract(data, '$.number')) AS n FROM records WHERE tbl = 'orders' AND deleted = 0");
   const invoicesOf = db.prepare("SELECT id, data FROM records WHERE tbl = 'invoices' AND deleted = 0 AND json_extract(data, '$.orderId') = ?");
   const liveRows = db.prepare('SELECT id, data FROM records WHERE tbl = ? AND deleted = 0');
+  // Job numbers kept for a device (v0.84.2): its jobs made without the server take them — nobody else's.
+  const reservedBy = db.prepare('SELECT device FROM reserved WHERE number = ?');
+  const reservedOf = db.prepare('SELECT number FROM reserved WHERE device = ? ORDER BY number');
+  const topReserved = db.prepare('SELECT MAX(number) AS n FROM reserved');
+  const unreserve = db.prepare('DELETE FROM reserved WHERE number = ?');
+  const reserve = db.prepare('INSERT INTO reserved (number, device, at) VALUES (?, ?, ?)');
 
   function record(tbl, id) {
     const row = getRecord.get(tbl, id);
     return row && !row.deleted ? JSON.parse(row.data) : undefined;
   }
 
-  /** The next free job number (≥ 350): the counter moves to it, and every device is told. */
+  /** The next free job number (≥ 350, past every number kept for a device): the counter moves to it, every device is told. */
   function nextJobNumber(at) {
-    const n = Math.max(FIRST_OWN - 1, Number(record('counters', 'order')?.value) || 0, Number(topNumber.get().n) || 0) + 1;
+    const n = Math.max(FIRST_OWN - 1, Number(record('counters', 'order')?.value) || 0, Number(topNumber.get().n) || 0, Number(topReserved.get().n) || 0) + 1;
     putRecord.run('counters', 'order', JSON.stringify({ name: 'order', value: n }), 0, ++rev, null, at);
     return n;
   }
@@ -179,9 +186,12 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
               data = { ...data, number: have.number };
               by = null;
             }
-          } else if (!Number.isFinite(n) || orderByNumber.get(id, n) || (!fromEaglecart(data) && !eaglecartNumbered(data) && n < FIRST_OWN)) {
+          } else if (!Number.isFinite(n) || orderByNumber.get(id, n) || (!fromEaglecart(data) && !eaglecartNumbered(data) && n < FIRST_OWN) || keptForAnother(n, deviceId)) {
             data = { ...data, number: nextJobNumber(at) };
             by = null;
+          } else if (Number.isFinite(n)) {
+            // A number kept for this device, now its job's: no longer kept.
+            unreserve.run(n);
           }
           jobs.add(id);
         }
@@ -210,6 +220,44 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     return rev;
   }
 
+  /** A number kept for another device (v0.84.2): a job of this one does not take it. */
+  function keptForAnother(n, deviceId) {
+    const by = reservedBy.get(n)?.device;
+    return !!by && by !== deviceId;
+  }
+
+  /**
+   * Job numbers kept for a device (v0.84.2, audit 25/11: the phone and the computer without the server each gave a job
+   * the next number after the last they knew — two customers got INV-2026-360, and the server renumbered one after the
+   * paper was out). Topped up to `want`: each the next free number, the counter past it (every device is told — none
+   * of them takes it while it is in touch). A job of this device made without the server, or invoiced before the server
+   * had it, takes one; nobody else ever does. Returns this device's numbers not yet taken.
+   */
+  function reserveNumbers(deviceId, want = 3) {
+    const at = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const mine = [];
+      for (const r of reservedOf.all(deviceId)) {
+        const n = Number(r.number);
+        // Taken by a job meanwhile (the device's own, kept under it): no longer kept.
+        if (orderByNumber.get('', n)) unreserve.run(n);
+        else mine.push(n);
+      }
+      while (mine.length < want) {
+        const n = nextJobNumber(at);
+        reserve.run(n, deviceId, at);
+        mine.push(n);
+      }
+      db.exec('COMMIT');
+      return mine;
+    } catch (e) {
+      db.exec('ROLLBACK');
+      rev = Number(db.prepare('SELECT COALESCE(MAX(rev), 0) AS r FROM records').get().r);
+      throw e;
+    }
+  }
+
   /**
    * The main device's data becomes the garage's (v0.41.1, the user's rule: «the phone is the main source»): every
    * record it does not have is deleted here — and so on the other devices; its job numbers are taken as they are, a
@@ -232,6 +280,8 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
         removed++;
       }
       for (const [name, value] of given) putRecord.run('counters', name, JSON.stringify({ name, value, reset: true }), 0, ++rev, deviceId, at);
+      // The numbers kept for devices (v0.84.2) went with the data they were kept past: kept again from the main's.
+      db.exec('DELETE FROM reserved');
       db.prepare("INSERT INTO meta (key, value) VALUES ('mainDevice', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(deviceId);
       db.exec('COMMIT');
     } catch (e) {
@@ -279,6 +329,8 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
       last = push(null, changes, { server: true });
       // The job counter: the highest number now (it only goes up).
       if (plan.counter > (Number(record('counters', 'order')?.value) || 0)) putRecord.run('counters', 'order', JSON.stringify({ name: 'order', value: plan.counter }), 0, ++rev, null, now());
+      // Numbers kept for devices (v0.84.2) may be jobs' now: kept anew past them (a device skips one a job has).
+      db.exec('DELETE FROM reserved');
       last = rev;
     }
     return { orders: plan.orders, invoices: plan.invoices, counter: plan.counter, rev: last };
@@ -455,7 +507,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const aiCachePrune = (olderThan) => db.prepare('DELETE FROM ai_cache WHERE at < ?').run(Number(olderThan)).changes;
   const aiCacheCount = () => Number(db.prepare('SELECT COUNT(*) AS n FROM ai_cache').get().n);
 
-  return { dataDir, push, pull, replace, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, aiCacheGet, aiCachePut, aiCachePrune, aiCacheCount, close: () => db.close() };
+  return { dataDir, push, pull, replace, reserveNumbers, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, aiCacheGet, aiCachePut, aiCachePrune, aiCacheCount, close: () => db.close() };
 }
 
 export function httpError(status, message) {

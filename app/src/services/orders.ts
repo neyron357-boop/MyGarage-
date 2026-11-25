@@ -40,6 +40,7 @@ import { createCustomer, createVehicle, findCustomerByPhone, updateCustomer, upd
 import { restoreEntry, takeJobPayments, type RemovedEntry } from './entries';
 import { AppError } from './errors';
 import { assertDayOpen, assertJobOpen } from './monthLock';
+import { jobMadeHere } from './sync/numbers';
 import { getSettings } from './settings';
 
 export async function logEvent(orderId: string, type: string, payload?: Record<string, unknown>): Promise<void> {
@@ -105,6 +106,10 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     };
     await db.orders.add(order);
     await logEvent(order.id, 'created', { stage: order.stage, warrantyOf: input.warrantyOfOrderId });
+    return order;
+  }).then((order) => {
+    // Its number is this device's guess until the garage's server has the job (v0.84.2).
+    jobMadeHere(order.id);
     return order;
   });
 }
