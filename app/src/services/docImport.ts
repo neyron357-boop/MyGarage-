@@ -7,6 +7,7 @@ import type { TextItem } from '../domain/obdReport';
 import { normalizePhone } from '../domain/phone';
 import { plateSearchKey } from '../domain/plates';
 import type { Customer, OrderItem } from '../domain/types';
+import { nameCount } from '../domain/sides';
 import { priceFromEntered } from '../domain/vat';
 import { findCustomerByPhone, updateCustomer, updateVehicle } from './customers';
 import { AppError } from './errors';
@@ -127,6 +128,8 @@ export async function importGarageDoc(items: TextItem[]): Promise<DocImport> {
         block: 'A',
         titleEn: even || qty === 1 ? l.title : `${l.title} ×${qty}`,
         qty: even ? qty : 1,
+        // As the paper has it: a name saying both sides priced as it is — not made two by itself (v0.85).
+        ...(nameCount(l.title) ? { qtyNoted: nameCount(l.title) } : {}),
         ...price,
         vatRateBp: rate,
         procurementStatus: l.kind === 'part' ? (doc.kind === 'invoice' ? 'received' : 'needed') : undefined,

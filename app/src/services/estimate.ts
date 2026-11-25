@@ -33,6 +33,7 @@ import { logEvent, tryStage } from './orders';
 import { getSettings } from './settings';
 import { syncLabourNames } from './labourName';
 import { typedOwnName } from '../domain/labourName';
+import { nameCount, qtyShort } from '../domain/sides';
 
 export type NewItem = Partial<OrderItem> & Pick<OrderItem, 'kind' | 'block'>;
 
@@ -56,6 +57,9 @@ export async function addItem(orderId: string, input: NewItem): Promise<OrderIte
   };
   if (!item.titleRu?.trim() && !item.titleEn?.trim()) throw new AppError('err.titleRequired');
   Object.assign(item, capitals(item, item));
+  // How many the name says, put at once — no question (v0.85, the owner: «LINK ROD LEFT AND RIGHT — это уже 2»).
+  const said = qtyShort(item);
+  if (said) item.qty = said;
   await db.transaction('rw', db.items, db.events, async () => {
     await db.items.add(item);
     await logEvent(orderId, 'item_added', { itemId: item.id, title: item.titleRu || item.titleEn, block: item.block });
@@ -82,6 +86,20 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
     throw new AppError('err.itemSent');
   }
   const next: Partial<OrderItem> = item.approvalState === 'draft' ? { ...patch, ...capitals(patch, item) } : patch;
+  if (item.approvalState === 'draft') {
+    const named = { ...item, ...next };
+    const renamed = (next.titleEn !== undefined && next.titleEn !== item.titleEn) || (next.titleRu !== undefined && next.titleRu !== item.titleRu);
+    const typedQty = next.qty !== undefined && next.qty !== item.qty;
+    // A new name says how many (v0.85): put so, no question. The quantity typed less by hand: the price is for all of
+    // them (as «Цена за N»), nothing to warn about.
+    if (renamed && !typedQty) {
+      const said = qtyShort(named);
+      if (said) next.qty = said;
+    } else if (typedQty) {
+      const n = nameCount(named.titleEn || named.titleRu || '');
+      if (n && next.qty! < n && named.kind === 'part') next.qtyNoted = n;
+    }
+  }
   // A labour charge renamed by hand keeps its name; plain labour words again — named by the parts (v0.80).
   if (item.kind === 'labor' && ((next.titleEn !== undefined && next.titleEn !== item.titleEn) || (next.titleRu !== undefined && next.titleRu !== item.titleRu)))
     next.ownName = typedOwnName(item, next, await db.items.where('orderId').equals(item.orderId).toArray());

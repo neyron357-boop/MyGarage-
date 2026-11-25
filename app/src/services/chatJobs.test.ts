@@ -108,7 +108,11 @@ describe('jobDocs (v0.80)', () => {
   it('a line short of its name is asked about before a new estimate goes', async () => {
     const c = await customer();
     const o = await job(c.id, '11111');
-    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake discs left and right', unitPriceFils: 30_000, vatRateBp: 500 });
+    const discs = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake discs left and right', unitPriceFils: 30_000, vatRateBp: 500 });
+    // Two by its name at once (v0.85): nothing to ask.
+    expect(jobDocs((await loadOrderBundle(o.id))!).qtyAsk).toBe(false);
+    // A line from before, one of it: asked about.
+    await db.items.update(discs.id, { qty: 1 });
     expect(jobDocs((await loadOrderBundle(o.id))!).qtyAsk).toBe(true);
   });
 

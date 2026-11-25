@@ -241,12 +241,18 @@ describe('lazy flow', () => {
 
   it('puts a line’s quantity right in any state before the invoice; its price said for both stops the asking (v0.70)', async () => {
     const o = await job();
-    const told = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Mirror LH+RH', unitPriceFils: 8000, vatRateBp: 0 });
-    const agreed = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Tie rod end L/R', unitPriceFils: 6000, vatRateBp: 0 });
+    // Lines from before v0.85, when the name's count was only asked about: one each.
+    const old = async (input: Parameters<typeof addItem>[1]) => {
+      const it = await addItem(o.id, input);
+      await db.items.update(it.id, { qty: 1 });
+      return it;
+    };
+    const told = await old({ kind: 'part', block: 'A', titleEn: 'Mirror LH+RH', unitPriceFils: 8000, vatRateBp: 0 });
+    const agreed = await old({ kind: 'part', block: 'A', titleEn: 'Tie rod end L/R', unitPriceFils: 6000, vatRateBp: 0 });
     await approveAll(o.id);
-    const waiting = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Wiper blade pair', unitPriceFils: 2000, vatRateBp: 0 });
+    const waiting = await old({ kind: 'part', block: 'A', titleEn: 'Wiper blade pair', unitPriceFils: 2000, vatRateBp: 0 });
     await sendVersion(o.id, { via: 'whatsapp' });
-    const draft = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Steering boot left & right', unitPriceFils: 5000, vatRateBp: 0 });
+    const draft = await old({ kind: 'part', block: 'A', titleEn: 'Steering boot left & right', unitPriceFils: 5000, vatRateBp: 0 });
     await setLineQty(draft.id, 2);
     await setLineQty(waiting.id, 2);
     await setLineQty(agreed.id, 2);
