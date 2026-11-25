@@ -1256,7 +1256,9 @@ function MessageFocus({ el, me, items, onClose }: { el: HTMLElement; me: boolean
     box.replaceChildren(copy);
     const vh = window.visualViewport?.height ?? window.innerHeight;
     const topSafe = 56;
-    const menuH = m.getBoundingClientRect().height;
+    // Its own height, not as drawn now: it comes in from 0.6 of its size (wa-menu-in) — measured so, a message low on the
+    // screen was lifted too little and its menu went off the bottom (#61, 25/11).
+    const menuH = m.offsetHeight;
     const max = Math.max(120, vh * 0.5);
     const h = Math.min(r.height, max);
     let top = r.top;

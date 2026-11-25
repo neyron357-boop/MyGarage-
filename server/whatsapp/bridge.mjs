@@ -603,6 +603,22 @@ function onMessage(m) {
   }
   count();
   emit({ t: 'msg', msg: row, chat });
+  // A photo that came (v0.85, the owner: «фотографии отображаются ужасно»): brought here at once, one after another — when
+  // the app asks for it, it is here (not the blurred preview while WhatsApp is asked).
+  // Ours too: sent from the phone's own WhatsApp, the app has no copy of it.
+  if (row.type === 'image' || row.type === 'sticker') bringAhead(row.id);
+}
+
+/** Photos brought ahead, one at a time (a busy group does not ask WhatsApp for many at once); a failure is left — asked later. */
+let aheadLine = Promise.resolve();
+let aheadQueued = 0;
+function bringAhead(id) {
+  if (aheadQueued > 40) return;
+  aheadQueued++;
+  aheadLine = aheadLine
+    .then(() => mediaOf(id))
+    .catch(() => undefined)
+    .finally(() => void aheadQueued--);
 }
 
 /* ---------- Files ---------- */

@@ -11,7 +11,8 @@ import { invoicePdf, versionPdf } from './documents';
 import { AppError } from './errors';
 import { bundleAmountDue, loadOrderBundle } from './orders';
 import { getSettings, saveSettings } from './settings';
-import { blobBase64, queueWa, type OutPart } from './waOutbox';
+import { forgetAsks, waAsks, type WaAsk } from './waConfirm';
+import { blobBase64, queueWa, type OutItem, type OutPart } from './waOutbox';
 
 /*
  * What the garage's WhatsApp says by itself (v0.79, the rules — domain/waAuto.ts): what happens here (a job in, the
@@ -79,6 +80,30 @@ async function remember(orderId: string, entry: NonNullable<Order['waSent']>[num
   await db.orders.update(orderId, { waSent: [...(order.waSent ?? []), entry].slice(-40) });
 }
 
+/** «Отправить» tapped on what was prepared (v0.85, WaConfirm): handed to the server, off the list, kept on its jobs. */
+export async function sendAsked(asks: WaAsk[]): Promise<void> {
+  if (!asks.length) return;
+  await queueWa(
+    asks.map((a) => a.item),
+    { confirmed: true },
+  );
+  forgetAsks(asks.map((a) => a.id));
+  await rememberSent(asks.map((a) => a.item));
+}
+
+/** What really went (v0.85: tapped «Отправить» after seeing it): kept on its job — not what was only prepared. */
+export async function rememberSent(items: OutItem[]): Promise<void> {
+  for (const it of items) if (it.note) await remember(it.note.orderId, { kind: it.note.kind, at: nowIso(), key: it.key, trigger: it.note.trigger });
+}
+
+/**
+ * A car in the garage now (v0.85, the owner: «не отправлять в рабочую группу как check in и т. д., если я создаю заказ
+ * задним числом — только когда в реальном времени автомобиль заходит в гараж и я принимаю»): not typed in after the fact
+ * (`backdated`), not brought from the old system. The work group, the wash and the company's group by themselves — only
+ * for such a job.
+ */
+const liveJob = (o: Order | undefined): o is Order => !!o && !o.backdated && !o.imported && o.stage !== 'closed' && o.stage !== 'cancelled';
+
 /* ---------- The work group ---------- */
 
 /**
@@ -96,9 +121,8 @@ export async function sendWorkReport(orderId: string, trigger: WorkTrigger = 'ma
   const text = workText({ car, number: order.number, complaint: order.complaint, lines: lineFaces(live, s.work.lang), mechanics, trigger }, s.work.lang, s.work);
   const photo = vehicle ? await coverOf(vehicle.id) : undefined;
   const key = trigger === 'manual' ? `work:hand:${orderId}:${uid().slice(0, 8)}` : `work:${trigger}:${orderId}${lines ? `:${hashOf(lines.map((i) => i.id))}` : ''}`;
-  const [r] = await queueWa([{ key, chat: to.chat, parts: withPhotos(text, photo ? [photo] : []), title: `#${order.number} · ${to.name}` }]);
+  const [r] = await queueWa([{ key, chat: to.chat, parts: withPhotos(text, photo ? [photo] : []), title: `#${order.number} · ${to.name}`, note: { orderId, kind: 'work', trigger } }]);
   if (r.state === 'sent' && trigger !== 'manual') return false;
-  await remember(orderId, { kind: 'work', at: nowIso(), key, trigger });
   return true;
 }
 
@@ -116,9 +140,8 @@ export async function sendClientReport(orderId: string, auto = false): Promise<b
   const text = clientText({ car, day: dubaiDate(order.arrivedAt ?? order.createdAt), driver: order.driver?.name, mileageKm: order.mileageKm, complaint: order.complaint, lines: lineFaces(lines, s.client.lang) }, s.client.lang, s.client);
   const photos = vehicle ? await carPhotos(vehicle.id, s.client.photos) : [];
   const key = auto ? `client:done:${orderId}` : `client:hand:${orderId}:${uid().slice(0, 8)}`;
-  const [r] = await queueWa([{ key, chat: to.chat, parts: withPhotos(text, photos), title: `#${order.number} · ${to.name}` }]);
+  const [r] = await queueWa([{ key, chat: to.chat, parts: withPhotos(text, photos), title: `#${order.number} · ${to.name}`, note: { orderId, kind: 'client', trigger: auto ? 'done' : 'manual' } }]);
   if (r.state === 'sent' && auto) return false;
-  await remember(orderId, { kind: 'client', at: nowIso(), key, trigger: auto ? 'done' : 'manual' });
   return true;
 }
 
@@ -129,12 +152,13 @@ export async function sendWash(orderId: string): Promise<boolean> {
   const to = s.wash.to;
   if (!to) return false;
   const { car, vehicle, order } = await jobFace(orderId);
+  // The wash is for a car here now (v0.85).
+  if (!liveJob(order)) return false;
   const text = washText({ car }, 'en', s.wash);
   const photo = vehicle ? await coverOf(vehicle.id) : undefined;
   const key = `wash:${orderId}`;
-  const [r] = await queueWa([{ key, chat: to.chat, parts: photo ? [{ media: photo, caption: text, fallback: `${text}\n${[car.make, car.model].filter(Boolean).join(' ')}` }] : [{ text: [text, [car.make, car.model].filter(Boolean).join(' ')].filter(Boolean).join('\n') }], title: `#${order.number} · ${to.name}` }]);
+  const [r] = await queueWa([{ key, chat: to.chat, parts: photo ? [{ media: photo, caption: text, fallback: `${text}\n${[car.make, car.model].filter(Boolean).join(' ')}` }] : [{ text: [text, [car.make, car.model].filter(Boolean).join(' ')].filter(Boolean).join('\n') }], title: `#${order.number} · ${to.name}`, note: { orderId, kind: 'wash' } }]);
   if (r.state === 'sent') return false;
-  await remember(orderId, { kind: 'wash', at: nowIso(), key });
   return true;
 }
 
@@ -278,7 +302,7 @@ async function agreed(orderId: string) {
   const s = await waAutoSettings();
   if (!s.work.on || !s.work.agreed || !s.work.to) return;
   const order = await db.orders.get(orderId);
-  if (!order || order.stage === 'closed' || order.stage === 'cancelled') return;
+  if (!liveJob(order)) return;
   const items = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => i.approvalState === 'approved' && i.kind !== 'discount');
   // Told already: only what was agreed since («Добавлено»).
   const told = new Set(order.waSentItems ?? []);
@@ -294,16 +318,17 @@ async function checkedIn(orderId: string) {
   const s = await waAutoSettings();
   if (!s.work.on || !s.work.checkin || !s.work.to) return;
   const order = await db.orders.get(orderId);
-  if (!order || order.stage === 'closed' || order.stage === 'cancelled' || order.stage === 'booked') return;
+  if (!liveJob(order) || order.stage === 'booked') return;
   // A job typed in afterwards is not a car in now.
-  if (order.backdated || Date.now() - Date.parse(order.createdAt) > 6 * 60 * 60_000) return;
+  if (Date.now() - Date.parse(order.createdAt) > 6 * 60 * 60_000) return;
   await sendWorkReport(orderId, 'checkin');
 }
 
 async function ready(orderId: string) {
   const s = await waAutoSettings();
   const order = await db.orders.get(orderId);
-  if (!order) return;
+  // «Готово» of a job typed in after the fact: nothing for the groups (v0.85).
+  if (!order || order.backdated || order.imported) return;
   if (s.work.on && s.work.done && s.work.to) await sendWorkReport(orderId, 'done').catch(() => undefined);
   const customer = await db.customers.get(order.customerId);
   if (s.client.on && s.client.done && customer?.waGroup) await sendClientReport(orderId, true).catch(() => undefined);
@@ -349,6 +374,13 @@ async function heard(writes: LocalWrite[]) {
     const open = (await db.orders.where('vehicleId').equals(m.ownerId).toArray()).filter((o) => o.stage !== 'closed' && o.stage !== 'cancelled' && Date.now() - Date.parse(o.createdAt) < 6 * 60 * 60_000);
     for (const o of open) later(checkins, o.id, DELAY.cover, () => checkedIn(o.id));
   }
+  // Typed in after the fact since (v0.85: «…» → «День»): what waits for it — to the groups, the wash — is not for it.
+  for (const w of writes) {
+    if (w.table !== 'orders' || w.kind !== 'update') continue;
+    const o = w.obj as unknown as Order;
+    if (!o.backdated || (w.was as unknown as Order | undefined)?.backdated) continue;
+    dropJobReports(o.id);
+  }
   // Ready: an invoice made.
   for (const inv of created('invoices') as unknown as Invoice[]) if (inv.type !== 'credit_note') later(checkins, `ready:${inv.orderId}`, DELAY.ready, () => ready(inv.orderId));
   // The wash: a line named so, new or renamed.
@@ -365,6 +397,17 @@ async function heard(writes: LocalWrite[]) {
       later(checkins, `wash:${it.orderId}`, DELAY.wash, () => sendWash(it.orderId));
     }
   }
+}
+
+/** A job's reports to the groups and the wash: neither prepared any more nor waiting to be sent. */
+function dropJobReports(orderId: string) {
+  for (const id of [orderId, `ready:${orderId}`, `wash:${orderId}`]) {
+    clearTimeout(checkins.get(id));
+    checkins.delete(id);
+  }
+  clearTimeout(agreeing.get(orderId));
+  agreeing.delete(orderId);
+  forgetAsks(waAsks().filter((a) => a.item.note?.orderId === orderId).map((a) => a.id));
 }
 
 let started = false;

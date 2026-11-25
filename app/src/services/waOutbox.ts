@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { SyncError } from './sync/api';
+import { askToSend } from './waConfirm';
 import { keepOutbox, waCall, waCan, type OutboxFace } from './whatsapp';
 
 /*
@@ -23,8 +24,16 @@ export interface OutPart {
   doc?: boolean;
 }
 
+/** What a job's message was (v0.85): kept on the job once it really went (`rememberSent`), never sent to the server. */
+export interface WaNote {
+  orderId: string;
+  kind: 'work' | 'client' | 'wash';
+  trigger?: string;
+}
+
 export interface OutItem {
   key: string;
+  note?: WaNote;
   chat?: string;
   phone?: string;
   parts: OutPart[];
@@ -66,9 +75,16 @@ export async function blobBase64(blob: Blob): Promise<string> {
  * Handed to the server: each item queued there (or sent already — its key known). Not reached: kept here to be handed
  * over again (`flushWaOutbox`) — the result says «local».
  */
-export async function queueWa(items: OutItem[]): Promise<{ key: string; state: OutboxFace['state'] | 'local' }[]> {
-  if (!items.length) return [];
-  if (!waCan()) return items.map((it) => ({ key: it.key, state: 'none' as const }));
+export async function queueWa(raw: OutItem[], { confirmed = false }: { confirmed?: boolean } = {}): Promise<{ key: string; state: OutboxFace['state'] | 'local' | 'confirm' }[]> {
+  if (!raw.length) return [];
+  if (!waCan()) return raw.map((it) => ({ key: it.key, state: 'none' as const }));
+  // Seen first (v0.85, the owner: «все автоотправки — с подтверждением и предварительным просмотром»): what the app
+  // prepared waits for «Отправить» in «Проверить и отправить» (features/whatsapp/WaConfirm.tsx); that tap sends it.
+  if (!confirmed) {
+    askToSend(raw);
+    return raw.map((it) => ({ key: it.key, state: 'confirm' as const }));
+  }
+  const items = raw.map(({ note: _note, ...item }) => item);
   try {
     const out: OutboxFace[] = [];
     // A few at a time: a request's sheets of diagrams make each item large.

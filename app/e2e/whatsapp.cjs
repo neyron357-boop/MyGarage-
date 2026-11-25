@@ -352,6 +352,26 @@ let current = null;
     await settle(500);
     await shot('phone-07a-message-menu');
     check(await page.locator('[data-wa-menu-item="copy"]').isVisible(), 'v0.84: a long press lifts the message — «Ответить», «Скопировать»…');
+    // #61 (25/11): the lowest message — its menu whole on the screen (it came in measured at 0.6 of its height).
+    await page.keyboard.press('Escape');
+    await page.locator('[data-wa-focus]').waitFor({ state: 'detached' });
+    await page.evaluate(() => {
+      const rows = document.querySelectorAll('.screen[data-role="top"] .note-row .note-swipe');
+      rows[rows.length - 1].setAttribute('data-last-row', '');
+      document.querySelector('.screen[data-role="top"] .screen-scroll').scrollTop = 1e6;
+    });
+    await settle(400);
+    await longPress('[data-last-row]');
+    await page.locator('[data-wa-focus] [data-wa-menu]').waitFor();
+    await settle(600);
+    const low = await page.evaluate(() => ({ bottom: document.querySelector('[data-wa-menu]').getBoundingClientRect().bottom, vh: window.innerHeight }));
+    check(low.bottom <= low.vh, `the lowest message's menu is whole on the screen (${Math.round(low.bottom)} ≤ ${low.vh})`);
+    await shot('phone-07a2-lowest-menu');
+    await page.keyboard.press('Escape');
+    await page.locator('[data-wa-focus]').waitFor({ state: 'detached' });
+    await longPress('.screen[data-role="top"] .note-row[data-in] .note-swipe');
+    await page.locator('[data-wa-focus] [data-wa-menu-item="reply"]').waitFor();
+    await settle(400);
     await page.locator('[data-wa-menu-item="reply"]').click();
     await top().locator('[data-wa-replying]').waitFor();
     check(true, 'v0.84: «Ответить» puts the message over the field');

@@ -95,8 +95,18 @@ async function playServer(page) {
       await settle(ms);
     };
     const out = (prefix) => page.evaluate((p) => window.__wa.out.filter((x) => x.key.startsWith(p)), prefix);
+    // v0.85: nothing goes by itself — «Проверить и отправить» opens, the person taps «Отправить» (all of them at once).
+    const confirm = async () => {
+      const sheet = page.locator('[data-wa-confirm]');
+      if (!(await sheet.isVisible().catch(() => false))) return;
+      const all = sheet.getByRole('button', { name: /^Отправить все/ });
+      if (await all.isVisible().catch(() => false)) await all.click();
+      else await sheet.locator('.wa-ask').first().getByRole('button', { name: /^Отправить$/ }).click();
+      await settle(400);
+    };
     const waitOut = async (prefix, n = 1) => {
       for (let i = 0; i < 60; i++) {
+        await confirm();
         if ((await out(prefix)).length >= n) return out(prefix);
         await page.waitForTimeout(150);
       }
@@ -147,6 +157,10 @@ async function playServer(page) {
       return { id: o.id, customerId: c.id, pads: pads.id, disc: disc.id };
     });
     await page.evaluate(async (id) => (await import('/src/services/flow.ts')).approveAll(id), job.id);
+    await page.locator('[data-wa-ask^="work:agreed"]').waitFor({ timeout: 10000 });
+    check((await out('work:')).length === 0, 'nothing goes before «Отправить»: the work group’s report waits, seen first');
+    await settle(500);
+    await shot('phone-02b-confirm');
     const work = (await waitOut('work:agreed'))[0];
     check(work.chat === '120363000000000001@g.us' && /BRAKE SERVICE/.test(work.parts[0].text ?? work.parts[0].caption) && !/AED/.test(work.parts[0].text ?? work.parts[0].caption), 'agreed: the work group gets the lines to do, no prices');
     const est = (await waitOut('boss:estimate'))[0];
@@ -170,6 +184,19 @@ async function playServer(page) {
     await page.locator('.action-tile', { hasText: 'Группе клиента' }).click();
     const client = (await waitOut('client:hand'))[0];
     check(client.chat === '120363000000000003@g.us' && !/AED/.test(JSON.stringify(client.parts)), "the visit's report goes to the company's group, no prices");
+
+    // 4b. v0.85: «＋» on the job's screen is this job's actions — a tap, not the app's «Новый заказ».
+    await go(`#/orders/${job.id}`, 1200);
+    await page.locator('.tab-plus').click();
+    await page.locator('.quick-item[data-job]').first().waitFor();
+    const acts = await page.locator('.quick-item[data-job]').evaluateAll((els) => els.map((e) => e.dataset.quick));
+    check(['toWork', 'toClient', 'owner', 'new'].every((k) => acts.includes(k)), `the job's «＋»: its own actions (${acts.join(', ')})`);
+    await shot('phone-04b-job-plus');
+    const before = (await out('work:hand')).length;
+    await page.locator('.quick-item[data-quick="toWork"]').click();
+    await page.locator('[data-wa-ask^="work:hand"]').waitFor({ timeout: 10000 });
+    check((await out('work:hand')).length === before, "«В рабочую группу» from «＋»: seen first, nothing gone yet");
+    await waitOut('work:hand', before + 1);
 
     // 5. Suppliers: picked, asked through the server, one answers — its prices on the lines.
     // v0.82 (#22): «Поставщики» under the job's lines — picked in its sheet, «Отправить» sends at once (no confirmation).

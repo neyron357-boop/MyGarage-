@@ -1,3 +1,4 @@
+import { muteLocalWrites } from '../db/syncHooks';
 import { labourWords, plainLabour } from '../domain/labourName';
 import { db } from '../db/db';
 import { parseGarageDoc, type GarageDoc } from '../domain/docImport';
@@ -38,7 +39,13 @@ export interface DocImport {
 
 const OPEN = (stage: string) => !['delivered', 'closed', 'cancelled'].includes(stage);
 
-export async function importGarageDoc(items: TextItem[]): Promise<DocImport> {
+export function importGarageDoc(items: TextItem[]): Promise<DocImport> {
+  // An invoice brought in from its PDF is a job done before (v0.85): nothing of it is news for WhatsApp — the groups, the
+  // boss. A quote is a car here now: as any job.
+  return parseGarageDoc(items)?.kind === 'invoice' ? muteLocalWrites(() => importNow(items)) : importNow(items);
+}
+
+async function importNow(items: TextItem[]): Promise<DocImport> {
   const doc = parseGarageDoc(items);
   if (!doc || !doc.lines.length) throw new AppError('docImport.badFile');
   const plate = doc.vehicle.plate;

@@ -2058,6 +2058,17 @@ export const en: typeof ru = {
     withPhotos: 'photos: {{n}}',
     jobChat: 'Chat',
     sentToGroup: 'Sent to the group',
+    confirm: {
+      title: 'Check and send',
+      send: 'Send',
+      sendAll: 'Send all · {{n}}',
+      drop: 'Do not send',
+      dropAll: 'Do not send',
+      later: 'Later',
+      waiting: 'Waiting to be sent · {{n}}',
+      sent: 'Sent',
+      file: 'File',
+    },
     // v0.79: what WhatsApp says by itself — reports, the boss, the wash, parts requests.
     auto: {
       title: 'Automation',
@@ -2601,6 +2612,17 @@ export const en: typeof ru = {
   },
   quick: {
     title: 'Quick actions',
+    job: {
+      estimate: 'Quote to customer',
+      remind: 'Remind the customer',
+      invoice: 'Invoice to customer',
+      toWork: 'To the work group',
+      toClient: 'To the customer’s group',
+      owner: 'To the boss',
+      report: 'Report to customer',
+      whatsapp: 'Customer’s chat',
+      new: 'New job',
+    },
     plateSeen: 'Plate',
     plateLooking: 'Looking for the plate',
     photo: 'Plate photo',

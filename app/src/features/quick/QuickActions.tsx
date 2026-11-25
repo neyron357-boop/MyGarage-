@@ -19,6 +19,7 @@ import { scanReceipt, type JobOption } from '../../services/receipts';
 import { expenseEntry } from '../../domain/ledger';
 import { db } from '../../db/db';
 import { notifications } from '@mantine/notifications';
+import { jobQuickNow, type JobQuick } from '../../ui/jobQuick';
 
 /*
  * Quick actions of «＋» (v0.28): a tap is a new job, as always; a press held, or a swipe up from it, brings the actions
@@ -205,14 +206,16 @@ export function QuickPlus() {
   const navigate = useNavigate();
   const quick = useQuickActions(true);
   const [open, setOpen] = useState<null | 'drag' | 'sticky'>(null);
-  const [hover, setHover] = useState<QuickKey | null>(null);
+  /** On a job's screen (v0.85): that job's actions instead of the app's. */
+  const [jobItems, setJobItems] = useState<JobQuick[] | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<{ right: number; bottom: number }>({ right: 16, bottom: 100 });
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
-  const hovered = useRef<QuickKey | null>(null);
+  const hovered = useRef<string | null>(null);
   /** The action a finger let go on: it runs in the touch's end (where the iPhone lets a picker open). */
-  const pending = useRef<QuickKey | null>(null);
+  const pending = useRef<string | null>(null);
   /** Until when a click is the end of a press that brought the actions up, not a tap. */
   const swallow = useRef(0);
   /** When the last tap opened a new job (a tap's click may come twice: the switch's own and the browser's). */
@@ -227,7 +230,7 @@ export function QuickPlus() {
   const ticking = hapticsOn && slideTicksAvailable();
   const tick = useRef<HTMLInputElement | null>(null);
   const ticks = useRef(0);
-  const ticked = useRef<QuickKey | null>(null);
+  const ticked = useRef<string | null>(null);
   const placeTick = (x: number) => {
     const sw = tick.current;
     const r = button.current?.getBoundingClientRect();
@@ -245,6 +248,7 @@ export function QuickPlus() {
   };
 
   const show = (how: 'drag' | 'sticky') => {
+    setJobItems(jobQuickNow() ?? null);
     const r = button.current?.getBoundingClientRect();
     if (r) setAnchor({ right: Math.max(8, window.innerWidth - r.right), bottom: Math.max(8, window.innerHeight - r.top + 12) });
     setOpen(how);
@@ -255,7 +259,7 @@ export function QuickPlus() {
     setHover(null);
     hovered.current = null;
   };
-  const point = (k: QuickKey | null) => {
+  const point = (k: string | null) => {
     if (k === hovered.current) return;
     hovered.current = k;
     setHover(k);
@@ -268,20 +272,22 @@ export function QuickPlus() {
     }
   };
   /** The action under a finger: in the column of actions (a little wider), the nearest within reach above or below. */
-  const at = (x: number, y: number): QuickKey | null => {
-    let best: QuickKey | null = null;
+  const at = (x: number, y: number): string | null => {
+    let best: string | null = null;
     let near = Infinity;
     for (const el of menu.current?.querySelectorAll<HTMLElement>('[data-quick]') ?? []) {
       const r = el.getBoundingClientRect();
       if (x < r.left - 32 || x > r.right + 32) continue;
       const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
-      if (d < near) (near = d), (best = el.dataset.quick as QuickKey);
+      if (d < near) (near = d), (best = el.dataset.quick ?? null);
     }
     return near <= REACH ? best : null;
   };
-  const go = (k: QuickKey, slide = false) => {
+  const go = (k: string, slide = false) => {
     close();
-    quick.run(k, slide);
+    const job = jobItems?.find((x) => x.key === k);
+    if (job) job.run();
+    else quick.run(k as QuickKey, slide);
   };
 
   // Escape closes them; so does the screen changing under them.
@@ -394,6 +400,8 @@ export function QuickPlus() {
           if (open) return close();
           if (performance.now() - tapped.current < 600) return;
           tapped.current = performance.now();
+          // On a job's screen: its own actions at a tap (v0.85); elsewhere a new job.
+          if (jobQuickNow()) return show('sticky');
           navigate('/orders/new');
         }}
       >
@@ -417,18 +425,19 @@ export function QuickPlus() {
           <div className="quick-layer" data-mode={open}>
             <div className="quick-scrim" onClick={close} aria-hidden />
             <div ref={menu} className="quick-menu" role="menu" aria-label={t('quick.title')} style={{ right: anchor.right, bottom: anchor.bottom }}>
-              {QUICK.map((q, i) => (
+              {(jobItems ?? QUICK).map((q, i) => (
                 <button
                   key={q.key}
                   type="button"
                   role="menuitem"
                   className="quick-item glass"
                   data-quick={q.key}
+                  data-job={jobItems ? '' : undefined}
                   data-hover={hover === q.key ? '' : undefined}
                   style={{ '--i': i } as CSSProperties}
                   onClick={() => go(q.key)}
                 >
-                  <span className="quick-label">{t(`quick.${q.key}`)}</span>
+                  <span className="quick-label">{t(jobItems ? `quick.job.${q.key}` : `quick.${q.key}`)}</span>
                   <span className="row-icon" style={{ background: `var(--mantine-color-${q.color}-6)` }} aria-hidden>
                     <q.icon size={20} stroke={2} />
                   </span>

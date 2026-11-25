@@ -99,6 +99,7 @@ import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from
 import { useDesk, useDeskHotkeys, useDeskPane } from '../../ui/desk';
 import { openTwin, useTwin } from '../../ui/deskTwin';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
+import { useJobQuick, type JobQuick } from '../../ui/jobQuick';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { holdKeyboard } from '../../ui/keyboard';
 import { markJobOpened } from '../../ui/recentJobs';
@@ -557,6 +558,9 @@ export function JobPage() {
   const lang = useLang();
   const navigate = useNavigate();
   const b = useOrderBundle(id);
+  // «＋» on this screen is this job's own actions (v0.85, ui/jobQuick.ts): set below, read when «＋» is touched.
+  const quickActs = useRef<() => JobQuick[]>(() => []);
+  useJobQuick(quickActs);
   // Opened (v0.81): the board puts it on top — remembered on this device only, nothing of the job is written.
   useEffect(() => {
     if (id) markJobOpened(id);
@@ -1069,8 +1073,11 @@ export function JobPage() {
       onClick: openChat,
     });
   // The reports by hand (v0.79): the job to the work group, the visit to the company's own group — no prices.
-  if (waLinked && waGroups?.work) tiles.push({ key: 'toWork', icon: IconUsersGroup, onClick: () => void run(() => sendWorkReport(oid), 'wa.sentToGroup') });
-  if (waLinked && b.customer.waGroup) tiles.push({ key: 'toClient', icon: IconBuildingCommunity, onClick: () => void run(() => sendClientReport(oid), 'wa.sentToGroup') });
+  // Seen before it goes (v0.85): the report opens in «Проверить и отправить».
+  const toWork = () => void run(() => sendWorkReport(oid));
+  const toClientGroup = () => void run(() => sendClientReport(oid));
+  if (waLinked && waGroups?.work) tiles.push({ key: 'toWork', icon: IconUsersGroup, onClick: toWork });
+  if (waLinked && b.customer.waGroup) tiles.push({ key: 'toClient', icon: IconBuildingCommunity, onClick: toClientGroup });
   tiles.push({ key: 'car', icon: IconCar, onClick: () => navigate(`/vehicles/${b.vehicle.id}`) });
   // Who brought the car: a company's job has it on its card too; a private customer's — here only.
   tiles.push({ key: 'driver', icon: IconSteeringWheel, onClick: () => setDriverOpen(true) });
@@ -1098,6 +1105,22 @@ export function JobPage() {
   if (editable && phase !== 'booked' && !reissue) tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   if (binOf(b.order, b.items).length) tiles.push({ key: 'bin', icon: IconArrowBackUp, color: 'gray', onClick: () => setBinOpen(true) });
   if (!lockedMonth) tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
+
+  // This job's «＋» (v0.85, the owner: «быстрое действие для отправки сметы или инвойса, в группу рабочий чат, боссу или
+  // клиенту… чтобы пару секунд занимали действия»): what to send now first, a new job last.
+  quickActs.current = () => {
+    const out: JobQuick[] = [];
+    if (inv) out.push({ key: 'invoice', icon: IconFileInvoice, color: 'violet', run: sendInvoice });
+    else if (phase === 'price' && !unpriced.length && live.length) out.push({ key: 'estimate', icon: IconSend, color: 'cobalt', run: toClient });
+    else if (phase === 'wait') out.push({ key: 'remind', icon: IconAlarm, color: 'orange', run: remind });
+    if (waLinked && waGroups?.work) out.push({ key: 'toWork', icon: IconUsersGroup, color: 'teal', run: toWork });
+    if (waLinked && b.customer.waGroup) out.push({ key: 'toClient', icon: IconBuildingCommunity, color: 'indigo', run: toClientGroup });
+    if (live.some((i) => i.kind !== 'discount')) out.push({ key: 'owner', icon: IconUserCheck, color: 'grape', run: () => setOwnerOpen(true) });
+    if (inv || hasAgreed) out.push({ key: 'report', icon: IconClipboardCheck, color: 'green', run: report });
+    if (waLinked && waPhone) out.push({ key: 'whatsapp', icon: IconBrandWhatsapp, color: 'green', run: openChat });
+    out.push({ key: 'new', icon: IconPlus, color: 'gray', run: () => navigate('/orders/new') });
+    return out;
+  };
 
   let bar: ReactNode = null;
   if (phase === 'booked')

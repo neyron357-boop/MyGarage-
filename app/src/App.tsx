@@ -72,6 +72,7 @@ import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 import { FeedbackTool } from './devtools/feedback';
 import { AiNotices } from './features/ai/AiNotices';
 import { WaNotices } from './features/whatsapp/WaNotices';
+import { WaConfirm } from './features/whatsapp/WaConfirm';
 import { useClientLockGuard } from './ui/clientLock';
 
 /** Every screen of the app, for a given location (the phone renders two at once while you go back). */
@@ -569,6 +570,7 @@ function Providers({ children }: { children: React.ReactNode }) {
       <FeedbackTool />
       <AiNotices />
       <WaNotices />
+      <WaConfirm />
       {children}
     </DatesProvider>
   );
