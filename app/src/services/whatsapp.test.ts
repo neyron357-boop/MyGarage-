@@ -9,6 +9,7 @@ import { SyncError } from './sync/api';
 import { tellSaid } from './sync/engine';
 import {
   canRetryWa,
+  catchUpWa,
   chatOfPhone,
   dropFailed,
   flushWa,
@@ -28,6 +29,7 @@ import {
   sendWaFile,
   sendWaText,
   setWaTransport,
+  showingChat,
   unlinkWa,
   waFileSrc,
   waReady,
@@ -317,6 +319,33 @@ describe('a chat', () => {
     tellSaid(`data: ${JSON.stringify({ wa: { t: 'msg', msg: mine, chat: null } })}`);
     tellSaid(`data: ${JSON.stringify({ wa: { t: 'ack', chat: ALI, id: 'out1', ack: 3 } })}`);
     expect(waStore().messages[ALI].at(-1)?.ack).toBe(3);
+  });
+
+  it('v0.87: what WhatsApp said while nobody heard — after a gap the chat on a screen and the list are read again; nothing new — nothing drawn again', async () => {
+    await loadMessages(ALI);
+    const off = showingChat(ALI);
+    // Messages that came while the stream was down: never said on it.
+    server.messages = [...server.messages, msg('missed1', { t: 4000, text: 'Are you there?' })];
+    server.chats = [chat(ALI, { unread: 3, t: 4000 }), ...server.chats.slice(1)];
+    const asked = server.asked.length;
+    tellSaid(`data: ${JSON.stringify({ wa: { t: 'gap' } })}`);
+    await new Promise((r) => setTimeout(r, 400));
+    await ticks();
+    expect(waStore().messages[ALI].map((m) => m.id)).toEqual(['m1', 'm2', 'missed1']);
+    expect(waStore().chats[0].unread).toBe(3);
+    expect(server.asked.slice(asked).map((a) => a.path).sort()).toEqual(['chats', 'messages']);
+    // Read again with nothing new: the same list (a screen is not drawn again).
+    const was = waStore().messages[ALI];
+    catchUpWa(0);
+    await new Promise((r) => setTimeout(r, 20));
+    await ticks();
+    expect(waStore().messages[ALI]).toBe(was);
+    // Off the screen: not read again (it is when it is opened).
+    off();
+    const n = server.asked.length;
+    catchUpWa(0);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(server.asked.slice(n).map((a) => a.path)).toEqual(['chats']);
   });
 });
 

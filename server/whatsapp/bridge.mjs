@@ -35,6 +35,7 @@ import { pipeline } from 'node:stream/promises';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 import { findBrowser } from './browser.mjs';
+import { createHearing, MARK_TIED, PAGE_HEARS, TOLD_KINDS } from './hearing.mjs';
 import { createOnce } from './once.mjs';
 import { CHAT_ID, chatRow, lastRow, MESSAGE_ID, messageRow, phoneOf, sortChats } from './rows.mjs';
 import { oggOpus, PAGE_OPUS } from './voice.mjs';
@@ -85,6 +86,8 @@ const state = {
   error: browser ? '' : 'no browser',
   since: Date.now(),
   readyAt: 0,
+  /** When a message was last heard from WhatsApp Web (v0.87: this computer's page shows how live it is). */
+  heardAt: 0,
   chats: 0,
   unread: 0,
 };
@@ -177,6 +180,12 @@ async function start() {
     qrMaxRetries: 8,
   });
   client = c;
+  // A new WhatsApp Web: heard from scratch, and a start-again waiting for the last one is not needed any more.
+  hearing.fresh();
+  clearTimeout(deafTimer);
+  deafTimer = null;
+  halfWay = 0;
+  watchTying(c);
   wire(c);
   c.initialize().catch(async (e) => {
     if (client !== c) return;
@@ -237,6 +246,7 @@ function wire(c) {
     'ready',
     mine(async () => {
       tries = 0;
+      stalls = 0;
       meId = c.info?.wid?._serialized || '';
       const me = { id: meId, phone: c.info?.wid?.user || '', name: c.info?.pushname || '' };
       let web = '';
@@ -248,7 +258,7 @@ function wire(c) {
       mark(me);
       set('ready', { qr: '', code: '', error: '', loading: 100, readyAt: Date.now(), web, platform: c.info?.platform || '' });
       void loadIndex();
-      void ensureEvents(c);
+      // (Whether it hears WhatsApp Web is asked every half minute from now on: `checkHearing`.)
       // How the page stands at this moment, for the log: what a later WhatsApp Web changes is seen against it.
       c.pupPage
         .evaluate(PAGE_STANDS)
@@ -283,7 +293,15 @@ function wire(c) {
       }
     }),
   );
-  c.on('message_create', mine((m) => onMessage(m)));
+  c.on(
+    'message_create',
+    mine((m) => {
+      // Heard (before anything is made of it: a notice the app does not show is heard too).
+      hearing.heard(m?.timestamp ?? m?._data?.t);
+      state.heardAt = hearing.heardAt;
+      onMessage(m);
+    }),
+  );
   c.on(
     'message_ack',
     mine((m, ack) => {
@@ -377,10 +395,21 @@ const PAGE_STANDS = () => {
     kinds: `${bus ? typeof bus.isMainStreamReadyMd : '-'}/${sock ? typeof sock.hasSynced : '-'}`,
     ready: busReady || sockSynced,
     canTell: typeof window.onAppStateHasSyncedEvent === 'function',
+    // The library's helpers are on the page: it is on its own way to ready (v0.87).
+    wwjs: typeof window.WWebJS !== 'undefined',
   };
 };
 let told = 0;
 let stood = '';
+/**
+ * Half-way (v0.87): the library's helpers first seen on the page while it was not ready, and how many starts in a row
+ * stopped there. Seen on the garage's computer 25/11: of the starts not ready in eight seconds, the library's own call had
+ * stopped for good after its helpers were on (once after 11 of the 17 functions it ties) — told «ready» then, it was ready
+ * and deaf; left alone, it never went on. Normally it is ready a second or two after its helpers are on.
+ */
+let halfWay = 0;
+let stalls = 0;
+const STALL_MS = 25_000;
 setInterval(async () => {
   const c = client;
   if (!c || !c.pupPage || (state.phase !== 'loading' && state.phase !== 'starting')) return;
@@ -394,7 +423,9 @@ setInterval(async () => {
     const now = JSON.stringify(seen);
     if (now !== stood) log(`still ${state.phase} after ${Math.round(waited / 1000)} s: ${now}`);
     stood = now;
-    if (seen.ready && seen.canTell && Date.now() - told > 60_000) {
+    // Only a library that has not begun (v0.87): one whose helpers are on the page is on its own way — told «ready» then,
+    // it says ready before its listeners are on (deaf, 25/11).
+    if (seen.ready && seen.canTell && !seen.wwjs && Date.now() - told > 60_000) {
       told = Date.now();
       log('WhatsApp Web is ready: the library is told');
       await within(
@@ -403,6 +434,22 @@ setInterval(async () => {
         'ready',
       );
       return;
+    }
+    // On its way and stopped there: WhatsApp Web started again at once (three times in a row; then the usual waits).
+    if (seen.wwjs) {
+      halfWay ||= Date.now();
+      if (Date.now() - halfWay > STALL_MS) {
+        stalls++;
+        log(`the library stopped half-way to ready (${stalls} in a row): WhatsApp Web started again`);
+        await drop(c);
+        set('offline', { error: 'stalled' });
+        if (stalls <= 3) {
+          clearTimeout(retry);
+          retry = setTimeout(() => void start(), 2000);
+          retry.unref?.();
+        } else again('stalled');
+        return;
+      }
     }
   } catch (e) {
     log(`still ${state.phase}: ${e?.message || e}`);
@@ -416,25 +463,62 @@ setInterval(async () => {
 }, 5000).unref();
 
 /**
- * WhatsApp's own events on the page (v0.80.3, the owner: «список чатов нормально не обновляется»; seen live: ready, and
- * not one message, tick or unread heard). The library ties them on in the same call that loads its helpers into the page —
- * and skips that when its helpers are there already: ready by the watchdog (above), it was ready and deaf. After ready,
- * and every minute while ready, the page is asked whether its hooks are there; none — they are tied on now.
+ * WhatsApp's own events on the page (v0.80.3: ready, and not one message, tick or unread heard; v0.87 — the same again on
+ * 25/11, with the old check saying all was well). Whether the bridge hears WhatsApp Web is not judged by the library's
+ * functions being on the page — they stay there when its call stops half-way, and when the page loads again — but by
+ * what really happened (`hearing.mjs`): the page marked when the library's call has ended on it, and the page's newest
+ * message against the newest one heard. Asked every half minute while ready; deaf — WhatsApp Web is started again.
  */
-async function ensureEvents(c) {
+const hearing = createHearing();
+
+/** The library's call that ties its listeners: the page is marked once it has ended — on this very page. */
+function watchTying(c) {
+  const attach = c.attachEventListeners;
+  if (typeof attach !== 'function') return;
+  c.attachEventListeners = async function tied(...args) {
+    const r = await attach.apply(this, args);
+    try {
+      await within(c.pupPage.evaluate(MARK_TIED), 10_000, 'events');
+    } catch {
+      // not marked: the next look finds it so and starts WhatsApp Web again
+    }
+    return r;
+  };
+}
+
+let hearingNow = false;
+let deafTimer = null;
+async function checkHearing(c) {
+  if (hearingNow || deafTimer || client !== c || state.phase !== 'ready' || !c.pupPage) return;
+  hearingNow = true;
   try {
-    const has = await within(c.pupPage.evaluate(() => typeof window.onAddMessageEvent === 'function' && typeof window.onMessageAckEvent === 'function'), 10_000, 'events');
-    if (has || client !== c) return;
-    log('events: not tied on — tied on now');
-    await within(c.attachEventListeners(), 60_000, 'events');
+    const seen = await within(c.pupPage.evaluate(PAGE_HEARS, hearing.since(state.readyAt), TOLD_KINDS), 15_000, 'hearing');
+    if (client !== c || state.phase !== 'ready') return;
+    const { verdict, why, reloaded } = hearing.judge(seen, { readyAt: state.readyAt });
+    if (reloaded) log('page: WhatsApp Web loaded itself again');
+    if (verdict !== 'deaf') return;
+    const ms = hearing.again();
+    const asked = Date.now();
+    log(`events: WhatsApp Web is not heard (${why}) — started again${ms > 5000 ? ` in ${Math.round(ms / 60_000)} min` : ''}`);
+    // Until then it stays as it is (deaf, it still reads and sends — better than none); heard meanwhile — left alone.
+    deafTimer = setTimeout(async () => {
+      deafTimer = null;
+      if (client !== c || hearing.heardAt > asked) return;
+      await drop(c);
+      set('offline', { error: 'not heard' });
+      void start();
+    }, ms);
+    deafTimer.unref?.();
   } catch (e) {
-    log(`events: ${e?.message || e}`);
+    log(`hearing: ${e?.message || e}`);
+  } finally {
+    hearingNow = false;
   }
 }
 setInterval(() => {
   const c = client;
-  if (c?.pupPage && state.phase === 'ready') void ensureEvents(c);
-}, 60_000).unref();
+  if (c) void checkHearing(c);
+}, 30_000).unref();
 
 /* ---------- The chats ---------- */
 

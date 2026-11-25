@@ -9100,8 +9100,10 @@ html.desk .wa-bubble {
   object-fit: cover;
 }
 /* A photo or a video: the picture fills the bubble (a thin edge of the bubble around it); without words — the time
-   over its corner on a shade. */
+   over its corner on a shade. Its words wrap under it (v0.87): the bubble is the picture's width — a long caption used to
+   stretch it to a whole line, the picture left in its corner. */
 .wa-bubble[data-media] {
+  width: min-content;
   padding: 3px;
 }
 .wa-bubble[data-media] > .wa-author,

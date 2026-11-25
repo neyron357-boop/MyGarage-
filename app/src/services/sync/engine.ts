@@ -682,6 +682,18 @@ export function tellSaid(block: string) {
 }
 
 /**
+ * The stream open again after it was closed (v0.87): what the server said meanwhile — WhatsApp's messages above all — was
+ * not heard. Whoever keeps such things reads them again (the data's own changes are taken by their number anyway).
+ */
+const backs = new Set<() => void>();
+export function onStreamBack(fn: () => void): () => void {
+  backs.add(fn);
+  return () => void backs.delete(fn);
+}
+/** The stream has been open once since the app started (the first time, every screen reads what it shows by itself). */
+let everOpen = false;
+
+/**
  * One stream open to the server: each time another device's changes are kept there, this device takes them at once.
  * Gone (no network, the app in the background, the server restarted): opened again; the minute's check stays as the net.
  */
@@ -723,6 +735,15 @@ function listen() {
           if (!through) {
             through = true;
             streamTries = 0;
+            if (everOpen)
+              for (const fn of backs) {
+                try {
+                  fn();
+                } catch {
+                  // a listener's own trouble does not close the stream
+                }
+              }
+            everOpen = true;
           }
           // Said again with each event and ping (15 s), should anything have put it out meanwhile.
           if (!syncState().live) setSyncState({ live: true }, false);

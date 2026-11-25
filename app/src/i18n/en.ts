@@ -2004,6 +2004,7 @@ export const en: typeof ru = {
     remove: 'Remove',
     forwarded: 'Forwarded',
     toEnd: 'To the latest',
+    msgMenu: 'Message menu',
     noMessages: 'No messages',
     notSent: 'Not sent · try again',
     fileGone: 'The file is only on the phone',

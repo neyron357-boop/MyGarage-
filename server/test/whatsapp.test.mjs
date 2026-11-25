@@ -381,6 +381,15 @@ describe('whatsapp through the server', () => {
     const got = await next((j) => j.wa?.t === 'msg');
     assert.equal(got.wa.msg.text, 'Hi');
     assert.equal(got.rev, undefined);
+    // v0.87: the bridge's stream cut — opened again by itself, and the devices told they may have missed something.
+    const was = bridgeStreams.length;
+    for (const s of bridgeStreams) s.destroy();
+    const gap = await next((j) => j.wa?.t === 'gap');
+    assert.deepEqual(gap, { wa: { t: 'gap' } });
+    assert.equal(bridgeStreams.length, was + 1);
+    // …and what is said on the new one reaches the device as before.
+    bridgeStreams.at(-1).write(`data: ${JSON.stringify({ t: 'ack', chat: '971501234567@c.us', id: 'true_971501234567@c.us_BB1', ack: 3 })}\n\n`);
+    assert.equal((await next((j) => j.wa?.t === 'ack')).wa.ack, 3);
     ctl.abort();
   });
 

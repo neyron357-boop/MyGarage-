@@ -2272,6 +2272,7 @@ html.desk .wa-pane-scroll {
   flex-direction: column;
   min-height: 0;
   padding: 12px 20px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 html.desk .wa-pane-scroll > .wa-chat {
@@ -2363,4 +2364,100 @@ html.desk .wa-desk-back {
 }
 html.desk .wa-chat-head > .wa-head {
   flex: 1;
+}
+
+/* ---------- WhatsApp on a PC as on the phone (v0.87) ----------
+   The owner: «перенеси последние изменения интерфейса по ватсапу из мобильной версии на компьютер, также и наоборот». The
+   phone's look (v0.84) on the PC's two panes: the chats on plain rows in a pane of their own (no card inside a card), the
+   search and the chips staying over them while they scroll; the chat's bar and the composer's in WhatsApp's own bar colour;
+   a message's menu from ⌄ in its corner while the pointer is over it (the right click stays); the chat never scrolls
+   sideways (a strip of a scrollbar under the messages, seen on the owner's screen). */
+html.desk .wa-desk-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border: 1px solid var(--app-hairline);
+  border-radius: 16px;
+  background: var(--app-card);
+  overflow-x: hidden;
+}
+html.desk .wa-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 0;
+  background: var(--app-card);
+  box-shadow: 0 1px 0 var(--app-hairline);
+}
+/* All the chips in sight — a pane is too narrow for them in one line: the last ones go under, never cut. */
+html.desk .wa-list-head .wa-filters {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 0 10px;
+  overflow: visible;
+}
+html.desk .wa-list-head .wa-filter {
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+html.desk .wa-desk-list .wa-chats {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none !important;
+}
+html.desk .wa-chat-head {
+  background: var(--wa-bar);
+  border-bottom-color: var(--wa-bar-line);
+}
+html.desk .wa-pane-foot {
+  background: var(--wa-bar);
+  box-shadow: 0 -1px 0 var(--wa-bar-line);
+}
+html.desk .wa-more {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  html.desk .wa-more {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 22px;
+    padding: 0 0 0 6px;
+    border: 0;
+    border-radius: 0 13px 0 13px;
+    background: linear-gradient(to right, transparent, var(--wa-out) 40%);
+    color: var(--wa-meta);
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity var(--dur-1) ease;
+  }
+  html.desk .note-row[data-in] .wa-more {
+    background: linear-gradient(to right, transparent, var(--wa-in) 40%);
+  }
+  html.desk .wa-bubble:is([data-media], [data-sticker]) > .wa-more {
+    top: 8px;
+    right: 8px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(11, 20, 26, 0.45);
+    color: #fff;
+  }
+  html.desk .wa-bubble:hover > .wa-more,
+  html.desk .wa-more:focus-visible {
+    opacity: 1;
+  }
 }

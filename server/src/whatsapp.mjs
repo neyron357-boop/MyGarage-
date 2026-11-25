@@ -184,8 +184,12 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     events?.tell?.({ wa: event });
   }
 
+  /** The bridge's stream was closed (or went silent) and is open again: what it said meanwhile was not heard (v0.87). */
+  let missed = false;
   function listen() {
     if (listening || stopping) return;
+    // The bridge says something every 15 s at least: silent for 50 — a stream that is there and dead; opened anew.
+    let heard = Date.now();
     const req = http.get(`${base}/events`, { headers: { 'X-Bridge': secret } }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
@@ -194,6 +198,12 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       let buf = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => {
+        heard = Date.now();
+        if (missed) {
+          // The devices read again what they show (v0.87): a message said while nobody listened is not lost.
+          missed = false;
+          tell({ t: 'gap' });
+        }
         buf += chunk;
         let i;
         while ((i = buf.indexOf('\n\n')) >= 0) {
@@ -214,6 +224,8 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
               // How many chats there are and how many messages wait: kept with the state (this computer's page shows them).
               if (last && ev.t === 'chats') last = { ...last, chats: ev.n, unread: ev.unread };
               if (last && ev.t === 'chat' && typeof ev.unread === 'number') last = { ...last, unread: ev.unread };
+              // When WhatsApp was last heard (v0.87): this computer's page sees whether it is live.
+              if (last && ev.t === 'msg' && !ev.was) last = { ...last, heardAt: Date.now() };
               tell(ev);
             }
           } catch {
@@ -223,9 +235,15 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       });
     });
     listening = req;
+    const quiet = setInterval(() => {
+      if (Date.now() - heard > 50_000) req.destroy();
+    }, 10_000);
+    quiet.unref?.();
     const closed = () => {
+      clearInterval(quiet);
       if (listening !== req) return;
       listening = null;
+      missed = true;
       // The bridge still there (or a test's): heard again in a moment.
       if (!stopping && (child || given)) setTimeout(listen, 1500).unref?.();
     };

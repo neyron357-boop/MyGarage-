@@ -51,6 +51,7 @@ import {
   setWaDraft,
   setWaReply,
   setWaVoiceDraft,
+  showingChat,
   stopWaUpload,
   useWaPrefs,
   waDraft,
@@ -103,9 +104,13 @@ const FIRST_ROWS = 14;
 const fineMouse = () => typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 const thumbSrc = (thumb: string | undefined) => (thumb ? `data:image/jpeg;base64,${thumb}` : undefined);
 
-/** A photo's or a video's frame: its own shape, kept within what a bubble may take — nothing moves as it loads. */
-function frameOf(w: number | undefined, h: number | undefined): React.CSSProperties {
-  const ratio = w && h ? Math.min(1.9, Math.max(0.62, w / h)) : 1;
+/**
+ * A photo's or a video's frame: its own shape, kept within what a bubble may take — nothing moves as it loads. With words
+ * under it (v0.87) a tall one is cut a little (its middle shown, as WhatsApp does): its words are read in a column as wide
+ * as the picture, not a narrow strip.
+ */
+function frameOf(w: number | undefined, h: number | undefined, words = false): React.CSSProperties {
+  const ratio = w && h ? Math.min(1.9, Math.max(words ? 0.8 : 0.62, w / h)) : 1;
   return { aspectRatio: String(ratio), width: `min(${ratio >= 1 ? 280 : Math.round(300 * ratio)}px, 66vw)` };
 }
 
@@ -359,7 +364,7 @@ function Picture({ m, onOpen }: { m: WaMessage; onOpen: (m: WaMessage) => void }
   const thumb = thumbSrc(m.file?.thumb);
   const going = m.pending && !m.failed && !m.queued && m.progress !== undefined;
   return (
-    <span className="wa-pic" style={frameOf(m.file?.w, m.file?.h)} data-gone={gone || undefined}>
+    <span className="wa-pic" style={frameOf(m.file?.w, m.file?.h, !!m.text)} data-gone={gone || undefined}>
       <button type="button" className="wa-pic-open" aria-label={t('wa.kind.photo')} onClick={() => !gone && onOpen(m)} />
       {thumb && <img className="wa-pic-thumb" src={thumb} alt="" aria-hidden />}
       {src && !gone && <img className="wa-pic-full" src={src} alt="" loading="lazy" decoding="async" data-shown={shown || undefined} onLoad={() => setShown(true)} onError={() => setGone(true)} />}
@@ -379,7 +384,7 @@ function Film({ m, onOpen }: { m: WaMessage; onOpen: (m: WaMessage, url: string)
   const thumb = thumbSrc(m.file?.thumb);
   const going = m.pending && !m.failed && !m.queued && m.progress !== undefined;
   return (
-    <span className="wa-pic wa-film" style={frameOf(m.file?.w, m.file?.h)}>
+    <span className="wa-pic wa-film" style={frameOf(m.file?.w, m.file?.h, !!m.text)}>
       <button type="button" className="wa-pic-open" aria-label={t('wa.kind.video')} onClick={() => src && onOpen(m, src)} />
       {thumb && <img className="wa-pic-thumb" src={thumb} alt="" aria-hidden />}
       {going ? (
@@ -559,6 +564,22 @@ const Bubble = memo(function Bubble({ m, tail, gap, author, quoteName, desk, onP
           {inner}
           {kind === 'place' ? null : words}
           {foot}
+          {/* A PC (v0.87, as WhatsApp's own window): ⌄ in the corner while the pointer is over it — the message's menu. */}
+          {desk && (
+            <button
+              type="button"
+              className="wa-more"
+              aria-label={t('wa.msgMenu')}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                onMenu(m, { x: Math.round(r.left), y: Math.round(r.bottom + 4) }, row.current ?? undefined);
+              }}
+              data-wa-more
+            >
+              <IconChevronDown size={18} stroke={2.2} aria-hidden />
+            </button>
+          )}
         </div>
         {state && (
           <span className="wa-state-line" role="status">
@@ -1381,6 +1402,8 @@ export function ChatThread({
   useEffect(() => {
     if (ready) void loadMessages(chatId);
   }, [chatId, ready]);
+  // On a screen (v0.87): read again after a gap — what WhatsApp said while this device did not hear it comes in.
+  useEffect(() => showingChat(chatId), [chatId]);
 
   // Seen: the chat is in front, the app in sight — its unread goes, here and on the phone.
   useEffect(() => {

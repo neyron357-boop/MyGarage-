@@ -7,6 +7,7 @@ import {
   mergeMessages,
   msgKey,
   peopleIndex,
+  sameMessages,
   sendKind,
   unreadTotal,
   type ChatRoles,
@@ -23,7 +24,7 @@ import { AppError } from './errors';
 import { getSettings, saveSettings } from './settings';
 import { callJson, SyncError } from './sync/api';
 import { syncConfig } from './sync/config';
-import { filesBase, onServerSaid } from './sync/engine';
+import { filesBase, onServerSaid, onStreamBack } from './sync/engine';
 
 /*
  * The garage's WhatsApp on this device (v0.78): asked of the garage's server (server/src/whatsapp.mjs — the server is
@@ -269,6 +270,56 @@ export async function loadMessages(chat: string, limit = metaOf(chat).limit): Pr
 }
 /** Older messages of the chat. */
 export const moreMessages = (chat: string) => loadMessages(chat, Math.min(400, metaOf(chat).limit + PAGE * 2));
+
+/* ---------- Live (v0.87) ---------- */
+
+/** The chats whose messages are on a screen now, by how many screens show each. */
+const onScreen = new Map<string, number>();
+/** A chat's messages are on a screen (`ChatThread`): read again after a gap, as long as they are. */
+export function showingChat(chat: string): () => void {
+  onScreen.set(chat, (onScreen.get(chat) ?? 0) + 1);
+  return () => {
+    const n = (onScreen.get(chat) ?? 1) - 1;
+    if (n > 0) onScreen.set(chat, n);
+    else onScreen.delete(chat);
+  };
+}
+
+/**
+ * A chat's messages read again quietly: what came is put in, what is shown stays (older messages, a file's local copy);
+ * nothing changed — nothing is drawn again. A chat never read is not (it is read when opened).
+ */
+async function freshen(chat: string): Promise<void> {
+  const meta = store.meta[chat];
+  if (!waReady() || !meta || meta.loading || !store.messages[chat]) return;
+  try {
+    const r = await call<{ messages: WaMessage[]; more: boolean }>('messages', { query: { chat, limit: String(meta.limit) }, timeout: 100_000 });
+    const had = store.messages[chat];
+    if (!had) return;
+    const next = mergeMessages(had, (r.messages ?? []).map(withEarlyAck));
+    if (!sameMessages(had, next)) set({ messages: { ...store.messages, [chat]: next } });
+  } catch {
+    // the stream is the way; the chat is read again when it is opened
+  }
+}
+
+let catching: ReturnType<typeof setTimeout> | undefined;
+/**
+ * What WhatsApp said while this device did not hear it (v0.87, the owner: «ватсап не живой… придётся каждый раз обновлять
+ * приложение»): the device's stream to the server was closed (the app in the background, the network, the server
+ * restarting) or the server's to WhatsApp was — the chats' list (where a screen uses it) and the chats on a screen are
+ * read again. The rest are read when they are opened.
+ */
+export function catchUpWa(ms = 300) {
+  clearTimeout(catching);
+  catching = setTimeout(() => {
+    catching = undefined;
+    if (!waReady()) return;
+    if (chatsWanted && store.chatsAt) void loadChats(true);
+    for (const chat of onScreen.keys()) void freshen(chat);
+  }, ms);
+}
+onStreamBack(() => catchUpWa());
 
 /** The chat is read (its unread number goes on every device, and on the phone). */
 export async function seenWa(chat: string): Promise<void> {
@@ -933,6 +984,11 @@ function waHeard(value: unknown) {
     // The server read its list anew (every ten minutes, and after a new chat): this one follows, if it is in use.
     if (store.chatsAt) void loadChats(true);
     else if (store.status) set({ status: { ...store.status, unread: ev.unread, chats: ev.n } });
+    return;
+  }
+  if (ev.t === 'gap') {
+    // The server did not hear WhatsApp for a moment (v0.87): what is on a screen is read again.
+    catchUpWa();
     return;
   }
   if (!store.chatsAt && ev.t === 'chat' && store.status && typeof ev.unread === 'number') set({ status: { ...store.status, unread: ev.unread } });

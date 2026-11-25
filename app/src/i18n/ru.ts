@@ -2011,6 +2011,8 @@ export const ru = {
     remove: 'Убрать',
     forwarded: 'Пересланное',
     toEnd: 'К последнему',
+    // A PC (v0.87): the message's menu from ⌄ in its corner, as WhatsApp's own window.
+    msgMenu: 'Меню сообщения',
     noMessages: 'Сообщений нет',
     notSent: 'Не отправлено · ещё раз',
     fileGone: 'Файл только на телефоне',

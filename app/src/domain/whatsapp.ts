@@ -466,7 +466,22 @@ export type WaEvent =
   | { t: 'ack'; chat: string; id: string; ack: number }
   | { t: 'chat'; chat: WaChat; unread?: number }
   | { t: 'chats'; n: number; unread: number }
-  | { t: 'state'; state: WaStatus };
+  | { t: 'state'; state: WaStatus }
+  /** The server did not hear the bridge for a while (v0.87): what is on a screen is read again. */
+  | { t: 'gap' };
+
+/**
+ * The same messages, as a screen shows them (v0.87): read again after a gap, a chat whose messages did not change is
+ * not drawn again.
+ */
+export function sameMessages(a: readonly WaMessage[] | undefined, b: readonly WaMessage[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((m, i) => {
+    const n = b[i];
+    return m.id === n.id && m.ack === n.ack && m.type === n.type && m.text === n.text && !!m.pending === !!n.pending && !!m.failed === !!n.failed && m.file?.here === n.file?.here && !!m.star === !!n.star;
+  });
+}
 
 /**
  * A message's own key — the last part of its id. The same message under a chat's two ids (its number's, and the one

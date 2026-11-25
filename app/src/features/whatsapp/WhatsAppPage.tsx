@@ -279,7 +279,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       notifications.show({ color: 'green', message: to ? t('wa.tags.updated', { count: n }) : t('wa.tags.cleared', { n }) });
     });
   const failed = !!s.chatsFailed && !s.chatsLoading;
-  return (
+  const head = (
     <>
       {/* «Выбрать» on the left (while picking: «Выбрано N» and «Отмена»), «Только гараж» on the right. */}
       <div className="wa-list-tools" data-picking={picking || undefined}>
@@ -331,6 +331,12 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
           </button>
         ))}
       </div>
+    </>
+  );
+  return (
+    <>
+      {/* A PC (v0.87): the search and the chips stay over the chats as they scroll (the phone's own list as it was). */}
+      {desk ? <div className="wa-list-head">{head}</div> : head}
       {failed && s.chats.length > 0 && (
         <div className="wa-list-note" role="status" data-wa-list-note>
           <IconCloudOff size={16} stroke={2} aria-hidden />
@@ -649,8 +655,8 @@ export function WhatsAppPage() {
                     <button type="button" className="wa-icon-btn wa-desk-back tap" aria-label={t('common.back')} onClick={() => navigate('/whatsapp')} data-wa-desk-back>
                       <IconChevronLeft size={24} stroke={2} />
                     </button>
+                    {/* Whose it is — in the line under the name, as on the phone (v0.87: not said twice). */}
                     <ChatHead id={chatId} name={face.title} group={face.c.group} line={headLine} onOpen={() => setInfo(true)} size={40} />
-                    {face.who && <WhoTag kind={face.who.kind} />}
                   </div>
                   <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk quick={quick} who={face.who} phone={face.c.phone} />
                 </>

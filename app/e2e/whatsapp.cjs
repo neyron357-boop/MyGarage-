@@ -82,7 +82,7 @@ async function playServer(page, phase) {
         msg(A, { t: now - 26 * 60 * min + 2 * min, me: true, type: 'document', text: '', ack: 3, file: { mime: 'application/pdf', name: 'QUO-2026-351.pdf', size: 84_200, here: true } }),
         msg(A, { t: now - 25 * 60 * min, text: 'Ok, how long will it take?' }),
         msg(A, { t: now - 25 * 60 * min + min, me: true, text: 'Ready tomorrow by 5 pm', ack: 3 }),
-        msg(A, { t: now - 50 * min, type: 'image', text: 'This noise is from here', file: { mime: 'image/jpeg', size: 182_000, w: 960, h: 720, thumb: dataUrl(small, 0.5).split(',')[1], here: true }, fileKey: 'photo1' }),
+        msg(A, { t: now - 50 * min, type: 'image', text: 'This noise is from here, under the front left wheel when braking slowly', file: { mime: 'image/jpeg', size: 182_000, w: 960, h: 720, thumb: dataUrl(small, 0.5).split(',')[1], here: true }, fileKey: 'photo1' }),
         msg(A, { t: now - 48 * min, type: 'ptt', file: { mime: 'audio/ogg', sec: 14, here: true } }),
         msg(A, { t: now - 20 * min, text: 'Yes, do the brakes. Skip the oil for now', quote: { id: 'q1', type: 'chat', text: 'Brake pads front — 450 AED', me: true } }),
         msg(A, { t: now - 19 * min, me: true, text: 'Done. See https://maps.app.goo.gl/garage for the location.', ack: 2 }),
@@ -144,7 +144,8 @@ async function playServer(page, phase) {
         }
         if (path === 'restart') return status();
         if (path === 'chats') return { chats: world.chats, total: world.chats.length, unread: 3 };
-        if (path === 'messages') return { messages: world.messages[init.query.chat] ?? [], more: false };
+        // A copy, as the server's JSON is: the page's lists are never the same arrays as the played server's.
+        if (path === 'messages') return { messages: [...(world.messages[init.query.chat] ?? [])], more: false };
         if (path === 'seen') {
           world.chats = world.chats.map((c) => (c.id === init.body.chat ? { ...c, unread: 0 } : c));
           return { ok: true, unread: 0 };
@@ -782,7 +783,32 @@ let current = null;
     check(box && box.y + box.height <= 900 && box.y > 600, `PC ${scheme}: the composer is at the foot of the window`);
     check(await p.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 2), `PC ${scheme}: the window itself does not scroll`);
     await p.screenshot({ path: `${OUT}/pc-${scheme}-02-chat.png` });
+    // v0.87: a photo's words wrap under it — the bubble is the picture's width (a long caption stretched it to a whole line,
+    // the picture left in its corner); the chat never scrolls sideways (a scrollbar's strip under the messages).
+    const media = await p.evaluate(() => {
+      const b = document.querySelector('.wa-bubble[data-media]');
+      const pic = b?.querySelector('.wa-pic');
+      return b && pic ? { b: b.getBoundingClientRect().width, p: pic.getBoundingClientRect().width } : null;
+    });
+    check(!!media && media.b - media.p < 12, `PC ${scheme} v0.87: a photo’s bubble is its picture’s width, its words wrap under it`);
+    check(await p.evaluate(() => [...document.querySelectorAll('.wa-pane-scroll')].every((el) => el.scrollWidth <= el.clientWidth + 1)), `PC ${scheme} v0.87: the chat never scrolls sideways`);
     if (scheme === 'light') {
+      // v0.87: ⌄ in a message's corner while the pointer is over it — its menu, as WhatsApp's own window (the right click stays).
+      const theirs = p.locator('.note-row[data-in] .wa-bubble').last();
+      await theirs.hover();
+      await theirs.locator('[data-wa-more]').click();
+      await p.getByRole('menuitem', { name: 'Ответить' }).waitFor();
+      check(true, 'PC v0.87: ⌄ in a message’s corner opens its menu');
+      await p.keyboard.press('Escape');
+      // v0.87: what WhatsApp said while this device did not hear it (the server told «gap») — the open chat reads it.
+      await p.evaluate(() => {
+        const id = Object.keys(window.__wa.messages)[0];
+        const list = window.__wa.messages[id];
+        list.push({ ...list.at(-1), id: `false_${id}_MISSED`, t: Date.now(), me: false, text: 'Sent while nobody heard', ack: 0, quote: undefined });
+      });
+      await say(p, { t: 'gap' });
+      await p.locator('.note-row', { hasText: 'Sent while nobody heard' }).waitFor({ timeout: 10000 });
+      check(true, 'PC v0.87: a message missed while the stream was down comes into the open chat by itself');
       // Enter sends; a right click on a message — its menu.
       await p.locator('[data-wa-field]').fill('Ok, see you at 5');
       await p.keyboard.press('Enter');
