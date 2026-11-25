@@ -1,5 +1,5 @@
 import { canonicalMake, canonicalModel } from './carCatalog';
-import { checkDigitOk, isVin, vinMaker, vinYear } from './vin';
+import { checkDigitOk, isVin, makeMatches, vinMaker, vinYear } from './vin';
 
 /*
  * What car a VIN is (v0.81, the user's brief: «отсканировать VIN… подставить марку, модель и год там, где их удалось
@@ -67,3 +67,50 @@ export function mergeVinCar(local: VinCar, decoded: VinCar): VinCar {
 
 const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const title = (s: string) => s.toLowerCase().replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase());
+
+/* ---------- The garage's own cars (v0.88) ---------- */
+
+/**
+ * A VIN's first eight characters: the maker and its plant (1–3) and that maker's code of the model, body and engine
+ * (4–8). The same stem — the same model (the 9th is a check, the 10th the year, the rest the car's own number).
+ */
+export const vinStem = (vin: string | undefined): string => {
+  const v = (vin ?? '').trim().toUpperCase();
+  return isVin(v) ? v.slice(0, 8) : '';
+};
+
+/** A car of the garage, as far as its VIN's stem goes. */
+export interface StemCar {
+  id: string;
+  vin?: string;
+  make?: string;
+  model?: string;
+  engine?: string;
+  type?: string;
+  /** What the AI put in its card (domain/types.ts `Vehicle.vinAi`): not a person's word. */
+  vinAi?: { filled: string[] };
+}
+
+/**
+ * What the garage itself knows of a VIN (v0.88, the owner: «по VIN ИИ узнала… марку угадала, но модель неверная: верный
+ * Veloz, а ИИ написала Land Cruiser»): the make and model a person wrote on its other cars of the same stem — not the
+ * AI's, and only when they all say the same (two models under one stem: neither); engine and body where they agree. A
+ * make that is not the VIN's own maker is not taken. Before the AI, and over it.
+ */
+export function stemCar(vin: string, cars: StemCar[], selfId?: string): { make: string; model: string; engine?: string; type?: string } | undefined {
+  const stem = vinStem(vin);
+  if (!stem) return undefined;
+  const theirs = cars.filter((c) => c.id !== selfId && vinStem(c.vin) === stem && c.make?.trim() && c.model?.trim() && !c.vinAi?.filled.includes('model') && !c.vinAi?.filled.includes('make'));
+  if (!theirs.length) return undefined;
+  const said = new Set(theirs.map((c) => `${plain(canonicalMake(c.make!.trim()))}|${plain(c.model!)}`));
+  if (said.size !== 1) return undefined;
+  const make = canonicalMake(theirs[0].make!.trim());
+  if (makeMatches(vin.trim().toUpperCase(), make) === false) return undefined;
+  const one = (values: (string | undefined)[]) => {
+    const set = new Set(values.map((x) => x?.trim()).filter((x): x is string => !!x));
+    return set.size === 1 ? [...set][0] : undefined;
+  };
+  const engine = one(theirs.map((c) => c.engine));
+  const type = one(theirs.map((c) => c.type));
+  return { make, model: theirs[0].model!.trim(), ...(engine ? { engine } : {}), ...(type ? { type } : {}) };
+}

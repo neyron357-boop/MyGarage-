@@ -133,7 +133,7 @@ export function VehiclePage() {
               ) : (
                 <List>
                   {orders.map((o) => (
-                    <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.createdAt)}`} subtitle={[o.complaint, o.driver ? o.driver.name || formatPhone(o.driver.phone) : ''].filter(Boolean).join(' · ') || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
+                    <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.arrivedAt ?? o.createdAt)}`} subtitle={[o.complaint, o.driver ? o.driver.name || formatPhone(o.driver.phone) : ''].filter(Boolean).join(' · ') || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
                   ))}
                 </List>
               )}

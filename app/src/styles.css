@@ -6090,6 +6090,10 @@ html.kb .viewer[data-typing] {
 .list-row[data-done] .title {
   color: var(--app-label-2);
 }
+/* Not confirmed (v0.88): its sum is out of the job's total — grey. */
+.price-tap-row[data-off] {
+  color: var(--app-label-3);
+}
 /* "Today" on the board: a strip of cards swiped sideways, running to the screen's edges. */
 .today-strip {
   display: flex;
@@ -6536,6 +6540,18 @@ button.kpi-tab .eyebrow {
   gap: 12px;
   align-items: flex-start;
   min-width: 0;
+}
+.ai-garage-mark {
+  /* v0.88: the car told by the garage's own cars of the same VIN — not the AI's mark. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--mantine-color-cobalt-light);
+  color: var(--mantine-color-cobalt-6);
 }
 .ai-toast-text {
   display: grid;
@@ -8442,6 +8458,11 @@ html.desk .mark-layer-body {
 }
 .line-off-note {
   color: var(--mantine-color-green-7);
+  font-weight: 600;
+}
+/* Not confirmed yet (v0.88): its word in its own colour — out of the quote and the invoice. */
+.line-unconfirmed {
+  color: var(--mantine-color-yellow-8);
   font-weight: 600;
 }
 /* «Поставщики»: the parts and the suppliers, a tap each. */

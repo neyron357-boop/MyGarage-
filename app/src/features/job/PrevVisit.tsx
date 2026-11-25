@@ -10,12 +10,18 @@ import type { Order, Settings } from '../../domain/types';
 import { mileageOfJob } from '../../services/mileage';
 import { useScreenLiveQuery } from '../../ui/hooks';
 
+/**
+ * The day a visit was — the day the car came (v0.88, the owner: «какой день физически машина приезжала»): not when the
+ * job closed (work continued later, a job opened again and closed — its visit is still the day it came).
+ */
+const visitDay = (o: Pick<Order, 'arrivedAt' | 'createdAt'>): string => o.arrivedAt ?? o.createdAt;
+
 /** The car's visit before this one, and whether its work is still under the garage's warranty. */
-async function previousVisit(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'>, lang: 'ru' | 'en') {
+async function previousVisit(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt' | 'arrivedAt'>, lang: 'ru' | 'en') {
   const all = await db.orders.where('vehicleId').equals(order.vehicleId).toArray();
   const prev = all
-    .filter((o) => o.id !== order.id && o.stage !== 'cancelled' && (o.closedAt ?? o.createdAt) <= order.createdAt)
-    .sort((a, b) => (b.closedAt ?? b.createdAt).localeCompare(a.closedAt ?? a.createdAt))[0];
+    .filter((o) => o.id !== order.id && o.stage !== 'cancelled' && o.stage !== 'booked' && visitDay(o) <= visitDay(order))
+    .sort((a, b) => visitDay(b).localeCompare(visitDay(a)))[0];
   if (!prev) return null;
   const [items, acts] = await Promise.all([db.items.where('orderId').equals(prev.id).toArray(), db.inspections.where('orderId').equals(prev.id).toArray()]);
   const done = items.filter((i) => i.kind !== 'discount' && i.kind !== 'fee' && (i.approvalState === 'approved' || i.done));
@@ -27,12 +33,12 @@ async function previousVisit(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'
  * "Был 12 д назад · 118 200 км · Oil change, Brake pads" on the job's card when the car has been here before — its
  * mileage then (v0.44), the last visit one tap away; within the garage's warranty period the row says so.
  */
-export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' | 'vehicleId' | 'createdAt'>; settings: Pick<Settings, 'warrantyLaborMonths'>; lang: 'ru' | 'en' }) {
+export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' | 'vehicleId' | 'createdAt' | 'arrivedAt'>; settings: Pick<Settings, 'warrantyLaborMonths'>; lang: 'ru' | 'en' }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const prev = useScreenLiveQuery(() => previousVisit(order, lang), [order.id, order.vehicleId, lang]);
   if (!prev) return null;
-  const at = prev.order.closedAt ?? prev.order.deliveredAt ?? prev.order.createdAt;
+  const at = visitDay(prev.order);
   const days = Math.max(0, Math.floor(hoursBetween(at, nowIso()) / 24));
   const ago = days < 1 ? t('job.prevToday') : days < 60 ? t('job.prevDays', { n: days }) : t('job.prevMonths', { n: Math.round(days / 30) });
   const warranty = settings.warrantyLaborMonths > 0 && days <= settings.warrantyLaborMonths * 30.5 && prev.titles.length > 0;

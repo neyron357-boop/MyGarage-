@@ -72,6 +72,38 @@ describe('the AI reads a VIN put in the card', () => {
     expect((await db.vehicles.get(o.vehicleId))!.vinAi).toMatchObject({ vin: VIN, filled: [] });
   });
 
+  it('v0.88: the garage’s own car of the same VIN answers first — a model the AI wrote and a person put right is learned; the AI adds only what is left, never another car’s engine', async () => {
+    // A Toyota built in Indonesia, named «Land Cruiser» by the AI; the owner put it right: «Veloz».
+    const first = await car('Toyota');
+    answers.vin = { vin: 'MHFAB1BY4P3069309', make: 'Toyota', model: 'Land Cruiser', year: 2023, engine: '4.0L V6', body: 'suv', confidence: 0.9 };
+    await updateVehicle(first.vehicleId, { vin: 'MHFAB1BY4P3069309' });
+    await until(async () => !!(await db.vehicles.get(first.vehicleId))?.vinAi);
+    expect((await db.vehicles.get(first.vehicleId))!.model).toBe('Land Cruiser');
+    await updateVehicle(first.vehicleId, { model: 'Veloz', engine: '1.5L 4-cyl', type: 'mpv' });
+    expect((await db.vehicles.get(first.vehicleId))!.vinAi!.filled).toEqual(['year']);
+    // The next car of the same maker and model code: the garage's word; the AI asked for the year only — its «Land
+    // Cruiser» engine and body are another car's.
+    answers.vin = { vin: 'MHFAB1BY0R3011111', make: 'Toyota', model: 'Land Cruiser', year: 2024, engine: '4.0L V6', body: 'suv', confidence: 0.9 };
+    notices.length = 0;
+    const second = await car();
+    await updateVehicle(second.vehicleId, { vin: 'MHFAB1BY0R3011111' });
+    await until(async () => !!(await db.vehicles.get(second.vehicleId))?.vinAi);
+    const v = (await db.vehicles.get(second.vehicleId))!;
+    expect([v.make, v.model, v.year, v.engine, v.type]).toEqual(['Toyota', 'Veloz', 2024, '1.5L 4-cyl', 'mpv']);
+    expect(v.vinAi?.filled).toEqual(['year']);
+    // Without the AI at all: the garage's word alone, said as the garage's (not the AI's card).
+    setAiTransport(async () => {
+      throw new Error('ai off');
+    });
+    notices.length = 0;
+    const third = await car();
+    await updateVehicle(third.vehicleId, { vin: 'MHFAB1BY2R3022222' });
+    await until(async () => !!(await db.vehicles.get(third.vehicleId))?.model);
+    const w = (await db.vehicles.get(third.vehicleId))!;
+    expect([w.make, w.model, w.engine, w.type]).toEqual(['Toyota', 'Veloz', '1.5L 4-cyl', 'mpv']);
+    expect(notices.find((n) => n.kind === 'car')).toMatchObject({ from: 'garage' });
+  });
+
   it('without the garage’s server (or its key, or a network): nothing happens, quietly', async () => {
     const o = await car();
     setAiTransport(async () => {

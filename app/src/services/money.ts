@@ -1,3 +1,4 @@
+import { isToSend } from '../domain/flow';
 import { db, nextNumber, uid } from '../db/db';
 import { cashTotals } from '../domain/cash';
 import { dubaiDate, monthKey, nowIso, onDubaiDay } from '../domain/dates';
@@ -123,8 +124,9 @@ async function issueQuick(orderId: string, day: string | undefined): Promise<Inv
   // refused only after the version and the customer's answers were recorded for good).
   const b = await loadOrderBundle(orderId);
   if (!b) throw new AppError('err.notFound');
-  invoiceCheck(b, day, b.items.map((i) => (i.approvalState === 'draft' ? { ...i, approvalState: 'approved' as const } : i)));
-  const drafts = b.items.filter((i) => i.approvalState === 'draft');
+  // (Not the unconfirmed lines — v0.88: they stay on the job, out of the invoice.)
+  invoiceCheck(b, day, b.items.map((i) => (isToSend(i) ? { ...i, approvalState: 'approved' as const } : i)));
+  const drafts = b.items.filter(isToSend);
   if (drafts.length) {
     const v = await sendVersion(orderId, { via: 'in_person' });
     await recordDecisions(
@@ -250,7 +252,7 @@ export async function discountIssuedInvoice(orderId: string, spec: DiscountSpec 
     const inv = activeInvoice(invoices);
     if (!inv || inv.type === 'credit_note') throw new AppError('err.notFound');
     // Only the invoiced lines are issued again: lines added since would slip onto the new invoice unasked.
-    if (items.some((i) => i.approvalState === 'draft' && i.kind !== 'discount')) throw new AppError('err.discountDrafts');
+    if (items.some((i) => isToSend(i) && i.kind !== 'discount')) throw new AppError('err.discountDrafts');
     const before = grossOf(discountBase(items));
     const off = spec ? discountGross(spec, before) : 0;
     if (spec && !(off > 0)) throw new AppError('err.amountRequired');

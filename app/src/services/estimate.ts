@@ -1,3 +1,4 @@
+import { isToSend } from '../domain/flow';
 import { db, uid } from '../db/db';
 import { addDays, nowIso } from '../domain/dates';
 import {
@@ -192,7 +193,8 @@ async function buildVersion(orderId: string, opts: SendOptions, lines?: OrderIte
   const [order, settings] = await Promise.all([db.orders.get(orderId), getSettings()]);
   if (!order) throw new AppError('err.notFound');
   // In the job's order (moved by hand, then as added): the quotation and the message list them as the job screen does.
-  const drafts = lines ?? (await db.items.where('orderId').equals(orderId).sortBy('createdAt')).sort(byPosition).filter((i) => i.approvalState === 'draft');
+  // (Not the unconfirmed ones — v0.88: they stay on the job, out of the quote.)
+  const drafts = lines ?? (await db.items.where('orderId').equals(orderId).sortBy('createdAt')).sort(byPosition).filter(isToSend);
   if (drafts.length === 0) throw new AppError('err.nothingToSend');
   const prev = await db.versions.where('orderId').equals(orderId).count();
   const lang = order.docLanguage;
@@ -331,7 +333,7 @@ export async function limitRemaining(orderId: string): Promise<{ limit: number; 
 
 /** Approve all draft items within the customer's no-call limit (signed in the intake act). */
 export async function approveByLimit(orderId: string, reason?: string): Promise<EstimateVersion> {
-  const drafts = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => i.approvalState === 'draft');
+  const drafts = (await db.items.where('orderId').equals(orderId).toArray()).filter(isToSend);
   const total = drafts.reduce((s, i) => s + itemAmounts(i).gross, 0);
   const { remaining } = await limitRemaining(orderId);
   if (drafts.length === 0) throw new AppError('err.nothingToSend');

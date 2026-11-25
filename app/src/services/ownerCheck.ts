@@ -15,7 +15,7 @@ import { coverOf } from './cover';
 import type { PdfFile } from './documents';
 import { cardUrl } from './media';
 import { loadOrderBundle, type OrderBundle } from './orders';
-import { waAvatarSrc, waCan } from './whatsapp';
+import { chatOfPhone, waCan, waPicture } from './whatsapp';
 
 /*
  * The job for the owner to check (v0.82, domain/ownerCheck.ts — what it says; pdf/ownerCheck.tsx — how): its PDF and the
@@ -87,8 +87,10 @@ export async function ownerCheckFile(orderId: string, appLang: Lang): Promise<Ow
   const sellers = new Map(
     await Promise.all(
       suppliers.map(async (s) => {
-        const chat = s!.phone ? chatIdOf(s!.phone) : '';
-        const picture = chat && waCan() ? await dataUrl(waAvatarSrc(chat)) : undefined;
+        // (The chat as the list has it — WhatsApp keeps a person's chat under a hidden id — else by the number.)
+        const chat = s!.phone ? (chatOfPhone(s!.phone)?.id ?? chatIdOf(s!.phone)) : '';
+        // Its WhatsApp picture, kept on this device (v0.88) — else brought from the garage's server and kept.
+        const picture = chat && waCan() ? await dataUrl(await waPicture(chat)) : undefined;
         return [s!.id, { name: s!.name, phone: s!.phone ? formatPhone(s!.phone) : undefined, ...(picture ? { picture } : {}) }] as const;
       }),
     ),
@@ -118,39 +120,26 @@ export async function ownerCheckFile(orderId: string, appLang: Lang): Promise<Ow
       work: w('work'),
       extra: w('extra'),
       item: w('item'),
-      qty: w('qty'),
-      buyNet: w('buyNet'),
-      buyVat: w('buyVat'),
-      saleNet: w('saleNet'),
-      saleVat: w('saleVat'),
-      saleTotal: w('saleTotal'),
+      supplier: w('supplier'),
+      buy: w('buy'),
+      sell: w('sell'),
       margin: w('margin'),
       noCost: w('noCost'),
       noPrice: w('noPrice'),
       own: w('own'),
       outside: w('outside'),
       noSupplier: w('noSupplier'),
+      garageWork: w('garageWork'),
       off: w('off'),
       discount: w('discount'),
-      totals: w('totals'),
-      net: w('net'),
-      vat: w('vat'),
-      gross: w('gross'),
       toClient: w('toClient'),
       spent: w('spent'),
       profit: w('profit'),
-      profitGross: w('profitGross'),
-      profitNet: w('profitNet'),
-      taxes: w('taxes'),
-      vatOut: w('vatOut'),
-      vatIn: w('vatIn'),
-      vatDue: w('vatDue'),
+      vatLine: w('vatLine'),
       warnUnpriced: w('warnUnpriced'),
       warnNoCost: w('warnNoCost'),
-      sellers: w('sellers'),
-      sellerTotal: w('sellerTotal'),
-      noSellers: w('noSellers'),
       customer: w('customer'),
+      footer: w('footer'),
     },
   });
   const name = [`№${b.order.number}`, b.vehicle.make, b.vehicle.model, `${b.vehicle.plate.code}${b.vehicle.plate.number}`].filter(Boolean).join(' ');

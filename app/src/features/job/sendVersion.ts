@@ -1,3 +1,4 @@
+import { isToSend } from '../../domain/flow';
 import { useState } from 'react';
 import type { EstimateVersion } from '../../domain/types';
 import { quotationPdf, versionPdf } from '../../services/documents';
@@ -27,7 +28,7 @@ export function useSendVersion(b: OrderBundle | undefined) {
       // The boss sees the quote first (v0.80.3): the lines as they are — nothing frozen.
       bossPdf: () => quotationPdf(orderId),
       // The photos of the lines going now (what was found): shared with the text from the phone.
-      photos: b.items.filter((i) => i.approvalState === 'draft').flatMap((i) => i.mediaIds ?? []),
+      photos: b.items.filter(isToSend).flatMap((i) => i.mediaIds ?? []),
       onConfirm: async () => {
         await freeze();
       },

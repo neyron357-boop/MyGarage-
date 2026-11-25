@@ -3,6 +3,8 @@ import { IconChevronLeft, IconChevronRight, IconDownload, IconPhotoOff, IconRota
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { db } from '../db/db';
+import { formatDateTime } from '../domain/dates';
 import { cardUrl, mediaBlob, mediaSrc, mediaUrl } from '../services/media';
 import { useHistoryLayer, useLockScroll } from './historyLayer';
 import { canShareFile, shareOrDownload } from './share';
@@ -109,6 +111,27 @@ function useFullUrl(id?: string) {
   return shown;
 }
 
+/**
+ * When the photo was taken (v0.88, the owner: «зафиксируйте дату фотографии — фактическую дату, когда я фотографирую
+ * автомобиль»): its own moment (its Exif, kept with it — services/media.ts), else when it was added. None for a picture
+ * not stored yet.
+ */
+function usePhotoMoment(id: string | undefined, stored: boolean): string | undefined {
+  const [at, setAt] = useState<{ id: string; at?: string }>();
+  useEffect(() => {
+    if (!id || !stored) return undefined;
+    let alive = true;
+    void db.media
+      .get(id)
+      .then((m) => alive && setAt({ id, at: m?.takenAt ?? m?.createdAt }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [id, stored]);
+  return at && at.id === id ? at.at : undefined;
+}
+
 /** A photo turned on screen while its turned copy is being saved: by how much, scaled to fit as it will. */
 interface Turn {
   id: string;
@@ -157,6 +180,7 @@ export function PhotoViewer({
   const paused = pausedByLayer || typing;
   const item = items[index];
   const stored = useFullUrl(item?.src ? undefined : item?.id);
+  const moment = usePhotoMoment(item?.id, !item?.src);
   const [turn, setTurn] = useState<Turn | null>(null);
   // The photo being turned: the button waits until its turned copy is here (a new id in its place).
   const [turning, setTurning] = useState<string | null>(null);
@@ -369,7 +393,11 @@ export function PhotoViewer({
         </div>
         <div className="cam-title">
           {item.title && <div className="cam-title-main">{item.title}</div>}
-          {items.length > 1 && <div className="cam-title-sub">{t('camera.of', { n: index + 1, total: items.length })}</div>}
+          {(items.length > 1 || moment) && (
+            <div className="cam-title-sub tnum" data-photo-moment={moment}>
+              {[moment ? formatDateTime(moment) : '', items.length > 1 ? t('camera.of', { n: index + 1, total: items.length }) : ''].filter(Boolean).join(' · ')}
+            </div>
+          )}
         </div>
         <div className="viewer-side">
           {onRotate && (

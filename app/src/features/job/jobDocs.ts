@@ -1,4 +1,4 @@
-import { liveLines } from '../../domain/flow';
+import { isToSend, liveLines } from '../../domain/flow';
 import { activeInvoice } from '../../domain/invoice';
 import { isAwaitingClient, itemAmounts } from '../../domain/items';
 import { formatAed } from '../../domain/money';
@@ -54,7 +54,7 @@ export function jobDocs(b: OrderBundle): JobDocs {
           orderId: oid,
           pdf: async () => versionPdf((await freeze()).id),
           bossPdf: () => quotationPdf(oid),
-          photos: b.items.filter((i) => i.approvalState === 'draft').flatMap((i) => i.mediaIds ?? []),
+          photos: b.items.filter(isToSend).flatMap((i) => i.mediaIds ?? []),
           onConfirm: async () => {
             await freeze();
           },

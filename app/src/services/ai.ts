@@ -5,6 +5,7 @@ import { itemTitle, lineName } from '../domain/items';
 import { matchPartName } from '../domain/partsVocab';
 import type { OrderItem, Vehicle } from '../domain/types';
 import { isVin } from '../domain/vin';
+import { stemCar, vinStem } from '../domain/vinDecode';
 import { callJson } from './sync/api';
 import { syncConfig } from './sync/config';
 import { syncLabourNames } from './labourName';
@@ -84,7 +85,8 @@ export const yandexUrl = (number: string): string => `https://yandex.ru/search/?
 
 export type CarFill = Partial<Pick<Vehicle, 'make' | 'model' | 'year' | 'engine' | 'type'>>;
 export type AiNotice =
-  | { kind: 'car'; vehicleId: string; filled: CarFill; undo: () => Promise<void> }
+  /** `from: 'garage'` (v0.88): said by the garage's own car of the same VIN, not by the AI. */
+  | { kind: 'car'; vehicleId: string; filled: CarFill; from?: 'garage'; undo: () => Promise<void> }
   | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
   /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
   | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; date: string; dateSure: boolean; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
@@ -122,27 +124,46 @@ async function once<T>(key: string, fn: () => Promise<T>): Promise<T | undefined
  */
 export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
   return once(`car:${vehicleId}`, async () => {
-    if (!aiOn()) return undefined;
     const v = await db.vehicles.get(vehicleId);
     const vin = v?.vin?.toUpperCase();
     if (!v || !vin || !isVin(vin) || v.vinAi?.vin === vin) return undefined;
-    if (v.make?.trim() && v.model?.trim() && v.year && v.engine?.trim() && v.type) {
-      await db.vehicles.update(vehicleId, { vinAi: { vin, at: nowIso(), filled: [] } });
-      return {};
+    // The garage's own cars of this VIN's maker and model code first (v0.88): what a person wrote on them — with or without
+    // the AI, and over it.
+    const known = await garageCarOf(vin, vehicleId);
+    if (whole({ ...v, ...emptyOf(v, known) })) {
+      if (!known || whole(v)) {
+        await db.vehicles.update(vehicleId, { vinAi: { vin, at: nowIso(), filled: [] } });
+        return {};
+      }
     }
-    const ai = await askAi<AiVin>('vin', { vin }, `car:${vehicleId}`);
+    let ai: AiVin | undefined;
+    if (aiOn() && !whole({ ...v, ...emptyOf(v, known) })) {
+      try {
+        ai = await askAi<AiVin>('vin', { vin }, `car:${vehicleId}`);
+      } catch {
+        // offline, no key: the garage's own word stands, the AI is asked the next time
+      }
+    }
+    if (!ai && !known) return undefined;
     // Read again: something may have been typed in the card while the AI was asked.
     const now = await db.vehicles.get(vehicleId);
     if (!now || now.vin?.toUpperCase() !== vin) return undefined;
-    const fill = vinFill(now, vin, ai);
+    const own = emptyOf(now, known);
+    const fromAi = ai ? vinFill({ ...now, ...own }, vin, ai) : {};
+    const fill: CarFill = { ...own, ...fromAi };
     const keys = Object.keys(fill) as (keyof CarFill)[];
+    const byAi = Object.keys(fromAi) as (keyof CarFill)[];
     const before: CarFill = Object.fromEntries(keys.map((k) => [k, now[k]]));
-    await db.vehicles.update(vehicleId, { ...fill, vinAi: { vin, at: nowIso(), filled: keys } });
+    // Marked read once the AI answered (or had nothing to add): the garage's own word alone leaves it to be asked later.
+    const done = !!ai || whole({ ...now, ...fill });
+    await db.vehicles.update(vehicleId, { ...fill, ...(done ? { vinAi: { vin, at: nowIso(), filled: byAi } } : {}) });
     if (keys.length)
       notify({
         kind: 'car',
         vehicleId,
         filled: fill,
+        // The garage's own car said it all (no AI's word in it).
+        ...(byAi.length ? {} : { from: 'garage' as const }),
         // Only what is still as the AI wrote it goes back (a field changed since stays).
         undo: async () => {
           const cur = await db.vehicles.get(vehicleId);
@@ -156,9 +177,32 @@ export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
   });
 }
 
-/** Asked about a VIN put in the card — not waited for. */
+/** Asked about a VIN put in the card — not waited for (the garage's own cars answer without the AI too, v0.88). */
 export function aiReadVinLater(vehicleId: string) {
-  if (aiOn()) void aiReadVin(vehicleId);
+  void aiReadVin(vehicleId);
+}
+
+/** The card has all a VIN can fill. */
+const whole = (c: Partial<CarFill>): boolean => !!(c.make?.trim() && c.model?.trim() && c.year && c.engine?.trim() && c.type);
+
+/** What the garage itself knows of this VIN (v0.88, domain/vinDecode.ts `stemCar`): its other cars of the same stem. */
+async function garageCarOf(vin: string, selfId: string): Promise<ReturnType<typeof stemCar>> {
+  const stem = vinStem(vin);
+  if (!stem) return undefined;
+  return stemCar(vin, await db.vehicles.where('vin').startsWith(stem).toArray(), selfId);
+}
+
+/** The garage's word, into what is empty — not over a make typed as another (the car is not that one, or the make is wrong). */
+function emptyOf(car: Partial<CarFill>, known: ReturnType<typeof stemCar>): CarFill {
+  if (!known) return {};
+  const make = car.make?.trim();
+  if (make && make.toLowerCase().replace(/[^a-z0-9]/g, '') !== known.make.toLowerCase().replace(/[^a-z0-9]/g, '')) return {};
+  const out: CarFill = {};
+  if (!make) out.make = known.make;
+  if (!car.model?.trim()) out.model = known.model;
+  if (known.engine && !car.engine?.trim()) out.engine = known.engine;
+  if (known.type && !car.type) out.type = known.type as CarFill['type'];
+  return out;
 }
 
 async function carOf(item: OrderItem): Promise<Vehicle | undefined> {

@@ -669,6 +669,11 @@ export function tellSaid(block: string) {
   } catch {
     return;
   }
+  tellEvent(event);
+}
+/** An event (read already — an ask's answer, v0.88) handed to whoever listens for its word. */
+function tellEvent(event: Record<string, unknown>) {
+  if (!said.size || 'rev' in event) return;
   for (const [word, set] of said) {
     if (!(word in event)) continue;
     for (const fn of set) {
@@ -694,7 +699,130 @@ export function onStreamBack(fn: () => void): () => void {
 let everOpen = false;
 
 /**
- * One stream open to the server: each time another device's changes are kept there, this device takes them at once.
+ * Asking instead of a stream (v0.88, the owner: «отправленное сообщение висит с часиками, в настоящем WhatsApp оно давно
+ * отправлено»): the garage's address is a Cloudflare quick tunnel (`…trycloudflare.com`), and a quick tunnel never passes
+ * a stream on — its documentation says so, and measured 25/11 not one of the server's events came through it in 70 s.
+ * The phone heard nothing live: WhatsApp's messages and ticks only when a chat was opened again, the other devices'
+ * changes by the 20-second check. There the app asks (`/api/sync/poll`): the server answers the moment it has
+ * something, else in 25 s, and is asked again at once. Any other address keeps the stream — and is asked too, once
+ * its stream has let nothing through for a few seconds (another proxy that holds it back).
+ */
+const askOnly = new Set<string>();
+/** A server too old to be asked: its stream, as before. */
+const noAsking = new Set<string>();
+const quickTunnel = (url: string): boolean => {
+  try {
+    return /(^|\.)trycloudflare\.com$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+const asks = (url: string): boolean => !noAsking.has(url) && (askOnly.has(url) || quickTunnel(url));
+/** Where the asking stands: the number to ask after, of this run of the server (the app's whole visit). */
+let asked: { url: string; boot: string; seq: number } | undefined;
+/** The server's own stream gives its first event at once: none in this long — the way holds it back. */
+const FIRST_MS = 4000;
+
+/** How one listening ended: on its own (asked again), cut off for good, or to be done the other way. */
+type Ended = 'again' | 'revoked' | 'held' | 'old';
+
+/** Heard: «На связи», what is said handed on, another device's changes taken. */
+function heardEvent(event: Record<string, unknown> | undefined, block?: string) {
+  heard = Date.now();
+  if (!syncState().live) setSyncState({ live: true }, false);
+  if (block !== undefined) tellSaid(block);
+  else if (event) tellEvent(event);
+  const rev = event ? Number(event.rev) : NaN;
+  // Another device's changes (or ones missed while not listening): taken now.
+  if (Number.isFinite(rev) && rev > syncState().cursor) void syncRecords();
+}
+/** Opened again after it was closed: whoever keeps what was said reads it again (v0.87). */
+function tellBack() {
+  for (const fn of backs) {
+    try {
+      fn();
+    } catch {
+      // a listener's own trouble does not close the stream
+    }
+  }
+}
+
+async function streaming(cfg: SyncConfig, ctl: AbortController): Promise<Ended> {
+  const res = await fetch(`${cfg.url}/api/sync/events`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: ctl.signal, cache: 'no-store' });
+  if (res.status === 401) return 'revoked';
+  if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
+  heard = Date.now();
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  // «На связи» once the server's first event has come through: a way that holds the stream back is not live — after
+  // a few seconds of nothing it is asked instead (v0.88).
+  let through = false;
+  let held = false;
+  const wait = setTimeout(() => {
+    if (through) return;
+    held = true;
+    ctl.abort();
+  }, FIRST_MS);
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      heard = Date.now();
+      buf += dec.decode(value, { stream: true }).replace(/\r/g, '');
+      let i: number;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        if (!through) {
+          through = true;
+          streamTries = 0;
+          if (everOpen) tellBack();
+          everOpen = true;
+        }
+        // (Read for its number only when it is the data's: WhatsApp's events are not parsed twice — v0.80.2.)
+        const rev = block.includes('"rev"') ? eventRev(block) : undefined;
+        // Said again with each event and ping (15 s), should anything have put it out meanwhile.
+        heardEvent(rev !== undefined ? { rev } : undefined, block);
+      }
+    }
+  } catch (e) {
+    if (!held) throw e;
+  } finally {
+    clearTimeout(wait);
+  }
+  return held ? 'held' : 'again';
+}
+
+async function asking(cfg: SyncConfig, ctl: AbortController): Promise<Ended> {
+  let first = true;
+  // (An ask unanswered for 45 s is a dead one, as a silent stream: opened anew by the 20-second check.)
+  heard = Date.now();
+  for (;;) {
+    const at = asked?.url === cfg.url ? asked : undefined;
+    const q = at ? `?after=${at.seq}&boot=${encodeURIComponent(at.boot)}` : '';
+    const res = await fetch(`${cfg.url}/api/sync/poll${q}`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: ctl.signal, cache: 'no-store' });
+    if (res.status === 401) return 'revoked';
+    if (res.status === 404) return 'old';
+    if (!res.ok) throw new Error(`poll ${res.status}`);
+    const r = (await res.json()) as { boot?: string; seq?: number; events?: Record<string, unknown>[]; gap?: boolean };
+    if (typeof r.boot !== 'string' || !Number.isInteger(r.seq)) throw new Error('poll answer');
+    asked = { url: cfg.url, boot: r.boot, seq: r.seq! };
+    if (first) {
+      first = false;
+      streamTries = 0;
+      // Asked on from where it was: what was said meanwhile comes now — read again only what was not kept for it.
+      if (r.gap || (!at && everOpen)) tellBack();
+      everOpen = true;
+    }
+    heard = Date.now();
+    if (!syncState().live) setSyncState({ live: true }, false);
+    for (const ev of r.events ?? []) if (ev && typeof ev === 'object') heardEvent(ev);
+  }
+}
+
+/**
+ * One stream open to the server (or asking it, v0.88): each time another device's changes are kept there, this device takes them at once.
  * Gone (no network, the app in the background, the server restarted): opened again; the minute's check stays as the net.
  */
 function listen() {
@@ -703,66 +831,46 @@ function listen() {
   clearTimeout(reopen);
   const ctl = new AbortController();
   stream = ctl;
-  let reconnect = true;
+  let ended: Ended = 'again';
   void (async () => {
     try {
-      const res = await fetch(`${cfg.url}/api/sync/events`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: ctl.signal, cache: 'no-store' });
-      if (res.status === 401) {
-        reconnect = false;
-        setSyncState({ lastError: 'revoked' });
-        return;
-      }
-      if (!res.ok || !res.body) throw new Error(`events ${res.status}`);
-      heard = Date.now();
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      // «На связи» once the server's first event has come through: a tunnel that held the stream back is not live (the
-      // 20-second check stays on).
-      let through = false;
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        heard = Date.now();
-        buf += dec.decode(value, { stream: true }).replace(/\r/g, '');
-        let i: number;
-        while ((i = buf.indexOf('\n\n')) >= 0) {
-          const block = buf.slice(0, i);
-          // (Read for its number only when it is the data's: WhatsApp's events are not parsed twice — v0.80.2.)
-          const rev = block.includes('"rev"') ? eventRev(block) : undefined;
-          buf = buf.slice(i + 2);
-          tellSaid(block);
-          if (!through) {
-            through = true;
-            streamTries = 0;
-            if (everOpen)
-              for (const fn of backs) {
-                try {
-                  fn();
-                } catch {
-                  // a listener's own trouble does not close the stream
-                }
-              }
-            everOpen = true;
-          }
-          // Said again with each event and ping (15 s), should anything have put it out meanwhile.
-          if (!syncState().live) setSyncState({ live: true }, false);
-          // Another device's changes (or ones missed while the stream was closed): taken now.
-          if (rev !== undefined && rev > syncState().cursor) void syncRecords();
-        }
-      }
+      ended = asks(cfg.url) ? await asking(cfg, ctl) : await streaming(cfg, ctl);
     } catch {
       // closed, or no network
     } finally {
       if (stream === ctl) stream = null;
       setSyncState({ live: false }, false);
-      if (reconnect && !ctl.signal.aborted && syncConfig()?.token === cfg.token) {
+      if (ended === 'revoked') setSyncState({ lastError: 'revoked' });
+      else if (syncConfig()?.token === cfg.token && (ended === 'held' || ended === 'old')) {
+        // The other way, at once.
+        if (ended === 'held') askOnly.add(cfg.url);
+        else noAsking.add(cfg.url);
+        listen();
+      } else if (!ctl.signal.aborted && syncConfig()?.token === cfg.token) {
         streamTries++;
         // Again in 2, 4, then every 5 s: the server back (it starts again in two seconds) is heard at once.
         reopen = setTimeout(listen, Math.min(5_000, 1000 * 2 ** Math.min(streamTries, 3)));
       }
     }
   })();
+}
+
+/**
+ * The tests: listening alone, as the app does (`ask` — by asking, as through a quick tunnel), without the rest of the
+ * start (its timers, the look for this computer's server). Gives the way to stop it.
+ */
+export function listenForTests(ask: boolean): () => void {
+  const cfg = syncConfig();
+  started = true;
+  if (ask && cfg) askOnly.add(cfg.url);
+  listen();
+  return () => {
+    started = false;
+    stream?.abort();
+    stream = null;
+    clearTimeout(reopen);
+    if (cfg) askOnly.delete(cfg.url);
+  };
 }
 
 /** The stream opened anew (back in the app, online again, a new address or connection), or closed when disconnected. */

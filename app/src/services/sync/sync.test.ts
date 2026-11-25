@@ -16,7 +16,7 @@ import { checkIn } from '../orders';
 import { ensureSeed } from '../seed';
 import { forgetSyncMemory, installId, resetSyncState, restoreInstallId, setSyncConfig, syncConfig, syncState, type SyncConfig, type SyncState } from './config';
 import { SyncError } from './api';
-import { applyChanges, changeServerAddress, eventRev, findServer, finishPairing, lastingError, makeMain, pairDevice, syncNow } from './engine';
+import { applyChanges, changeServerAddress, eventRev, findServer, finishPairing, lastingError, listenForTests, makeMain, onServerSaid, pairDevice, syncNow } from './engine';
 
 /*
  * Two devices and the garage's own server (server/src/main.mjs, started here as it runs on the computer): what one
@@ -139,6 +139,9 @@ function as(name: string): Device {
   current = d;
   return d;
 }
+
+/** A record as another device sends it: without this device's own stamp. */
+const withoutStamp = ({ _t: _stamp, ...rest }: Record<string, unknown>) => rest;
 
 const bytes = (n: number, seed: number) => new Uint8Array(Array.from({ length: n }, (_, i) => (i * seed) % 251));
 
@@ -561,6 +564,38 @@ describe('syncing with the garage’s server (v0.40)', () => {
     expect(syncConfig()!.url).toBe('http://127.0.0.1:1');
     relayTopics.set(relay.topic, left);
     setSyncConfig(here);
+  });
+
+  it('v0.88: an address that passes no stream (a Cloudflare quick tunnel) — the device asks, and hears what is said at once', async () => {
+    as('phone');
+    const phoneToken = syncConfig()!.token;
+    as('pc');
+    const cfg = syncConfig()!;
+    const heardWa: unknown[] = [];
+    const off = onServerSaid('wa', (v) => heardWa.push(v));
+    const stop = listenForTests(true);
+    try {
+      for (let i = 0; i < 100 && !syncState().live; i++) await new Promise((r) => setTimeout(r, 20));
+      expect(syncState().live).toBe(true);
+      // Another device's change, kept on the server: this one is told and takes it — at once, not at the 20-second check.
+      const t0 = Date.now();
+      const pushed = (await (
+        await fetch(`${cfg.url}/api/sync/push`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${phoneToken}`, 'Content-Type': 'application/json', 'X-Sync': '2' },
+          body: JSON.stringify({ changes: [{ t: 'orders', k: orderId, d: { ...withoutStamp((await db.orders.get(orderId)) as unknown as Record<string, unknown>), complaint: 'Asked for, heard at once' } }] }),
+        })
+      ).json()) as { rev: number };
+      while (syncState().cursor < pushed.rev && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10));
+      expect(syncState().cursor).toBeGreaterThanOrEqual(pushed.rev);
+      expect(Date.now() - t0).toBeLessThan(1500);
+      expect((await db.orders.get(orderId))?.complaint).toBe('Asked for, heard at once');
+    } finally {
+      stop();
+      off();
+    }
+    // (WhatsApp's words come the same way: the server's own test says them; here nothing of WhatsApp was said.)
+    expect(heardWa).toEqual([]);
   });
 
   it('a device cut off on the server stops, and says why', async () => {

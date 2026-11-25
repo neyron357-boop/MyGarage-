@@ -70,6 +70,22 @@ describe('the AI', () => {
     await assert.rejects(ai.vin('NOTAVIN'), /not a VIN/);
   });
 
+  it('v0.88: a VIN — no model named in the question (a light model gave back «Land Cruiser» for an Indonesian Veloz), its maker’s code said; the stronger model first, thinking a little', async () => {
+    const { f, seen } = fake([
+      [/vpic\.nhtsa/, () => json({ Results: [{ Make: 'TOYOTA', ModelYear: '2023' }] })],
+      [/generateContent/, () => answer({ make: 'Toyota', model: 'Veloz', year: 2023, engine: '1.5L 4-cyl', body: 'mpv', confidence: 0.8 })],
+    ]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const r = await ai.vin('MHFAB1BY4P3069309');
+    assert.equal(r.model, 'Veloz');
+    const ask = seen.find((x) => /generateContent/.test(x.url));
+    assert.match(ask.url, /gemini-3\.8-flash:/);
+    const text = ask.body.contents[0].parts[0].text;
+    assert.doesNotMatch(text, /Land Cruiser|Camry|Corolla/);
+    assert.match(text, /"MHF"[\s\S]*Indonesia[\s\S]*"AB1BY"/);
+    assert.equal(ask.body.generationConfig.thinkingConfig.thinkingLevel, 'low');
+  });
+
   it('a part’s name: its mistakes put right, its English name', async () => {
     const { f, seen } = fake([[/generateContent/, () => answer({ fixed: 'колодки тормозные', english: 'BRAKE PADS', isPart: true, confidence: 0.92 })]]);
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });

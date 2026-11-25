@@ -14,7 +14,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-server-'));
 const config = loadConfig({ DATA_DIR: dir, ALLOWED_ORIGINS: 'https://app.example' });
 const store = openStore(dir, { keepBackups: 2 });
 const pairing = createPairing();
-const events = createEvents({ pingMs: 200 });
+const events = createEvents({ pingMs: 200, holdMs: 300 });
 // Where the address is left (v0.42.2): nothing goes out of this test.
 const relay = createRelay({ store, base: 'http://127.0.0.1:9/relay', fetchImpl: async () => new Response('{}') });
 let base = '';
@@ -214,6 +214,44 @@ describe('MyGarage server', () => {
     assert.equal(events.live().size, 1);
     await a1.stop();
     await b1.stop();
+  });
+
+  it('v0.88: a device that cannot keep a stream (a Cloudflare quick tunnel) asks — answered the moment something is said', async () => {
+    const one = await pair('Asker A');
+    const two = await pair('Asker B');
+    const ask = async (token, q = '') => {
+      const t0 = Date.now();
+      const res = await call(`/api/sync/poll${q}`, { token });
+      assert.equal(res.status, 200);
+      return { ...(await res.json()), ms: Date.now() - t0 };
+    };
+    // The first ask: answered at once with the data's number, and what to ask after next.
+    const first = await ask(one);
+    assert.equal(typeof first.events[0].rev, 'number');
+    assert.ok(first.boot && Number.isInteger(first.seq));
+    assert.ok(!first.gap);
+    // Asked after it: nothing yet — waits; another device's change — answered at once (not to the device that made it).
+    const waiting = ask(one, `?after=${first.seq}&boot=${first.boot}`);
+    const own = ask(two, `?after=${first.seq}&boot=${first.boot}`);
+    await new Promise((r) => setTimeout(r, 30));
+    const pushed = await (await call('/api/sync/push', { token: two, method: 'POST', body: { changes: [{ t: 'orders', k: 'ask-1', d: { id: 'ask-1' } }] } })).json();
+    const told = await waiting;
+    assert.deepEqual(told.events, [{ rev: pushed.rev }]);
+    assert.ok(told.ms < 250, `answered in ${told.ms} ms`);
+    // Its own change is not said to it: its ask ends in its time with nothing.
+    const quiet = await own;
+    assert.deepEqual(quiet.events, []);
+    // Said while nobody asked: given at the next ask, a burst together.
+    events.tell({ wa: { t: 'ack', id: 'x', ack: 1 } });
+    events.tell({ wa: { t: 'ack', id: 'x', ack: 2 } });
+    const later = await ask(one, `?after=${told.seq}&boot=${told.boot}`);
+    assert.deepEqual(later.events, [{ wa: { t: 'ack', id: 'x', ack: 1 } }, { wa: { t: 'ack', id: 'x', ack: 2 } }]);
+    // Another run of the server (or more went by than is kept): the data's number, and the device reads again.
+    const lost = await ask(one, `?after=${later.seq}&boot=other`);
+    assert.equal(lost.gap, true);
+    assert.equal(typeof lost.events[0].rev, 'number');
+    // Asking — it is listening.
+    assert.ok(events.live().has(store.devices().find((d) => d.name === 'Asker A').id));
   });
 
   it('the main device’s data becomes the garage’s: what it lacks is deleted for everyone, its numbers taken as they are', async () => {

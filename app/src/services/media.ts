@@ -1,3 +1,4 @@
+import { exifTakenAt } from '../domain/exifDate';
 import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { sha256Bytes, toHex } from '../domain/sha256';
@@ -99,6 +100,17 @@ export interface AddMediaInput {
   locked?: boolean;
   /** A photo already sized for storage (in-app camera) comes with its thumbnail and is stored as is. */
   thumb?: Blob;
+  /** When it was taken, said by whoever adds it (a turned copy keeps the photo's) — over the file's own Exif (v0.88). */
+  takenAt?: string;
+}
+
+/** A photo's own moment (its Exif) — none when it does not say or cannot be read. */
+async function takenAtOf(file: Blob): Promise<string | undefined> {
+  try {
+    return exifTakenAt(new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer()));
+  } catch {
+    return undefined;
+  }
 }
 
 export async function addMedia(input: AddMediaInput): Promise<Media> {
@@ -106,6 +118,8 @@ export async function addMedia(input: AddMediaInput): Promise<Media> {
     input.kind ?? (input.file.type.startsWith('video/') ? 'video' : input.file.type.startsWith('audio/') ? 'audio' : input.file.type === 'application/pdf' ? 'pdf' : 'photo');
   let blob = input.file;
   let thumb: Blob | undefined = input.thumb;
+  // When it was taken (v0.88): read off the file before it is made smaller (that drops its Exif).
+  const takenAt = input.takenAt ?? (kind === 'photo' ? await takenAtOf(input.file) : undefined);
   if (kind === 'video' && blob.size > MAX_VIDEO_BYTES) throw new Error('video_too_large');
   if (kind === 'photo' && !thumb && input.compress !== false && typeof document !== 'undefined') {
     try {
@@ -128,6 +142,7 @@ export async function addMedia(input: AddMediaInput): Promise<Media> {
     name: input.name,
     locked: input.locked ?? false,
     createdAt: nowIso(),
+    ...(takenAt ? { takenAt } : {}),
   };
   await db.transaction('rw', db.media, db.mediaBlobs, async () => {
     await db.media.add(media);

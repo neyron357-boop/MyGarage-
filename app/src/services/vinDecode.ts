@@ -1,4 +1,5 @@
-import { mergeVinCar, vinCarLocal, vpicCar, type VinCar } from '../domain/vinDecode';
+import { db } from '../db/db';
+import { mergeVinCar, stemCar, vinCarLocal, vinStem, vpicCar, type VinCar } from '../domain/vinDecode';
 
 /*
  * What car a VIN is, for «Новый заказ» (v0.81): the app's own table at once, and the official NHTSA decoder (vPIC — free,
@@ -32,16 +33,24 @@ export function setVinDecoder(d: Decoder): void {
 export async function decodeVin(vin: string): Promise<VinCar> {
   const v = vin.trim().toUpperCase();
   const hit = known.get(v);
-  if (hit) return hit;
+  const car = hit ?? (await decoded(v));
+  // The garage's own cars of the same maker and model code (v0.88): the make and model a person wrote on them, over
+  // the decoder's (read each time: a car put right a moment ago counts).
+  const stem = vinStem(v);
+  const garage = stem ? stemCar(v, await db.vehicles.where('vin').startsWith(stem).toArray()) : undefined;
+  return garage ? { ...car, make: garage.make, model: garage.model } : car;
+}
+
+async function decoded(v: string): Promise<VinCar> {
   const local = vinCarLocal(v);
-  let decoded: VinCar = {};
+  let said: VinCar = {};
   try {
-    decoded = vpicCar(await decoder(v));
+    said = vpicCar(await decoder(v));
   } catch {
     // no network: the table alone
   }
-  const car = mergeVinCar(local, decoded);
-  if (Object.keys(decoded).length) known.set(v, car);
+  const car = mergeVinCar(local, said);
+  if (Object.keys(said).length) known.set(v, car);
   return car;
 }
 

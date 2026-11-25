@@ -2,7 +2,7 @@ import { db, uid } from '../db/db';
 import { binOf, draftLike, withoutRemoved, withRemoved } from '../domain/bin';
 import type { BoardStatus } from '../domain/boardStatus';
 import { nowIso } from '../domain/dates';
-import { flowStage, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
+import { flowStage, isToSend, jobPhase, nothingToBill, stepToward, type Phase } from '../domain/flow';
 import { discountBase, discountLines, grossOf } from '../domain/discount';
 import { activeInvoice, canAmendInvoice } from '../domain/invoice';
 import { byPosition, canReprice, isAwaitingClient, itemAmounts, unitGrossPrice } from '../domain/items';
@@ -108,7 +108,8 @@ export async function answerLines(itemIds: string[], decision: 'approve' | 'decl
 export async function approveAll(orderId: string): Promise<void> {
   const items = await db.items.where('orderId').equals(orderId).toArray();
   await answer(items.filter(isAwaitingClient), 'approve');
-  if (items.some((i) => i.approvalState === 'draft')) {
+  // (Not the unconfirmed ones — v0.88: they stay as they are.)
+  if (items.some(isToSend)) {
     const v = await sendVersion(orderId, { via: 'in_person' });
     await recordDecisions(v.id, v.items.map((s) => ({ itemId: s.itemId, decision: 'approve' as const })), 'in_person');
   }
@@ -289,6 +290,26 @@ export async function removeLines(itemIds: string[]): Promise<OrderItem[]> {
   await syncLabourNames(orderId);
   await syncStage(orderId);
   return removed;
+}
+
+/**
+ * Lines marked not confirmed yet — or confirmed (v0.88, the owner: «сделать так, чтобы можно было отмечать позиции как
+ * неподтверждённые и они чтобы не попадали в смету или инвойс пока»): drafts only. While unconfirmed a line stays on the
+ * job (its price, its supplier's answers, its photo) and is out of «Отправить», «Согласовано», «Готово» and every total;
+ * confirmed — a draft as any other, it goes with the next quote. Not after the invoice (as any line's change).
+ */
+export async function setUnconfirmed(itemIds: string[], on: boolean): Promise<void> {
+  const items = (await db.items.bulkGet(itemIds)).filter((i): i is OrderItem => !!i && i.approvalState === 'draft' && i.kind !== 'discount' && !!i.unconfirmed !== on);
+  if (!items.length) return;
+  const orderId = items[0].orderId;
+  if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
+  await db.transaction('rw', db.items, db.events, async () => {
+    for (const i of items) await db.items.update(i.id, { unconfirmed: on ? true : undefined });
+    await logEvent(orderId, on ? 'lines_unconfirmed' : 'lines_confirmed', { n: items.length });
+  });
+  await syncDiscount(orderId);
+  await syncLabourNames(orderId);
+  await syncStage(orderId);
 }
 
 /** "Undo" for removeLines: the drafts come back (out of the bin). */

@@ -37,6 +37,12 @@ const TYPES: VehicleType[] = ['pickup', 'van', 'bus', 'truck', 'suv', 'mpv', 'se
 /** «TOYOTA» → «Toyota» (a make not in the catalogue, written in capitals). */
 const titleCase = (s: string) => (s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase()) : s);
 const same = (a?: string, b?: string) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+/** Two names of one model: «HiLux» and «Hilux», «Land Cruiser» and «Land Cruiser 200» — not «Land Cruiser» and «Veloz». */
+const sameModel = (a: string, b: string) => {
+  const x = a.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const y = b.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return !!x && !!y && (x === y || x.startsWith(y) || y.startsWith(x));
+};
 
 /**
  * What the AI's reading of a VIN puts in the car's card: only fields that are empty, only when it is sure enough, and
@@ -57,6 +63,9 @@ export function vinFill(car: CarFields, vin: string, ai: AiVin, now = new Date()
   const y = vinYear(vin, now);
   const factsYear = Number(ai.facts?.year) || undefined;
   if (ai.year && !car.year && y && (ai.year === y || ai.year === y - 30) && (!factsYear || factsYear === ai.year)) out.year = ai.year;
+  // The card says another model than the AI (typed, or the garage's own car of the same VIN — v0.88): what the AI says
+  // of the engine and the body is of another car.
+  if (ai.model?.trim() && car.model?.trim() && !sameModel(canonicalModel(theMake, ai.model.trim()), canonicalModel(theMake, car.model.trim()))) return out;
   if (ai.engine?.trim() && !car.engine?.trim()) out.engine = ai.engine.trim().slice(0, 40);
   const body = ai.body?.trim().toLowerCase() as VehicleType | undefined;
   if (body && TYPES.includes(body) && !car.type) out.type = body;

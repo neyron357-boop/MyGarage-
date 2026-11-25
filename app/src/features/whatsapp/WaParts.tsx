@@ -2,7 +2,7 @@ import { IconAlertCircle, IconBan, IconChartBar, IconCheck, IconChecks, IconCloc
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { marks, previewOf, ticksOf, type WaKind, type WaLast, type WaMessage, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
-import { loadPeople, waAvatarSrc } from '../../services/whatsapp';
+import { loadPeople, waNoPicture, waPicture, waPictureNow } from '../../services/whatsapp';
 import { PersonAvatar } from '../../ui/components';
 import { useScreenLiveQuery } from '../../ui/hooks';
 
@@ -22,12 +22,32 @@ const noPicture = new Set<string>();
 
 /**
  * A chat's picture, as WhatsApp shows it — over the person's initials, which stay when there is none. A group is a
- * rounded square, as a company is.
+ * rounded square, as a company is. Kept on this device (v0.88, services/whatsapp.ts `waPicture`): one already here is
+ * drawn at once, as it is — only one that has just come from the server fades in over the initials.
  */
 export const WaAvatar = memo(function WaAvatar({ id, name, group, size = 48 }: { id: string; name: string; group?: boolean; size?: number }) {
-  const src = noPicture.has(id) ? undefined : waAvatarSrc(id);
+  const [src, setSrc] = useState(() => (noPicture.has(id) ? undefined : waPictureNow(id)));
+  // Here when drawn (or a moment after — taken out of this device's keeping): no fade.
+  const [atOnce, setAtOnce] = useState(() => !!src);
   const [shown, setShown] = useState(false);
-  useEffect(() => setShown(false), [id]);
+  useEffect(() => {
+    let alive = true;
+    const now = noPicture.has(id) ? undefined : waPictureNow(id);
+    setSrc(now);
+    setAtOnce(!!now);
+    setShown(false);
+    if (!now && !noPicture.has(id) && !waNoPicture(id)) {
+      const asked = Date.now();
+      void waPicture(id).then((url) => {
+        if (!alive || !url) return;
+        setAtOnce(Date.now() - asked < 120);
+        setSrc(url);
+      });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [id]);
   // A chat known only by its number has no initials: a figure (not «+9»). Brackets are not initials either.
   const letters = /\p{L}/u.test(name) ? name.replace(/[^\p{L}\p{N}\s]/gu, ' ') : '';
   return (
@@ -37,9 +57,9 @@ export const WaAvatar = memo(function WaAvatar({ id, name, group, size = 48 }: {
         <img
           src={src}
           alt=""
-          loading="lazy"
           decoding="async"
-          data-shown={shown || undefined}
+          data-shown={shown || atOnce || undefined}
+          data-at-once={atOnce || undefined}
           onLoad={() => setShown(true)}
           onError={(e) => {
             noPicture.add(id);

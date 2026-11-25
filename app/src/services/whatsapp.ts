@@ -92,9 +92,190 @@ export interface WaStore {
   chatsFailed?: boolean;
   /** Recordings stopped before they were sent, by chat (v0.84). */
   voices: Record<string, VoiceDraft>;
+  /** The chats shown are those kept on this device (v0.88), read from the server when: until it answers again. */
+  chatsKept?: number;
 }
 
 const EMPTY: WaStore = { old: false, away: false, statusAt: 0, chats: [], chatsAt: 0, chatsLoading: false, messages: {}, meta: {}, busy: false, outbox: {}, voices: {} };
+
+/* ---------- Kept on this device (v0.88) ---------- */
+
+/*
+ * The chats' list and their pictures kept on this device (v0.88, the owner: «нужно чтобы контакты в кеше сохранились
+ * локально, а то каждый раз замечаю, как они перезагружаются»): the list is there at once when the app opens — while
+ * the server is asked — and put right by what it says; a picture once brought is drawn at once, without its fade (kept
+ * by the chat, not by the server's address: a new tunnel after the computer starts again does not bring them all again).
+ * This device's only — its own storage, not the app's data: never synced, never in a copy; WhatsApp unlinked — gone.
+ * The messages themselves are still read from the server when a chat is opened.
+ */
+const LIST_KEY = 'mygarage.wa.list';
+const NOPIC_KEY = 'mygarage.wa.nopic';
+const PICS = 'mygarage-wa-pics';
+const DAY = 24 * 60 * 60_000;
+/** A picture is asked again after a week (the server's own copy is a week's too). */
+const PIC_DAYS = 7;
+const local = (): Storage | undefined => (typeof localStorage === 'undefined' ? undefined : localStorage);
+
+interface KeptList {
+  device: string;
+  at: number;
+  chats: WaChat[];
+}
+function keptList(): KeptList | undefined {
+  const cfg = syncConfig();
+  if (!cfg) return undefined;
+  try {
+    const v = JSON.parse(local()?.getItem(LIST_KEY) ?? 'null') as KeptList | null;
+    return v && v.device === cfg.deviceId && Array.isArray(v.chats) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+let keepTimer: ReturnType<typeof setTimeout> | undefined;
+/** The list as it is now, kept — a moment later (a busy account changes it every few seconds: written once for them all). */
+function keepList() {
+  if (transport || keepTimer) return;
+  keepTimer = setTimeout(() => {
+    keepTimer = undefined;
+    const cfg = syncConfig();
+    if (!cfg || !store.chatsAt || !store.chats.length) return;
+    try {
+      local()?.setItem(LIST_KEY, JSON.stringify({ device: cfg.deviceId, at: store.chatsAt, chats: store.chats } satisfies KeptList));
+    } catch {
+      // full: kept while the app is open
+    }
+  }, 2000);
+}
+/** WhatsApp unlinked (or this device let go): nothing of it stays here. */
+export function forgetKeptWa() {
+  clearTimeout(keepTimer);
+  keepTimer = undefined;
+  try {
+    local()?.removeItem(LIST_KEY);
+    local()?.removeItem(NOPIC_KEY);
+  } catch {
+    // nothing kept
+  }
+  noPics = {};
+  for (const url of pics.values()) URL.revokeObjectURL(url);
+  pics.clear();
+  if (typeof caches !== 'undefined') void caches.delete(PICS).catch(() => undefined);
+}
+/** The store at the app's start: the chats kept, if this device has them. */
+function startStore(): WaStore {
+  const kept = transport ? undefined : keptList();
+  return kept ? { ...EMPTY, chats: kept.chats, chatsKept: kept.at } : { ...EMPTY };
+}
+
+/** Pictures of this visit, by chat: drawn at once. */
+const pics = new Map<string, string>();
+const picAsking = new Map<string, Promise<string | undefined>>();
+/** Chats found without a picture, and when (asked again after a week). */
+let noPics: Record<string, number> | undefined;
+function noPicsNow(): Record<string, number> {
+  if (!noPics) {
+    try {
+      noPics = JSON.parse(local()?.getItem(NOPIC_KEY) ?? '{}') as Record<string, number>;
+    } catch {
+      noPics = {};
+    }
+  }
+  return noPics;
+}
+function saveNoPics() {
+  const all = noPicsNow();
+  const now = Date.now();
+  for (const [k, t] of Object.entries(all)) if (now - t > PIC_DAYS * DAY) delete all[k];
+  try {
+    local()?.setItem(NOPIC_KEY, JSON.stringify(all));
+  } catch {
+    // kept while the app is open
+  }
+}
+/** A chat's picture already here (drawn at once). */
+export const waPictureNow = (chat: string): string | undefined => (transportSrc ? transportSrc('avatar', chat) : pics.get(chat));
+/** The chat has no picture (not asked again for a week). */
+export const waNoPicture = (chat: string): boolean => {
+  const t = noPicsNow()[chat];
+  return !!t && Date.now() - t < PIC_DAYS * DAY;
+};
+/** Four pictures asked at a time: a quick tunnel takes 200 requests at most, and the list has hundreds of chats. */
+let picsRunning = 0;
+const picsWaiting: (() => void)[] = [];
+async function picSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (picsRunning >= 4) await new Promise<void>((r) => picsWaiting.push(r));
+  picsRunning++;
+  try {
+    return await fn();
+  } finally {
+    picsRunning--;
+    picsWaiting.shift()?.();
+  }
+}
+const picKey = (chat: string) => `${typeof location === 'undefined' ? 'https://app.local' : location.origin}/__wa-picture/${encodeURIComponent(chat)}`;
+function picUrl(chat: string, blob: Blob): string {
+  const url = URL.createObjectURL(blob);
+  const was = pics.get(chat);
+  if (was) URL.revokeObjectURL(was);
+  pics.set(chat, url);
+  return url;
+}
+/** A picture from the server, kept here (`box`); none — said so for a week. */
+async function bringPicture(chat: string, box: Cache | undefined): Promise<Blob | null | undefined> {
+  const src = fileAddress('avatar', chat);
+  if (!src) return undefined;
+  const res = await picSlot(() => fetch(src));
+  if (res.status === 404) {
+    noPicsNow()[chat] = Date.now();
+    saveNoPics();
+    await box?.delete(picKey(chat));
+    return null;
+  }
+  if (!res.ok) return undefined;
+  const blob = await res.blob();
+  await box?.put(picKey(chat), new Response(blob, { headers: { 'Content-Type': blob.type || 'image/jpeg', 'X-At': String(Date.now()) } })).catch(() => undefined);
+  return blob;
+}
+/**
+ * A chat's picture: kept here — at once (and brought again after a week, quietly); else from the server, then kept.
+ * None (no picture, no server) — undefined.
+ */
+export function waPicture(chat: string): Promise<string | undefined> {
+  const now = waPictureNow(chat);
+  if (now) return Promise.resolve(now);
+  if (waNoPicture(chat)) return Promise.resolve(undefined);
+  let p = picAsking.get(chat);
+  if (!p) {
+    p = (async () => {
+      const box = typeof caches === 'undefined' ? undefined : await caches.open(PICS).catch(() => undefined);
+      const hit = await box?.match(picKey(chat)).catch(() => undefined);
+      if (hit) {
+        const url = picUrl(chat, await hit.blob());
+        if (Date.now() - Number(hit.headers.get('X-At') ?? 0) > PIC_DAYS * DAY) void bringPicture(chat, box).catch(() => undefined);
+        return url;
+      }
+      try {
+        const blob = await bringPicture(chat, box);
+        return blob ? picUrl(chat, blob) : undefined;
+      } catch {
+        return undefined;
+      }
+    })().finally(() => picAsking.delete(chat));
+    picAsking.set(chat, p);
+  }
+  return p;
+}
+/** The pictures of the kept chats taken out of this device's keeping (no server asked) — the list then draws them at once. */
+async function warmPictures(chats: WaChat[]) {
+  if (typeof caches === 'undefined' || transport) return;
+  const box = await caches.open(PICS).catch(() => undefined);
+  if (!box) return;
+  for (const c of chats.slice(0, 60)) {
+    if (pics.has(c.id)) continue;
+    const hit = await box.match(picKey(c.id)).catch(() => undefined);
+    if (hit) picUrl(c.id, await hit.blob());
+  }
+}
 /** The outbox's faces as read (v0.79). */
 export function keepOutbox(items: OutboxFace[]) {
   if (!items.length) return;
@@ -102,11 +283,15 @@ export function keepOutbox(items: OutboxFace[]) {
   for (const it of items) next[it.key] = it;
   set({ outbox: next });
 }
-let store: WaStore = { ...EMPTY };
+let store: WaStore = startStore();
+// The kept chats' pictures, ready before the list is opened (a moment after the start, from this device alone).
+if (store.chats.length && typeof window !== 'undefined') setTimeout(() => void warmPictures(store.chats).catch(() => undefined), 1500);
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 function set(patch: Partial<WaStore>) {
   store = { ...store, ...patch };
+  // The list read from the server (or put right by its stream): kept on this device (v0.88).
+  if (patch.chats && store.chatsAt) keepList();
   emit();
 }
 const subscribe = (f: () => void) => {
@@ -182,9 +367,11 @@ export function refreshWa(): Promise<WaStore> {
       const status = await call<WaStatus>('status', { timeout: 15_000 });
       const was = store.status?.phase;
       set({ status, old: false, away: false, statusAt: Date.now() });
+      // Unlinked: nothing of it stays on this device (v0.88).
+      if (status.phase === 'off' && !status.linked) forgetKeptWa();
       // Ready just now (linked, or back): the chats are read again — where a screen has asked for them.
       if (status.phase === 'ready' && was !== 'ready' && chatsWanted) void loadChats(true);
-      if (status.phase !== 'ready' && store.chats.length) set({ chats: [], chatsAt: 0, messages: {}, meta: {} });
+      if (status.phase !== 'ready' && store.chats.length) set({ chats: [], chatsAt: 0, chatsKept: undefined, messages: {}, meta: {} });
       // What waited for the network goes now (v0.84).
       if (status.phase === 'ready' && was !== 'ready') later(300);
     } catch (e) {
@@ -205,7 +392,8 @@ async function act(path: 'link' | 'logout' | 'restart' | 'code', body?: unknown)
   set({ busy: true });
   try {
     const status = await call<WaStatus>(path, { method: 'POST', body, timeout: 80_000 });
-    set({ status, old: false, away: false, statusAt: Date.now(), ...(path === 'logout' ? { chats: [], chatsAt: 0, messages: {}, meta: {} } : {}) });
+    set({ status, old: false, away: false, statusAt: Date.now(), ...(path === 'logout' ? { chats: [], chatsAt: 0, chatsKept: undefined, messages: {}, meta: {} } : {}) });
+    if (path === 'logout') forgetKeptWa();
   } catch (e) {
     throw failure(e);
   } finally {
@@ -239,7 +427,7 @@ export function loadChats(force = false): Promise<void> {
     set({ chatsLoading: true });
     try {
       const r = await call<{ chats: WaChat[]; total: number; unread: number }>('chats', { query: { limit: '1000' }, timeout: 60_000 });
-      set({ chats: r.chats ?? [], chatsAt: Date.now(), chatsLoading: false, chatsFailed: false });
+      set({ chats: r.chats ?? [], chatsAt: Date.now(), chatsKept: undefined, chatsLoading: false, chatsFailed: false });
     } catch {
       set({ chatsLoading: false, chatsFailed: true });
     } finally {
@@ -976,7 +1164,8 @@ function waHeard(value: unknown) {
     const was = store.status?.phase;
     set({ status: ev.state, old: false, away: false, statusAt: Date.now() });
     if (ev.state.phase === 'ready' && was !== 'ready' && chatsWanted) void loadChats(true);
-    if (ev.state.phase !== 'ready' && store.chats.length) set({ chats: [], chatsAt: 0, messages: {}, meta: {} });
+    if (ev.state.phase !== 'ready' && store.chats.length) set({ chats: [], chatsAt: 0, chatsKept: undefined, messages: {}, meta: {} });
+    if (ev.state.phase === 'off' && !ev.state.linked) forgetKeptWa();
     if (ev.state.phase === 'ready' && was !== 'ready') later(300);
     return;
   }
@@ -993,9 +1182,11 @@ function waHeard(value: unknown) {
   }
   if (!store.chatsAt && ev.t === 'chat' && store.status && typeof ev.unread === 'number') set({ status: { ...store.status, unread: ev.unread } });
   const said: WaEvent = ev.t === 'msg' ? { ...ev, msg: withEarlyAck(ev.msg) } : ev;
-  const next = applyEvent({ chats: store.chats, messages: store.messages }, said);
-  if (next.chats !== store.chats || next.messages !== store.messages) set({ chats: next.chats, messages: next.messages });
-  // A tick for a message not here yet (its send not answered yet): kept for it.
-  else if (ev.t === 'ack' && ev.ack > 0) keepEarlyAck(ev.id, ev.ack);
+  const had = store.messages;
+  const next = applyEvent({ chats: store.chats, messages: had }, said);
+  if (next.chats !== store.chats || next.messages !== had) set({ chats: next.chats, messages: next.messages });
+  // A tick for a message not here yet (its send not answered yet): kept for it — also when the chat's line took it
+  // (v0.88: the line knew the message, the chat did not yet, and its answer came with ack 0 — the clock stayed).
+  if (ev.t === 'ack' && ev.ack > 0 && next.messages === had) keepEarlyAck(ev.id, ev.ack);
 }
 onServerSaid('wa', waSaid);

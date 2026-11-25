@@ -22,8 +22,20 @@ export interface FlowFacts {
 
 const billable = (i: OrderItem) => i.kind !== 'discount';
 
-/** Lines that still count: not declined and not cancelled. */
+/**
+ * A draft the garage has not confirmed yet (v0.88): shown on the job, out of the quote, the invoice and every total.
+ */
+export const isUnconfirmed = (i: Pick<OrderItem, 'approvalState' | 'unconfirmed'>): boolean => i.approvalState === 'draft' && !!i.unconfirmed;
+/** A draft that goes to the customer with the next quote (not an unconfirmed one). */
+export const isToSend = (i: Pick<OrderItem, 'approvalState' | 'unconfirmed'>): boolean => i.approvalState === 'draft' && !i.unconfirmed;
+
+/** Lines that still count: not declined and not cancelled — and not unconfirmed (v0.88). */
 export function liveLines(items: OrderItem[]): OrderItem[] {
+  return items.filter((i) => isToSend(i) || i.approvalState === 'pending' || i.approvalState === 'approved');
+}
+
+/** The lines a job's screen lists (v0.88): those that count, and the unconfirmed ones among them, in their order. */
+export function jobLines(items: OrderItem[]): OrderItem[] {
   return items.filter((i) => i.approvalState === 'draft' || i.approvalState === 'pending' || i.approvalState === 'approved');
 }
 
@@ -35,7 +47,7 @@ export function jobPhase(f: FlowFacts): Phase {
   if (stage === 'delivered') return f.dueFils > 0 ? 'debt' : 'out';
   if (activeInvoice(f.invoices)) return f.dueFils > 0 ? 'pay' : 'out';
   if (f.items.some(isAwaitingClient)) return 'wait';
-  if (f.items.some((i) => i.approvalState === 'draft' && billable(i))) return 'price';
+  if (f.items.some((i) => isToSend(i) && billable(i))) return 'price';
   if (f.items.some((i) => i.approvalState === 'approved' && billable(i))) return 'work';
   // The customer refused the repair: nothing left to do but hand the car back.
   if (f.order.outcome === 'repair_declined') return 'out';

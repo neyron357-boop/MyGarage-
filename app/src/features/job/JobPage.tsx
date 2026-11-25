@@ -1,6 +1,6 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { AiLineWork, AiMark } from '../ai/Ai';
-import {
+import { IconHelpCircle,
   IconBrandWhatsapp,
   IconPlus,
   IconBuildingCommunity,
@@ -63,7 +63,7 @@ import { mechanicsOf } from '../../domain/crew';
 import { formatDate, hoursBetween, monthLong, shortDuration } from '../../domain/dates';
 import { lockedMonthOf } from '../../domain/monthLock';
 import { discountBase } from '../../domain/discount';
-import { liveLines, type Phase } from '../../domain/flow';
+import { isToSend, isUnconfirmed, jobLines, liveLines, type Phase } from '../../domain/flow';
 import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet, reissueDue } from '../../domain/invoice';
 import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGross, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
@@ -78,7 +78,7 @@ import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, updateItem } from '../../services/estimate';
-import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, syncStage, takeBack } from '../../services/flow';
+import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, setUnconfirmed, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { chatOfPhone, ensureChats, waReady } from '../../services/whatsapp';
 import { useWaSel } from '../../ui/waSel';
@@ -151,14 +151,18 @@ import { lockForClient, useClientLock } from '../../ui/clientLock';
 
 /** What a line is to the job right now, as one symbol. */
 function LineMark({ item }: { item: OrderItem }) {
+  const { t } = useTranslation();
   // When the line's state changes (agreed, done) its symbol pops; not when the screen opens.
   const shown = useRef(false);
   useEffect(() => {
     shown.current = true;
   }, []);
-  const state = item.approvalState === 'approved' && item.done ? 'done' : item.approvalState;
+  const state = item.approvalState === 'approved' && item.done ? 'done' : isUnconfirmed(item) ? 'unconfirmed' : item.approvalState;
   const mark =
-    state === 'pending' ? (
+    state === 'unconfirmed' ? (
+      // Not confirmed yet (v0.88): out of the quote and the invoice until it is.
+      <IconHelpCircle size={20} stroke={2} color="var(--mantine-color-yellow-7)" aria-label={t('job.unconfirmed')} />
+    ) : state === 'pending' ? (
       <IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />
     ) : state === 'done' ? (
       <IconChecks size={20} stroke={2.2} color="var(--mantine-color-green-6)" aria-hidden />
@@ -704,14 +708,14 @@ export function JobPage() {
     if (orderId && pctDiscount) syncDiscount(orderId).catch((e) => console.error(e));
   }, [orderId, baseKey, pctDiscount]);
   // Once on a device: the first line peeks to the left — lines can be swiped.
-  useSwipeHint(!!b && !activeInvoice(b.invoices) && !['closed', 'cancelled', 'booked'].includes(b.order.stage) && liveLines(b.items).some((i) => i.kind !== 'discount'));
+  useSwipeHint(!!b && !activeInvoice(b.invoices) && !['closed', 'cancelled', 'booked'].includes(b.order.stage) && jobLines(b.items).some((i) => i.kind !== 'discount'));
   // The screen glows in the colour of the job's step.
   const bodyRef = useRef<HTMLDivElement>(null);
   useStuck(tabsMark, tabsBar, !!b);
   usePhaseGlow(bodyRef, phase);
 
   // Lines moved by hand in edit mode (≡ at the row's end): the quote and the invoice list them so.
-  const sortIds = b ? liveLines(b.items).filter((i) => i.kind !== 'discount').map((i) => i.id) : [];
+  const sortIds = b ? jobLines(b.items).filter((i) => i.kind !== 'discount').map((i) => i.id) : [];
   const sortGrip = useSortable(sortIds, (ids) => {
     if (orderId) void run(async () => (await reorderLines(orderId, ids), haptic('light')));
   });
@@ -739,13 +743,18 @@ export function JobPage() {
   const billTo = inv && invoiceBuyer(inv.buyer, c);
   const due = Math.max(0, bundleAmountDue(b));
   const live = liveLines(b.items);
-  const lines = live.filter((i) => i.kind !== 'discount');
+  // On the screen also the unconfirmed lines (v0.88) — out of every total, the quote and the invoice.
+  const listed = jobLines(b.items);
+  const lines = listed.filter((i) => i.kind !== 'discount');
+  const unconfirmed = lines.filter(isUnconfirmed);
   const discounts = live.filter((i) => i.kind === 'discount');
   // Refused by the customer — those not brought back from the bin (v0.70).
   const refusedLines = b.items.filter((i) => i.approvalState === 'declined' && !i.restoredAt);
   const waiting = b.items.filter(isAwaitingClient);
   const sum = sumAmounts(live.map(itemAmounts));
-  const unpriced = lines.filter((i) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0);
+  // A line with no price yet: «+ Цена» on it; one that goes with the quote stops it (an unconfirmed one does not).
+  const noPrice = (i: OrderItem) => i.approvalState === 'draft' && !i.customerSupplied && itemAmounts(i).gross === 0;
+  const unpriced = lines.filter((i) => isToSend(i) && noPrice(i));
   const open = phase !== 'closed' && phase !== 'cancelled';
   const editable = open && !inv;
   // A job of a closed month of its customer (v0.69): nothing of it changes — the services refuse too.
@@ -803,7 +812,7 @@ export function JobPage() {
 
   // The usual jobs (those that went with a similar complaint first) for one-tap adding.
   // (A labour charge named by the parts, v0.80, is its plain words: its chip does not come back.)
-  const onJob = new Set(live.map((i) => (plainLabour(itemTitle(i, docLang)) ? labourWords(itemTitle(i, docLang)) : itemTitle(i, docLang))));
+  const onJob = new Set(listed.map((i) => (plainLabour(itemTitle(i, docLang)) ? labourWords(itemTitle(i, docLang)) : itemTitle(i, docLang))));
   const quick = (suggestions?.work.top ?? [])
     .filter((name) => !onJob.has(name))
     .slice(0, 8)
@@ -829,7 +838,7 @@ export function JobPage() {
   // Where a part is — not on a done line (it is fitted), nor after the invoice.
   // The whole list of lines as text, one tap: to paste to a supplier, the customer, anywhere.
   // The parts by name only, without prices — the car and its VIN on top: pasted to a parts seller as they are.
-  const parts = live.filter((i) => i.kind === 'part');
+  const parts = lines.filter((i) => i.kind === 'part');
   const copyLines = () =>
     run(async () => {
       if (!(await copyText(partNamesText(parts, docLang, b.vehicle)))) throw new AppError('err.copy');
@@ -873,7 +882,12 @@ export function JobPage() {
         ? { label: t('job.agreed'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await answerLines([i.id], 'approve'), haptic('success'))) }
         : i.approvalState === 'approved'
           ? { label: i.done ? t('job.lineUndone') : t('job.lineDone'), icon: IconChecks, color: i.done ? 'gray' : 'green', onCommit: () => void run(async () => (await lineDone(i.id, !i.done), haptic(i.done ? 'light' : 'success'))) }
-          : undefined;
+          : i.approvalState === 'draft' && i.kind !== 'discount'
+            ? // A draft (v0.88): not confirmed yet — out of the quote and the invoice; again — confirmed.
+              isUnconfirmed(i)
+              ? { label: t('job.confirm'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await setUnconfirmed([i.id], false), haptic('success'))) }
+              : { label: t('job.unconfirm'), icon: IconHelpCircle, color: 'yellow', onCommit: () => void run(async () => (await setUnconfirmed([i.id], true), haptic('light'))) }
+            : undefined;
   const row = (i: OrderItem) => (
     <PickRow
       key={i.id}
@@ -882,7 +896,7 @@ export function JobPage() {
       // No swipe that takes a line away (v0.83, the owner: «убрать свайп для удаления»): a line goes from its sheet or
       // by «Выбрать» (a hold on it).
       leading={swipeOn(i)}
-      dim={i.done && !picking}
+      dim={(i.done || isUnconfirmed(i)) && !picking}
       left={
         picking && canPick(i) ? (
           picked.has(i.id) ? (
@@ -915,6 +929,12 @@ export function JobPage() {
         </Text>
       }
       subtitle={dots([
+        // Not confirmed yet (v0.88): said in its own colour — out of the quote and the invoice.
+        isUnconfirmed(i) && (
+          <span key="unconfirmed" className="line-unconfirmed">
+            {t('job.unconfirmed')}
+          </span>
+        ),
         // Its name asks for more than its quantity (v0.70): «×2?» in orange — a tap asks.
         !picking && qtyShort(i) && (
           <button
@@ -952,14 +972,16 @@ export function JobPage() {
           // a tap to change it (the row's name opens its card).
           <button
             type="button"
-            className={unpriced.includes(i) ? 'price-add' : 'price-tap-row tnum'}
-            aria-label={unpriced.includes(i) ? t('price.add') : t('job.changePrice')}
+            className={noPrice(i) ? 'price-add' : 'price-tap-row tnum'}
+            // Not confirmed (v0.88): its sum is out of the total — grey.
+            data-off={isUnconfirmed(i) || undefined}
+            aria-label={noPrice(i) ? t('price.add') : t('job.changePrice')}
             onClick={(e) => {
               e.stopPropagation();
               openPrice(i);
             }}
           >
-            {unpriced.includes(i) ? (
+            {noPrice(i) ? (
               <>
                 <IconPlus size={15} stroke={2.6} aria-hidden />
                 {t('price.word')}
@@ -1222,6 +1244,15 @@ export function JobPage() {
   const allPicked = pickedLines.length > 0 && pickedLines.length === lines.filter(canPick).length;
   // The picked parts (v0.29): one supplier for them, where they stand — all at once.
   const pickedParts = pickedLines.filter((i) => i.kind === 'part' && !i.customerSupplied);
+  // The picked drafts (v0.88): not confirmed yet — or, all of them so, confirmed.
+  const pickedDrafts = pickedLines.filter((i) => i.approvalState === 'draft');
+  const allUnconfirmed = pickedDrafts.length > 0 && pickedDrafts.every(isUnconfirmed);
+  const markPicked = () =>
+    run(async () => {
+      await setUnconfirmed(pickedDrafts.map((i) => i.id), !allUnconfirmed);
+      setPicked(null);
+      haptic(allUnconfirmed ? 'success' : 'light');
+    });
   const removePicked = () =>
     run(async () => {
       const removed = await removeLines(pickedLines.map((i) => i.id));
@@ -1245,6 +1276,19 @@ export function JobPage() {
             <IconTruckDelivery size={21} stroke={1.9} />
           </ActionIcon>
         )}
+        {pickedDrafts.length > 0 && (
+          <ActionIcon
+            size={44}
+            radius="xl"
+            variant="default"
+            aria-label={allUnconfirmed ? t('job.confirm') : t('job.unconfirm')}
+            onClick={() => void markPicked()}
+            style={{ flex: '0 0 auto' }}
+            data-pick-unconfirm={allUnconfirmed ? 'confirm' : 'unconfirm'}
+          >
+            {allUnconfirmed ? <IconCheck size={21} stroke={2} color="var(--mantine-color-green-7)" /> : <IconHelpCircle size={21} stroke={1.9} color="var(--mantine-color-yellow-7)" />}
+          </ActionIcon>
+        )}
         <Button
           color="red"
           loading={busy}
@@ -1255,7 +1299,7 @@ export function JobPage() {
           style={{ flex: 1 }}
         >
           {/* Beside the parts' two buttons (v0.53) the words did not fit a phone: its symbol and the number. */}
-          {pickedParts.length > 0 && phone ? pickedLines.length : t('job.removeN', { n: pickedLines.length })}
+          {(pickedParts.length > 0 || pickedDrafts.length > 0) && phone ? pickedLines.length : t('job.removeN', { n: pickedLines.length })}
         </Button>
       </Group>
     );
@@ -1531,7 +1575,9 @@ export function JobPage() {
         back="/"
         // The customer's chat (v0.81, «заголовок с названием автомобиля компактнее»): the car in the bar only — room for messages.
         inline={phone && tab === 'chat'}
-        eyebrow={`№${b.order.number}`}
+        // The day the car came (v0.88, the owner: «первоначальная дата должна сохраниться… какой день физически машина
+        // приезжала»): always in sight — work continued later, the job closed and opened again, it stays the first one.
+        eyebrow={phase === 'booked' ? `№${b.order.number}` : `№${b.order.number} · ${formatDate(b.order.arrivedAt ?? b.order.createdAt)}`}
         // The VIN alone, one tap (v0.70) — small, under the car's name (v0.71, «переместить наверх под названием авто мелко»).
         subtitle={
           vin ? (
@@ -1679,6 +1725,12 @@ export function JobPage() {
       >
         {/* The parts short of their names (v0.70): the last look before the invoice. */}
         <QtyCheckList items={live} lang={docLang} />
+        {/* Not confirmed (v0.88): they stay on the job, not on the invoice. */}
+        {unconfirmed.length > 0 && (
+          <Text size="sm" c="yellow.8" fw={600} mb="xs" data-unconfirmed-out>
+            {t('job.unconfirmedOut', { count: unconfirmed.length })}
+          </Text>
+        )}
         <Text size="sm" mt={live.some((i) => qtyShort(i)) ? 'sm' : undefined}>
           {t('invoice.confirmText')}
         </Text>

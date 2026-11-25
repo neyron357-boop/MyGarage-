@@ -1,5 +1,5 @@
 import { ActionIcon, Autocomplete, Button, Group, Modal, SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
-import { IconBuildingFactory2, IconCar, IconCheck, IconListDetails, IconMinus, IconPlus, IconUser, IconX } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconCar, IconCheck, IconHelpCircle, IconListDetails, IconMinus, IconPlus, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +15,7 @@ import { AiMark, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
 import { VinCatalogsRow } from './VinCatalogs';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
-import { syncStage } from '../../services/flow';
+import { setUnconfirmed, syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { setProcurement } from '../../services/parts';
@@ -568,6 +568,24 @@ export function LineSheet({
                 {c.note && <span className="line-sum-note">{c.note}</span>}
               </div>
             ))}
+          </div>
+        )}
+
+        {item?.approvalState === 'draft' && (
+          // Not confirmed yet (v0.88, the owner: «отмечать позиции как неподтверждённые, чтобы они не попадали в смету или
+          // инвойс пока»): a tap, at once — out of the quote and the invoice; again — confirmed.
+          <div>
+            <button
+              type="button"
+              className="chip"
+              data-active={!!live?.unconfirmed}
+              aria-pressed={!!live?.unconfirmed}
+              data-line-unconfirmed
+              onClick={() => void run(async () => (await setUnconfirmed([item.id], !live?.unconfirmed), haptic('selection')))}
+            >
+              <IconHelpCircle size={16} stroke={2} style={{ verticalAlign: -3, marginRight: 6 }} color="var(--mantine-color-yellow-7)" aria-hidden />
+              {t('job.unconfirmChip')}
+            </button>
           </div>
         )}
 

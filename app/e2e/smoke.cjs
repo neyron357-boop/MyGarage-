@@ -2857,10 +2857,17 @@ async function launchBrowser() {
     const pdfMade = await page.evaluate(async (orderId) => {
       const { ownerCheckFile } = await import('/src/services/ownerCheck.ts');
       const m = await ownerCheckFile(orderId, 'ru');
-      const head = new TextDecoder().decode(new Uint8Array(await m.pdf.blob.slice(0, 5).arrayBuffer()));
-      return { head, size: m.pdf.blob.size, name: m.pdf.filename, vat: m.check.vat, sellers: m.check.sellers.length };
+      const bytes = new Uint8Array(await m.pdf.blob.arrayBuffer());
+      const head = new TextDecoder().decode(bytes.slice(0, 5));
+      // v0.88: one page (the owner: «помещать всё в одной странице»).
+      const pages = (new TextDecoder('latin1').decode(bytes).match(/\/Type\s*\/Page[^s]/g) || []).length;
+      let b64 = '';
+      for (let i = 0; i < bytes.length; i += 32768) b64 += String.fromCharCode(...bytes.subarray(i, i + 32768));
+      return { head, size: m.pdf.blob.size, name: m.pdf.filename, vat: m.check.vat, sellers: m.check.sellers.length, pages, b64: btoa(b64) };
     }, job);
-    if (pdfMade.head !== '%PDF-' || pdfMade.size < 5000 || !/\.pdf$/.test(pdfMade.name) || pdfMade.vat.due !== pdfMade.vat.out - pdfMade.vat.in || !pdfMade.sellers) throw new Error('the owner’s PDF: ' + JSON.stringify(pdfMade));
+    fs.writeFileSync(path.join(SP, 'shots', '41d-owner-check.pdf'), Buffer.from(pdfMade.b64, 'base64'));
+    delete pdfMade.b64;
+    if (pdfMade.head !== '%PDF-' || pdfMade.size < 5000 || !/\.pdf$/.test(pdfMade.name) || pdfMade.vat.due !== pdfMade.vat.out - pdfMade.vat.in || !pdfMade.sellers || pdfMade.pages !== 1) throw new Error('the owner’s PDF: ' + JSON.stringify(pdfMade));
     // The phone's share sheet: the PDF and the words together.
     await page.evaluate(() => {
       window.__shared = null;

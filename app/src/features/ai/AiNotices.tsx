@@ -1,4 +1,5 @@
 import { notifications } from '@mantine/notifications';
+import { IconCar } from '@tabler/icons-react';
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dayShort, dubaiDate } from '../../domain/dates';
@@ -27,8 +28,10 @@ export function AiNotices() {
         const id = `ai-${Date.now()}`;
         let title: string;
         let body: ReactNode;
+        // Said by the garage's own car of the same VIN (v0.88): not the AI's — no mark of it, no sound.
+        const garage = n.kind === 'car' && n.from === 'garage';
         if (n.kind === 'car') {
-          title = t('ai.carTitle');
+          title = garage ? t('ai.carGarage') : t('ai.carTitle');
           const values = [n.filled.make, n.filled.model, n.filled.year, n.filled.engine, n.filled.type ? t(`vehicle.bodyTypes.${n.filled.type}`) : ''].filter(Boolean);
           body = (
             <span className="ai-pills">
@@ -66,15 +69,21 @@ export function AiNotices() {
           );
         }
         // The AI has finished with a result: its sound (v0.52).
-        chime('found');
+        if (!garage) chime('found');
         const undo = n.undo;
         notifications.show({
           id,
           className: 'ai-toast',
           autoClose: 6000,
           message: (
-            <span className="ai-toast-body" data-ai-notice={n.kind}>
-              <AiMark size={30} />
+            <span className="ai-toast-body" data-ai-notice={garage ? 'garage' : n.kind}>
+              {garage ? (
+                <span className="ai-garage-mark" aria-hidden>
+                  <IconCar size={20} stroke={2} />
+                </span>
+              ) : (
+                <AiMark size={30} />
+              )}
               <span className="ai-toast-text">
                 <span className="ai-toast-title">{title}</span>
                 {body}

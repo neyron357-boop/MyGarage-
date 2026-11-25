@@ -76,6 +76,13 @@ export async function updateVehicle(id: string, patch: Partial<VehicleInput>): P
     out.plateSearch = plateSearchKey(out.plate);
   }
   if (patch.vin !== undefined) out.vin = patch.vin.toUpperCase().replace(/\s/g, '') || undefined;
+  // A field the AI filled, changed by a person (v0.88: «Land Cruiser» put right to «Veloz»): the person's word now — the
+  // garage's next car of the same VIN takes it (domain/vinDecode.ts `stemCar`).
+  const was = await db.vehicles.get(id);
+  if (was?.vinAi?.filled.length) {
+    const fixed = (['make', 'model', 'year', 'engine', 'type'] as const).filter((k) => k in patch && patch[k as keyof typeof patch] !== was[k]);
+    if (fixed.length) out.vinAi = { ...was.vinAi, filled: was.vinAi.filled.filter((k) => !fixed.includes(k)) };
+  }
   await db.vehicles.update(id, out);
   // A VIN put in the card: the garage's AI reads it (v0.48) — what is empty in the card filled, not waited for.
   if (out.vin) aiReadVinLater(id);

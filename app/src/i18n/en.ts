@@ -1185,6 +1185,15 @@ export const en: typeof ru = {
     done: 'Done',
     lineDone: 'Done',
     lineUndone: 'Not done',
+    // v0.88: a line not confirmed yet — out of the quote and the invoice.
+    unconfirmed: 'not confirmed',
+    unconfirm: 'Unconfirm',
+    confirm: 'Confirm',
+    unconfirmChip: 'Not confirmed',
+    unconfirmedOut_one: '{{count}} line not confirmed — not on the invoice',
+    unconfirmedOut_few: '{{count}} lines not confirmed — not on the invoice',
+    unconfirmedOut_many: '{{count}} lines not confirmed — not on the invoice',
+    unconfirmedOut_other: '{{count}} lines not confirmed — not on the invoice',
     drop: 'Remove',
     arrived: 'Arrived',
     pay: 'Payment',
@@ -2494,7 +2503,8 @@ export const en: typeof ru = {
     message: 'Message',
     openPdf: 'Open the PDF',
     msg: { client: 'Customer: {{sum}}', spent: 'Parts and costs: {{sum}}', profit: 'Profit: {{sum}}', labour: 'How much should we charge for labour?', check: 'Please check.' },
-    pdf: { title: 'For the owner to check', parts: 'Parts', work: 'Work and services', extra: 'Other expenses', item: 'Item', qty: 'Qty', buyNet: 'Buy', buyVat: 'VAT', saleNet: 'Sell', saleVat: 'VAT', saleTotal: 'Customer', margin: 'Margin', noCost: 'no cost', noPrice: 'no price', own: "customer's part", outside: 'outside', noSupplier: 'no supplier', off: 'discount', discount: 'Discount', totals: 'Totals', net: 'excl. VAT', vat: 'VAT', gross: 'incl. VAT', toClient: 'Customer pays', spent: 'Spent', profit: 'Profit', profitGross: "incl. VAT — as the garage's books count it", profitNet: 'excl. VAT — sales excl. VAT less costs excl. VAT', taxes: 'VAT (tax)', vatOut: 'VAT charged to the customer', vatIn: 'VAT paid to suppliers', vatDue: 'VAT to pay', warnUnpriced: 'No price for the customer: {n}', warnNoCost: 'Parts without a cost: {n}', sellers: 'Suppliers', sellerTotal: 'We pay', noSellers: 'No suppliers picked yet', customer: 'Customer', file: 'check' },
+    // v0.88: one page — the line, its supplier, the supplier's price, what the garage sells it for (all with VAT).
+    pdf: { title: 'For the owner to check', parts: 'Parts', work: 'Work and services', extra: 'Other costs', item: 'Line', supplier: 'Supplier', buy: "Supplier's price", sell: 'We sell', margin: 'Difference', noCost: 'no cost', noPrice: 'no price', own: "customer's part", outside: 'outside', noSupplier: 'not chosen', garageWork: 'own work', off: 'discount', discount: 'Discount', toClient: 'Customer pays', spent: 'Spent', profit: 'Profit', vatLine: 'VAT: from the customer {out} − to the suppliers {in} = to pay {due}', warnUnpriced: 'No price for the customer: {n}', warnNoCost: 'Parts with no cost: {n}', customer: 'Customer', footer: 'All amounts in AED with VAT', file: 'check' },
     title: 'For the owner to check',
     send: 'Send',
     toOwner: 'To the owner on WhatsApp',
@@ -2610,6 +2620,8 @@ export const en: typeof ru = {
     sample: 'Sample',
     // v0.48.1: its notices as cards, its state in the server's card.
     carTitle: 'Car by VIN',
+    // v0.88: the car filled from the garage's own cars of the same VIN (no AI).
+    carGarage: "As the garage's own cars",
     nameTitle: 'Name corrected',
     working: 'AI at work',
     yandex: 'Search on Yandex',

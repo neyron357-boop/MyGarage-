@@ -196,6 +196,20 @@ describe('a chat', () => {
     expect(waStore().messages[ALI].at(-1)).toMatchObject({ id: real.id, ack: 1 });
   });
 
+  it('v0.88: a tick the chat’s line takes before the message is in the chat — kept for the send’s answer too', async () => {
+    await loadMessages(ALI);
+    const real = msg(`true_${ALI}_3EB0CC33`, { me: true, t: Date.now(), text: 'On the way', ack: 0 });
+    server.onSend = async () => {
+      // The chat's line is told of the message (its last one), and its tick comes — the chat itself has only the copy on its way.
+      tellSaid(`data: ${JSON.stringify({ wa: { t: 'chat', chat: chat(ALI, { t: real.t, last: { id: real.id, t: real.t, me: true, type: 'chat', text: real.text, ack: 0 } }) } })}`);
+      tellSaid(`data: ${JSON.stringify({ wa: { t: 'ack', chat: ALI, id: real.id, ack: 1 } })}`);
+      return { ok: true, msg: real };
+    };
+    await sendWaText(ALI, 'On the way');
+    expect(waStore().chats.find((c) => c.id === ALI)?.last?.ack).toBe(1);
+    expect(waStore().messages[ALI].at(-1)).toMatchObject({ id: real.id, ack: 1 });
+  });
+
   it('a text that did not go stays, marked — and says why', async () => {
     await loadMessages(ALI);
     server.fail = new SyncError(429, 'too many messages a minute');

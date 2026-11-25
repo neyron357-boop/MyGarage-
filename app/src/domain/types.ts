@@ -632,6 +632,12 @@ export interface Media {
   name?: string;
   locked: boolean;
   createdAt: string;
+  /**
+   * When the photo was taken (v0.88, the owner: «зафиксируйте дату фотографии — фактическую дату, когда я фотографирую
+   * автомобиль»): by the photo's own Exif (domain/exifDate.ts) — a photo picked from the phone keeps its day. None —
+   * `createdAt` (taken here and kept at once, or a picture that does not say).
+   */
+  takenAt?: string;
 }
 
 export interface MediaBlob {
@@ -780,6 +786,12 @@ export interface OrderItem {
   qtyNoted?: number;
   /** A cancelled (v0.68) or refused (v0.70) line brought back from the bin as a new draft: the bin lists it no more. */
   restoredAt?: string;
+  /**
+   * Not confirmed yet (v0.88, the owner: «отмечать позиции как неподтверждённые, чтобы они не попадали в смету или
+   * инвойс пока»): a draft kept on the job — out of the quote, the invoice and every total (domain/flow.ts `liveLines`)
+   * until it is confirmed. A draft only (services/estimate.ts `setUnconfirmed`).
+   */
+  unconfirmed?: true;
   createdAt: string;
 }
 

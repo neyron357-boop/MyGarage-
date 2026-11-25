@@ -29,6 +29,11 @@ describe('a VIN read by the AI', () => {
     expect(vinFill(empty, 'JTDBR42E39J01645', { ...ai, vin: 'JTDBR42E39J01645' }, NOW)).toEqual({});
     expect(vinFill(empty, VIN, { ...ai, body: 'hatchback' }, NOW).type).toBeUndefined();
   });
+  it('v0.88: the card says another model (typed, or the garage’s own car of the same VIN): the AI’s engine and body are another car’s', () => {
+    expect(vinFill({ make: 'Toyota', model: 'Auris' }, VIN, ai, NOW)).toEqual({ year: 2009 });
+    // The same model under another spelling: the rest is taken.
+    expect(vinFill({ make: 'Toyota', model: 'COROLLA' }, VIN, ai, NOW)).toEqual({ year: 2009, engine: '1.8L 4-cyl', type: 'sedan' });
+  });
 });
 
 describe('a part’s name looked at by the AI', () => {

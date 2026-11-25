@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeVinCar, vinCarLocal, vpicCar } from './vinDecode';
+import { mergeVinCar, stemCar, vinCarLocal, vinStem, vpicCar } from './vinDecode';
 
 const NOW = new Date('2026-11-24T08:00:00Z');
 // A VIN made to the North-American rule (its check digit adds up): Honda, 2003.
@@ -32,5 +32,33 @@ describe('what car a VIN is — without AI (v0.81)', () => {
     expect(mergeVinCar({ make: 'Honda', year: 2003 }, {})).toEqual({ make: 'Honda', year: 2003 });
     expect(mergeVinCar({ make: 'Toyota' }, { make: 'Ford', model: 'Focus' })).toEqual({ make: 'Toyota' });
     expect(mergeVinCar({}, { make: 'Lexus', model: 'LX' })).toEqual({ make: 'Lexus', model: 'LX' });
+  });
+});
+
+describe('v0.88: what the garage itself knows of a VIN — its other cars of the same maker and model code', () => {
+  // A Toyota built in Indonesia: the AI named it «Land Cruiser»; the owner put it right — «Veloz».
+  const VELOZ = 'MHFAB1BY4P3069309';
+  const veloz = { id: 'v1', vin: VELOZ, make: 'Toyota', model: 'Veloz', engine: '1.5L 4-cyl', type: 'mpv' };
+  it('the stem: the first eight characters of a VIN, none of a broken one', () => {
+    expect(vinStem(VELOZ)).toBe('MHFAB1BY');
+    expect(vinStem('mhfab1by4p3069309')).toBe('MHFAB1BY');
+    expect(vinStem('MHFAB1BY4P306930')).toBe('');
+  });
+  it('another car of the same stem: its make and model as a person wrote them; engine and body where they agree', () => {
+    expect(stemCar('MHFAB1BY0R3011111', [veloz])).toEqual({ make: 'Toyota', model: 'Veloz', engine: '1.5L 4-cyl', type: 'mpv' });
+    // Not the car itself; not another stem.
+    expect(stemCar(VELOZ, [veloz], 'v1')).toBeUndefined();
+    expect(stemCar('MHFAB1BZ0R3011111', [veloz])).toBeUndefined();
+    // Two models under one stem: neither. Engines that differ: no engine.
+    expect(stemCar('MHFAB1BY0R3011111', [veloz, { ...veloz, id: 'v2', model: 'Avanza' }])).toBeUndefined();
+    expect(stemCar('MHFAB1BY0R3011111', [veloz, { ...veloz, id: 'v2', engine: '1.3L' }])).toEqual({ make: 'Toyota', model: 'Veloz', type: 'mpv' });
+  });
+  it('not the AI’s word: a model the AI filled is not taken — until a person put it right', () => {
+    const byAi = { ...veloz, model: 'Land Cruiser', vinAi: { filled: ['model', 'year'] } };
+    expect(stemCar('MHFAB1BY0R3011111', [byAi])).toBeUndefined();
+    expect(stemCar('MHFAB1BY0R3011111', [{ ...byAi, model: 'Veloz', vinAi: { filled: ['year'] } }])?.model).toBe('Veloz');
+  });
+  it('a make that is not the VIN’s own maker is not taken', () => {
+    expect(stemCar('MHFAB1BY0R3011111', [{ ...veloz, make: 'Nissan' }])).toBeUndefined();
   });
 });

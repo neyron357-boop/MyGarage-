@@ -14,6 +14,8 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/sync/push {changes}        — the device's changes
  *   GET  /api/sync/pull?since=N          — other devices' changes after N
  *   GET  /api/sync/events                — a stream: told at once when other devices' changes are kept (v0.41.2)
+ *   GET  /api/sync/poll?after=N&boot=B   — the same, asked for: what was said after N, at once or in 25 s (v0.88 —
+ *                                          a Cloudflare quick tunnel does not pass a stream on)
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/sync/numbers               — job numbers kept for this device, for jobs made without the server (v0.84.2)
  *   POST /api/forget                     — this device leaves (its key no longer works)
@@ -273,6 +275,11 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
 
       if (req.method === 'GET' && url.pathname === '/api/sync/events' && events) {
         events.open(req, res, device.id, store.lastRev());
+        return;
+      }
+      // The same, asked for (v0.88): a Cloudflare quick tunnel does not pass a stream on (events.mjs).
+      if (req.method === 'GET' && url.pathname === '/api/sync/poll' && events) {
+        events.poll(res, device.id, store.lastRev(), { after: url.searchParams.get('after'), boot: url.searchParams.get('boot') }, (body) => send(res, 200, body));
         return;
       }
 

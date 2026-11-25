@@ -61,9 +61,9 @@ export async function coverOf(vehicleId: string): Promise<string | undefined> {
 export type CarSlot = 'cover' | 'vin' | MulkiyaSide;
 
 /** One photo the car keeps (its main photo, its VIN plate): a new one replaces the one before. */
-async function setCarPhoto(vehicleId: string, slot: CarSlot, file: Blob, thumb?: Blob): Promise<Media> {
+async function setCarPhoto(vehicleId: string, slot: CarSlot, file: Blob, thumb?: Blob, takenAt?: string): Promise<Media> {
   const before = (await db.media.where('ownerId').equals(vehicleId).toArray()).filter((m) => m.slot === slot);
-  const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot, file, thumb });
+  const media = await addMedia({ ownerType: 'vehicle', ownerId: vehicleId, slot, file, thumb, takenAt });
   for (const m of before) await deleteMedia(m.id);
   return media;
 }
@@ -76,7 +76,9 @@ export async function rotateCarPhoto(vehicleId: string, slot: CarSlot, mediaId: 
   const blob = await mediaBlob(mediaId);
   if (!blob) throw new AppError('err.notFound');
   const turned = await turnPhoto(blob, turn);
-  return setCarPhoto(vehicleId, slot, turned.blob, turned.thumb);
+  // The turned copy keeps the moment the photo was taken (v0.88): its own, or when it was added.
+  const was = await db.media.get(mediaId);
+  return setCarPhoto(vehicleId, slot, turned.blob, turned.thumb, was?.takenAt ?? was?.createdAt);
 }
 
 /** Which of these photos are the car's own (taken for it — not a check-in act's, which stay as they are). */

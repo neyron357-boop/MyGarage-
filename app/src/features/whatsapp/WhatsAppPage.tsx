@@ -340,7 +340,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       {failed && s.chats.length > 0 && (
         <div className="wa-list-note" role="status" data-wa-list-note>
           <IconCloudOff size={16} stroke={2} aria-hidden />
-          <span>{s.chatsAt ? t('wa.staleAt', { time: dubaiTime(new Date(s.chatsAt).toISOString()) }) : t('wa.loadFailed')}</span>
+          <span>{s.chatsAt || s.chatsKept ? t('wa.staleAt', { time: dubaiTime(new Date(s.chatsAt || s.chatsKept!).toISOString()) }) : t('wa.loadFailed')}</span>
           <Button variant="subtle" size="compact-sm" onClick={() => void loadChats(true)}>
             {t('wa.gate.retry')}
           </Button>
@@ -627,7 +627,9 @@ export function WhatsAppPage() {
     return () => window.removeEventListener('mg-wa-open', on);
   }, [openNumber, errorText]);
 
-  const gate = ready ? null : <WaGate s={s} />;
+  // The chats kept on this device (v0.88) while the server is asked: shown at once, not a spinner.
+  const kept = !s.status && !s.old && !s.away && waCan() && s.chats.length > 0;
+  const gate = ready || kept ? null : <WaGate s={s} />;
   // Under the chat's name: whose it is in the garage and the number (a group — «Группа»).
   const headLine = face ? (face.c.group ? t('wa.groupLine') : [face.who ? t(`wa.who.${face.who.kind}`) : '', face.c.phone ? formatPhone(`+${face.c.phone}`) : ''].filter(Boolean).join(' · ')) : '';
   const eyebrow = s.status?.me && ready ? formatPhone(`+${s.status.me.phone}`) : undefined;

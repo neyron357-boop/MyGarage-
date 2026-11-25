@@ -1187,6 +1187,15 @@ export const ru = {
     done: 'Готово',
     lineDone: 'Сделано',
     lineUndone: 'Не сделано',
+    // v0.88: a line not confirmed yet — out of the quote and the invoice.
+    unconfirmed: 'не подтверждена',
+    unconfirm: 'Не подтв.',
+    confirm: 'Подтвердить',
+    unconfirmChip: 'Не подтверждена',
+    unconfirmedOut_one: '{{count}} строка не подтверждена — не войдёт в инвойс',
+    unconfirmedOut_few: '{{count}} строки не подтверждены — не войдут в инвойс',
+    unconfirmedOut_many: '{{count}} строк не подтверждены — не войдут в инвойс',
+    unconfirmedOut_other: '{{count}} строки не подтверждены — не войдут в инвойс',
     drop: 'Убрать',
     arrived: 'Приехал',
     pay: 'Оплата',
@@ -2503,7 +2512,8 @@ export const ru = {
     message: 'Сообщение',
     openPdf: 'Открыть PDF',
     msg: { client: 'Клиенту: {{sum}}', spent: 'Закупка и расходы: {{sum}}', profit: 'Прибыль: {{sum}}', labour: 'Сколько ставить за оплату труда?', check: 'Проверьте, пожалуйста.' },
-    pdf: { title: 'Проверка владельцу', parts: 'Запчасти', work: 'Работа и услуги', extra: 'Другие расходы', item: 'Позиция', qty: 'Кол.', buyNet: 'Закупка', buyVat: 'VAT', saleNet: 'Продажа', saleVat: 'VAT', saleTotal: 'Клиенту', margin: 'Маржа', noCost: 'нет закупки', noPrice: 'нет цены', own: 'запчасть клиента', outside: 'на стороне', noSupplier: 'поставщик не выбран', off: 'скидка', discount: 'Скидка', totals: 'Итоги', net: 'без VAT', vat: 'VAT', gross: 'с VAT', toClient: 'Клиент платит', spent: 'Расходы', profit: 'Прибыль', profitGross: 'с VAT — как в учёте мастерской', profitNet: 'без VAT — продажа без VAT минус расходы без VAT', taxes: 'VAT (налог)', vatOut: 'VAT с клиента', vatIn: 'VAT поставщикам', vatDue: 'VAT к уплате', warnUnpriced: 'Без цены клиенту: {n}', warnNoCost: 'Запчасти без закупки: {n}', sellers: 'Поставщики', sellerTotal: 'Платим', noSellers: 'Поставщики ещё не выбраны', customer: 'Клиент', file: 'проверка' },
+    // v0.88: one page — the line, its supplier, the supplier's price, what the garage sells it for (all with VAT).
+    pdf: { title: 'Проверка владельцу', parts: 'Запчасти', work: 'Работа и услуги', extra: 'Другие расходы', item: 'Позиция', supplier: 'Поставщик', buy: 'Цена поставщика', sell: 'Продаём', margin: 'Разница', noCost: 'нет закупки', noPrice: 'нет цены', own: 'запчасть клиента', outside: 'на стороне', noSupplier: 'не выбран', garageWork: 'своя работа', off: 'скидка', discount: 'Скидка', toClient: 'Клиент платит', spent: 'Расходы', profit: 'Прибыль', vatLine: 'VAT: с клиента {out} − поставщикам {in} = к уплате {due}', warnUnpriced: 'Без цены клиенту: {n}', warnNoCost: 'Запчасти без закупки: {n}', customer: 'Клиент', footer: 'Все суммы в AED с VAT', file: 'проверка' },
     title: 'Владельцу на проверку',
     send: 'Отправить',
     // The garage's WhatsApp linked (v0.80): one tap — the owner's chat.
@@ -2621,6 +2631,8 @@ export const ru = {
     sample: 'Образец',
     // v0.48.1: its notices as cards, its state in the server's card.
     carTitle: 'Машина по VIN',
+    // v0.88: the car filled from the garage's own cars of the same VIN (no AI).
+    carGarage: 'Как у машин мастерской',
     nameTitle: 'Название исправлено',
     working: 'ИИ работает',
     yandex: 'Найти в Яндексе',

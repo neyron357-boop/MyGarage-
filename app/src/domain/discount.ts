@@ -9,7 +9,8 @@ import type { ItemKind, OrderItem } from './types';
  */
 export type DiscountSpec = { pctBp: number } | { grossFils: number };
 
-const counted = (i: OrderItem) => i.approvalState === 'draft' || i.approvalState === 'approved';
+// (An unconfirmed line — v0.88 — is not on the invoice: no discount on it.)
+const counted = (i: OrderItem) => (i.approvalState === 'draft' && !i.unconfirmed) || i.approvalState === 'approved';
 
 /** The lines a discount applies to: what goes on the invoice, discounts aside. */
 export function discountBase(items: OrderItem[]): OrderItem[] {

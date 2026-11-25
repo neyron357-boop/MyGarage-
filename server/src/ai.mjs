@@ -30,6 +30,11 @@ const MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-fl
 const COOL = 10 * 60_000;
 /** A receipt: every digit counts (the date under a stamp, a total) — the stronger model reads it, the light ones if it does not answer. */
 const RECEIPT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+/**
+ * A VIN (v0.88): the model read off the maker's own code — the stronger model first, with a little thinking (two or three
+ * a day; a light model with none named a Toyota built in Indonesia «Land Cruiser»).
+ */
+const VIN_MODELS = RECEIPT_MODELS;
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 const DAY = 24 * 60 * 60_000;
 /** How long an answer serves: a VIN, a name and a receipt's picture do not change. */
@@ -40,9 +45,11 @@ const TTL = 365 * DAY;
  * in front of the model instead of being asked of it.
  */
 const P = {
+  // v0.88 (the owner: «по VIN ИИ узнала… марку угадала, но модель неверная: верный Veloz, а ИИ написала Land Cruiser»): no
+  // model named in the question — a light model with no thinking gave back the example; the VIN's parts said instead.
   vin: (vin, facts, built) =>
-    `VIN ${vin} (car built in ${built || 'unknown region'}; garage in the UAE). NHTSA decoder says: ${facts ? JSON.stringify(facts) : 'nothing'}.
-Give make, model (as sold, e.g. "Land Cruiser"), year, engine ("4.0L V6"; "" if unknown), body (one of pickup, van, bus, truck, suv, mpv, sedan; "" if unknown), confidence 0..1. Empty rather than a guess.`,
+    `VIN ${vin}, a car at a garage in the UAE. Characters 1-3 ("${vin.slice(0, 3)}") are the maker and its plant${built ? ` (built in ${built})` : ''}; 4-8 ("${vin.slice(3, 8)}") are that maker's code of the model, body and engine; the 10th the model year. NHTSA decoder says: ${facts ? JSON.stringify(facts) : 'nothing'}.
+Give make, model (the name it is sold under), year, engine (litres and cylinders; "" if unknown), body (one of pickup, van, bus, truck, suv, mpv, sedan; "" if unknown), confidence 0..1 that the model is right. The model only if characters 1-8 tell it — never a model that plant does not build; "" rather than a guess.`,
   name: (name, car) =>
     `A line of a car repair job typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}" — a spare part, a service or work. It may have typos; it may be English, Russian, or Russian in Latin letters.
 fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; confidence 0..1 for fixed.`,
@@ -352,7 +359,8 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     async vin(vin) {
       vin = String(vin ?? '').toUpperCase().replace(/\s/g, '');
       if (!VIN_RE.test(vin)) throw httpError(400, 'not a VIN');
-      return cached(`vin:${vin}`, 'vin', async () => {
+      // (v0.88: a new question — what the old one answered is not given again.)
+      return cached(`vin:2:${vin}`, 'vin', async () => {
         const facts = await vpic(vin);
         const built = builtWhere(vin);
         // The official decoder said it all (a car made for the USA): nothing to ask Gemini.
@@ -362,7 +370,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
           type: 'object',
           properties: { make: { type: 'string' }, model: { type: 'string' }, year: { type: 'integer' }, engine: { type: 'string' }, body: { type: 'string' }, confidence: { type: 'number' } },
           required: ['make', 'model', 'confidence'],
-        }, { kind: 'vin', thinking: 'minimal' });
+        }, { kind: 'vin', models: VIN_MODELS, thinking: 'low' });
         // `by` — which Gemini answered (`model` is the car's).
         return { vin, ...value, facts, built, by: model };
       });

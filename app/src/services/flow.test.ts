@@ -2,8 +2,9 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { addItem, sendVersion } from './estimate';
-import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, noteLineQty, removeLines, reopenJob, restoreFromBin, restoreLines, setBoardStatus, setLineQty, syncStage, takeBack } from './flow';
+import { answerLines, approveAll, archiveJob, carArrived, closeUnpaid, dropLine, leaveOnDebt, lineDone, partsToFind, phaseOf, refuseAll, noteLineQty, removeLines, reopenJob, restoreFromBin, restoreLines, setBoardStatus, setLineQty, setUnconfirmed, syncStage, takeBack } from './flow';
 import { binOf } from '../domain/bin';
+import { liveLines } from '../domain/flow';
 import { addPayment, createDebt, quickInvoice } from './money';
 import { bundleAmountDue, changeStage, checkIn, loadOrderBundle } from './orders';
 import { setProcurement } from './parts';
@@ -378,5 +379,49 @@ describe('lazy flow', () => {
     await refuseAll(o.id);
     await reopenJob(o.id);
     expect((await db.orders.get(o.id))!.archivedAt).toBeUndefined();
+  });
+});
+
+describe('v0.88: lines not confirmed yet', () => {
+  it('stay on the job, out of the quote, «Согласовано», «Готово» and every total; confirmed — they go with the next quote', async () => {
+    const o = await job();
+    const work = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Alignment', unitPriceFils: 10000 });
+    const bearing = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front wheel bearing', unitPriceFils: 25000 });
+    await setUnconfirmed([bearing.id], true);
+    let b = (await loadOrderBundle(o.id))!;
+    expect(b.items.find((i) => i.id === bearing.id)?.unconfirmed).toBe(true);
+    expect(liveLines(b.items).map((i) => i.id)).toEqual([work.id]);
+    // Only an unconfirmed line: nothing to price yet.
+    await setUnconfirmed([work.id], true);
+    expect((await state(o.id)).phase).toBe('look');
+    await setUnconfirmed([work.id], false);
+    expect((await state(o.id)).phase).toBe('price');
+    // The quote takes the confirmed line only.
+    const v = await sendVersion(o.id, { via: 'whatsapp' });
+    expect(v.items.map((i) => i.itemId)).toEqual([work.id]);
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.items.find((i) => i.id === bearing.id)?.approvalState).toBe('draft');
+    // «Согласовано» and «Готово»: the invoice without it; it stays on the job as it was.
+    await approveAll(o.id);
+    const inv = await quickInvoice(o.id);
+    expect(inv.lines.map((l) => l.description)).toEqual(['ALIGNMENT']);
+    expect(inv.totalFils).toBe(10500);
+    b = (await loadOrderBundle(o.id))!;
+    expect(b.items.find((i) => i.id === bearing.id)).toMatchObject({ approvalState: 'draft', unconfirmed: true });
+    expect(bundleAmountDue(b)).toBe(10500);
+    // After the invoice it is not changed (as any line).
+    await expect(setUnconfirmed([bearing.id], false)).rejects.toMatchObject({ code: 'err.invoiceExists' });
+  });
+
+  it('a sent or agreed line is not marked; a draft marked again is confirmed', async () => {
+    const o = await job();
+    const a = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    await setUnconfirmed([a.id], true);
+    expect((await db.items.get(a.id))?.unconfirmed).toBeUndefined();
+    const c = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Oil filter', unitPriceFils: 3000 });
+    await setUnconfirmed([c.id], true);
+    await setUnconfirmed([c.id], false);
+    expect((await db.items.get(c.id))?.unconfirmed).toBeUndefined();
   });
 });

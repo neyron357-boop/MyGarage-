@@ -1,3 +1,4 @@
+import { liveLines } from '../domain/flow';
 import { Document, Font, Image, Page, pdf, StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { ReactNode } from 'react';
 import { db } from '../db/db';
@@ -390,7 +391,8 @@ export async function renderVersion(versionId: string): Promise<Blob> {
 /** Quotation of the job's current lines (quick path), before the invoice is issued. */
 export async function renderQuotation(orderId: string): Promise<Blob> {
   const b = (await loadOrderBundle(orderId))!;
-  const items = b.items.filter((i) => ['draft', 'pending', 'approved'].includes(i.approvalState));
+  // The lines that count — not the unconfirmed ones (v0.88).
+  const items = liveLines(b.items);
   const priced = items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i, ...(itemOff(i) ? { discountFils: itemOff(i) } : {}) }));
   const spread = spreadDiscount(priced);
   const rows: DocRow[] = [
