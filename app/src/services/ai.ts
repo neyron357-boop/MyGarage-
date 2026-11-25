@@ -8,6 +8,8 @@ import { isVin } from '../domain/vin';
 import { callJson } from './sync/api';
 import { syncConfig } from './sync/config';
 import { syncLabourNames } from './labourName';
+import { liveLines } from '../domain/flow';
+import { namedByParts, partNames, partsKey } from '../domain/labourName';
 
 /*
  * The garage's AI on this device (v0.48): questions go to the garage's server (server/src/ai.mjs — Gemini with the key
@@ -25,7 +27,7 @@ import { syncLabourNames } from './labourName';
  * определения VIN.»): not to come back without his word.
  */
 
-export type AiPath = 'vin' | 'part-name' | 'receipt';
+export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles';
 type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
@@ -173,7 +175,9 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
   return once(`name:${itemId}`, async () => {
     const item = await db.items.get(itemId);
     const typed = item?.titleRu || item?.titleEn || '';
-    if (!item || item.kind !== 'part' || item.approvalState !== 'draft' || !typed || item.aiName?.from === typed || item.aiName?.to === typed) return false;
+    // Every line (v0.86, the owner: «автоисправление названий позиций и деталей»): a part, work, a service — not a discount,
+    // not the labour charge named by the parts.
+    if (!item || item.kind === 'discount' || namedByParts(item) || item.approvalState !== 'draft' || !typed || item.aiName?.from === typed || item.aiName?.to === typed) return false;
     const russian = !!item.titleRu;
     const was = lineName(typed.trim());
     let fix: { title?: string; english?: string } | undefined;
@@ -186,7 +190,7 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
     }
     // 2. A line typed exactly the same before, already looked at: its answer again.
     if (!fix) {
-      const memo = await db.items.filter((i) => i.id !== itemId && i.kind === 'part' && i.aiName?.from === typed).first();
+      const memo = await db.items.filter((i) => i.id !== itemId && i.kind !== 'discount' && i.aiName?.from === typed).first();
       if (memo?.aiName) {
         fix = {};
         if (memo.aiName.to && memo.aiName.to !== was) fix.title = memo.aiName.to;
@@ -235,5 +239,74 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
  * nothing else at all — the search for its number is gone).
  */
 export function aiAfterPart(itemId: string) {
-  void aiFixPartName(itemId);
+  aiAfterLine(itemId);
+}
+
+/**
+ * A line saved (v0.86): its name looked at, then the job's labour charge said by its parts — one after the other, not
+ * waited for.
+ */
+export function aiAfterLine(itemId: string) {
+  void (async () => {
+    await aiFixPartName(itemId);
+    const item = await db.items.get(itemId);
+    if (item) await aiLabourName(item.orderId);
+  })();
+}
+
+/**
+ * The labour charge said by the AI (v0.86, the owner: «использовать ИИ для описания труда исходя из деталей и позиций»):
+ * «LABOR CHARGE: REPLACE FRONT BRAKE PADS & DISCS» for the job's parts and its other work — a light model, kept on the
+ * server for the same parts (no tokens the second time). Only a draft named by the parts (not typed by hand, not told
+ * to the customer); the parts changed meanwhile — not put (the rules name it by the parts until it is said anew).
+ */
+export function aiLabourName(orderId: string): Promise<boolean | undefined> {
+  return once(`labour:${orderId}`, async () => {
+    if (!aiOn()) return false;
+    const items = await db.items.where('orderId').equals(orderId).toArray();
+    const charges = items.filter(namedByParts);
+    const parts = partNames(items, 'en');
+    if (!charges.length || !parts.length) return false;
+    const key = partsKey(items);
+    if (charges.every((c) => c.labourAi?.parts === key)) return false;
+    const work = liveLines(items)
+      .filter((i) => i.kind !== 'part' && i.kind !== 'discount' && !namedByParts(i))
+      .map((i) => lineName((i.titleEn || i.titleRu || '').trim()))
+      .filter(Boolean);
+    const r = await askAi<{ text: string }>('labour', { parts, work }, `labour:${orderId}`);
+    const text = lineName(String(r?.text ?? '').trim()).slice(0, 80);
+    if (!text) return false;
+    const now = await db.items.where('orderId').equals(orderId).toArray();
+    if (partsKey(now) !== key) return false;
+    for (const c of now.filter(namedByParts)) await db.items.update(c.id, { labourAi: { parts: key, text } });
+    await syncLabourNames(orderId);
+    return true;
+  });
+}
+
+/** What the AI read in a supplier's answer (v0.86): the request it answers, each line's prices. */
+export interface AiReply {
+  ask: string;
+  lines: { n: number; offers: { price: number; kind: '' | 'oem' | 'aftermarket' | 'used'; brand: string; na: boolean }[] }[];
+  vat: '' | 'incl' | 'excl';
+}
+
+/** A supplier's answer the rules found no price in, read by the AI (light model; none — undefined). */
+export async function aiReadReply(text: string, quote: string, asks: { id: string; car: string; lines: string[] }[]): Promise<AiReply | undefined> {
+  if (!aiOn() || !asks.length) return undefined;
+  try {
+    return await askAi<AiReply>('reply', { text, quote, asks }, `reply:${asks[0].id}`, 40_000);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Who these chats are to the garage, as the AI says by their names and words (v0.86). */
+export async function aiChatRoles(chats: { id: string; name: string; texts: string[] }[]): Promise<{ id: string; role: 'customer' | 'supplier' | 'other'; confidence: number }[]> {
+  if (!aiOn() || !chats.length) return [];
+  try {
+    return (await askAi<{ chats: { id: string; role: 'customer' | 'supplier' | 'other'; confidence: number }[] }>('roles', { chats }, 'roles', 40_000)).chats ?? [];
+  } catch {
+    return [];
+  }
 }

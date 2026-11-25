@@ -103,6 +103,8 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
   // A labour charge renamed by hand keeps its name; plain labour words again — named by the parts (v0.80).
   if (item.kind === 'labor' && ((next.titleEn !== undefined && next.titleEn !== item.titleEn) || (next.titleRu !== undefined && next.titleRu !== item.titleRu)))
     next.ownName = typedOwnName(item, next, await db.items.where('orderId').equals(item.orderId).toArray());
+  // A cost typed by hand is no longer the AI's (v0.86).
+  if ('costPriceFils' in patch && !('costAi' in patch) && item.costAi && patch.costPriceFils !== item.costPriceFils) next.costAi = undefined;
   await db.items.update(id, next);
   await syncLabourNames(item.orderId);
 }

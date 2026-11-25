@@ -7,7 +7,7 @@ import type { Suggestion, SuggestionSet } from '../../domain/linePrices';
 import { formatAed } from '../../domain/money';
 import { exactTitle, quickMatches, sideOf } from '../../domain/quickAdd';
 import { enteredPrice, vatModeOf } from '../../domain/vat';
-import { aiAfterPart } from '../../services/ai';
+import { aiAfterLine } from '../../services/ai';
 import { addItem } from '../../services/estimate';
 import { removeLines, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
@@ -86,7 +86,8 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
       haptic('light');
       setAdded((a) => [...a, { id: item.id, title: name }]);
       // A part: the app's own dictionary names it in English (and the garage's AI looks it up) — in the background.
-      if (lineKind === 'part') aiAfterPart(item.id);
+      // Every line's name looked at, and the labour charge said by the parts (v0.86).
+      aiAfterLine(item.id);
     });
   };
   /** Added by mistake: off the job at once (into its bin, as any draft line taken off). */

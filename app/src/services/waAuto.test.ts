@@ -4,7 +4,8 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { muteLocalWrites } from '../db/syncHooks';
 import type { Order } from '../domain/types';
 import { createCustomer } from './customers';
-import { addItem } from './estimate';
+import { addItem, updateItem } from './estimate';
+import { setAiTransport } from './ai';
 import { approveAll } from './flow';
 import { addMedia } from './media';
 import { addExpense, addPayment, quickInvoice } from './money';
@@ -273,8 +274,17 @@ describe('suppliers', () => {
     expect((await db.orders.get(o.id))!.asks![0].replies?.map((x) => x.lines)).toEqual([2, 0]);
   });
 
-  it('offers only (as by default): the line’s cost is left to the manager', async () => {
-    const { o } = await job();
+  it('v0.86: an answer’s price is the line’s cost by default; «offers only» set — the cost is left to the manager', async () => {
+    const { o: first } = await job();
+    const pad1 = await addItem(first.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 0 });
+    const sup1 = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+    await recordLinkAsk(first.id, sup1, [pad1], 'BRAKE PADS');
+    chatMsgs['55512345678901@lid'] = [{ id: 'false_x_R0', chat: '55512345678901@lid', t: Date.now() + 5000, me: false, type: 'chat', text: '150', ack: 0 }];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect((await db.items.get(pad1.id))!.costPriceFils).toBe(15000);
+    await saveWaAuto('ask', { prices: 'offers' });
+    const o = first;
     const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 0 });
     const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
     await recordLinkAsk(o.id, supId, [pads], 'BRAKE PADS');
@@ -284,6 +294,42 @@ describe('suppliers', () => {
     const p = (await db.items.get(pads.id))!;
     expect(p.offers?.[0]).toMatchObject({ costFils: 15000, unsure: true, supplierId: supId });
     expect(p.costPriceFils).toBeUndefined();
+  });
+
+  it('v0.86: an answer the rules cannot read — the AI says which request and which lines; the cost marked as the AI’s', async () => {
+    const asked: unknown[] = [];
+    setAiTransport(async (p, body) => {
+      asked.push(body);
+      if (p !== 'reply') throw new Error('not played');
+      const b = body as { asks: { id: string; lines: string[] }[] };
+      return { ask: b.asks[0].id, lines: [{ n: 1, offers: [{ price: 185, kind: '', brand: '', na: false }] }, { n: 2, offers: [{ price: 30, kind: '', brand: '', na: false }] }], vat: '' };
+    });
+    try {
+      const { o } = await job();
+      const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+      const filter = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Oil filter', qty: 2, unitPriceFils: 0 });
+      const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+      await recordLinkAsk(o.id, supId, [pads, filter], 'BRAKE PADS FRONT / OIL FILTER × 2');
+      chatMsgs['55512345678901@lid'] = [{ id: 'false_x_AI1', chat: '55512345678901@lid', t: Date.now() + 5000, me: false, type: 'chat', text: 'pads 185 dirham, filter 30 dirham available bro', ack: 0 }];
+      await loadChats(true);
+      expect(await readReplies()).toBe(2);
+      expect(asked.length).toBe(1);
+      const p = (await db.items.get(pads.id))!;
+      expect(p.offers?.[0]).toMatchObject({ costFils: 18500, ai: true, supplierId: supId });
+      expect([p.costPriceFils, p.costAi]).toEqual([18500, true]);
+      const f = (await db.items.get(filter.id))!;
+      expect([f.costPriceFils, f.costAi]).toEqual([3000, true]);
+      // The cost changed by hand: no longer the AI's.
+      await updateItem(pads.id, { costPriceFils: 17000 });
+      expect((await db.items.get(pads.id))!.costAi).toBeUndefined();
+      // A message the rules read: the AI is not asked.
+      chatMsgs['55512345678901@lid'].push({ id: 'false_x_AI2', chat: '55512345678901@lid', t: Date.now() + 6000, me: false, type: 'chat', text: '1. BRAKE PADS FRONT  180\n2. OIL FILTER  25', ack: 0 });
+      await loadChats(true);
+      await readReplies();
+      expect(asked.length).toBe(1);
+    } finally {
+      setAiTransport(undefined);
+    }
   });
 });
 
@@ -317,5 +363,38 @@ describe('nothing goes by itself (v0.85)', () => {
     await quickInvoice(o.id, { day: past });
     await new Promise((r) => setTimeout(r, 300));
     expect(waAsks().filter((a) => a.item.key.startsWith('work:'))).toEqual([]);
+  });
+});
+
+describe('who a chat is — said by the AI (v0.86)', () => {
+  it('a chat the garage does not know: the AI says «supplier»; a status by hand wins; asked once', async () => {
+    const { tagUnknownChats } = await import('./waRoles');
+    const { loadChatRoles, loadPeople, waStore, tagChats } = await import('./whatsapp');
+    const { chatRole, aiRoleOf } = await import('../domain/whatsapp');
+    let asks = 0;
+    setAiTransport(async (p, body) => {
+      if (p !== 'roles') throw new Error('not played');
+      asks++;
+      const chats = (body as { chats: { id: string }[] }).chats;
+      return { chats: chats.map((c) => ({ id: c.id, role: 'supplier', confidence: 0.9 })) };
+    });
+    try {
+      await loadChats(true);
+      const chat = waStore().chats.find((c) => c.id === '55512345678901@lid')!;
+      expect(await tagUnknownChats()).toBe(1);
+      const [people, roles] = await Promise.all([loadPeople(), loadChatRoles()]);
+      expect(chatRole(chat, people, roles)).toBe('supplier');
+      expect(aiRoleOf(chat, people, roles)).toBe('supplier');
+      // Asked once.
+      expect(await tagUnknownChats()).toBe(0);
+      expect(asks).toBe(1);
+      // A status given by hand takes its place.
+      await tagChats([chat.id], 'customer');
+      const after = await loadChatRoles();
+      expect(chatRole(chat, people, after)).toBe('customer');
+      expect(aiRoleOf(chat, people, after)).toBeUndefined();
+    } finally {
+      setAiTransport(undefined);
+    }
   });
 });

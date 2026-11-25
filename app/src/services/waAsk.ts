@@ -2,7 +2,8 @@ import { db, uid } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { withMarkup } from '../domain/money';
-import { askFor, kindOnly, netUnit, parseReply, type AskLine } from '../domain/supplierReply';
+import { askFor, kindOnly, netUnit, parseReply, type AskLine, type ParsedReply } from '../domain/supplierReply';
+import { aiReadReply, type AiReply } from './ai';
 import type { Order, OrderItem, PartAsk, PartOffer, Supplier, Vehicle } from '../domain/types';
 import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
 import { waAutoOf } from '../domain/waAuto';
@@ -128,8 +129,9 @@ export function onRepliesRead(fn: ReadListener): () => void {
 }
 
 /** The offer kept for a part, from a parsed one. */
-function offerOf(o: ReturnType<typeof parseReply>['lines'][number]['offers'][number], ctx: { msg: string; supplierId: string; n: string; vat: 'net' | 'gross'; vatBp: number }): PartOffer {
+function offerOf(o: ReturnType<typeof parseReply>['lines'][number]['offers'][number], ctx: { msg: string; supplierId: string; n: string; vat: 'net' | 'gross'; vatBp: number; ai?: boolean }): PartOffer {
   return {
+    ...(ctx.ai ? { ai: true as const } : {}),
     id: ctx.n,
     kind: o.kind,
     costFils: o.na ? undefined : netUnit(o, ctx.vat, ctx.vatBp),
@@ -210,10 +212,15 @@ async function readNow(phones?: string[]): Promise<number> {
       // A list numbered past that request's parts answers another one to the same supplier (the newest that fits).
       const others = asks.filter((a) => a !== target.ref && Date.parse(a.ask.at) <= m.t + 60_000).sort((a, b) => Date.parse(b.ask.at) - Date.parse(a.ask.at));
       let got = -1;
-      for (const x of [target.ref, ...others]) {
-        got = await applyReply(x.order.id, x.ask.id, m, settings, s, true);
-        if (got >= 0) break;
-      }
+      // The app's own rules found no price in it, in any of this supplier's requests (v0.86): the AI reads it — which
+      // request, which line, what price (a light model, only for such a message).
+      const read = await aiFallback(m, [target.ref, ...others]);
+      if (read) got = await applyReply(read.x.order.id, read.x.ask.id, m, settings, s, false, read.parsed);
+      if (!read)
+        for (const x of [target.ref, ...others]) {
+          got = await applyReply(x.order.id, x.ask.id, m, settings, s, true);
+          if (got >= 0) break;
+        }
       if (got < 0) got = await applyReply(target.ref.order.id, target.ref.ask.id, m, settings, s, false);
       priced += Math.max(0, got);
       seen.add(m.id);
@@ -222,18 +229,70 @@ async function readNow(phones?: string[]): Promise<number> {
   return priced;
 }
 
+/** A request's lines, as the request lists them (the line's own order). */
+async function linesOf(x: { order: Order; ask: PartAsk }): Promise<{ items: OrderItem[]; lines: AskLine[]; car: string }> {
+  const items = (await db.items.bulkGet(x.ask.items)).filter((i): i is OrderItem => !!i);
+  const ordered = x.ask.items.map((id) => items.find((i) => i.id === id)).filter((i): i is OrderItem => !!i);
+  const v = await db.vehicles.get(x.order.vehicleId);
+  return { items, lines: askLines(ordered), car: [v?.make, v?.model].filter(Boolean).join(' ') };
+}
+
+/**
+ * The AI's reading of a supplier's message (v0.86, the owner: «если поставщик дал цены, ИИ должен понимать, к какому заказу
+ * относится, и в этом заказе заполнять цены закупок, но чтобы я понимал, что ИИ это заполнил»): only a message with digits
+ * in which the rules found no line of any of the supplier's requests; the request it answers and its lines' prices, as
+ * the rules would give them — kept as read by the AI (`PartOffer.ai`, `OrderItem.costAi`).
+ */
+async function aiFallback(m: { text: string; quote?: { text?: string } }, cands: { order: Order; ask: PartAsk }[]): Promise<{ x: { order: Order; ask: PartAsk }; parsed: ParsedReply & { ai: true } } | undefined> {
+  if (!/\d/.test(m.text)) return undefined;
+  const list = cands.slice(0, 4);
+  const read = await Promise.all(list.map(linesOf));
+  for (const [k, x] of list.entries()) {
+    const v = await db.vehicles.get(x.order.vehicleId);
+    if (parseReply(m.text, read[k].lines, { make: v?.make }).lines.length) return undefined;
+  }
+  const r = await aiReadReply(
+    m.text,
+    m.quote?.text ?? '',
+    list.map((x, k) => ({ id: x.ask.id, car: read[k].car, lines: read[k].lines.map((l) => `${l.name}${l.qty > 1 ? ` × ${l.qty}` : ''}`) })),
+  );
+  const x = r?.ask ? list.find((c) => c.ask.id === r.ask) : undefined;
+  if (!r || !x || !r.lines.length) return undefined;
+  return { x, parsed: { ...fromAi(r), ai: true } };
+}
+
+/** The AI's lines as the rules give theirs. */
+function fromAi(r: AiReply): ParsedReply {
+  const vat = r.vat === 'incl' ? 'gross' : r.vat === 'excl' ? 'net' : 'unsaid';
+  return {
+    lines: r.lines.map((l) => ({
+      index: l.n - 1,
+      offers: l.offers.map((o) => ({
+        kind: o.kind || 'aftermarket',
+        kindSaid: !!o.kind,
+        unitFils: o.na ? undefined : Math.round(o.price * 100),
+        vat,
+        brand: o.brand || undefined,
+        na: o.na || undefined,
+      })),
+    })),
+  } as ParsedReply;
+}
+
 /**
  * One message of a supplier put on the job it answers: its prices as offers, its words kept with the request. `strict`
- * — a message that answers another request is left (−1): the caller tries the supplier's other requests.
+ * — a message that answers another request is left (−1): the caller tries the supplier's other requests. `given` — read
+ * already (by the AI, v0.86): put as it is.
  */
-async function applyReply(orderId: string, askId: string, m: { id: string; t: number; text: string }, settings: Awaited<ReturnType<typeof getSettings>>, s: ReturnType<typeof waAutoOf>, strict = false): Promise<number> {
+async function applyReply(orderId: string, askId: string, m: { id: string; t: number; text: string }, settings: Awaited<ReturnType<typeof getSettings>>, s: ReturnType<typeof waAutoOf>, strict = false, given?: ParsedReply & { ai?: true }): Promise<number> {
   const order = await db.orders.get(orderId);
   const ask = order?.asks?.find((a) => a.id === askId);
   if (!order || !ask || ask.replies?.some((r) => r.id === m.id)) return 0;
   const vehicle = await db.vehicles.get(order.vehicleId);
   const items = (await db.items.bulkGet(ask.items)).filter((i): i is OrderItem => !!i);
   const lines = askLines(ask.items.map((id) => items.find((i) => i.id === id)).filter((i): i is OrderItem => !!i));
-  const parsed = parseReply(m.text, lines, { make: vehicle?.make });
+  const parsed = given ?? parseReply(m.text, lines, { make: vehicle?.make });
+  const ai = !!given?.ai;
   if (parsed.other && strict) return -1;
   const kind = parsed.lines.length ? undefined : kindOnly(m.text);
   let priced = 0;
@@ -250,7 +309,7 @@ async function applyReply(orderId: string, askId: string, m: { id: string; t: nu
     // «na» to the whole request: only for the parts this supplier has not answered.
     if (line && !(parsed.naAll && offers.some(mine))) {
       offers = offers.filter((o) => o.msg !== m.id);
-      offers.push(...line.offers.map((o, k) => offerOf(o, { msg: m.id, supplierId: ask.supplierId, n: `wa:${short}:${n}:${k}`, vat: s.ask.vat, vatBp: item.vatRateBp || settings.vatRateBp })));
+      offers.push(...line.offers.map((o, k) => offerOf(o, { msg: m.id, supplierId: ask.supplierId, n: `wa:${short}:${n}:${k}`, vat: s.ask.vat, vatBp: item.vatRateBp || settings.vatRateBp, ai })));
       if (line.offers.some((o) => !o.na && !o.pending)) priced++;
     }
     if (JSON.stringify(offers) === before) continue;
@@ -261,6 +320,8 @@ async function applyReply(orderId: string, askId: string, m: { id: string; t: nu
     if (best && free && (s.ask.prices === 'cost' || s.ask.prices === 'price')) {
       patch.costPriceFils = best.costFils;
       patch.supplierId = best.supplierId;
+      // Put by the AI's reading: said so on the line (v0.86).
+      if (best.ai) patch.costAi = true;
       // …and the customer's price by the garage's markup — a draft line without a price only.
       if (s.ask.prices === 'price' && item.approvalState === 'draft' && !item.unitPriceFils && best.costFils !== undefined) {
         const rate = item.vatRateBp || settings.vatRateBp;

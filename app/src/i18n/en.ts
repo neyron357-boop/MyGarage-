@@ -2600,6 +2600,9 @@ export const en: typeof ru = {
   },
   /** The garage's AI (v0.48): what it did by itself, said once. */
   ai: {
+    costByAi: 'Cost set by the AI from the supplier’s answer',
+    offerByAi: 'Read by the AI',
+    chatByAi: 'Status given by the AI',
     car: 'AI: {{what}}',
     name: 'Corrected: {{to}}',
     diagram: 'Diagram',

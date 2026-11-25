@@ -5,7 +5,7 @@ import { dubaiDate, nowIso } from '../domain/dates';
 import { liveLines } from '../domain/flow';
 import { itemTitle } from '../domain/items';
 import type { Customer, Expense, Income, Invoice, ItemDecision, Media, Order, OrderItem, Payment, EstimateVersion, Settings } from '../domain/types';
-import { bossText, clientText, isWash, waAutoOf, washText, workText, type BossEvent, type CarFace, type LineFace, type WaAuto, type WaTarget, type WorkTrigger } from '../domain/waAuto';
+import { ASK_V, bossText, clientText, isWash, waAutoOf, washText, workText, type BossEvent, type CarFace, type LineFace, type WaAuto, type WaTarget, type WorkTrigger } from '../domain/waAuto';
 import { COVER_SLOTS, coverOf } from './cover';
 import { invoicePdf, versionPdf } from './documents';
 import { AppError } from './errors';
@@ -32,7 +32,9 @@ export async function waAutoSettings(): Promise<WaAuto> {
 export async function saveWaAuto<K extends keyof WaAuto>(section: K, patch: Partial<WaAuto[K]>): Promise<void> {
   const s = await getSettings();
   const kept = (s.waAuto ?? {}) as NonNullable<Settings['waAuto']>;
-  await saveSettings({ waAuto: { ...kept, [section]: { ...(kept[section] ?? {}), ...patch } } });
+  // The suppliers' section kept with its version (v0.86): a choice made now is not set again.
+  const stamp = section === 'ask' ? { v: ASK_V } : {};
+  await saveSettings({ waAuto: { ...kept, [section]: { ...(kept[section] ?? {}), ...patch, ...stamp } } });
 }
 
 /** A company's own group (none — taken off). */

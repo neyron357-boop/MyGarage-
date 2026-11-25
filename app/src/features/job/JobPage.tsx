@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
-import { AiLineWork } from '../ai/Ai';
+import { AiLineWork, AiMark } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
   IconPlus,
@@ -904,8 +904,14 @@ export function JobPage() {
         <Text span inherit td={i.approvalState === 'declined' ? 'line-through' : undefined} c={i.approvalState === 'declined' ? 'dimmed' : undefined}>
           {itemTitle(i, docLang) || '—'}
           {!!i.mediaIds?.length && i.kind !== 'part' && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
-          {/* The garage's AI looking at the part's name: its mark twinkles after the name. */}
-          {i.kind === 'part' && <AiLineWork itemId={i.id} />}
+          {/* The garage's AI looking at the line's name (v0.86: every line): its mark twinkles after the name. */}
+          {i.kind !== 'discount' && <AiLineWork itemId={i.id} />}
+          {/* Its cost put by the AI from a supplier's answer (v0.86): said by the AI's mark. */}
+          {i.costAi && (
+            <span style={{ marginLeft: 6, verticalAlign: -2, display: 'inline-flex' }}>
+              <AiMark size={15} label={t('ai.costByAi')} />
+            </span>
+          )}
         </Text>
       }
       subtitle={dots([

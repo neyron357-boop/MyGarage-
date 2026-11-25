@@ -814,7 +814,7 @@ export async function loadChatRoles(): Promise<ChatRoles> {
   const [settings, customers] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray()]);
   const auto = waAutoOf(settings.waAuto);
   const groups = new Set([auto.work.to?.chat, auto.boss.to?.chat, auto.wash.to?.chat, ...customers.map((c) => c.waGroup?.chat)].filter((x): x is string => !!x));
-  return { tags: settings.waChatTags ?? {}, groups };
+  return { tags: settings.waChatTags ?? {}, groups, ai: settings.waChatAi ?? {} };
 }
 
 /** Chats picked in the list given one status (or theirs taken off — null): kept with the garage's settings. */

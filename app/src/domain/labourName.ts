@@ -35,6 +35,16 @@ export function partNames(items: OrderItem[], lang: 'en' | 'ru'): string[] {
   return out;
 }
 
+/** The parts a labour charge's AI words were said for (v0.86): the same parts — the same words. */
+export const partsKey = (items: OrderItem[]): string => partNames(items, 'en').join('|');
+
+/**
+ * The words the AI said for these parts (v0.86): «LABOR CHARGE: REPLACE FRONT BRAKE PADS & DISCS» — while the parts are
+ * the ones it said them for; else none (the parts' own names until it says them anew).
+ */
+export const aiLabourTitle = (i: Pick<OrderItem, 'labourAi'>, title: string, key: string): string | undefined =>
+  i.labourAi?.text && i.labourAi.parts === key ? `${labourWords(title)}${LABOUR_JOIN}${i.labourAi.text}` : undefined;
+
 /** The labour charge's name with these parts: its words, then the parts («LABOR CHARGE: GEAR FILTER, OIL SEAL»). */
 export const labourName = (title: string, parts: string[]): string => (parts.length ? `${labourWords(title)}${LABOUR_JOIN}${parts.join(', ')}` : labourWords(title));
 
@@ -44,11 +54,13 @@ export const namedByParts = (i: OrderItem): boolean => i.kind === 'labor' && !i.
 /** What changes: each labour charge named by the parts whose name is not what the parts say now. */
 export function labourRenames(items: OrderItem[]): { id: string; patch: Pick<OrderItem, 'titleEn' | 'titleRu'> }[] {
   const out: { id: string; patch: Pick<OrderItem, 'titleEn' | 'titleRu'> }[] = [];
+  const key = partsKey(items);
   for (const i of items) {
     if (!namedByParts(i)) continue;
     const patch: Pick<OrderItem, 'titleEn' | 'titleRu'> = {};
     if (i.titleEn && plainLabour(i.titleEn)) {
-      const next = labourName(i.titleEn, partNames(items, 'en'));
+      // The AI's words for these very parts (v0.86), else the parts' own names.
+      const next = aiLabourTitle(i, i.titleEn, key) ?? labourName(i.titleEn, partNames(items, 'en'));
       if (next !== i.titleEn) patch.titleEn = next;
     }
     if (i.titleRu && plainLabour(i.titleRu)) {
@@ -69,6 +81,7 @@ export function typedOwnName(i: OrderItem, next: Pick<OrderItem, 'titleEn' | 'ti
   const en = next.titleEn ?? i.titleEn ?? '';
   const ru = next.titleRu ?? i.titleRu ?? '';
   // Not plain labour words — never named by the parts anyway; plain words alone, or the parts' own name — by the parts.
-  const asParts = (t: string, lang: 'en' | 'ru') => !t || !plainLabour(t) || t === labourWords(t) || t === labourName(t, partNames(items, lang));
+  const asParts = (t: string, lang: 'en' | 'ru') =>
+    !t || !plainLabour(t) || t === labourWords(t) || t === labourName(t, partNames(items, lang)) || (lang === 'en' && t === aiLabourTitle(i, t, partsKey(items)));
   return asParts(en, 'en') && asParts(ru, 'ru') ? undefined : true;
 }

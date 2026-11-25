@@ -19,6 +19,7 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/forget                     — this device leaves (its key no longer works)
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
  *        /api/ai/receipt {image}          — the garage's AI (v0.48, ai.mjs; the part-number search — gone, v0.85)
+ *        /api/ai/labour {parts, work}, /api/ai/reply {text, quote, asks}, /api/ai/roles {chats} — v0.86, light models
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
@@ -215,6 +216,10 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
           if (parts[2] === 'receipt') return send(res, 200, await ai.receipt(body));
           if (parts[2] === 'part-name') return send(res, 200, await ai.partName(body));
+          // v0.86: the labour line said by the parts; a supplier's answer; who chats are.
+          if (parts[2] === 'labour') return send(res, 200, await ai.labour(body));
+          if (parts[2] === 'reply') return send(res, 200, await ai.reply(body));
+          if (parts[2] === 'roles') return send(res, 200, await ai.roles(body));
         }
       }
 

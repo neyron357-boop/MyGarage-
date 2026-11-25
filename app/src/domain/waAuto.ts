@@ -83,17 +83,25 @@ export interface WaAuto {
     vat: 'net' | 'gross';
     /** Which variant is put on the line by itself: the original, or the cheapest. */
     prefer: 'oem' | 'cheap';
+    /** The settings' version (v0.86: an answer's prices are the line's cost by default — set once). */
+    v?: number;
   };
 }
 
 export const WASH_WORDS = ['CAR WASH', 'WASH', 'WASHING', 'МОЙКА'];
+
+/**
+ * v0.86 (the owner: «если поставщик дал цены… в этом заказе заполнять цены закупок»): an answer's prices are the line's
+ * cost by default — settings kept before that said only variants: once put to the cost.
+ */
+export const ASK_V = 2;
 
 export const WA_AUTO: WaAuto = {
   work: { on: true, lang: 'en', checkin: false, agreed: true, done: false, complaint: true, lines: true, mechanics: true },
   client: { on: true, lang: 'en', driver: true, mileage: true, lines: true, complaint: false, photos: 1, done: false },
   boss: { on: true, lang: 'en', estimate: true, invoice: true, payment: true, income: true, expense: true, pdf: true, photo: true },
   wash: { on: true, words: WASH_WORDS, caption: 'CAR WASH', plate: false },
-  ask: { gapSec: 8, max: 15, read: true, prices: 'offers', vat: 'net', prefer: 'oem' },
+  ask: { gapSec: 8, max: 15, read: true, prices: 'cost', vat: 'net', prefer: 'oem', v: ASK_V },
 };
 
 type Deep<T> = { [K in keyof T]?: T[K] extends object ? (T[K] extends unknown[] ? T[K] : Partial<T[K]>) : T[K] };
@@ -113,6 +121,8 @@ export function waAutoOf(kept?: Deep<WaAuto> | null): WaAuto {
   out.client.photos = Math.min(4, Math.max(0, Math.round(out.client.photos)));
   out.ask.gapSec = Math.min(60, Math.max(3, Math.round(out.ask.gapSec)));
   out.ask.max = Math.min(30, Math.max(1, Math.round(out.ask.max)));
+  if ((k.ask?.v ?? 0) < ASK_V && out.ask.prices === 'offers') out.ask.prices = 'cost';
+  out.ask.v = ASK_V;
   return out;
 }
 

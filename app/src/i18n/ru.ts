@@ -2610,6 +2610,9 @@ export const ru = {
   },
   /** The garage's AI (v0.48): what it did by itself, said once. */
   ai: {
+    costByAi: 'Закупку поставил ИИ из ответа поставщика',
+    offerByAi: 'Прочитал ИИ',
+    chatByAi: 'Статус дал ИИ',
     car: 'ИИ: {{what}}',
     name: 'Исправлено: {{to}}',
     diagram: 'Схема',

@@ -181,15 +181,32 @@ export interface ChatRoles {
   tags: Record<string, WaTag>;
   /** The work group, the boss, the wash, the customers' own groups (domain/waAuto.ts, `Customer.waGroup`). */
   groups: Set<string>;
+  /** Said by the AI (v0.86, `Settings.waChatAi`): under the person's own status; «other» — asked, none. */
+  ai?: Record<string, 'customer' | 'supplier' | 'other'>;
 }
 export const NO_ROLES: ChatRoles = { tags: {}, groups: new Set() };
+
+/** The AI's word on a chat, when it is the one that counts (no one of the base, no status by hand). */
+export function aiRoleOf(chat: Pick<WaChat, 'id' | 'phone' | 'group'>, people: Map<string, Who>, roles: ChatRoles): 'customer' | 'supplier' | undefined {
+  if (whoOf(chat, people) || roles.tags[chat.id]) return undefined;
+  const r = roles.ai?.[chat.id];
+  return r === 'customer' || r === 'supplier' ? r : undefined;
+}
+
+/**
+ * The chats the garage does not know (v0.86): a person's chat, not the account's own, no one of the base by its number,
+ * no status by hand, not one of its groups, not asked of the AI yet — the newest first.
+ */
+export function unknownChats(chats: WaChat[], people: Map<string, Who>, roles: ChatRoles): WaChat[] {
+  return orderChats(chats.filter((c) => !c.group && !c.self && !whoOf(c, people) && !roles.tags[c.id] && !roles.groups.has(c.id) && !roles.ai?.[c.id] && (!!c.last || !!c.name)));
+}
 
 /**
  * What a chat is to the garage, if anything: the person behind its number (a customer, a supplier, a mechanic, a driver —
  * the statuses the base gives by itself), else the status given by hand, else a group the garage writes to («work»).
  */
 export function chatRole(chat: Pick<WaChat, 'id' | 'phone' | 'group'>, people: Map<string, Who>, roles: ChatRoles): WhoKind | WaTag | undefined {
-  return whoOf(chat, people)?.kind ?? roles.tags[chat.id] ?? (roles.groups.has(chat.id) ? 'work' : undefined);
+  return whoOf(chat, people)?.kind ?? roles.tags[chat.id] ?? (roles.groups.has(chat.id) ? 'work' : undefined) ?? aiRoleOf(chat, people, roles);
 }
 
 /* ---------- The list ---------- */

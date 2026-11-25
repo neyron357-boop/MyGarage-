@@ -6,10 +6,12 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { dayShort, dubaiDate, dubaiTime } from '../../domain/dates';
 import { formatPhone } from '../../domain/phone';
-import { CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROLES, tabCounts, WA_TAGS, waDigits, whoOf, type ChatTab, type WaChat, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
+import { aiRoleOf, CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROLES, tabCounts, WA_TAGS, waDigits, whoOf, type ChatTab, type WaChat, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
 import { loadChatRoles, loadChats, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
+import { tagUnknownChats } from '../../services/waRoles';
+import { AiMark } from '../ai/Ai';
 import { haptic } from '../../ui/haptics';
 import { useWaStatus } from '../../ui/waSel';
 import { copyText } from '../../ui/clipboard';
@@ -116,7 +118,7 @@ export function WaGate({ s }: { s: WaStore }) {
 
 /* ---------- The list ---------- */
 
-const ChatRow = memo(function ChatRow({ c, who, role, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
+const ChatRow = memo(function ChatRow({ c, who, role, byAi, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
   const { t } = useTranslation();
   const title = c.self ? t('wa.self') : chatTitle(c, who);
   return (
@@ -137,6 +139,8 @@ const ChatRow = memo(function ChatRow({ c, who, role, when, active, onOpen, pick
         <span className="wa-row-title" data-wa-chat={c.id} data-wa-picked={picked || undefined}>
           <span className="wa-row-name">{title}</span>
           {role && <WhoTag kind={role} />}
+          {/* The status said by the AI (v0.86) — a status set by hand takes its place. */}
+          {byAi && <AiMark size={13} label={t('ai.chatByAi')} />}
         </span>
       }
       subtitle={c.last ? <LastLine last={c.last} group={c.group} /> : undefined}
@@ -205,6 +209,12 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const setQuery = (v: string) => setQueryState((view.query = v));
   const setGarageOnly = (v: boolean) => setGarageOnlyState((view.garageOnly = v));
   const roles = useScreenLiveQuery(loadChatRoles, []) ?? NO_ROLES;
+  // Chats the garage does not know: who they are, asked of the AI a few at a time (v0.86, services/waRoles.ts).
+  useEffect(() => {
+    if (!s.chats.length) return;
+    const t = setTimeout(() => void tagUnknownChats(s.chats).catch(() => undefined), 3000);
+    return () => clearTimeout(t);
+  }, [s.chats.length]);
   const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly }), [s.chats, tab, query, people, roles, garageOnly]);
   // A search with «Только гараж» on: how many more the whole list has (one tap shows them).
   const elsewhere = useMemo(
@@ -379,7 +389,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
         <>
           <List className="wa-chats">
             {rows.slice(0, limit).map((c) => (
-              <ChatRow key={c.id} c={c} who={whoOf(c, people)} role={chatRole(c, people, roles)} when={when(c.t)} active={!picking && c.id === active} onOpen={tap} picking={picking} picked={picked.has(c.id)} />
+              <ChatRow key={c.id} c={c} who={whoOf(c, people)} role={chatRole(c, people, roles)} byAi={!!aiRoleOf(c, people, roles)} when={when(c.t)} active={!picking && c.id === active} onOpen={tap} picking={picking} picked={picked.has(c.id)} />
             ))}
             {more()}
           </List>

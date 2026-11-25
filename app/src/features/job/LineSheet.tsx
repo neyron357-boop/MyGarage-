@@ -10,8 +10,8 @@ import { formatAed, roundFils, withMarkup } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import { buildSuggestions, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
 import type { OrderItem, Outsource, PartOffer } from '../../domain/types';
-import { aiAfterPart } from '../../services/ai';
-import { YandexButton } from '../ai/Ai';
+import { aiAfterLine } from '../../services/ai';
+import { AiMark, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
 import { VinCatalogsRow } from './VinCatalogs';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
@@ -293,7 +293,8 @@ export function LineSheet({
       forgetSuggestions();
       haptic('light');
       // A part saved: the garage's AI looks at its name (v0.48) — in the background.
-      if (kind === 'part' && itemId) aiAfterPart(itemId);
+      // Every line's name looked at, and the labour charge said by the parts (v0.86).
+      if (itemId) aiAfterLine(itemId);
       if (!next || !itemId) return onClose();
       // The next one: the sheet empty again, the keyboard still up in the name.
       setAdded((a) => [...a, { id: itemId!, title: typed }]);
@@ -556,7 +557,11 @@ export function LineSheet({
           <div className="line-sum" role="group" aria-label={sum.label} data-cells={sum.cells.length}>
             {sum.cells.map((c) => (
               <div key={c.key} className="line-sum-cell" data-sum={c.key} data-tone={c.tone}>
-                <span className="line-sum-label">{c.label}</span>
+                <span className="line-sum-label">
+                  {c.label}
+                  {/* The cost the AI put from a supplier's answer (v0.86) — until it is changed by hand. */}
+                  {c.key === 'cost' && item?.costAi && cost === item.costPriceFils && <AiMark size={13} label={t('ai.costByAi')} />}
+                </span>
                 <span className="line-sum-value">
                   <Money fils={c.fils} signed={c.key === 'margin'} roll />
                 </span>
@@ -590,6 +595,8 @@ export function LineSheet({
                   <span className="offer-kind">
                     {t(`offer.${o.kind}`)}
                     {o.unsure ? '?' : ''}
+                    {/* Read by the AI (v0.86): the app's own rules found no price in the message. */}
+                    {o.ai && <AiMark size={13} label={t('ai.offerByAi')} />}
                   </span>
                   <Text size="sm" c="dimmed" className="offer-meta" lineClamp={1}>
                     {[sName(o.supplierId), o.brand, o.na ? t('wa.ask.na') : offerWhen(o.days, uiLang), o.note].filter(Boolean).join(' · ')}

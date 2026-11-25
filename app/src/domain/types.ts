@@ -77,6 +77,12 @@ export interface Settings {
    * `tagChats` (services/whatsapp.ts).
    */
   waChatTags?: Record<string, 'customer' | 'supplier' | 'service' | 'work'>;
+  /**
+   * Who a chat is, as the AI said by its name and words (v0.86, the owner: «ИИ должен мониторить входящие сообщения ватсап
+   * и присваивать им статусы»): under the person's own status (`waChatTags`) and the base's people; «other» — asked, not
+   * one of them (not asked again).
+   */
+  waChatAi?: Record<string, 'customer' | 'supplier' | 'other'>;
 }
 
 export interface Customer {
@@ -708,6 +714,14 @@ export interface OrderItem {
   /** The garage's AI looked at the part's name as typed (v0.48): what it was, so it is not asked again; «Отменить» puts it back. */
   aiName?: { from: string; to?: string; at: string };
   /**
+   * What the labour charge is for, said by the AI for these parts (v0.86, the owner: «использовать ИИ для описания труда
+   * исходя из деталей и позиций»): `parts` — the job's parts it was said for (domain/labourName.ts `partsKey`), `text` —
+   * the words after «LABOR CHARGE:». The parts changed — the line is named by the parts again until it is said anew.
+   */
+  labourAi?: { parts: string; text: string };
+  /** The cost was put by the AI from a supplier's WhatsApp answer (v0.86): shown with the AI's mark. */
+  costAi?: true;
+  /**
    * Left by the AI's search for the part's number (v0.48–v0.84: the numbers it found, their catalogues' word) — gone
    * v0.85 by the owner's decision. Records may still hold it; nothing reads or writes it now (kept as data, no migration).
    */
@@ -786,6 +800,8 @@ export interface PartOffer {
   brand?: string;
   /** The supplier's own words («1 HOUR ORDER», «need sample»). */
   note?: string;
+  /** Read by the AI (v0.86): the app's own rules found no price in the message. */
+  ai?: true;
 }
 
 /**

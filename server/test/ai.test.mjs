@@ -182,3 +182,31 @@ describe('the AI through the API', () => {
     }
   });
 });
+
+describe('v0.86: the labour line, a supplier’s answer, who chats are — light models, asked once', () => {
+  it('says the labour, the light model first with minimal thinking; the same parts — not asked again', async () => {
+    const { f, seen } = fake([[/generateContent/, () => answer({ text: 'Labor charge: replace front brake pads' })]]);
+    const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-l-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
+    const r = await ai.labour({ parts: ['FRONT BRAKE PADS'] });
+    assert.equal(r.text, 'REPLACE FRONT BRAKE PADS');
+    assert.match(seen[0].url, /flash-lite/);
+    assert.equal(seen[0].body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+    await ai.labour({ parts: ['FRONT BRAKE PADS'] });
+    assert.equal(seen.length, 1);
+    assert.equal(ai.status().usage.today.byKind.labour, 1);
+  });
+
+  it('reads a supplier’s answer: the request it answers, each line’s prices; a line number not in the request is dropped', async () => {
+    const { f } = fake([[/generateContent/, () => answer({ ask: 'B', lines: [{ n: 1, offers: [{ price: 185, kind: 'oem', brand: '', na: false }] }, { n: 9, offers: [{ price: 1, kind: '', brand: '', na: false }] }], vat: 'excl' })]]);
+    const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-r-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
+    const r = await ai.reply({ text: 'pads 185 original +vat', asks: [{ id: 'a1', car: 'Toyota', lines: ['OIL FILTER'] }, { id: 'a2', car: 'Nissan', lines: ['BRAKE PADS', 'DISC'] }] });
+    assert.deepEqual(r, { ask: 'a2', lines: [{ n: 1, offers: [{ price: 185, kind: 'oem', brand: '', na: false }] }], vat: 'excl' });
+  });
+
+  it('says who chats are; a role it was not asked for is left out', async () => {
+    const { f } = fake([[/generateContent/, () => answer({ chats: [{ id: 'c1', role: 'supplier', confidence: 0.9 }, { id: 'zz', role: 'customer', confidence: 1 }, { id: 'c2', role: 'boss', confidence: 1 }] })]]);
+    const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-c-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
+    const r = await ai.roles({ chats: [{ id: 'c1', name: 'Al Noor Auto Parts', texts: ['price 120'] }, { id: 'c2', name: 'Ahmed', texts: ['my car ready?'] }] });
+    assert.deepEqual(r.chats, [{ id: 'c1', role: 'supplier', confidence: 0.9 }]);
+  });
+});

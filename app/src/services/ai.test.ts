@@ -136,3 +136,35 @@ describe('the AI looks at a part', () => {
     expect(asked.map((a) => a.path).filter((p) => p !== 'part-name')).toEqual([]);
   });
 });
+
+describe('v0.86: every line’s name, the labour charge said by the parts', () => {
+  it('a work line’s name is put right too (not only a part’s)', async () => {
+    const o = await car('Toyota', 'Corolla');
+    answers['part-name'] = { fixed: 'WHEEL ALIGNMENT', english: 'WHEEL ALIGNMENT', isPart: true, confidence: 0.95 };
+    const w = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'whel alignmnet', unitPriceFils: 10000 });
+    expect(await aiFixPartName(w.id)).toBe(true);
+    expect((await db.items.get(w.id))!.titleEn).toBe('WHEEL ALIGNMENT');
+  });
+
+  it('«LABOR CHARGE» says what is done with the parts; the parts changed — by the parts again, then said anew', async () => {
+    const { aiLabourName } = await import('./ai');
+    const o = await car('Toyota', 'Corolla');
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake pads', unitPriceFils: 20000 });
+    const labour = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Labor charge', unitPriceFils: 15000 });
+    expect((await db.items.get(labour.id))!.titleEn).toBe('LABOR CHARGE: FRONT BRAKE PADS');
+    answers.labour = { text: 'REPLACE FRONT BRAKE PADS' };
+    expect(await aiLabourName(o.id)).toBe(true);
+    expect((await db.items.get(labour.id))!.titleEn).toBe('LABOR CHARGE: REPLACE FRONT BRAKE PADS');
+    expect(asked.find((a) => a.path === 'labour')!.body).toMatchObject({ parts: ['FRONT BRAKE PADS'] });
+    // The same parts: not asked again.
+    const n = asked.length;
+    expect(await aiLabourName(o.id)).toBe(false);
+    expect(asked.length).toBe(n);
+    // A part added: the parts' names at once, the AI's words for the new parts after.
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake discs', unitPriceFils: 30000 });
+    expect((await db.items.get(labour.id))!.titleEn).toBe('LABOR CHARGE: FRONT BRAKE PADS, FRONT BRAKE DISCS');
+    answers.labour = { text: 'REPLACE FRONT BRAKE PADS & DISCS' };
+    await aiLabourName(o.id);
+    expect((await db.items.get(labour.id))!.titleEn).toBe('LABOR CHARGE: REPLACE FRONT BRAKE PADS & DISCS');
+  });
+});

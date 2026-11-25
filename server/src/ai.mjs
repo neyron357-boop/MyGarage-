@@ -44,8 +44,23 @@ const P = {
     `VIN ${vin} (car built in ${built || 'unknown region'}; garage in the UAE). NHTSA decoder says: ${facts ? JSON.stringify(facts) : 'nothing'}.
 Give make, model (as sold, e.g. "Land Cruiser"), year, engine ("4.0L V6"; "" if unknown), body (one of pickup, van, bus, truck, suv, mpv, sedan; "" if unknown), confidence 0..1. Empty rather than a guess.`,
   name: (name, car) =>
-    `Spare part name typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}". It may have typos; it may be English, Russian, or Russian in Latin letters.
-fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS"); isPart: is it a car part or service item; confidence 0..1 for fixed.`,
+    `A line of a car repair job typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}" — a spare part, a service or work. It may have typos; it may be English, Russian, or Russian in Latin letters.
+fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; confidence 0..1 for fixed.`,
+  // v0.86: the labour line said by the job's parts and work, as a garage writes it on an invoice.
+  labour: (parts, work) =>
+    `Garage invoice, UAE. Parts on the job: ${parts.join('; ')}.${work.length ? ` Other work on it: ${work.join('; ')}.` : ''}
+Write what the labour charge is for, as on a garage invoice: a verb and the parts, e.g. "REPLACE FRONT BRAKE PADS & DISCS", "OVERHAUL GEARBOX, REPLACE ATF FILTER". English capitals, at most 70 characters, no prices, no "LABOR CHARGE".`,
+  // v0.86: a supplier's WhatsApp answer read when the app's own rules found no prices in it.
+  reply: (text, quote, asks) =>
+    `A UAE auto-parts supplier wrote to a garage on WhatsApp. The garage's requests to this supplier (lines numbered):
+${asks.map((a, k) => `${String.fromCharCode(65 + k)}) ${a.car || 'car'}: ${a.lines.map((l, n) => `${n + 1}. ${l}`).join('; ')}`).join('\n')}
+The supplier's message${quote ? ` (a reply to: "${quote.slice(0, 300)}")` : ''}:
+"""${text.slice(0, 2000)}"""
+ask: the letter of the request it answers ("" if it gives no prices or answers none). lines: each line it answers — n (line number), offers: each price it says for it — price (AED, one piece, as written), kind ("oem" original/genuine, "aftermarket" copy/duplicate/brand, "used", "" if not said), brand ("" if none), na (true: not available). vat: "incl" if the prices include VAT, "excl" if VAT is on top, "" if not said. Only what the message says.`,
+  // v0.86: who a chat is to the garage, by its name and its last words.
+  roles: (chats) =>
+    `WhatsApp chats of a car repair garage in the UAE. For each, who is it to the garage: "customer" (a car owner, a company bringing cars), "supplier" (sells parts, oils, tyres, or does outside work: paint, tow, machining), "other". By the name and the messages; "other" when unsure.
+${chats.map((c) => `${c.id} — "${c.name}": ${c.texts.map((t) => `"${t.slice(0, 160)}"`).join(' / ')}`).join('\n')}`,
   receipt: () =>
     `A photo of a supplier's invoice or receipt in the UAE (amounts in AED; VAT 5 %). The garage is the buyer; read the seller's paper exactly as printed.
 Return: isReceipt (an invoice/receipt/bill at all); vendor (the seller's name as printed, not the buyer's); vendorTrn; vendorPhone (a mobile first, "" if none); vendorAddress (a few words, "" if none); kind — "parts" (car parts, accessories, oils, consumables), "service" (a workshop's or contractor's bill for work: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo;
@@ -143,6 +158,12 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     row.out += u?.candidatesTokenCount ?? 0;
     row.think += u?.thoughtsTokenCount ?? 0;
     row.byKind[kind] = (row.byKind[kind] ?? 0) + 1;
+    // Tokens by kind too (v0.86): what each question of the garage costs, seen on its own.
+    row.tokensByKind ??= {};
+    const t = row.tokensByKind[kind] ??= { in: 0, out: 0, think: 0 };
+    t.in += (u?.promptTokenCount ?? 0) + (u?.toolUsePromptTokenCount ?? 0);
+    t.out += u?.candidatesTokenCount ?? 0;
+    t.think += u?.thoughtsTokenCount ?? 0;
     for (const k of Object.keys(usage)) if (new Date(k).getTime() < now() - 62 * DAY) delete usage[k];
     try {
       fs.mkdirSync(path.dirname(usageFile), { recursive: true });
@@ -152,7 +173,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     }
   }
   const sum = (days) => {
-    const out = { questions: 0, searches: 0, in: 0, out: 0, think: 0, byKind: {} };
+    const out = { questions: 0, searches: 0, in: 0, out: 0, think: 0, byKind: {}, tokensByKind: {} };
     for (const d of days) {
       const r = usage[d];
       if (!r) continue;
@@ -162,6 +183,12 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       out.out += r.out;
       out.think += r.think;
       for (const [k, v] of Object.entries(r.byKind)) out.byKind[k] = (out.byKind[k] ?? 0) + v;
+      for (const [k, v] of Object.entries(r.tokensByKind ?? {})) {
+        const t = (out.tokensByKind[k] ??= { in: 0, out: 0, think: 0 });
+        t.in += v.in;
+        t.out += v.out;
+        t.think += v.think;
+      }
     }
     return out;
   };
@@ -387,6 +414,86 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         );
         const num = (x) => (x === '' || x === null || x === undefined || Number.isNaN(Number(x)) ? undefined : Number(x));
         return { ...value, subtotal: num(value.subtotal), vat: num(value.vat), total: num(value.total), by: model };
+      });
+    },
+
+    /** v0.86: what the labour charge is for, by the job's parts and work (a light model; kept for the same parts). */
+    async labour({ parts = [], work = [] } = {}) {
+      const p = (Array.isArray(parts) ? parts : []).map((x) => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 20);
+      const w = (Array.isArray(work) ? work : []).map((x) => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 10);
+      if (!p.length) throw httpError(400, 'no parts');
+      return cached(`labour:${p.join('|').toLowerCase()}#${w.join('|').toLowerCase()}`, 'labour', async () => {
+        const { value } = await json(P.labour(p, w), { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] }, { kind: 'labour', thinking: 'minimal' });
+        const text = String(value.text ?? '')
+          .toUpperCase()
+          .replace(/^\s*LABOU?R(?: CHARGES?)?\s*[:\-–]\s*/, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 80);
+        return { text };
+      });
+    },
+
+    /** v0.86: a supplier's answer the app's rules could not read — which request, which line, what price. */
+    async reply({ text, quote = '', asks = [] } = {}) {
+      text = String(text ?? '').trim();
+      const list = (Array.isArray(asks) ? asks : []).slice(0, 4).map((a) => ({
+        id: String(a?.id ?? ''),
+        car: String(a?.car ?? '').slice(0, 60),
+        lines: (Array.isArray(a?.lines) ? a.lines : []).slice(0, 25).map((l) => String(l).slice(0, 80)),
+      }));
+      if (!text || !list.length || !list.some((a) => a.lines.length)) throw httpError(400, 'nothing to read');
+      const key = createHash('sha1').update(JSON.stringify([text, String(quote).slice(0, 300), list])).digest('hex');
+      return cached(`reply:${key}`, 'reply', async () => {
+        const offer = { type: 'object', properties: { price: { type: 'number' }, kind: { type: 'string' }, brand: { type: 'string' }, na: { type: 'boolean' } }, required: ['price', 'kind', 'na'] };
+        const { value } = await json(
+          P.reply(text, String(quote), list),
+          {
+            type: 'object',
+            properties: { ask: { type: 'string' }, lines: { type: 'array', items: { type: 'object', properties: { n: { type: 'number' }, offers: { type: 'array', items: offer } }, required: ['n', 'offers'] } }, vat: { type: 'string' } },
+            required: ['ask', 'lines', 'vat'],
+          },
+          { kind: 'reply', thinking: 'minimal' },
+        );
+        const ask = list[String(value.ask ?? '').trim().toUpperCase().charCodeAt(0) - 65];
+        if (!ask) return { ask: '', lines: [], vat: '' };
+        const kinds = new Set(['oem', 'aftermarket', 'used']);
+        const lines = (Array.isArray(value.lines) ? value.lines : [])
+          .map((l) => ({
+            n: Math.round(Number(l?.n)),
+            offers: (Array.isArray(l?.offers) ? l.offers : [])
+              .map((o) => ({ price: Number(o?.price) > 0 ? Number(o.price) : 0, kind: kinds.has(o?.kind) ? o.kind : '', brand: String(o?.brand ?? '').slice(0, 40), na: !!o?.na }))
+              .filter((o) => o.na || o.price > 0),
+          }))
+          .filter((l) => l.n >= 1 && l.n <= ask.lines.length && l.offers.length);
+        return { ask: ask.id, lines, vat: value.vat === 'incl' || value.vat === 'excl' ? value.vat : '' };
+      });
+    },
+
+    /** v0.86: who chats are to the garage — a few at once, kept by their words. */
+    async roles({ chats = [] } = {}) {
+      const list = (Array.isArray(chats) ? chats : [])
+        .slice(0, 12)
+        .map((c) => ({ id: String(c?.id ?? '').slice(0, 80), name: String(c?.name ?? '').slice(0, 80), texts: (Array.isArray(c?.texts) ? c.texts : []).slice(0, 3).map((t) => String(t)) }))
+        .filter((c) => c.id && (c.name || c.texts.length));
+      if (!list.length) return { chats: [] };
+      const key = createHash('sha1').update(JSON.stringify(list)).digest('hex');
+      return cached(`roles:${key}`, 'roles', async () => {
+        const { value } = await json(
+          P.roles(list),
+          {
+            type: 'object',
+            properties: { chats: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, role: { type: 'string' }, confidence: { type: 'number' } }, required: ['id', 'role', 'confidence'] } } },
+            required: ['chats'],
+          },
+          { kind: 'roles', thinking: 'minimal' },
+        );
+        const ids = new Set(list.map((c) => c.id));
+        return {
+          chats: (Array.isArray(value.chats) ? value.chats : [])
+            .filter((c) => ids.has(c?.id) && ['customer', 'supplier', 'other'].includes(c?.role))
+            .map((c) => ({ id: c.id, role: c.role, confidence: Number(c.confidence) || 0 })),
+        };
       });
     },
 
