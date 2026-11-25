@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  firstUnread,
+  searchDigits,
   applyEvent,
   chatRole,
   chatIdOf,
@@ -312,15 +314,50 @@ describe('«Только гараж» and the statuses given by hand (v0.81)', (
     expect(chatRole(ali, people, { tags: { [ali.id]: 'supplier' }, groups: new Set() })).toBe('customer');
   });
 
-  it('on — the garage’s chats (and oneself); off — every chat; a search finds any; a service is among the suppliers', () => {
+  it('on — the garage’s chats (and oneself); off — every chat; a search keeps to it (v0.84); a service is among the suppliers', () => {
     const ids = (garageOnly: boolean, tab: 'all' | 'suppliers' | 'groups' = 'all', query = '') => filterChats(all, { tab, query, people, roles, garageOnly }).map((c) => c.id);
     expect(ids(true)).toEqual([ali.id, tagged.id, workGroup.id, me.id]);
     expect(ids(false)).toEqual(all.map((c) => c.id));
     expect(ids(true, 'suppliers')).toEqual([tagged.id]);
     expect(ids(true, 'groups')).toEqual([workGroup.id]);
-    expect(ids(true, 'all', '55444')).toEqual([stranger.id]);
+    // v0.84: a search keeps to the filter — the stranger is found with it off.
+    expect(ids(true, 'all', '55444')).toEqual([]);
+    expect(ids(false, 'all', '55444')).toEqual([stranger.id]);
+    // A number however it is typed: spaces, dashes, «+», «00», the local «0».
+    expect(ids(true, 'all', '050 123-45-67')).toEqual([ali.id]);
+    expect(ids(true, 'all', '+971 50 1234567')).toEqual([ali.id]);
+    expect(ids(true, 'all', '00971501234567')).toEqual([ali.id]);
     // The unread of the chats shown.
     expect(tabCounts(all, people, roles, true).all).toBe(1);
     expect(tabCounts(all, people, roles, false).all).toBe(2);
+  });
+});
+
+describe('v0.84: where the unread begin, a number typed, a message’s state', () => {
+  const m = (me: boolean) => ({ me });
+  it('the first of the last N of the other side', () => {
+    const list = [m(false), m(true), m(false), m(false), m(true), m(false)];
+    expect(firstUnread(list, 0)).toBe(-1);
+    expect(firstUnread(list, 1)).toBe(5);
+    expect(firstUnread(list, 2)).toBe(3);
+    expect(firstUnread(list, 3)).toBe(2);
+    // WhatsApp counts more than are read here: from the first of theirs.
+    expect(firstUnread(list, 9)).toBe(0);
+    expect(firstUnread([m(true)], 2)).toBe(-1);
+  });
+  it('a number’s digits as a search keeps them', () => {
+    expect(searchDigits('050 123-45-67')).toBe('501234567');
+    expect(searchDigits('+971 (50) 123')).toBe('97150123');
+    expect(searchDigits('00971 50')).toBe('97150');
+    expect(searchDigits('12')).toBe('');
+  });
+  it('queued, checking, on its way, sent, delivered, read, failed', () => {
+    expect(ticksOf({ ack: 0, pending: true, queued: true })).toBe('queued');
+    expect(ticksOf({ ack: 0, pending: true, checking: true })).toBe('checking');
+    expect(ticksOf({ ack: 0, pending: true })).toBe('wait');
+    expect(ticksOf({ ack: 1 })).toBe('sent');
+    expect(ticksOf({ ack: 2 })).toBe('got');
+    expect(ticksOf({ ack: 3 })).toBe('read');
+    expect(ticksOf({ ack: 0, pending: true, queued: true, failed: true })).toBe('failed');
   });
 });

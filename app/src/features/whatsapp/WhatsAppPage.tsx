@@ -1,7 +1,7 @@
 import { ActionIcon, Button, Group, Loader, Modal, Stack, Switch, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconBriefcase, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { IconBrandWhatsapp, IconBriefcase, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { dayShort, dubaiDate, dubaiTime } from '../../domain/dates';
@@ -9,11 +9,11 @@ import { formatPhone } from '../../domain/phone';
 import { CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROLES, tabCounts, WA_TAGS, waDigits, whoOf, type ChatTab, type WaChat, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
-import { loadChatRoles, loadChats, numberOnWa, refreshWa, setWaPrefs, tagChats, waCan, waPrefs, waReady, type WaStore } from '../../services/whatsapp';
+import { loadChatRoles, loadChats, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
 import { haptic } from '../../ui/haptics';
 import { useWaStatus } from '../../ui/waSel';
 import { copyText } from '../../ui/clipboard';
-import { EmptyState, List, ListRow, PageHeader, ScrollTabs, SearchField, StickyBar } from '../../ui/components';
+import { EmptyState, List, ListRow, PageHeader, SearchField, StickyBar } from '../../ui/components';
 import { useDesk } from '../../ui/desk';
 import { setWaSideHidden, useWaSideHidden } from '../../ui/deskSide';
 import { useAction, useErrorText, useScreenLiveQuery } from '../../ui/hooks';
@@ -26,7 +26,7 @@ import { CustomerModal } from '../customers/forms';
 import { SupplierSheet } from '../parts/Suppliers';
 import { ChatThread } from './ChatThread';
 import type { QuickFor } from './ChatQuick';
-import { LastLine, useWaPeople, WaAvatar, WhoTag } from './WaParts';
+import { ChatHead, LastLine, useWaPeople, WaAvatar, WhoTag } from './WaParts';
 
 /*
  * «WhatsApp» (v0.78): the garage's chats in the app. A phone: the list, a chat on its own screen. A PC: the list and
@@ -184,20 +184,61 @@ function TagSheet({ opened, onClose, n, onTag }: { opened: boolean; onClose: () 
   );
 }
 
+/**
+ * The list as it was left (v0.84, the brief: «при возврате из чата сохраняй поиск, фильтр и позицию в списке в рамках
+ * текущей сессии… при следующем запуске снова включай рабочий фильтр»): the tab, the search, «Только гараж», how far it was
+ * scrolled and how many rows were drawn — kept while the app is open; «Только гараж» is on again at each start.
+ */
+const view = { tab: 'all' as ChatTab, query: '', garageOnly: true, scroll: 0, shown: 0 };
+
 function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<string, Who>; active?: string; onOpen: (c: WaChat) => void }) {
   const { t } = useTranslation();
   const when = useWhen();
+  const desk = useDesk();
+  const screen = useScreen();
   const { run } = useAction();
-  const [tab, setTab] = useState<ChatTab>('all');
-  const [query, setQuery] = useState('');
-  // «Только гараж» (v0.81): on by default, kept on the device; the garage's chats are its people's, those given a status,
-  // its groups.
-  const [garageOnly, setGarageOnly] = useState(() => waPrefs().garageOnly);
+  const [tab, setTabState] = useState<ChatTab>(view.tab);
+  const [query, setQueryState] = useState(view.query);
+  // «Только гараж» (v0.81): on by default; the garage's chats are its people's, those given a status, its groups.
+  const [garageOnly, setGarageOnlyState] = useState(view.garageOnly);
+  const setTab = (v: ChatTab) => setTabState((view.tab = v));
+  const setQuery = (v: string) => setQueryState((view.query = v));
+  const setGarageOnly = (v: boolean) => setGarageOnlyState((view.garageOnly = v));
   const roles = useScreenLiveQuery(loadChatRoles, []) ?? NO_ROLES;
   const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly }), [s.chats, tab, query, people, roles, garageOnly]);
+  // A search with «Только гараж» on: how many more the whole list has (one tap shows them).
+  const elsewhere = useMemo(
+    () => (garageOnly && query.trim() ? filterChats(s.chats, { tab, query, people, roles, garageOnly: false }).length - rows.length : 0),
+    [garageOnly, query, s.chats, tab, people, roles, rows.length],
+  );
   const counts = useMemo(() => tabCounts(s.chats, people, roles, garageOnly), [s.chats, people, roles, garageOnly]);
-  const { limit, more } = useMoreRows(rows.length, `${tab}|${query}|${garageOnly}`);
-  // «Выбрать чаты» (v0.81): several picked, one status to all of them.
+  const { limit, more } = useMoreRows(rows.length, `${tab}|${query}|${garageOnly}`, undefined, view.shown);
+  view.shown = Math.min(limit, rows.length);
+  // A phone (v0.84): the list on the screen's plain colour, as WhatsApp's (no group card, no glow).
+  useLayoutEffect(() => {
+    const el = desk ? null : screen?.scroller.current?.closest<HTMLElement>('.screen');
+    if (!el) return undefined;
+    el.setAttribute('data-wa-list', '');
+    return () => el.removeAttribute('data-wa-list');
+  }, [desk, screen]);
+  // Back where it was: the list's own scroll (a phone) — kept as it scrolls, put back when the list is drawn again.
+  const restored = useRef(false);
+  useLayoutEffect(() => {
+    const el = desk ? null : screen?.scroller.current;
+    if (!el || restored.current || !rows.length) return;
+    restored.current = true;
+    if (view.scroll > 0) el.scrollTop = view.scroll;
+  }, [desk, screen, rows.length]);
+  useEffect(() => {
+    const el = desk ? null : screen?.scroller.current;
+    if (!el) return undefined;
+    const on = () => {
+      if (screen?.front()) view.scroll = el.scrollTop;
+    };
+    el.addEventListener('scroll', on, { passive: true });
+    return () => el.removeEventListener('scroll', on);
+  }, [desk, screen]);
+  // «Выбрать» (v0.81): several picked, one status to all of them.
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [tagging, setTagging] = useState(false);
@@ -225,42 +266,134 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       haptic('success');
       setTagging(false);
       endPick();
-      notifications.show({ color: 'green', message: to ? t('wa.tags.done', { n, tag: t(`wa.who.${to}`) }) : t('wa.tags.cleared', { n }) });
+      notifications.show({ color: 'green', message: to ? t('wa.tags.updated', { count: n }) : t('wa.tags.cleared', { n }) });
     });
+  const failed = !!s.chatsFailed && !s.chatsLoading;
   return (
     <>
-      <SearchField value={query} onChange={setQuery} placeholder={t('wa.search')} />
-      <div className="wa-list-tools">
-        <Button variant={picking ? 'light' : 'subtle'} size="compact-md" leftSection={picking ? <IconX size={16} /> : <IconListCheck size={16} />} onClick={() => (picking ? endPick() : setPicking(true))} data-wa-pick>
-          {picking ? t('common.cancel') : t('wa.tags.pick')}
-        </Button>
-        <Switch label={t('wa.garageOnly')} labelPosition="left" checked={garageOnly} onChange={(e) => {
-            const on = e.currentTarget.checked;
-            setGarageOnly(on);
-            setWaPrefs({ garageOnly: on });
-          }} data-wa-garage-only />
+      {/* «Выбрать» on the left (while picking: «Выбрано N» and «Отмена»), «Только гараж» on the right. */}
+      <div className="wa-list-tools" data-picking={picking || undefined}>
+        {picking ? (
+          <>
+            <span className="wa-picked-n" data-wa-picked-n>
+              {t('wa.pickedN', { n: picked.size })}
+            </span>
+            <Button variant="subtle" size="compact-md" onClick={endPick} data-wa-pick>
+              {t('common.cancel')}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="subtle" size="compact-md" leftSection={<IconListCheck size={18} />} onClick={() => setPicking(true)} data-wa-pick>
+              {t('wa.tags.pick')}
+            </Button>
+            <Switch
+              label={t('wa.garageOnly')}
+              labelPosition="left"
+              checked={garageOnly}
+              onChange={(e) => {
+                haptic('selection');
+                setGarageOnly(e.currentTarget.checked);
+              }}
+              data-wa-garage-only
+            />
+          </>
+        )}
       </div>
-      <ScrollTabs value={tab} onChange={(v) => setTab(v as ChatTab)} items={CHAT_TABS.map((k) => ({ value: k, label: t(`wa.tab.${k}`), count: k === 'all' ? undefined : counts[k] || undefined }))} mb="sm" />
+      <SearchField value={query} onChange={setQuery} placeholder={t('wa.search')} />
+      <div className="wa-filters" role="tablist" data-own-swipe>
+        {CHAT_TABS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={tab === k}
+            className="wa-filter tap"
+            data-on={tab === k || undefined}
+            onClick={() => {
+              haptic('selection');
+              setTab(k);
+            }}
+            data-wa-tab={k}
+          >
+            {t(`wa.tab.${k}`)}
+            {k !== 'all' && counts[k] > 0 && <span className="wa-filter-n">{counts[k]}</span>}
+          </button>
+        ))}
+      </div>
+      {failed && s.chats.length > 0 && (
+        <div className="wa-list-note" role="status" data-wa-list-note>
+          <IconCloudOff size={16} stroke={2} aria-hidden />
+          <span>{s.chatsAt ? t('wa.staleAt', { time: dubaiTime(new Date(s.chatsAt).toISOString()) }) : t('wa.loadFailed')}</span>
+          <Button variant="subtle" size="compact-sm" onClick={() => void loadChats(true)}>
+            {t('wa.gate.retry')}
+          </Button>
+        </div>
+      )}
       {rows.length === 0 ? (
         s.chatsLoading && !s.chatsAt ? (
           <Group justify="center" py="xl">
             <Loader size="sm" />
           </Group>
+        ) : failed && !s.chats.length ? (
+          <EmptyState
+            icon={IconCloudOff}
+            title={t('wa.loadFailed')}
+            action={
+              <Button variant="light" onClick={() => void loadChats(true)} data-wa-reload>
+                {t('wa.gate.retry')}
+              </Button>
+            }
+          />
+        ) : query ? (
+          <EmptyState
+            icon={IconSearch}
+            title={t('wa.noFound')}
+            action={
+              <Group gap="xs" justify="center">
+                {elsewhere > 0 && (
+                  <Button variant="light" onClick={() => setGarageOnly(false)} data-wa-search-all>
+                    {t('wa.searchAll', { n: elsewhere })}
+                  </Button>
+                )}
+                <Button variant="subtle" onClick={() => setQuery('')} data-wa-clear>
+                  {t('wa.clearSearch')}
+                </Button>
+              </Group>
+            }
+          />
+        ) : garageOnly && tab === 'all' && s.chats.length > 0 ? (
+          <EmptyState
+            icon={IconBriefcase}
+            title={t('wa.noGarage')}
+            action={
+              <Button variant="light" onClick={() => setGarageOnly(false)} data-wa-show-all>
+                {t('wa.showAll')}
+              </Button>
+            }
+          />
         ) : (
-          <EmptyState icon={IconBrandWhatsapp} title={t(query ? 'wa.noFound' : tab === 'all' ? 'wa.empty' : 'wa.emptyTab')} />
+          <EmptyState icon={IconBrandWhatsapp} title={t(tab === 'all' ? 'wa.empty' : 'wa.emptyTab')} />
         )
       ) : (
-        <List className="wa-chats">
-          {rows.slice(0, limit).map((c) => (
-            <ChatRow key={c.id} c={c} who={whoOf(c, people)} role={chatRole(c, people, roles)} when={when(c.t)} active={!picking && c.id === active} onOpen={tap} picking={picking} picked={picked.has(c.id)} />
-          ))}
-          {more()}
-        </List>
+        <>
+          <List className="wa-chats">
+            {rows.slice(0, limit).map((c) => (
+              <ChatRow key={c.id} c={c} who={whoOf(c, people)} role={chatRole(c, people, roles)} when={when(c.t)} active={!picking && c.id === active} onOpen={tap} picking={picking} picked={picked.has(c.id)} />
+            ))}
+            {more()}
+          </List>
+          {elsewhere > 0 && (
+            <Button variant="subtle" fullWidth mt="xs" onClick={() => setGarageOnly(false)} data-wa-search-all>
+              {t('wa.searchAll', { n: elsewhere })}
+            </Button>
+          )}
+        </>
       )}
       {picking && (
         <StickyBar>
           <Button fullWidth disabled={!picked.size} leftSection={<IconTag size={18} />} onClick={() => setTagging(true)} data-wa-tag-picked>
-            {t('wa.tags.give', { n: picked.size })}
+            {t('wa.tags.assign')}
           </Button>
         </StickyBar>
       )}
@@ -479,6 +612,8 @@ export function WhatsAppPage() {
   }, [openNumber, errorText]);
 
   const gate = ready ? null : <WaGate s={s} />;
+  // Under the chat's name: whose it is in the garage and the number (a group — «Группа»).
+  const headLine = face ? (face.c.group ? t('wa.groupLine') : [face.who ? t(`wa.who.${face.who.kind}`) : '', face.c.phone ? formatPhone(`+${face.c.phone}`) : ''].filter(Boolean).join(' · ')) : '';
   const eyebrow = s.status?.me && ready ? formatPhone(`+${s.status.me.phone}`) : undefined;
   const sheets = (
     <>
@@ -492,19 +627,21 @@ export function WhatsAppPage() {
       <>
         <PageHeader title="WhatsApp" eyebrow={eyebrow} right={<HeaderButtons ready={ready} onNew={() => setAdding(true)} />} />
         {gate ?? (
-          <div className="wa-desk">
+          // Narrow (an iPad upright, v0.84): the list or the chat, one at a time — «‹» in the chat's head back to the list.
+          <div className="wa-desk" data-open={chatId ? true : undefined}>
             <div className="wa-desk-list">
               <ChatList s={s} people={people} active={chatId} onOpen={openChat} />
             </div>
             <div className="wa-desk-chat">
               {face && chatId ? (
                 <>
-                  <button type="button" className="wa-chat-head" onClick={() => setInfo(true)} data-wa-head>
-                    <WaAvatar id={chatId} name={face.title} group={face.c.group} size={40} />
-                    <span className="wa-chat-head-name dt-clip">{face.title}</span>
+                  <div className="wa-chat-head">
+                    <button type="button" className="wa-icon-btn wa-desk-back tap" aria-label={t('common.back')} onClick={() => navigate('/whatsapp')} data-wa-desk-back>
+                      <IconChevronLeft size={24} stroke={2} />
+                    </button>
+                    <ChatHead id={chatId} name={face.title} group={face.c.group} line={headLine} onOpen={() => setInfo(true)} size={40} />
                     {face.who && <WhoTag kind={face.who.kind} />}
-                    {face.c.phone && <span className="wa-chat-head-phone tnum">{formatPhone(`+${face.c.phone}`)}</span>}
-                  </button>
+                  </div>
                   <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk quick={quick} who={face.who} phone={face.c.phone} />
                 </>
               ) : (
@@ -527,18 +664,18 @@ export function WhatsAppPage() {
   if (chatId && face) {
     return (
       <>
+        {/* WhatsApp's bar (v0.84): «‹», the picture, the name and whose it is — a tap, the chat's card; the call at the end. */}
         <PageHeader
-          title={
-            <span className="wa-title" data-wa-head>
-              {face.title}
-            </span>
-          }
-          eyebrow={face.who ? t(`wa.who.${face.who.kind}`) : face.c.phone ? formatPhone(`+${face.c.phone}`) : undefined}
+          title={face.title}
+          inline
+          lead={<ChatHead id={chatId} name={face.title} group={face.c.group} line={headLine} onOpen={() => setInfo(true)} />}
           back="/whatsapp"
           right={
-            <button type="button" className="wa-head-avatar tap" aria-label={face.title} onClick={() => setInfo(true)} data-wa-info-btn>
-              <WaAvatar id={chatId} name={face.title} group={face.c.group} size={40} />
-            </button>
+            face.c.phone ? (
+              <ActionIcon variant="default" size={40} radius="xl" aria-label={t('wa.call')} component="a" href={`tel:+${face.c.phone}`} data-wa-call>
+                <IconPhone size={21} stroke={1.9} />
+              </ActionIcon>
+            ) : undefined
           }
         />
         {gate ?? (

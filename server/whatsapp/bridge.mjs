@@ -35,6 +35,7 @@ import { pipeline } from 'node:stream/promises';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 import { findBrowser } from './browser.mjs';
+import { createOnce } from './once.mjs';
 import { CHAT_ID, chatRow, lastRow, MESSAGE_ID, messageRow, phoneOf, sortChats } from './rows.mjs';
 import { oggOpus, PAGE_OPUS } from './voice.mjs';
 
@@ -719,7 +720,11 @@ const chatParam = (v) => {
 };
 const quoteOpt = (v) => (v && MESSAGE_ID.test(String(v)) ? { quotedMessageId: String(v) } : {});
 
-async function sendText(body) {
+/** The app's key of a send (v0.84): the same key again — the same message (once.mjs). */
+const once = createOnce();
+
+const sendText = (body) => once(body?.key, () => sendTextNow(body));
+async function sendTextNow(body) {
   const c = need();
   const chat = chatParam(body.chat);
   const text = String(body.text ?? '');
@@ -798,7 +803,8 @@ async function toVoice(c, bytes) {
   return oggOpus(r.packets.map((p) => Buffer.from(p, 'base64')), { samples: r.samples });
 }
 
-async function sendFile(url, bytes, type) {
+const sendFile = (url, bytes, type) => once(url.searchParams.get('key'), () => sendFileNow(url, bytes, type));
+async function sendFileNow(url, bytes, type) {
   const c = need();
   const chat = chatParam(url.searchParams.get('chat'));
   if (!bytes.length) throw httpError(400, 'empty file');

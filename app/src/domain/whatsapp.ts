@@ -97,6 +97,16 @@ export interface WaMessage {
   /** Written here and not on WhatsApp yet; `failed` — it did not go (a tap sends it again). */
   pending?: boolean;
   failed?: boolean;
+  /**
+   * Waiting for the network (v0.84): it goes by itself when the server answers again — under the same key, so it is never
+   * sent twice. `checking` — the last try ended without an answer: whether it went is asked by its key first.
+   */
+  queued?: boolean;
+  checking?: boolean;
+  /** A file on its way to the server: how much of it went (0–1). */
+  progress?: number;
+  /** Why it did not go (an i18n key, `wa.err.*`). */
+  err?: string;
   /** A file being sent: shown from this address until WhatsApp has it. */
   local?: string;
 }
@@ -196,11 +206,13 @@ const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е').trim();
 
 /**
  * The chats of a tab, in the list's order. Archived chats are out of every tab (WhatsApp hides them too) — a search
- * finds them. A search goes by the garage's name, WhatsApp's name and the number as it is said («050…»).
+ * finds them. A search goes by the garage's name, WhatsApp's name and the number however it is typed («050 123-45-67»,
+ * «+971…», «00971…»).
  */
 export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who>; roles?: ChatRoles; garageOnly?: boolean }): WaChat[] {
   const q = fold(opts.query ?? '');
-  const qDigits = q.replace(/\D/g, '').replace(/^0+/, '');
+  // Letters in it — a name, not a number («Ali 2» is not «2»).
+  const qDigits = /\p{L}/u.test(q) ? '' : searchDigits(q);
   const roles = opts.roles ?? NO_ROLES;
   const out = chats.filter((c) => {
     const who = whoOf(c, opts.people);
@@ -208,11 +220,12 @@ export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: strin
     if (q) {
       const names = fold(`${who?.name ?? ''} ${c.name}`);
       const byName = names.includes(q);
-      const byNumber = qDigits.length >= 3 && c.phone.includes(qDigits);
+      const byNumber = !!qDigits && c.phone.includes(qDigits);
       if (!byName && !byNumber) return false;
     } else if (c.archived) return false;
-    // «Только гараж» (v0.81): the chats that are something to the garage (and oneself) — a search finds any.
-    else if (opts.garageOnly && !role && !c.self) return false;
+    // «Только гараж» (v0.81): the chats that are something to the garage (and oneself). A search keeps to it too (v0.84,
+    // «поиск по имени и номеру учитывает текущий фильтр»): the list says how many more the whole list has.
+    if (opts.garageOnly && !role && !c.self) return false;
     if (opts.tab === 'unread') return c.unread > 0;
     if (opts.tab === 'customers') return role === 'customer';
     if (opts.tab === 'suppliers') return role === 'supplier' || role === 'service';
@@ -299,10 +312,15 @@ export function previewOf(last: Pick<WaLast, 'type' | 'text' | 'name' | 'sec'>):
   return { kind, words: text };
 }
 
-export type Ticks = 'failed' | 'wait' | 'sent' | 'got' | 'read';
-/** One's own message's ticks: on its way, sent, delivered, read. */
-export function ticksOf(m: Pick<WaMessage, 'ack' | 'pending' | 'failed'>): Ticks {
+export type Ticks = 'failed' | 'queued' | 'checking' | 'wait' | 'sent' | 'got' | 'read';
+/**
+ * One's own message's state (v0.84, the brief: «В очереди», «Отправляется», «Отправлено», «Доставлено», «Прочитано»,
+ * «Ошибка отправки», «Проверяем отправку»): waiting for the network, on its way, sent, delivered, read — or not sent.
+ */
+export function ticksOf(m: Pick<WaMessage, 'ack' | 'pending' | 'failed' | 'queued' | 'checking'>): Ticks {
   if (m.failed || m.ack < 0) return 'failed';
+  if (m.pending && m.queued) return 'queued';
+  if (m.pending && m.checking) return 'checking';
   if (m.pending || m.ack === 0) return 'wait';
   if (m.ack === 1) return 'sent';
   if (m.ack === 2) return 'got';
@@ -315,6 +333,33 @@ export function fileSize(bytes: number | undefined): { n: string; unit: 'kb' | '
   if (bytes < 1024 * 1024) return { n: String(Math.max(1, Math.round(bytes / 1024))), unit: 'kb' };
   const mb = bytes / 1024 / 1024;
   return { n: mb >= 10 ? String(Math.round(mb)) : mb.toFixed(1), unit: 'mb' };
+}
+
+/**
+ * Where the unread begin (v0.84, «при первом открытии с непрочитанными дай ориентир на первое непрочитанное»): the first of
+ * the last `unread` messages of the other side — WhatsApp counts only theirs. -1: none (or none of them read yet).
+ */
+export function firstUnread(list: Pick<WaMessage, 'me'>[], unread: number): number {
+  if (unread <= 0) return -1;
+  let left = unread;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].me) continue;
+    left--;
+    if (left === 0) return i;
+  }
+  // Fewer of theirs read here than WhatsApp counts (older ones not read yet): from the first of them.
+  const first = list.findIndex((m) => !m.me);
+  return first;
+}
+
+/**
+ * What a search for a number keeps (v0.84, «поиск номера работает с пробелами, дефисами и международным префиксом»): the
+ * digits, without «00» or a leading «0» of the local way of saying it («050 123-45-67» → «501234567», «+971 50…» and
+ * «00971 50…» → «97150…»). Fewer than three digits — not a number.
+ */
+export function searchDigits(query: string): string {
+  const d = query.replace(/\D/g, '').replace(/^0+/, '');
+  return d.length >= 3 ? d : '';
 }
 
 /** The messages by day (Dubai), the oldest first. */

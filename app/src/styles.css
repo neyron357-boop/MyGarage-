@@ -9040,3 +9040,1382 @@ html.phone-shell .note-video-play {
   background: color-mix(in srgb, var(--mantine-color-text) 10%, transparent);
   color: var(--mantine-color-text);
 }
+
+/* ---------- WhatsApp as WhatsApp (v0.84) ----------
+   The brief «полировка встроенного WhatsApp», the owner: «интерфейс на 99 % схож с настоящим ватсапом по детализации и
+   качеству». A chat: the garage's own doodles over WhatsApp's warm paper (night — its deep blue-grey), the other side's
+   messages white on the left, one's own pale green on the right, the time and the ticks in the bubble's corner, a tail on
+   the last of a run, the day floating at the top while it scrolls, «N непрочитанных» across; WhatsApp's bars above and
+   below. The list: plain rows on the screen's own colour, WhatsApp's chips over it. Colours here only — the rest of the app
+   keeps its own. */
+:root {
+  --wa-wall-bg: #efeae2;
+  --wa-doodles: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Cg fill='none' stroke='%234a3f33' stroke-opacity='0.13' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg transform='translate(18 14) rotate(-18 12 12) scale(1.25)'%3E%3Cpath d='M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5'/%3E%3C/g%3E%3Cg transform='translate(96 28) rotate(8 12 12) scale(1.1)'%3E%3Cpath d='M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1'/%3E%3C/g%3E%3Cg transform='translate(178 10) rotate(-6 12 12) scale(1.4)'%3E%3Cpath d='M5 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M15 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M5 17h-2v-6l2 -5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5'/%3E%3C/g%3E%3Cg transform='translate(262 30) rotate(14 12 12) scale(1.05)'%3E%3Cpath d='M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11'/%3E%3C/g%3E%3Cg transform='translate(40 92) rotate(10 12 12) scale(1.2)'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0'/%3E%3Cpath d='M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'/%3E%3Cpath d='M13.41 10.59l2.59 -2.59'/%3E%3Cpath d='M7 12a5 5 0 0 1 5 -5'/%3E%3C/g%3E%3Cg transform='translate(132 96) rotate(-12 12 12) scale(1)'%3E%3Cpath d='M7.502 19.423c2.602 2.105 6.395 2.105 8.996 0c2.602 -2.105 3.262 -5.708 1.566 -8.546l-4.89 -7.26c-.42 -.625 -1.287 -.803 -1.936 -.397a1.376 1.376 0 0 0 -.41 .397l-4.893 7.26c-1.695 2.838 -1.035 6.441 1.567 8.546z'/%3E%3C/g%3E%3Cg transform='translate(206 84) rotate(22 12 12) scale(1.15)'%3E%3Cpath d='M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0z'/%3E%3Cpath d='M15 9h.01'/%3E%3C/g%3E%3Cg transform='translate(278 104) rotate(-8 12 12) scale(1.05)'%3E%3Cpath d='M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2'/%3E%3Cpath d='M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0'/%3E%3C/g%3E%3Cg transform='translate(12 172) rotate(0 12 12) scale(1.2)'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0'/%3E%3Cpath d='M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0'/%3E%3Cpath d='M3 12h6'/%3E%3Cpath d='M15 12h6'/%3E%3Cpath d='M12 3v6'/%3E%3Cpath d='M12 15v6'/%3E%3C/g%3E%3Cg transform='translate(96 160) rotate(-14 12 12) scale(1.05)'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0'/%3E%3Cpath d='M12 7v5l3 3'/%3E%3C/g%3E%3Cg transform='translate(160 168) rotate(30 12 12) scale(1.1)'%3E%3Cpath d='M9 4h6v4l-3 2l-3 -2z'/%3E%3Cpath d='M12 10v10'/%3E%3Cpath d='M10 13l4 -1'/%3E%3Cpath d='M10 16l4 -1'/%3E%3Cpath d='M10 19l4 -1'/%3E%3C/g%3E%3Cg transform='translate(232 160) rotate(12 12 12) scale(1.05)'%3E%3Cpath d='M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2'/%3E%3C/g%3E%3Cg transform='translate(54 242) rotate(-10 12 12) scale(1.2)'%3E%3Cpath d='M6 7h11a2 2 0 0 1 2 2v.5a.5 .5 0 0 0 .5 .5a.5 .5 0 0 1 .5 .5v3a.5 .5 0 0 1 -.5 .5a.5 .5 0 0 0 -.5 .5v.5a2 2 0 0 1 -2 2h-11a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2'/%3E%3Cpath d='M7 10v4'/%3E%3Cpath d='M10 10v4'/%3E%3C/g%3E%3Cg transform='translate(130 232) rotate(0 12 12) scale(1)'%3E%3Cpath d='M5 12l5 5l10 -10'/%3E%3C/g%3E%3Cg transform='translate(196 236) rotate(-12 12 12) scale(1)'%3E%3Cpath d='M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572'/%3E%3C/g%3E%3Cg transform='translate(270 236) rotate(10 12 12) scale(1.05)'%3E%3Cpath d='M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9z'/%3E%3Cpath d='M5 21v-7'/%3E%3C/g%3E%3Cg transform='translate(120 288) rotate(40 12 12) scale(0.95)'%3E%3Cpath d='M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5'/%3E%3C/g%3E%3Cg transform='translate(236 290) rotate(8 12 12) scale(1.05)'%3E%3Cpath d='M5 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M15 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M5 17h-2v-6l2 -5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5'/%3E%3C/g%3E%3Cg transform='translate(8 286) rotate(-20 12 12) scale(0.95)'%3E%3Cpath d='M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  --wa-out: #d9fdd3;
+  --wa-in: #ffffff;
+  --wa-ink: #111b21;
+  --wa-meta: #667781;
+  --wa-meta-out: #5b7a62;
+  --wa-read: #53bdeb;
+  --wa-accent: #25d366;
+  --wa-accent-ink: #008069;
+  --wa-send: #00a884;
+  --wa-voice: #00a884;
+  --wa-bar: #f6f5f4;
+  --wa-bar-line: rgba(0, 0, 0, 0.14);
+  --wa-field: #ffffff;
+  --wa-field-line: rgba(0, 0, 0, 0.16);
+  --wa-icon: #3b4a54;
+  --wa-day-bg: rgba(255, 255, 255, 0.94);
+  --wa-day-ink: #54656f;
+  --wa-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  --wa-quote-bg-in: #f5f6f6;
+  --wa-quote-bg-out: #d1f4cc;
+  --wa-quote-me: #06cf9c;
+  --wa-quote-other: #7f66ff;
+  --wa-unread-bg: rgba(255, 255, 255, 0.72);
+  --wa-menu-bg: #ffffff;
+  --wa-menu-line: rgba(60, 60, 67, 0.2);
+  --wa-doc-bg: rgba(11, 20, 26, 0.05);
+}
+[data-mantine-color-scheme='dark'] {
+  --wa-wall-bg: #0b141a;
+  --wa-doodles: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.06' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg transform='translate(18 14) rotate(-18 12 12) scale(1.25)'%3E%3Cpath d='M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5'/%3E%3C/g%3E%3Cg transform='translate(96 28) rotate(8 12 12) scale(1.1)'%3E%3Cpath d='M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1'/%3E%3C/g%3E%3Cg transform='translate(178 10) rotate(-6 12 12) scale(1.4)'%3E%3Cpath d='M5 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M15 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M5 17h-2v-6l2 -5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5'/%3E%3C/g%3E%3Cg transform='translate(262 30) rotate(14 12 12) scale(1.05)'%3E%3Cpath d='M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11'/%3E%3C/g%3E%3Cg transform='translate(40 92) rotate(10 12 12) scale(1.2)'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0'/%3E%3Cpath d='M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0'/%3E%3Cpath d='M13.41 10.59l2.59 -2.59'/%3E%3Cpath d='M7 12a5 5 0 0 1 5 -5'/%3E%3C/g%3E%3Cg transform='translate(132 96) rotate(-12 12 12) scale(1)'%3E%3Cpath d='M7.502 19.423c2.602 2.105 6.395 2.105 8.996 0c2.602 -2.105 3.262 -5.708 1.566 -8.546l-4.89 -7.26c-.42 -.625 -1.287 -.803 -1.936 -.397a1.376 1.376 0 0 0 -.41 .397l-4.893 7.26c-1.695 2.838 -1.035 6.441 1.567 8.546z'/%3E%3C/g%3E%3Cg transform='translate(206 84) rotate(22 12 12) scale(1.15)'%3E%3Cpath d='M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0z'/%3E%3Cpath d='M15 9h.01'/%3E%3C/g%3E%3Cg transform='translate(278 104) rotate(-8 12 12) scale(1.05)'%3E%3Cpath d='M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2'/%3E%3Cpath d='M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0'/%3E%3C/g%3E%3Cg transform='translate(12 172) rotate(0 12 12) scale(1.2)'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0'/%3E%3Cpath d='M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0'/%3E%3Cpath d='M3 12h6'/%3E%3Cpath d='M15 12h6'/%3E%3Cpath d='M12 3v6'/%3E%3Cpath d='M12 15v6'/%3E%3C/g%3E%3Cg transform='translate(96 160) rotate(-14 12 12) scale(1.05)'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0'/%3E%3Cpath d='M12 7v5l3 3'/%3E%3C/g%3E%3Cg transform='translate(160 168) rotate(30 12 12) scale(1.1)'%3E%3Cpath d='M9 4h6v4l-3 2l-3 -2z'/%3E%3Cpath d='M12 10v10'/%3E%3Cpath d='M10 13l4 -1'/%3E%3Cpath d='M10 16l4 -1'/%3E%3Cpath d='M10 19l4 -1'/%3E%3C/g%3E%3Cg transform='translate(232 160) rotate(12 12 12) scale(1.05)'%3E%3Cpath d='M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2'/%3E%3C/g%3E%3Cg transform='translate(54 242) rotate(-10 12 12) scale(1.2)'%3E%3Cpath d='M6 7h11a2 2 0 0 1 2 2v.5a.5 .5 0 0 0 .5 .5a.5 .5 0 0 1 .5 .5v3a.5 .5 0 0 1 -.5 .5a.5 .5 0 0 0 -.5 .5v.5a2 2 0 0 1 -2 2h-11a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2'/%3E%3Cpath d='M7 10v4'/%3E%3Cpath d='M10 10v4'/%3E%3C/g%3E%3Cg transform='translate(130 232) rotate(0 12 12) scale(1)'%3E%3Cpath d='M5 12l5 5l10 -10'/%3E%3C/g%3E%3Cg transform='translate(196 236) rotate(-12 12 12) scale(1)'%3E%3Cpath d='M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572'/%3E%3C/g%3E%3Cg transform='translate(270 236) rotate(10 12 12) scale(1.05)'%3E%3Cpath d='M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9z'/%3E%3Cpath d='M5 21v-7'/%3E%3C/g%3E%3Cg transform='translate(120 288) rotate(40 12 12) scale(0.95)'%3E%3Cpath d='M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5'/%3E%3C/g%3E%3Cg transform='translate(236 290) rotate(8 12 12) scale(1.05)'%3E%3Cpath d='M5 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M15 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0'/%3E%3Cpath d='M5 17h-2v-6l2 -5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5'/%3E%3C/g%3E%3Cg transform='translate(8 286) rotate(-20 12 12) scale(0.95)'%3E%3Cpath d='M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  --wa-out: #005c4b;
+  --wa-in: #202c33;
+  --wa-ink: #e9edef;
+  --wa-meta: #8696a0;
+  --wa-meta-out: rgba(233, 237, 239, 0.62);
+  --wa-accent-ink: #21c063;
+  --wa-send: #21c063;
+  --wa-voice: #06cf9c;
+  --wa-bar: #1f2c34;
+  --wa-bar-line: rgba(255, 255, 255, 0.1);
+  --wa-field: #2a3942;
+  --wa-field-line: transparent;
+  --wa-icon: #aebac1;
+  --wa-day-bg: #182229;
+  --wa-day-ink: #8696a0;
+  --wa-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.35);
+  --wa-quote-bg-in: #1d282f;
+  --wa-quote-bg-out: #025144;
+  --wa-quote-other: #a594ff;
+  --wa-unread-bg: rgba(11, 20, 26, 0.65);
+  --wa-menu-bg: #233138;
+  --wa-menu-line: rgba(255, 255, 255, 0.1);
+  --wa-doc-bg: rgba(0, 0, 0, 0.18);
+}
+
+/* The wallpaper: the whole screen of a chat (it stays where it is while the messages scroll), the PC's chat pane. */
+.screen[data-wa-wall] > .screen-scroll,
+.wa-wall {
+  background-color: var(--wa-wall-bg) !important;
+  background-image: var(--wa-doodles) !important;
+  background-size: 320px 320px !important;
+}
+.screen[data-wa-wall] .screen-body {
+  background: none;
+  padding-bottom: calc(var(--wa-foot, 60px) + 4px) !important;
+}
+.screen[data-wa-wall] .screen-body::before,
+.screen[data-wa-wall]::after {
+  display: none;
+}
+/* WhatsApp's bars: solid, a hairline under the top one and over the bottom one. */
+.screen[data-wa-wall] > .screen-nav > .nav-bar::before {
+  bottom: 0 !important;
+  opacity: 1 !important;
+  background: var(--wa-bar) !important;
+  border-bottom: 0.5px solid var(--wa-bar-line) !important;
+}
+.screen[data-wa-wall] .job-tabs::before {
+  opacity: 1;
+  inset: 0;
+  background: var(--wa-bar);
+  border-bottom: 0.5px solid var(--wa-bar-line);
+}
+.screen[data-wa-wall] > .screen-bottom > .sticky-bar {
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px)) !important;
+  background: var(--wa-bar) !important;
+  box-shadow: 0 -0.5px 0 var(--wa-bar-line) !important;
+  animation: none;
+}
+html.kb .screen[data-wa-wall] > .screen-bottom > .sticky-bar {
+  padding-bottom: 6px !important;
+}
+/* A messenger's bar: «‹», the picture and the name on the left, the call at the end. */
+.nav-bar[data-lead] {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+.nav-bar[data-lead] > .nav-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wa-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px 2px 2px;
+  border: 0;
+  border-radius: 24px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wa-head-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.wa-head-name {
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-head-line {
+  overflow: hidden;
+  color: var(--app-label-2);
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A job's chat: whose it is, over the messages — it stays under the job's tabs. */
+.wa-job-head {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 48px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: -14px calc(-1 * var(--page-pad)) 4px;
+  padding: 4px calc(var(--page-pad) - 6px);
+  background: var(--wa-bar);
+  border-bottom: 0.5px solid var(--wa-bar-line);
+}
+.wa-job-head > .wa-head {
+  flex: 1;
+}
+html.desk .wa-job-head {
+  position: static;
+  margin: 0;
+  padding: 6px 10px;
+}
+
+/* The messages. */
+.wa-chat {
+  --wa-stick: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 6px);
+  --wa-bleed: var(--page-pad);
+  color: var(--wa-ink);
+}
+.job-chat .wa-chat {
+  --wa-stick: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 98px);
+}
+html.desk .wa-chat {
+  --wa-stick: 6px;
+  --wa-bleed: 20px;
+}
+.wa-list {
+  gap: 0;
+}
+.wa-day {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wa-chat .note-day.wa-day-pill {
+  position: relative;
+  align-self: center;
+  margin: 8px 0 6px;
+  padding: 5px 12px 4px;
+  border-radius: 8px;
+  background: var(--wa-day-bg);
+  color: var(--wa-day-ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  box-shadow: var(--wa-shadow);
+}
+/* The day of what is at the top, over the chat while it scrolls (a moment after, it goes). */
+.wa-float-day {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 8px);
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  height: 0;
+  pointer-events: none;
+}
+.job-chat .wa-float-day {
+  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 100px);
+}
+html.desk .wa-pane > .wa-float-day {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+}
+html.desk .job-chat .wa-pane > .wa-float-day {
+  top: 58px;
+}
+.wa-float-day > span {
+  flex-shrink: 0;
+  height: max-content;
+  padding: 5px 12px 4px;
+  border-radius: 8px;
+  background: var(--wa-day-bg);
+  box-shadow: var(--wa-shadow);
+  color: var(--wa-day-ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  opacity: 0;
+  transition: opacity var(--dur-3) ease;
+}
+.wa-float-day[data-on] > span {
+  opacity: 1;
+  transition-duration: var(--dur-1);
+}
+.wa-unread-line {
+  margin: 8px calc(-1 * var(--wa-bleed)) 6px;
+  padding: 5px 0;
+  background: var(--wa-unread-bg);
+  color: var(--wa-day-ink);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+}
+.wa-chat .note-row {
+  border-radius: 0;
+}
+.wa-chat .note-row[data-gap] {
+  margin-top: 8px;
+}
+.wa-chat .note-row[data-pending] .note-swipe {
+  opacity: 1;
+}
+.wa-chat .note-swipe {
+  max-width: 82%;
+}
+html.desk .wa-chat .note-swipe {
+  max-width: min(66%, 640px);
+}
+/* A bubble: one's own pale green on the right, theirs white on the left; the time and ticks in its corner. */
+.wa-bubble {
+  position: relative;
+  min-width: 72px;
+  max-width: 100%;
+  padding: 6px 8px 6px 9px;
+  border-radius: 16px;
+  background: var(--wa-out);
+  color: var(--wa-ink);
+  box-shadow: var(--wa-shadow);
+  font-size: 16px;
+  line-height: 1.32;
+  letter-spacing: -0.01em;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.note-row[data-in] .wa-bubble {
+  background: var(--wa-in);
+}
+html.desk .wa-bubble {
+  font-size: 14px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* The tail: the last of a run — on the bubble's lower corner by its own edge, curved as WhatsApp's. */
+.wa-bubble[data-tail] {
+  border-bottom-right-radius: 4px;
+}
+.note-row[data-in] .wa-bubble[data-tail] {
+  border-bottom-right-radius: 16px;
+  border-bottom-left-radius: 4px;
+}
+.wa-bubble[data-tail]::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: 0;
+  width: 12px;
+  height: 15px;
+  background: inherit;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 15'%3E%3Cpath d='M0 0h6c0 7 1.6 11 5.4 14.2.4.3.2.8-.3.8H0z'/%3E%3C/svg%3E") no-repeat 0 0 / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 15'%3E%3Cpath d='M0 0h6c0 7 1.6 11 5.4 14.2.4.3.2.8-.3.8H0z'/%3E%3C/svg%3E") no-repeat 0 0 / 100% 100%;
+  box-shadow: none;
+}
+.note-row[data-in] .wa-bubble[data-tail]::after {
+  right: auto;
+  left: -6px;
+  transform: scaleX(-1);
+}
+.wa-bubble[data-sticker],
+.wa-bubble[data-sticker]::after {
+  background: none !important;
+  box-shadow: none;
+}
+.wa-bubble .note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wa-bubble .note-text a {
+  color: #027eb5;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+[data-mantine-color-scheme='dark'] .wa-bubble .note-text a {
+  color: #53bdeb;
+}
+.wa-bubble code {
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 0.92em;
+}
+.wa-chat .wa-foot {
+  position: relative;
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 6px -2px -4px 12px;
+  color: var(--wa-meta);
+  font-size: 11px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  white-space: nowrap;
+  opacity: 1;
+}
+.wa-chat .note-row:not([data-in]) .wa-foot {
+  color: var(--wa-meta-out);
+}
+.wa-chat .wa-foot .wa-ticks {
+  color: inherit;
+}
+.wa-chat .wa-foot .wa-ticks[data-state='read'] {
+  color: var(--wa-read);
+}
+.wa-chat .wa-foot .wa-ticks[data-state='failed'] {
+  color: var(--mantine-color-red-6);
+}
+.wa-star {
+  font-size: 10px;
+}
+/* In a group: who wrote it, in their own colour. Forwarded: said in italics. */
+.wa-chat .wa-author {
+  display: block;
+  margin: 0 0 1px;
+  color: var(--ac);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+[data-mantine-color-scheme='dark'] .wa-chat .wa-author {
+  color: color-mix(in srgb, var(--ac) 62%, white);
+}
+.wa-fwd {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 2px;
+  color: var(--wa-meta);
+  font-size: 12px;
+  font-style: italic;
+}
+/* The message answered: a bar of whose it was, who, a line or two of it, its picture. */
+.wa-quote,
+.wa-replying-body {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: var(--wa-quote-bg-out);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.wa-quote {
+  min-width: min(200px, 56vw);
+  margin: 0 0 4px;
+  padding: 5px 8px 6px 11px;
+  cursor: pointer;
+}
+.note-row[data-in] .wa-quote {
+  background: var(--wa-quote-bg-in);
+}
+.wa-quote::before,
+.wa-replying-body::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--qc);
+}
+.wa-quote-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.wa-chat .wa-quote-who,
+.wa-replying .wa-quote-who {
+  display: block;
+  color: var(--qc);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.wa-quote-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--wa-meta);
+  font-size: 13px;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.wa-quote-line svg {
+  vertical-align: -2px;
+}
+.wa-quote-thumb {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  margin: -5px -8px -6px 0;
+  object-fit: cover;
+}
+/* A photo or a video: the picture fills the bubble (a thin edge of the bubble around it); without words — the time
+   over its corner on a shade. */
+.wa-bubble[data-media] {
+  padding: 3px;
+}
+.wa-bubble[data-media] > .wa-author,
+.wa-bubble[data-media] > .wa-fwd {
+  padding: 2px 6px 1px;
+}
+.wa-bubble[data-media] > .wa-quote {
+  margin-bottom: 3px;
+}
+.wa-bubble[data-media] > .note-text {
+  display: block;
+  padding: 5px 6px 0;
+}
+.wa-bubble[data-media] > .wa-foot {
+  margin: 4px 4px 1px 12px;
+}
+.wa-chat .wa-pic {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  border-radius: 13px;
+  overflow: hidden;
+  background: var(--wa-doc-bg);
+  cursor: zoom-in;
+}
+.wa-bubble[data-sticker] .wa-pic {
+  background: none;
+}
+.wa-pic-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: inherit;
+  -webkit-touch-callout: none;
+}
+.wa-bubble[data-bare] .wa-pic::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 36px;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.38));
+  pointer-events: none;
+}
+.wa-chat .wa-bubble[data-bare] > .wa-foot {
+  position: absolute;
+  right: 10px;
+  bottom: 7px;
+  z-index: 2;
+  float: none;
+  margin: 0;
+  color: #fff !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.wa-chat .wa-bubble[data-bare] > .wa-foot .wa-ticks:not([data-state='read']) {
+  color: #fff;
+}
+.wa-bubble[data-sticker] > .wa-foot {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--wa-day-bg);
+  color: var(--wa-meta) !important;
+  text-shadow: none;
+}
+.wa-pic-progress {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+}
+.wa-chat .wa-film .note-video-play {
+  z-index: 1;
+  pointer-events: none;
+}
+/* A file going up: a ring of how much went, «×» in it. */
+.wa-progress {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(11, 20, 26, 0.5);
+  color: #fff;
+  cursor: pointer;
+}
+.wa-progress svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.wa-progress-track,
+.wa-progress-bar {
+  fill: none;
+  stroke-width: 3;
+}
+.wa-progress-track {
+  stroke: rgba(255, 255, 255, 0.25);
+}
+.wa-progress-bar {
+  stroke: #fff;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-2) linear;
+}
+.wa-progress[data-spin] svg {
+  animation: wa-spin 1s linear infinite;
+}
+@keyframes wa-spin {
+  to {
+    transform: rotate(270deg);
+  }
+}
+.wa-doc .wa-progress,
+.wa-voice .wa-progress {
+  background: none;
+  color: var(--wa-meta);
+}
+.wa-doc .wa-progress-track,
+.wa-voice .wa-progress-track {
+  stroke: color-mix(in srgb, var(--wa-ink) 14%, transparent);
+}
+.wa-doc .wa-progress-bar,
+.wa-voice .wa-progress-bar {
+  stroke: var(--wa-voice);
+}
+/* A document: the file's symbol with its kind on it, the name, how large — on a shade of the bubble. */
+.wa-chat .wa-doc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  min-width: min(250px, 62vw);
+  margin: -2px -3px 2px -4px;
+  padding: 8px 10px 8px 8px;
+  border-radius: 10px;
+  background: var(--wa-doc-bg);
+  cursor: default;
+}
+.wa-chat .wa-doc-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 40px;
+  border-radius: 4px;
+  background: none;
+  color: var(--wa-meta);
+}
+.wa-doc-ext {
+  position: absolute;
+  bottom: 6px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #8696a0;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+.wa-doc-icon[data-ext='pdf'] .wa-doc-ext {
+  background: #e5252a;
+}
+.wa-doc-icon:is([data-ext='doc'], [data-ext='docx']) .wa-doc-ext {
+  background: #2a5699;
+}
+.wa-doc-icon:is([data-ext='xls'], [data-ext='xlsx'], [data-ext='csv']) .wa-doc-ext {
+  background: #1d6f42;
+}
+.wa-chat .wa-doc-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wa-chat .wa-doc-name {
+  font-size: 15px;
+  font-weight: 500;
+}
+.wa-chat .wa-doc-meta {
+  color: var(--wa-meta);
+  font-size: 12px;
+  opacity: 1;
+}
+.wa-chat .wa-doc-get {
+  color: var(--wa-meta);
+}
+/* A voice message, as WhatsApp's: ▶ without a circle, the bars grey, the part heard in WhatsApp's green. */
+.wa-chat .wa-bubble .note-voice.wa-voice {
+  width: min(250px, 62vw);
+}
+.wa-chat .wa-bubble .wa-voice .wa-sound-play {
+  width: 36px;
+  height: 36px;
+  background: none;
+  color: var(--wa-meta);
+}
+.wa-chat .wa-bubble .wa-voice .voice-bars > i {
+  background: color-mix(in srgb, var(--wa-ink) 26%, transparent);
+}
+.wa-chat .wa-bubble .wa-voice .voice-played > i,
+.wa-chat .wa-bubble .wa-voice .voice-dot {
+  background: var(--wa-voice);
+}
+.wa-chat .note-row .wa-bubble .wa-voice .voice-mic {
+  background: none;
+  color: var(--wa-voice);
+}
+.wa-chat .note-row .wa-bubble .wa-voice .voice-rate {
+  background: color-mix(in srgb, var(--wa-ink) 10%, transparent);
+  color: var(--wa-ink);
+}
+.wa-chat .note-row .wa-bubble .wa-voice .voice-bars > i {
+  background: color-mix(in srgb, var(--wa-ink) 26%, transparent);
+}
+.wa-chat .note-row .wa-bubble .wa-voice .voice-played > i,
+.wa-chat .note-row .wa-bubble .wa-voice .voice-dot {
+  background: var(--wa-voice);
+}
+.wa-chat .wa-bubble .wa-voice .voice-rate {
+  background: color-mix(in srgb, var(--wa-ink) 10%, transparent);
+  color: var(--wa-ink);
+}
+.wa-chat .wa-bubble .wa-voice .voice-len {
+  color: var(--wa-meta);
+  opacity: 1;
+}
+.wa-chat .wa-bubble[data-kind='voice'] > .wa-foot,
+.wa-chat .wa-bubble[data-kind='audio'] > .wa-foot {
+  margin-top: -15px;
+}
+.wa-chat .wa-line {
+  color: inherit;
+}
+.wa-chat .wa-card-phone {
+  color: var(--wa-meta);
+}
+/* Not on WhatsApp yet: «В очереди» / «Проверяем отправку» under it; not sent — why, «Повторить», «Удалить». */
+.wa-state-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 2px 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--wa-day-bg);
+  color: var(--wa-day-ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.wa-chat .wa-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 6px 4px 2px 10px;
+  border-radius: 12px;
+  background: var(--wa-day-bg);
+  box-shadow: var(--wa-shadow);
+  color: var(--mantine-color-red-7);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: default;
+}
+.wa-failed-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding-right: 6px;
+}
+.wa-failed-why svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.wa-failed-acts {
+  display: flex;
+  gap: 2px;
+}
+[data-mantine-color-scheme='dark'] .wa-chat .wa-failed {
+  color: var(--mantine-color-red-4);
+}
+.wa-failed-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--wa-accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wa-failed-btn[data-red] {
+  color: var(--mantine-color-red-6);
+}
+.wa-empty-chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--wa-day-bg);
+  color: var(--wa-day-ink);
+  font-size: 15px;
+  box-shadow: var(--wa-shadow);
+}
+/* The way down: a round white button with the count of what came meanwhile. */
+.wa-chat ~ .wa-bottom .wa-jump,
+.wa-bottom .wa-jump {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 14px);
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--wa-in);
+  color: var(--wa-meta);
+  box-shadow: 0 1px 4px rgba(11, 20, 26, 0.24);
+  cursor: pointer;
+  animation: mg-fade-in var(--dur-1) ease both;
+}
+.wa-bottom .wa-jump .wa-badge {
+  position: absolute;
+  top: -7px;
+  right: -3px;
+  min-width: 20px;
+  height: 20px;
+  background: var(--wa-accent);
+  font-size: 11px;
+}
+
+/* The bar: «＋», the words (up to four lines), the camera, the microphone — the send button once something is typed. */
+.wa-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wa-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+.wa-icon-btn {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--wa-icon);
+  cursor: pointer;
+}
+.wa-icon-btn[data-red] {
+  color: var(--mantine-color-red-6);
+}
+.wa-icon-btn[hidden] {
+  display: none;
+}
+.wa-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+}
+.wa-input .mantine-Input-wrapper {
+  --input-bg: var(--wa-field) !important;
+  --input-bd: var(--wa-field-line) !important;
+  --input-bd-focus: var(--wa-field-line) !important;
+}
+.wa-input .mantine-Textarea-input {
+  min-height: 36px;
+  padding: 7px 14px !important;
+  border: 0.5px solid var(--wa-field-line) !important;
+  border-radius: 18px !important;
+  background: var(--wa-field) !important;
+  color: var(--wa-ink);
+  font-size: 17px;
+  line-height: 21px;
+  scrollbar-width: none;
+}
+html.desk .wa-input .mantine-Textarea-input {
+  font-size: 15px;
+}
+.wa-send-btn {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: 2px 2px 2px 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--wa-send);
+  color: #fff;
+  cursor: pointer;
+  animation: mg-pop var(--dur-2) var(--ease-out) both;
+}
+.wa-send-btn:disabled {
+  opacity: 0.45;
+}
+.wa-send-btn svg {
+  margin-left: 2px;
+}
+.wa-mic-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.wa-chat ~ * .wa-mic,
+.wa-bottom .wa-mic {
+  width: 40px;
+  height: 40px;
+  background: none !important;
+  color: var(--wa-icon);
+  box-shadow: none;
+}
+.wa-bottom .wa-mic[data-rec] {
+  background: var(--wa-send) !important;
+  color: #fff;
+  transform: scale(1.6);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--wa-send) 45%, transparent);
+}
+/* Held: slide up to lock — the lock stands over the microphone and follows the finger. */
+.wa-lock {
+  position: absolute;
+  bottom: calc(100% + 22px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 36px;
+  height: 66px;
+  margin-left: -18px;
+  border-radius: 18px;
+  background: var(--wa-in);
+  box-shadow: 0 2px 10px rgba(11, 20, 26, 0.2);
+  color: var(--wa-meta);
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+.wa-bottom .wa-rec {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--wa-ink);
+}
+.wa-bottom .wa-rec-time {
+  font-size: 17px;
+  font-weight: 400;
+}
+.wa-bottom .wa-rec-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--wa-meta);
+  font-size: 15px;
+  white-space: nowrap;
+}
+/* Locked: the seconds and the signal over 🗑 · ■ · ➤. */
+.wa-rec-locked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 2px 0;
+}
+.wa-rec-locked-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--wa-ink);
+}
+.wa-rec-locked-top .wa-rec-time {
+  min-width: 44px;
+  font-size: 17px;
+}
+.wa-live {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  height: 28px;
+  min-width: 0;
+}
+.wa-live > i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--wa-meta);
+  transform: scaleY(0.06);
+  transition: transform 90ms linear;
+}
+.wa-rec-locked-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+.wa-rec-stop {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid var(--mantine-color-red-6);
+  border-radius: 50%;
+  background: none;
+  color: var(--mantine-color-red-6);
+  cursor: pointer;
+}
+.wa-rec-stop:disabled {
+  opacity: 0.4;
+}
+/* A recording stopped before it went: listened to, sent or thrown away. */
+.wa-voice-review {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wa-voice-review-note {
+  padding: 0 10px;
+  color: var(--mantine-color-orange-7);
+  font-size: 12px;
+}
+.wa-voice-review-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wa-voice-review-player {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 18px;
+  background: var(--wa-field);
+  color: var(--wa-ink);
+}
+.wa-voice-review-player .note-voice.wa-voice {
+  width: 100%;
+}
+.wa-voice-review-player .wa-sound-play {
+  background: none !important;
+  color: var(--wa-meta) !important;
+}
+.wa-voice-review-player .voice-bars > i {
+  background: color-mix(in srgb, var(--wa-ink) 26%, transparent);
+}
+.wa-voice-review-player .voice-played > i,
+.wa-voice-review-player .voice-dot {
+  background: var(--wa-voice);
+}
+.wa-voice-review-player .voice-mic {
+  background: none;
+  color: var(--wa-voice);
+}
+.wa-voice-review-player .voice-len {
+  color: var(--wa-meta);
+}
+.wa-voice-review-player .voice-rate {
+  background: color-mix(in srgb, var(--wa-ink) 10%, transparent);
+  color: var(--wa-ink);
+}
+/* A word over the bar: how to record, the microphone not given, a recording interrupted. */
+.wa-mic-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 4px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 12px;
+  background: var(--wa-field);
+  color: var(--wa-ink);
+  font-size: 13px;
+  line-height: 1.35;
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+.wa-mic-note-btn {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--wa-accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* Answering: the message over the field, with its bar and «×». */
+.wa-replying {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 4px;
+  padding: 6px 2px 6px 6px;
+  border-radius: 12px;
+  background: var(--wa-field);
+  animation: mg-rise-in var(--dur-2) var(--ease-out) both;
+}
+.wa-replying-body {
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 8px 5px 11px;
+  background: var(--wa-quote-bg-in);
+}
+.wa-replying-body .wa-quote-line {
+  -webkit-line-clamp: 1;
+}
+.wa-replying .wa-quote-thumb {
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  border-radius: 6px;
+}
+.wa-kept-files {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 4px;
+}
+.wa-kept-open {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--wa-field);
+  color: var(--wa-ink);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+/* Files about to go: one picture large. */
+.wa-picked-pic[data-one] {
+  width: 100%;
+  height: auto;
+  max-height: 46vh;
+  aspect-ratio: 4 / 3;
+}
+.wa-picked-pic[data-one] img {
+  object-fit: contain;
+  background: var(--app-fill);
+}
+
+/* A message lifted with its menu (a long press). */
+.wa-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.wa-focus-shade {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 20, 26, 0.36);
+  animation: mg-fade-in var(--dur-2) ease both;
+}
+[data-mantine-color-scheme='dark'] .wa-focus-shade {
+  background: rgba(0, 0, 0, 0.6);
+}
+.wa-focus-msg {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  animation: wa-lift var(--dur-3) var(--ease-ios) both;
+}
+.wa-focus-msg .note-row {
+  margin: 0 !important;
+}
+.wa-focus-msg .wa-bubble {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+}
+@keyframes wa-lift {
+  from {
+    transform: translateY(calc(-1 * var(--shift, 0px)));
+  }
+  to {
+    transform: none;
+  }
+}
+.wa-focus-menu {
+  position: absolute;
+  min-width: 236px;
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--wa-menu-bg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.26);
+  transform-origin: top left;
+  animation: wa-menu-in var(--dur-3) var(--spring) both;
+}
+.wa-focus-menu[data-me] {
+  transform-origin: top right;
+}
+@keyframes wa-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.wa-focus-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  background: none;
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+}
+.wa-focus-item + .wa-focus-item {
+  box-shadow: inset 0 0.5px 0 var(--wa-menu-line);
+}
+.wa-focus-item:active {
+  background: var(--app-press);
+}
+.wa-focus-item[data-red] {
+  color: var(--mantine-color-red-6);
+}
+
+/* The list: plain rows on the screen's own colour, the picture larger, the name and the time on one line, the last
+   message under them; WhatsApp's chips over it. */
+.screen[data-wa-list] {
+  --app-canvas: var(--app-card);
+}
+.screen[data-wa-list] > .screen-scroll,
+.screen[data-wa-list] .screen-body {
+  background: var(--app-card);
+}
+.screen[data-wa-list] .screen-body::before {
+  display: none;
+}
+.screen[data-wa-list] .wa-chats {
+  margin: 0 calc(-1 * var(--page-pad));
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none !important;
+}
+.wa-chats .list-row {
+  min-height: 76px;
+  gap: 12px;
+}
+.wa-chats .list-row .title {
+  font-size: 17px;
+  font-weight: 600;
+}
+.wa-chats .list-row .subtitle {
+  color: var(--app-label-2);
+  font-size: 15px;
+}
+.wa-row-when {
+  font-size: 14px;
+}
+.wa-row-when[data-unread] {
+  color: var(--wa-accent-ink);
+}
+.wa-chats .wa-badge,
+.wa-bottom .wa-badge {
+  background: var(--wa-accent);
+}
+.wa-chats .wa-badge[data-muted] {
+  background: var(--app-label-3);
+}
+.wa-list-tools[data-picking] {
+  min-height: 34px;
+}
+.wa-picked-n {
+  font-size: 17px;
+  font-weight: 600;
+}
+.wa-filters {
+  display: flex;
+  gap: 8px;
+  margin: 0 calc(-1 * var(--page-pad)) 4px;
+  padding: 10px var(--page-pad) 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.wa-filters::-webkit-scrollbar {
+  display: none;
+}
+.wa-filter {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--app-fill);
+  color: var(--app-label-2);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wa-filter[data-on] {
+  background: color-mix(in srgb, var(--wa-accent) 20%, transparent);
+  color: var(--wa-accent-ink);
+}
+[data-mantine-color-scheme='dark'] .wa-filter[data-on] {
+  background: #103529;
+  color: #d9fdd3;
+}
+.wa-filter-n {
+  font-size: 13px;
+  font-weight: 700;
+}
+.wa-list-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 8px;
+  color: var(--mantine-color-orange-7);
+  font-size: 13px;
+}
+.wa-list-note > span {
+  flex: 1;
+}
+
+/* A PC: the chat pane — its head over the wallpaper, WhatsApp's bar at its foot. */
+html.desk .wa-chat-head {
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--wa-bar);
+  cursor: default;
+}
+html.desk .wa-pane-foot {
+  padding: 8px 10px;
+  background: var(--wa-bar);
+  border-top: 0.5px solid var(--wa-bar-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-focus-msg,
+  .wa-focus-menu,
+  .wa-send-btn,
+  .wa-lock,
+  .wa-mic-note,
+  .wa-replying,
+  .wa-progress[data-spin] svg {
+    animation: none;
+  }
+  .wa-live > i,
+  .wa-progress-bar {
+    transition: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .wa-bubble {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--wa-ink) 35%, transparent);
+  }
+  .wa-chat .wa-foot,
+  .wa-quote-line,
+  .wa-chat .wa-doc-meta {
+    color: color-mix(in srgb, var(--wa-ink) 80%, transparent);
+  }
+}

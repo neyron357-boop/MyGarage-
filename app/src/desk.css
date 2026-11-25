@@ -2339,3 +2339,28 @@ html.desk .wa-state {
 html.desk .wa-auto {
   max-width: 760px;
 }
+
+/* WhatsApp on a narrow window (v0.84 — an iPad upright, 820 px: the side menu and the list left the chat 40 px): the list or
+   the open chat, one at a time, as on a phone; «‹» in the chat's head goes back to the list. */
+html.desk .wa-desk-back {
+  display: none;
+}
+@media (max-width: 1100px) {
+  html.desk .wa-desk {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  html.desk .wa-desk[data-open] > .wa-desk-list,
+  html.desk .wa-desk:not([data-open]) > .wa-desk-chat {
+    display: none;
+  }
+  html.desk .wa-desk-back {
+    display: grid;
+    margin-left: -6px;
+  }
+  html.desk .wa-chat-head {
+    gap: 4px;
+  }
+}
+html.desk .wa-chat-head > .wa-head {
+  flex: 1;
+}

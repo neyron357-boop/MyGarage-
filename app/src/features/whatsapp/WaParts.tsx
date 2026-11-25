@@ -51,10 +51,26 @@ export const WaAvatar = memo(function WaAvatar({ id, name, group, size = 48 }: {
   );
 });
 
-const TICK: Record<ReturnType<typeof ticksOf>, Icon> = { failed: IconAlertCircle, wait: IconClock, sent: IconCheck, got: IconChecks, read: IconChecks };
+/**
+ * A chat's head (v0.84, the brief: «в переписке главным ориентиром служит получатель»): its picture, its name and a line
+ * under it — whose it is, the number — in WhatsApp's bar on a phone and over the chat on a PC; a tap opens its card.
+ */
+export function ChatHead({ id, name, group, line, onOpen, size = 36 }: { id: string; name: string; group?: boolean; line?: string; onOpen?: () => void; size?: number }) {
+  return (
+    <button type="button" className="wa-head tap" onClick={onOpen} aria-label={name} data-wa-head data-wa-info-btn>
+      <WaAvatar id={id} name={name} group={group} size={size} />
+      <span className="wa-head-text">
+        <span className="wa-head-name">{name}</span>
+        {line && <span className="wa-head-line tnum">{line}</span>}
+      </span>
+    </button>
+  );
+}
 
-/** One's own message's ticks: a clock while it goes, one tick sent, two delivered, two blue read. */
-export function Ticks({ m, size = 16 }: { m: Pick<WaMessage, 'ack' | 'pending' | 'failed'>; size?: number }) {
+const TICK: Record<ReturnType<typeof ticksOf>, Icon> = { failed: IconAlertCircle, queued: IconClock, checking: IconClock, wait: IconClock, sent: IconCheck, got: IconChecks, read: IconChecks };
+
+/** One's own message's ticks: a clock while it goes (or waits), one tick sent, two delivered, two blue read. */
+export function Ticks({ m, size = 16 }: { m: Pick<WaMessage, 'ack' | 'pending' | 'failed' | 'queued' | 'checking'>; size?: number }) {
   const { t } = useTranslation();
   const state = ticksOf(m);
   const I = TICK[state];

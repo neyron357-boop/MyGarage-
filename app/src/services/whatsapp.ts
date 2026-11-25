@@ -53,6 +53,7 @@ export function setWaTransport(t: Transport | undefined, src?: (kind: 'media' | 
   store = { ...EMPTY };
   people = undefined;
   chatsWanted = false;
+  forgetSends();
   emit();
 }
 
@@ -86,9 +87,13 @@ export interface WaStore {
   busy: boolean;
   /** What the server's outbox said of the items this device looks at (v0.79), by key. */
   outbox: Record<string, OutboxFace>;
+  /** The chats could not be read when last asked (v0.84: «Не удалось загрузить чаты» — what was read stays). */
+  chatsFailed?: boolean;
+  /** Recordings stopped before they were sent, by chat (v0.84). */
+  voices: Record<string, VoiceDraft>;
 }
 
-const EMPTY: WaStore = { old: false, away: false, statusAt: 0, chats: [], chatsAt: 0, chatsLoading: false, messages: {}, meta: {}, busy: false, outbox: {} };
+const EMPTY: WaStore = { old: false, away: false, statusAt: 0, chats: [], chatsAt: 0, chatsLoading: false, messages: {}, meta: {}, busy: false, outbox: {}, voices: {} };
 /** The outbox's faces as read (v0.79). */
 export function keepOutbox(items: OutboxFace[]) {
   if (!items.length) return;
@@ -179,6 +184,8 @@ export function refreshWa(): Promise<WaStore> {
       // Ready just now (linked, or back): the chats are read again — where a screen has asked for them.
       if (status.phase === 'ready' && was !== 'ready' && chatsWanted) void loadChats(true);
       if (status.phase !== 'ready' && store.chats.length) set({ chats: [], chatsAt: 0, messages: {}, meta: {} });
+      // What waited for the network goes now (v0.84).
+      if (status.phase === 'ready' && was !== 'ready') later(300);
     } catch (e) {
       const status = e instanceof SyncError ? e.status : -1;
       // The server is there and has no such address: an older one.
@@ -231,9 +238,9 @@ export function loadChats(force = false): Promise<void> {
     set({ chatsLoading: true });
     try {
       const r = await call<{ chats: WaChat[]; total: number; unread: number }>('chats', { query: { limit: '1000' }, timeout: 60_000 });
-      set({ chats: r.chats ?? [], chatsAt: Date.now(), chatsLoading: false });
+      set({ chats: r.chats ?? [], chatsAt: Date.now(), chatsLoading: false, chatsFailed: false });
     } catch {
-      set({ chatsLoading: false });
+      set({ chatsLoading: false, chatsFailed: true });
     } finally {
       chatsAsking = undefined;
     }
@@ -296,30 +303,286 @@ function withEarlyAck(m: WaMessage): WaMessage {
   return early && Date.now() - early.at <= EARLY_MS && early.ack > m.ack ? { ...m, ack: early.ack } : m;
 }
 
-function settle(chat: string, pendingId: string, sent: WaMessage | undefined, local?: string) {
+function settle(chat: string, pendingId: string, sent: WaMessage, local?: string) {
   const list = (store.messages[chat] ?? []).filter((m) => m.id !== pendingId);
-  if (sent) {
-    const msg = withEarlyAck(local ? { ...sent, local } : sent);
-    const next = applyEvent({ chats: store.chats, messages: { ...store.messages, [chat]: list } }, { t: 'msg', msg, chat: null });
-    set({ chats: next.chats, messages: next.messages });
-  } else set({ messages: { ...store.messages, [chat]: (store.messages[chat] ?? []).map((m) => (m.id === pendingId ? { ...m, failed: true } : m)) } });
+  const msg = withEarlyAck(local ? { ...sent, local } : sent);
+  const next = applyEvent({ chats: store.chats, messages: { ...store.messages, [chat]: list } }, { t: 'msg', msg, chat: null });
+  set({ chats: next.chats, messages: next.messages });
 }
 
-/** A text to the chat: shown at once as on its way, then as WhatsApp has it — or as not sent (thrown too). */
-export async function sendWaText(chat: string, text: string, quote?: WaMessage): Promise<WaMessage> {
+/** One message of a chat changed in place (its state while it goes). */
+function patchMsg(chat: string, id: string, patch: Partial<WaMessage>) {
+  const list = store.messages[chat];
+  if (!list?.some((m) => m.id === id)) return;
+  set({ messages: { ...store.messages, [chat]: list.map((m) => (m.id === id ? { ...m, ...patch } : m)) } });
+}
+
+/* ---------- Sending (v0.84): one message for one tap ---------- */
+
+/**
+ * What is being sent from here, by its place in the chat (v0.84, the brief: «различай черновик, ожидание отправки, отправку,
+ * подтверждённые статусы и ошибку… повторный тап, потеря сети, перезапуск… повтор не должен создавать дубли»). Its place's
+ * id is also its key on the garage's server (server/whatsapp/once.mjs): asked again under it — after the network dropped
+ * the answer, after «Повторить» — the server gives the same message, it never sends a second one.
+ *
+ * The chat's own sends (`queue`) wait for the network: no answer, the server restarting, WhatsApp not ready, too many a
+ * minute — «В очереди», and they go by themselves, in order, when the server answers again. The rest (a document from a
+ * sheet) are said not sent at once, as before. A text waiting is kept on this device (`QUEUE_KEY`), so it goes after the
+ * app is opened again too; a file waits while the app is open.
+ */
+interface Outgoing {
+  id: string;
+  chat: string;
+  t: number;
+  kind: 'text' | 'file' | 'voice';
+  text: string;
+  quote?: string;
+  blob?: Blob;
+  name?: string;
+  doc?: boolean;
+  seconds?: number;
+  local?: string;
+  queue: boolean;
+  /** The last try ended with no answer: it may have gone — the next one is asked by the key first. */
+  unsure?: boolean;
+  queued?: boolean;
+  running?: boolean;
+  /** It cannot go by itself (said why): not kept for the next start. */
+  failed?: boolean;
+  tries: number;
+  settle?: { resolve: (m: WaMessage) => void; reject: (e: unknown) => void };
+}
+const outgoing = new Map<string, Outgoing>();
+/** A file going up: its way to stop it («×» on its progress). */
+const uploads = new Map<string, () => void>();
+const QUEUE_KEY = 'mygarage.wa.queue';
+
+/** No answer, or an answer that says «not now»: tried again by itself. */
+const transient = (e: unknown): boolean => e instanceof SyncError && (e.status === 0 || e.status === 409 || e.status === 429 || e.status === 503 || e.status === 502 || e.status === 504);
+/** No answer at all: whether it went is not known. */
+const unknownEnd = (e: unknown): boolean => e instanceof SyncError && (e.status === 0 || e.status === 502 || e.status === 504);
+
+/** The texts waiting for the network, kept on this device (only the words one typed, nothing of WhatsApp's). */
+function keepQueue() {
+  const texts = [...outgoing.values()].filter((o) => o.kind === 'text' && o.queue && !o.failed).map((o) => ({ id: o.id, chat: o.chat, t: o.t, text: o.text, quote: o.quote }));
+  try {
+    if (texts.length) globalThis.localStorage?.setItem(QUEUE_KEY, JSON.stringify(texts.slice(-60)));
+    else globalThis.localStorage?.removeItem(QUEUE_KEY);
+  } catch {
+    // kept while the app is open
+  }
+}
+
+function pendingOf(o: Outgoing, quote?: WaMessage): WaMessage {
+  const type = o.kind === 'text' ? 'chat' : o.kind === 'voice' ? 'ptt' : (() => {
+    const kind = o.doc ? 'doc' : sendKind({ type: o.blob?.type ?? '', name: o.name ?? '' });
+    return kind === 'photo' ? 'image' : kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'document';
+  })();
+  return {
+    id: o.id,
+    chat: o.chat,
+    t: o.t,
+    me: true,
+    type,
+    text: o.kind === 'voice' ? '' : o.text,
+    ack: 0,
+    pending: true,
+    local: o.local,
+    ...(o.blob ? { file: { mime: o.blob.type, name: o.name, size: o.blob.size, here: true, ...(o.seconds ? { sec: Math.max(1, Math.round(o.seconds)) } : {}) } } : {}),
+    ...(quote ? { quote: { id: quote.id, type: quote.type, text: quote.text, me: quote.me, thumb: quote.file?.thumb } } : {}),
+  };
+}
+
+/** A file up to the server — with how much of it went (the bubble's ring), stoppable. */
+function upload(o: Outgoing, query: Record<string, string>): Promise<{ msg: WaMessage }> {
+  const blob = o.blob!;
+  if (transport) return transport('file', { method: 'POST', file: blob, query, timeout: 300_000 }) as Promise<{ msg: WaMessage }>;
+  const cfg = syncConfig();
+  if (!cfg) return Promise.reject(new SyncError(0, 'no server'));
+  return new Promise<{ msg: WaMessage }>((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', `${filesBase(cfg)}/api/wa/file?${new URLSearchParams(query).toString()}`);
+    x.setRequestHeader('Authorization', `Bearer ${cfg.token}`);
+    x.setRequestHeader('Content-Type', blob.type || 'application/octet-stream');
+    x.timeout = 300_000;
+    let shown = 0;
+    x.upload.onprogress = (e) => {
+      if (!e.lengthComputable || !e.total) return;
+      const p = e.loaded / e.total;
+      // A step at a time (not every packet): the chat draws one bubble again, not on every few kilobytes.
+      if (p - shown >= 0.04 || (p >= 1 && shown < 1)) {
+        shown = p;
+        patchMsg(o.chat, o.id, { progress: Math.min(1, p) });
+      }
+    };
+    x.onload = () => {
+      if (x.status >= 200 && x.status < 300) {
+        try {
+          resolve(JSON.parse(x.responseText) as { msg: WaMessage });
+        } catch {
+          reject(new SyncError(502, 'bad answer'));
+        }
+      } else reject(new SyncError(x.status, x.statusText));
+    };
+    x.onerror = () => reject(new SyncError(0, 'offline'));
+    x.ontimeout = () => reject(new SyncError(0, 'timeout'));
+    x.onabort = () => reject(new AppError('wa.err.stopped'));
+    uploads.set(o.id, () => x.abort());
+    x.send(blob);
+  }).finally(() => uploads.delete(o.id));
+}
+
+async function attemptOf(o: Outgoing): Promise<WaMessage> {
+  if (o.kind === 'text') {
+    const r = await call<{ msg: WaMessage }>('send', { method: 'POST', body: { chat: o.chat, text: o.text, quote: o.quote, key: o.id }, timeout: 80_000 });
+    return r.msg;
+  }
+  const query: Record<string, string> = { chat: o.chat, name: o.name || 'file', key: o.id };
+  if (o.kind === 'voice') query.voice = '1';
+  else {
+    if (o.text) query.caption = o.text;
+    if (o.doc || sendKind({ type: o.blob?.type ?? '', name: o.name ?? '' }) === 'doc') query.doc = '1';
+  }
+  if (o.quote) query.quote = o.quote;
+  const r = await upload(o, query);
+  return o.kind === 'voice' && r.msg.file && o.seconds ? { ...r.msg, file: { ...r.msg.file, sec: r.msg.file.sec || Math.max(1, Math.round(o.seconds)) } } : r.msg;
+}
+
+/** One try of a send; its end decides: sent, waiting for the network, or not sent (with why). */
+async function run(id: string): Promise<void> {
+  const o = outgoing.get(id);
+  if (!o || o.running) return;
+  o.running = true;
+  o.queued = false;
+  o.failed = false;
+  o.tries++;
+  patchMsg(o.chat, id, { pending: true, failed: false, queued: false, checking: !!o.unsure, err: undefined, progress: o.kind === 'text' ? undefined : 0 });
+  keepQueue();
+  try {
+    if (!waReady()) throw new SyncError(409, 'not ready');
+    const msg = await attemptOf(o);
+    if (outgoing.get(id) !== o) return;
+    outgoing.delete(id);
+    keepQueue();
+    settle(o.chat, id, msg, o.local);
+    o.settle?.resolve(msg);
+  } catch (e) {
+    o.running = false;
+    // Taken out of the chat meanwhile («Удалить»): nothing more to say.
+    if (outgoing.get(id) !== o) return;
+    if (o.queue && transient(e)) {
+      o.queued = true;
+      o.unsure = o.unsure || unknownEnd(e);
+      patchMsg(o.chat, id, { pending: true, queued: true, checking: false, progress: undefined });
+      keepQueue();
+      later(o.tries < 3 ? 3000 : 10_000);
+      return;
+    }
+    const err = failure(e);
+    o.failed = true;
+    shownInChat.add(err);
+    o.unsure = o.unsure || unknownEnd(e);
+    patchMsg(o.chat, id, { pending: true, failed: true, queued: false, checking: false, progress: undefined, err: err instanceof AppError ? err.code : 'wa.err.failed' });
+    keepQueue();
+    o.settle?.reject(err);
+    o.settle = undefined;
+  }
+}
+
+/** Failures said by their message in the chat (the screen does not say them again). */
+const shownInChat = new WeakSet<object>();
+export const inChat = (e: unknown): boolean => typeof e === 'object' && !!e && shownInChat.has(e);
+
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+/** Nothing being sent (a played server begins afresh). */
+function forgetSends() {
+  for (const stop of uploads.values()) stop();
+  outgoing.clear();
+  uploads.clear();
+  clearTimeout(flushTimer);
+  flushTimer = undefined;
+}
+function later(ms: number) {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = undefined;
+    void flushWa();
+  }, ms);
+}
+let flushing = false;
+/**
+ * What waits for the network, sent — in the order it was written, each chat's own after one another (v0.84). Asked when
+ * the network or the app comes back, when WhatsApp is ready again, and every few seconds while something waits.
+ */
+export async function flushWa(): Promise<void> {
+  if (flushing) return;
+  const waiting = [...outgoing.values()].filter((o) => o.queued && !o.running).sort((a, b) => a.t - b.t);
+  if (!waiting.length) return;
+  flushing = true;
+  try {
+    if (!waReady()) await refreshWa();
+    if (!waReady()) return later(10_000);
+    for (const o of waiting) {
+      if (!outgoing.has(o.id)) continue;
+      await run(o.id);
+      // Still no network: the rest wait with it (a later one does not overtake).
+      if (outgoing.get(o.id)?.queued) break;
+    }
+  } finally {
+    flushing = false;
+  }
+  if ([...outgoing.values()].some((o) => o.queued)) later(10_000);
+}
+
+/** A send begun: in the chat at once, then as WhatsApp has it. */
+function begin(o: Omit<Outgoing, 'tries' | 't' | 'id'> & { id?: string; t?: number }, quote?: WaMessage, after?: Promise<unknown>): Promise<WaMessage> {
+  const out: Outgoing = { ...o, id: o.id ?? `p:${uid()}`, t: o.t ?? Date.now(), tries: 0, quote: quote?.id ?? o.quote };
+  outgoing.set(out.id, out);
+  putPending(out.chat, pendingOf(out, quote));
+  const done = new Promise<WaMessage>((resolve, reject) => (out.settle = { resolve, reject }));
+  if (after) void after.catch(() => undefined).then(() => run(out.id));
+  else void run(out.id);
+  return done;
+}
+
+/**
+ * A text to the chat: shown at once as on its way, then as WhatsApp has it — or as not sent (thrown too). `queue` (the
+ * chat's own field): no network — it waits and goes by itself; thrown only when it cannot go at all.
+ */
+export async function sendWaText(chat: string, text: string, quote?: WaMessage, opts: { queue?: boolean } = {}): Promise<WaMessage> {
   const words = text.trim();
   if (!words) throw new AppError('wa.err.empty');
-  if (!waReady()) throw new AppError('wa.err.notReady');
-  const id = `p:${uid()}`;
-  putPending(chat, { id, chat, t: Date.now(), me: true, type: 'chat', text: words, ack: 0, pending: true, quote: quote ? { id: quote.id, type: quote.type, text: quote.text, me: quote.me, thumb: quote.file?.thumb } : undefined });
-  try {
-    const r = await call<{ msg: WaMessage }>('send', { method: 'POST', body: { chat, text: words, quote: quote?.id }, timeout: 80_000 });
-    settle(chat, id, r.msg);
-    return r.msg;
-  } catch (e) {
-    settle(chat, id, undefined);
-    throw failure(e);
-  }
+  if (!opts.queue && !waReady()) throw new AppError('wa.err.notReady');
+  return begin({ chat, kind: 'text', text: words, queue: !!opts.queue }, quote);
+}
+
+/** A message that did not go, sent again — the same one, under the same key: if it went after all, it is not sent twice. */
+export function retryWa(chat: string, id: string): Promise<WaMessage> | undefined {
+  const o = outgoing.get(id);
+  if (!o || o.chat !== chat || o.running) return undefined;
+  o.queued = false;
+  const done = new Promise<WaMessage>((resolve, reject) => (o.settle = { resolve, reject }));
+  void run(id);
+  return done;
+}
+/** Can it be sent again from here (its words or its file are still here)? */
+export const canRetryWa = (id: string): boolean => outgoing.has(id);
+
+/** A file going up stopped: it stays in the chat, not sent — «Повторить» or «Удалить». */
+export function stopWaUpload(id: string) {
+  uploads.get(id)?.();
+}
+
+/**
+ * A message that did not go (or waits): taken out of the chat. One still going up is stopped; one whose answer never came
+ * may have gone — WhatsApp has it then, and the chat shows it when read again.
+ */
+export function dropFailed(chat: string, id: string) {
+  outgoing.delete(id);
+  uploads.get(id)?.();
+  keepQueue();
+  const list = store.messages[chat];
+  if (list?.some((m) => m.id === id && (m.failed || m.pending))) set({ messages: { ...store.messages, [chat]: list.filter((m) => m.id !== id) } });
 }
 
 /**
@@ -353,70 +616,117 @@ export async function deleteWaForAll(message: Pick<WaMessage, 'id' | 'chat'>): P
   if (r.msg) waSaid({ t: 'msg', msg: r.msg, chat: null, was: true });
 }
 
-/** Voice messages that did not go, by their place in the chat: «Повторить» sends the same recording again. */
-const unsentVoices = new Map<string, { blob: Blob; seconds: number }>();
-
 /**
  * A voice message (v0.81, the user's brief: «удержание микрофона начинает запись, отпускание отправляет голосовое в текущий
  * чат… сразу показывать голосовое в переписке со статусом отправки; при сбое — ошибка и повтор»): in the chat at once as
  * on its way (playable from here), sent as WhatsApp's own voice message — the bridge makes it Opus in Ogg, as WhatsApp
- * records them (server/whatsapp/voice.mjs); failed — kept here, a tap sends it again.
+ * records them (server/whatsapp/voice.mjs). v0.84: no network — it waits and goes by itself; not sent — «Повторить» sends
+ * the same recording under the same key.
  */
-export async function sendWaVoice(chat: string, blob: Blob, seconds: number): Promise<WaMessage> {
-  if (!waReady()) throw new AppError('wa.err.notReady');
+export async function sendWaVoice(chat: string, blob: Blob, seconds: number, quote?: WaMessage): Promise<WaMessage> {
   if (blob.size > MAX_FILE_BYTES) throw new AppError('wa.err.tooBig');
-  const id = `p:${uid()}`;
   const ext = /mp4|aac|m4a/.test(blob.type) ? 'm4a' : /ogg/.test(blob.type) ? 'ogg' : 'webm';
   const local = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(blob) : undefined;
-  const sec = Math.max(1, Math.round(seconds));
-  putPending(chat, { id, chat, t: Date.now(), me: true, type: 'ptt', text: '', ack: 0, pending: true, local, file: { mime: blob.type, name: `voice.${ext}`, size: blob.size, here: true, sec } });
-  try {
-    const r = await call<{ msg: WaMessage }>('file', { method: 'POST', file: blob, query: { chat, name: `voice.${ext}`, voice: '1' }, timeout: 300_000 });
-    settle(chat, id, { ...r.msg, file: r.msg.file ? { ...r.msg.file, sec: r.msg.file.sec || sec } : r.msg.file }, local);
-    return r.msg;
-  } catch (e) {
-    unsentVoices.set(id, { blob, seconds });
-    settle(chat, id, undefined);
-    throw failure(e);
-  }
+  return begin({ chat, kind: 'voice', text: '', blob, name: `voice.${ext}`, seconds, local, queue: true }, quote);
 }
 
-/** A voice message that did not go, sent again (its recording kept while the app is open). */
-export function againWaVoice(chat: string, id: string): Promise<WaMessage> | undefined {
-  const v = unsentVoices.get(id);
-  if (!v) return undefined;
-  unsentVoices.delete(id);
-  dropFailed(chat, id);
-  return sendWaVoice(chat, v.blob, v.seconds);
-}
-
-/** A message that did not go: taken out of the chat (to be written again). */
-export function dropFailed(chat: string, id: string) {
-  const list = store.messages[chat];
-  if (list?.some((m) => m.id === id && m.failed)) set({ messages: { ...store.messages, [chat]: list.filter((m) => m.id !== id) } });
-}
-
-/** A file to the chat (a photo, a video, a PDF…), with its caption. `doc`: as a document even if it is a picture. */
-export async function sendWaFile(chat: string, file: Blob, opts: { name: string; caption?: string; doc?: boolean; quote?: WaMessage } = { name: 'file' }): Promise<WaMessage> {
-  if (!waReady()) throw new AppError('wa.err.notReady');
+/**
+ * A file to the chat (a photo, a video, a PDF…), with its caption. `doc`: as a document even if it is a picture. `queue`
+ * (the chat's own «＋» and camera, v0.84): no network — it waits; a ring shows how much of it went up.
+ */
+export async function sendWaFile(chat: string, file: Blob, opts: { name: string; caption?: string; doc?: boolean; quote?: WaMessage; queue?: boolean; /** Sent once this has ended (the files picked together go in their order). */ after?: Promise<unknown> } = { name: 'file' }): Promise<WaMessage> {
+  if (!opts.queue && !waReady()) throw new AppError('wa.err.notReady');
   if (file.size > MAX_FILE_BYTES) throw new AppError('wa.err.tooBig');
   const kind = opts.doc ? 'doc' : sendKind({ type: file.type, name: opts.name });
-  const type = kind === 'photo' ? 'image' : kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'document';
-  const id = `p:${uid()}`;
   const local = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && (kind === 'photo' || kind === 'video') ? URL.createObjectURL(file) : undefined;
-  putPending(chat, { id, chat, t: Date.now(), me: true, type, text: opts.caption?.trim() ?? '', ack: 0, pending: true, local, file: { mime: file.type, name: opts.name, size: file.size, here: true } });
-  try {
-    const query: Record<string, string> = { chat, name: opts.name };
-    if (opts.caption?.trim()) query.caption = opts.caption.trim();
-    if (kind === 'doc') query.doc = '1';
-    if (opts.quote) query.quote = opts.quote.id;
-    const r = await call<{ msg: WaMessage }>('file', { method: 'POST', file, query, timeout: 300_000 });
-    settle(chat, id, r.msg, local);
-    return r.msg;
-  } catch (e) {
-    settle(chat, id, undefined);
-    throw failure(e);
+  return begin({ chat, kind: 'file', text: opts.caption?.trim() ?? '', blob: file, name: opts.name, doc: opts.doc, local, queue: !!opts.queue }, opts.quote, opts.after);
+}
+
+/* ---------- What is typed and not sent yet (v0.84) ---------- */
+
+/**
+ * A chat's draft — the same in «WhatsApp» and on a job's tab (one chat, one draft), back after the app is opened again
+ * (only the words one typed are kept on this device). The message being answered stays with its chat while the app is
+ * open: another job opened meanwhile does not take it.
+ */
+const DRAFTS_KEY = 'mygarage.wa.drafts';
+let draftsCache: Record<string, string> | undefined;
+function draftsAll(): Record<string, string> {
+  if (!draftsCache) {
+    try {
+      draftsCache = JSON.parse(globalThis.localStorage?.getItem(DRAFTS_KEY) ?? '{}') as Record<string, string>;
+    } catch {
+      draftsCache = {};
+    }
   }
+  return draftsCache;
+}
+let draftsSave: ReturnType<typeof setTimeout> | undefined;
+export const waDraft = (chat: string): string => draftsAll()[chat] ?? '';
+export function setWaDraft(chat: string, text: string) {
+  const all = draftsAll();
+  if ((all[chat] ?? '') === text) return;
+  if (text) all[chat] = text;
+  else delete all[chat];
+  clearTimeout(draftsSave);
+  draftsSave = setTimeout(() => {
+    try {
+      const keys = Object.keys(all);
+      // The newest 80 chats' drafts: nobody keeps more open at once.
+      for (const k of keys.slice(0, Math.max(0, keys.length - 80))) delete all[k];
+      if (Object.keys(all).length) globalThis.localStorage?.setItem(DRAFTS_KEY, JSON.stringify(all));
+      else globalThis.localStorage?.removeItem(DRAFTS_KEY);
+    } catch {
+      // kept while the app is open
+    }
+  }, 300);
+}
+const replies = new Map<string, WaMessage>();
+export const waReplyOf = (chat: string): WaMessage | null => replies.get(chat) ?? null;
+export function setWaReply(chat: string, m: WaMessage | null) {
+  if (m) replies.set(chat, m);
+  else replies.delete(chat);
+}
+
+/** A recording that was stopped before it was sent (a call, the app put away, another chat opened): its chat keeps it. */
+export interface VoiceDraft {
+  blob: Blob;
+  seconds: number;
+  url: string;
+  /** Why it stopped: by hand (locked, «■»), or by something else. */
+  how: 'stopped' | 'interrupted';
+}
+export const waVoiceDraft = (chat: string, s: WaStore = store): VoiceDraft | undefined => s.voices[chat];
+export function setWaVoiceDraft(chat: string, v: VoiceDraft | null) {
+  const had = store.voices[chat];
+  if (had && had !== v) URL.revokeObjectURL?.(had.url);
+  const next = { ...store.voices };
+  if (v) next[chat] = v;
+  else delete next[chat];
+  set({ voices: next });
+}
+
+/** The texts left waiting when the app was closed: back in their chats, on their way again. */
+function restoreQueue() {
+  let texts: { id: string; chat: string; t: number; text: string; quote?: string }[] = [];
+  try {
+    texts = JSON.parse(globalThis.localStorage?.getItem(QUEUE_KEY) ?? '[]');
+  } catch {
+    return;
+  }
+  for (const x of texts) {
+    if (!x?.id || !x.chat || !x.text || outgoing.has(x.id)) continue;
+    const o: Outgoing = { id: x.id, chat: x.chat, t: x.t, kind: 'text', text: x.text, quote: x.quote, queue: true, queued: true, unsure: true, tries: 1 };
+    outgoing.set(o.id, o);
+    putPending(o.chat, { ...pendingOf(o), queued: true });
+  }
+  if (outgoing.size) later(2000);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => void flushWa());
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void flushWa());
+  restoreQueue();
 }
 
 /** Is this number on WhatsApp — and its chat (the one already in the list, if there is one). */
@@ -616,6 +926,7 @@ function waHeard(value: unknown) {
     set({ status: ev.state, old: false, away: false, statusAt: Date.now() });
     if (ev.state.phase === 'ready' && was !== 'ready' && chatsWanted) void loadChats(true);
     if (ev.state.phase !== 'ready' && store.chats.length) set({ chats: [], chatsAt: 0, messages: {}, meta: {} });
+    if (ev.state.phase === 'ready' && was !== 'ready') later(300);
     return;
   }
   if (ev.t === 'chats') {

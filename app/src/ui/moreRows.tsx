@@ -9,8 +9,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export const PAGE = 30;
 
-export function useMoreRows(total: number, reset: string, page = PAGE): { limit: number; more: (as?: 'div' | 'tr', cols?: number) => ReactNode } {
-  const [limit, setLimit] = useState(page);
+/** `start` (v0.84): drawn at first — as many as were in sight when the list was left (it comes back where it was). */
+export function useMoreRows(total: number, reset: string, page = PAGE, start = 0): { limit: number; more: (as?: 'div' | 'tr', cols?: number) => ReactNode } {
+  const [limit, setLimit] = useState(() => Math.max(page, start));
   const asked = useRef(reset);
   useEffect(() => {
     if (asked.current === reset) return;

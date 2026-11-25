@@ -127,6 +127,7 @@ async function playServer(page, phase) {
       async (path, init) => {
         world.asked.push({ path, method: init.method ?? 'GET', body: init.body, query: init.query, file: init.file ? { type: init.file.type, size: init.file.size } : undefined });
         await new Promise((r) => setTimeout(r, 120));
+        if (world.offline) throw err(0, 'offline');
         if (world.fail) throw err(world.fail, 'failed');
         if (path === 'status') return status();
         if (path === 'link') {
@@ -301,10 +302,19 @@ let current = null;
   await top().getByRole('tab', { name: /^Все/ }).click();
   await top().locator('.search-field input').fill('archived');
   await settle(400);
-  check((await top().locator('.wa-row-name').allInnerTexts()).join('|') === 'Archived one', 'a search finds an archived chat');
+  check((await top().locator('.wa-row-name').count()) === 0 && (await top().locator('[data-wa-search-all]').first().isVisible()), 'v0.84: a search keeps to «Только гараж» — and offers the whole list');
+  await shot('phone-06c-search-garage');
+  await top().locator('[data-wa-search-all]').first().click();
+  await settle(400);
+  check((await top().locator('.wa-row-name').allInnerTexts()).join('|') === 'Archived one', 'a search of the whole list finds an archived chat');
+  await top().locator('.wa-list-tools .mantine-Switch-track').click();
+  await settle(300);
   await top().locator('.search-field input').fill('052 444');
   await settle(400);
   check((await top().locator('.wa-row-name').count()) === 1, 'a search by the number as it is said');
+  await top().locator('.search-field input').fill('+971 52-444');
+  await settle(400);
+  check((await top().locator('.wa-row-name').count()) === 1, 'v0.84: … with «+», spaces and dashes');
   await top().locator('.search-field input').fill('');
   await settle(300);
 
@@ -313,15 +323,43 @@ let current = null;
   await top().locator('[data-wa-list]').waitFor();
   await settle(900);
   check((await top().locator('.note-row').count()) === 8, 'the chat shows its eight messages');
+  check(/^2 непрочитанн/.test(await top().locator('[data-wa-unread-line]').innerText()), 'v0.84: «2 непрочитанных сообщения» where the unread begin');
+  check(await page.evaluate(() => getComputedStyle(document.querySelector('.screen[data-role="top"] > .screen-scroll')).backgroundImage.includes('svg')), 'v0.84: the chat’s wallpaper');
   check((await top().locator('.note-row[data-in]').count()) === 4, 'four of them are the customer’s, on the left');
   check((await top().locator('.wa-pic-full[data-shown]').count()) === 1, 'the photo is shown over its preview');
   check(await top().locator('.wa-doc-name', { hasText: 'QUO-2026-351.pdf' }).isVisible(), 'a document shows its name');
   check(await top().locator('.wa-voice .voice-wave').isVisible() && (await top().locator('.wa-voice .voice-bars').first().locator('i').count()) > 20, 'a voice message has its player — as WhatsApp: ▶, the bars, the microphone (v0.83)');
   check(await top().locator('.wa-quote').isVisible(), 'an answer shows what it answers');
-  check((await top().locator('.note-bubble b').first().innerText()) === 'Toyota Camry 2019', 'WhatsApp’s bold is bold');
-  check(await top().locator('.note-bubble a[href="https://maps.app.goo.gl/garage"]').isVisible(), 'a link is a link');
+  check((await top().locator('.wa-bubble b').first().innerText()) === 'Toyota Camry 2019', 'WhatsApp’s bold is bold');
+  check(await top().locator('.wa-bubble a[href="https://maps.app.goo.gl/garage"]').isVisible(), 'a link is a link');
   check(await page.evaluate(() => window.__wa.asked.some((a) => a.path === 'seen')), 'opened, the chat is marked read on WhatsApp');
   await shot('phone-07-chat');
+  {
+    const longPress = async (sel) =>
+      page.evaluate(async (q) => {
+        const el = document.querySelector(q);
+        const r = el.getBoundingClientRect();
+        const touch = (type) => {
+          const t = new Touch({ identifier: 1, target: el, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+          el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === 'touchend' ? [] : [t], changedTouches: [t], targetTouches: type === 'touchend' ? [] : [t] }));
+        };
+        touch('touchstart');
+        await new Promise((res) => setTimeout(res, 650));
+        touch('touchend');
+      }, sel);
+    await longPress('.screen[data-role="top"] .note-row[data-in] .note-swipe');
+    await page.locator('[data-wa-focus] [data-wa-menu-item="reply"]').waitFor();
+    await settle(500);
+    await shot('phone-07a-message-menu');
+    check(await page.locator('[data-wa-menu-item="copy"]').isVisible(), 'v0.84: a long press lifts the message — «Ответить», «Скопировать»…');
+    await page.locator('[data-wa-menu-item="reply"]').click();
+    await top().locator('[data-wa-replying]').waitFor();
+    check(true, 'v0.84: «Ответить» puts the message over the field');
+    await settle(400);
+    await shot('phone-07b-replying');
+    await top().locator('[data-wa-replying] button').click();
+    await top().locator('[data-wa-replying]').waitFor({ state: 'detached' });
+  }
   // v0.80: «＋» of a customer's chat — what can be done for them at once (a file, a new job, their card, their jobs).
   await top().locator('[data-wa-plus]').click();
   await page.locator('[data-wa-quick]').waitFor();
@@ -383,6 +421,48 @@ let current = null;
     await top().locator('[data-wa-rec]').waitFor({ state: 'detached' });
     await settle(800);
     check((await top().locator('.note-row').count()) === before + 1, 'v0.81: a recording slid away is not sent');
+    // Slid up: locked — it records on without the finger; ■ — to listen first; ➤ — sent.
+    const asked2 = await page.evaluate(() => window.__wa.asked.length);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await top().locator('[data-wa-rec]').waitFor();
+    await page.waitForTimeout(500);
+    await page.mouse.move(box.x + box.width / 2, box.y - 110, { steps: 8 });
+    await top().locator('[data-wa-rec-locked]').waitFor();
+    await page.mouse.up();
+    await page.waitForTimeout(1300);
+    check(await top().locator('[data-wa-rec-locked]').isVisible(), 'v0.84: slid up — locked: it records on after the finger is lifted');
+    await page.screenshot({ path: `${OUT}/phone-07d-recording-locked.png` });
+    await top().locator('[data-wa-rec-stop]').click();
+    await top().locator('[data-wa-voice-review]').waitFor();
+    await settle(400);
+    await shot('phone-07e-voice-review');
+    check((await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file').length, asked2)) === 0, 'v0.84: ■ stops it to be listened to — nothing sent');
+    await top().locator('[data-wa-voice-send]').click();
+    await top().locator('[data-wa-voice-review]').waitFor({ state: 'detached' });
+    await settle(700);
+    check((await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file' && a.query.voice === '1').length, asked2)) === 1, 'v0.84: ➤ — the voice message goes');
+    // Held, then the app put away (a call, the home screen): kept for the chat, not sent.
+    const asked3 = await page.evaluate(() => window.__wa.asked.length);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await top().locator('[data-wa-rec]').waitFor();
+    await page.waitForTimeout(1600);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await top().locator('[data-wa-voice-review]').waitFor();
+    await page.mouse.up();
+    await page.evaluate(() => {
+      delete document.visibilityState;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await settle(500);
+    check(/прервана/.test(await top().locator('[data-wa-voice-review]').innerText()), 'v0.84: interrupted — «Запись прервана», kept to listen, send or delete');
+    check((await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file').length, asked3)) === 0, 'v0.84: … nothing sent by itself');
+    await top().locator('[data-wa-voice-drop]').click();
+    await top().locator('[data-wa-voice-review]').waitFor({ state: 'detached' });
   }
 
   // A file: shown before it goes, then sent with its caption.
@@ -403,16 +483,38 @@ let current = null;
   await settle(500);
   await shot('phone-09-chat-after');
 
-  // A message that does not go stays, marked.
-  await page.evaluate(() => (window.__wa.fail = 429));
+  // v0.84: no network — «В очереди» (twice tapped words go once); back — it goes by itself, once.
+  await page.evaluate(() => {
+    window.__wa.offline = true;
+  });
+  await top().locator('[data-wa-field]').fill('on my way');
+  await top().locator('[data-wa-send]').click();
+  await top().locator('.wa-state-line', { hasText: 'В очереди' }).waitFor();
+  await settle(300);
+  await shot('phone-09a-queued');
+  check((await top().locator('.note-row', { hasText: 'on my way' }).count()) === 1, 'v0.84: without the network the message waits in the chat — «В очереди»');
+  await page.evaluate(() => {
+    window.__wa.offline = false;
+    window.dispatchEvent(new Event('online'));
+  });
+  await top().locator('.wa-state-line').waitFor({ state: 'detached', timeout: 15000 });
+  await settle(400);
+  const onMyWay = await page.evaluate(() => window.__wa.asked.filter((a) => a.path === 'send' && a.body.text === 'on my way'));
+  check(onMyWay.length >= 2 && new Set(onMyWay.map((a) => a.body.key)).size === 1 && (await page.evaluate(() => Object.values(window.__wa.messages).flat().filter((m) => m.text === 'on my way').length)) === 1, 'v0.84: the network back — it went by itself, once (the same key each try)');
+  // A message that cannot go: why, «Повторить», «Удалить».
+  await page.evaluate(() => (window.__wa.fail = 401));
   await top().locator('[data-wa-field]').fill('one more');
   await top().locator('[data-wa-send]').click();
   await top().locator('.note-row[data-failed]').waitFor();
-  check(await page.getByText('Слишком часто — подождите минуту').first().isVisible(), 'why it did not go is said');
+  check(await top().locator('.wa-failed', { hasText: 'Устройство отключено от сервера' }).isVisible(), 'why it did not go is said, in the chat');
+  await shot('phone-09b-failed');
   await page.evaluate(() => (window.__wa.fail = null));
-  await top().locator('.wa-failed').click();
+  await top().locator('[data-wa-retry]').click();
   await top().locator('.note-row[data-failed]').waitFor({ state: 'detached' });
-  check((await top().locator('.note-row', { hasText: 'one more' }).count()) === 1, 'tapped, it is sent again — once');
+  check((await top().locator('.note-row', { hasText: 'one more' }).count()) === 1, 'tapped «Повторить», it is sent again — once');
+  // v0.84: a draft stays with its chat — in «WhatsApp» and on the job's tab alike.
+  await top().locator('[data-wa-field]').fill('draft for the job');
+  await settle(400);
 
   // 5. The chat's card: who it is.
   await top().locator('[data-wa-info-btn]').click();
@@ -508,6 +610,9 @@ let current = null;
   await top().locator('[data-job-chat-open]').click();
   await top().locator('[data-job-chat] [data-wa-list]').waitFor();
   check(true, 'v0.83: «Открыть чат» opens it');
+  check((await top().locator('[data-wa-field]').inputValue()) === 'draft for the job', 'v0.84: the job’s chat has the same draft as «WhatsApp» — one chat, one draft');
+  check(await top().locator('[data-wa-job-head]').isVisible(), 'v0.84: the job’s chat says whose it is over the messages');
+  await top().locator('[data-wa-field]').fill('');
   await top().getByRole('tab', { name: /^(Основная|Job)$/ }).click();
   await settle(600);
   await go(`#/`, 900);
@@ -663,9 +768,9 @@ let current = null;
       await p.keyboard.press('Enter');
       await p.locator('.note-row', { hasText: 'Ok, see you at 5' }).waitFor();
       check(true, 'PC: Enter sends');
-      await p.locator('.note-row[data-in] .note-bubble').first().click({ button: 'right' });
+      await p.locator('.note-row[data-in] .wa-bubble').first().click({ button: 'right' });
       await p.getByRole('menuitem', { name: 'Ответить' }).click();
-      await p.locator('.notes-reply').waitFor();
+      await p.locator('[data-wa-replying]').waitFor();
       check(true, 'PC: a right click answers a message');
       await p.screenshot({ path: `${OUT}/pc-${scheme}-03-reply.png` });
       // Another chat: the group, with who wrote — a group the garage does not write to: in the whole list (v0.81, «Только
@@ -702,7 +807,7 @@ let current = null;
       await p.screenshot({ path: `${OUT}/pc-${scheme}-07-quick.png` });
       await p.keyboard.press('Escape');
       // v0.80.3: «Переслать» on a message — a customer's goes with a line saying whose it is.
-      await p.locator('.note-row[data-in] .note-bubble').first().click({ button: 'right' });
+      await p.locator('.note-row[data-in] .wa-bubble').first().click({ button: 'right' });
       await p.getByRole('menuitem', { name: 'Переслать' }).click();
       await p.locator('[data-chat-picker] .list-row').first().waitFor();
       const before7 = await p.evaluate(() => window.__wa.asked.length);
@@ -711,7 +816,7 @@ let current = null;
       const went7 = await p.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'send' || a.path === 'forward'), before7);
       check(went7.length === 2 && went7[0].path === 'send' && /^From customer .+ \(\+971/.test(went7[0].body.text) && went7[1].path === 'forward' && /^false_/.test(went7[1].body.id) && went7[1].body.to === went7[0].body.chat, 'PC v0.80.3: a customer’s message forwarded — the line whose it is, then the message itself');
       // v0.83: «Удалить у всех» on a message of ours — asked first, then the server is asked to take it back.
-      await p.locator('.note-row:not([data-in]) .note-bubble').last().click({ button: 'right' });
+      await p.locator('.note-row:not([data-in]) .wa-bubble').last().click({ button: 'right' });
       await p.getByRole('menuitem', { name: 'Удалить у всех' }).click();
       const before8 = await p.evaluate(() => window.__wa.asked.length);
       await p.getByRole('dialog').getByRole('button', { name: 'Удалить у всех' }).click();

@@ -374,6 +374,11 @@ type HeaderProps = {
   eyebrow?: ReactNode;
   /** A phone: the title in the bar only, no large title under it (v0.81: a job's chat — the room is the messages'). */
   inline?: boolean;
+  /**
+   * A phone, with `inline` (v0.84, a WhatsApp chat): the bar's own head right after «‹» — a picture, the name and a line
+   * under it, as a messenger's bar — instead of the small title in the middle.
+   */
+  lead?: ReactNode;
 };
 
 /**
@@ -459,7 +464,7 @@ function DeskBack({ to }: { to?: string }) {
  * one has scrolled under it) above a large title that fades as it goes. On a phone the bar lives
  * outside the screen's scroll view, so it never moves when the content bounces.
  */
-function PhoneHeader({ title, back, right, subtitle, eyebrow, inline }: HeaderProps) {
+function PhoneHeader({ title, back, right, subtitle, eyebrow, inline, lead }: HeaderProps) {
   const screen = useScreen();
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);
@@ -507,11 +512,16 @@ function PhoneHeader({ title, back, right, subtitle, eyebrow, inline }: HeaderPr
     };
   }, [screen, inline]);
   const bar = (
-    <div className="nav-bar" data-compact={inline || compact} data-inline={inline || undefined} ref={barRef}>
-      <div style={{ minWidth: 0 }}>{back && <BackButton to={typeof back === 'string' ? back : undefined} />}</div>
-      <div className="nav-title" aria-hidden>
-        {title}
+    <div className="nav-bar" data-compact={inline || compact} data-inline={inline || undefined} data-lead={lead ? true : undefined} ref={barRef}>
+      <div className="nav-left" style={{ minWidth: 0 }}>
+        {back && <BackButton to={typeof back === 'string' ? back : undefined} />}
+        {lead}
       </div>
+      {!lead && (
+        <div className="nav-title" aria-hidden>
+          {title}
+        </div>
+      )}
       <div className="nav-right">{right}</div>
     </div>
   );

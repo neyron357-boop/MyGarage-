@@ -314,6 +314,13 @@ describe('whatsapp through the server', () => {
     assert.deepEqual(JSON.parse(asked.at(-1).body), { id: 'false_971501234567@c.us_AA1', to: '120363000000000001@g.us' });
   });
 
+  it('v0.84: the app’s key of a send goes to the bridge — with a text and with a file', async () => {
+    await call('/api/wa/send', { method: 'POST', body: { chat: '971501234567@c.us', text: 'Once', key: 'p:k1a2b3' } });
+    assert.deepEqual(JSON.parse(asked.at(-1).body), { chat: '971501234567@c.us', text: 'Once', key: 'p:k1a2b3' });
+    await call(`/api/wa/file?chat=${encodeURIComponent('971501234567@c.us')}&name=a.jpg&key=p%3Ak4c5d6`, { method: 'POST', body: new Uint8Array([9]), headers: { 'Content-Type': 'image/jpeg' } });
+    assert.equal(asked.at(-1).query.key, 'p:k4c5d6');
+  });
+
   it('a text and a file are sent', async () => {
     const sent = await (await call('/api/wa/send', { method: 'POST', body: { chat: '971501234567@c.us', text: 'Ready', extra: 'no' } })).json();
     assert.equal(sent.msg.text, 'Ready');

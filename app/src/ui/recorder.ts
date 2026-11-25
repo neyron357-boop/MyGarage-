@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** The recording formats a phone can make: iPhone (Safari) records MP4/AAC, Chrome MP4 or WebM with Opus. */
 function pickMime(): string | undefined {
@@ -28,8 +28,11 @@ export function canRecord(): boolean {
 /**
  * A voice message, like in a messenger: start, the seconds run, stop — the recording comes back
  * (or nothing, when cancelled). The microphone is let go as soon as it stops.
+ * `keep` (v0.84, a chat's microphone): the screen going away stops the recording but keeps it — its chat offers it
+ * («Прослушать · Отправить · Удалить»), nothing is sent by itself. `stream()` — the microphone while it records (the
+ * signal's bars, and a call taking the microphone away).
  */
-export function useRecorder() {
+export function useRecorder({ keep = false }: { keep?: boolean } = {}) {
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const rec = useRef<MediaRecorder | null>(null);
@@ -47,11 +50,15 @@ export function useRecorder() {
     rec.current = null;
     setRecording(false);
   };
-  useEffect(() => () => {
-    cancelled.current = true;
-    rec.current?.state === 'recording' && rec.current.stop();
-    release();
-  }, []);
+  useEffect(
+    () => () => {
+      if (!keep) cancelled.current = true;
+      if (rec.current?.state === 'recording') rec.current.stop();
+      else release();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   /** Starts recording; the promise ends with the recording when it is stopped. */
   const start = async (): Promise<{ blob: Blob; seconds: number } | null> => {
@@ -92,7 +99,8 @@ export function useRecorder() {
     cancelled.current = true;
     stop();
   };
-  return { recording, seconds, start, stop, cancel };
+  const streamOf = useCallback(() => stream.current, []);
+  return { recording, seconds, start, stop, cancel, stream: streamOf };
 }
 
 /** 0:07, 1:24. */

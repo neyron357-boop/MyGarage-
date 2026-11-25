@@ -8,8 +8,15 @@ import { ensureSeed } from './seed';
 import { SyncError } from './sync/api';
 import { tellSaid } from './sync/engine';
 import {
+  canRetryWa,
   chatOfPhone,
   dropFailed,
+  flushWa,
+  retryWa,
+  setWaDraft,
+  setWaReply,
+  waDraft,
+  waReplyOf,
   linkWa,
   loadChats,
   loadMessages,
@@ -39,6 +46,7 @@ const ALI = '55512345678901@lid';
 const status = (over: Partial<WaStatus> = {}): WaStatus => ({ available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '2.3000', error: '', chats: 2, unread: 3, ...over });
 const chat = (id: string, over: Partial<WaChat> = {}): WaChat => ({ id, name: 'Ali wa', group: false, phone: '971501234567', unread: 0, t: 1000, archived: false, pinned: false, muted: false, self: false, last: null, ...over });
 const msg = (id: string, over: Partial<WaMessage> = {}): WaMessage => ({ id, chat: ALI, t: 1000, me: false, type: 'chat', text: 'hi', ack: 0, ...over });
+const ticks = () => new Promise((r) => setTimeout(r, 0));
 
 interface Server {
   status: WaStatus;
@@ -149,7 +157,7 @@ describe('a chat', () => {
     expect(waStore().messages[ALI].map((m) => m.id)).toEqual(['m1', 'm2', 'sent1']);
     expect(waStore().messages[ALI].some((m) => m.pending)).toBe(false);
     expect(waStore().chats[0].last?.id).toBe('sent1');
-    expect(server.asked.find((a) => a.path === 'send')?.init.body).toEqual({ chat: ALI, text: 'Car is ready', quote: undefined });
+    expect(server.asked.find((a) => a.path === 'send')?.init.body).toEqual({ chat: ALI, text: 'Car is ready', quote: undefined, key: expect.stringMatching(/^p:/) });
   });
 
   it('v0.80: WhatsApp’s tick on the stream before the send’s own answer — the tick stays (no clock on a sent message)', async () => {
@@ -205,11 +213,89 @@ describe('a chat', () => {
     const sent = await sendWaFile(ALI, pdf, { name: 'INV-2026-319.pdf', caption: 'Invoice' });
     expect(sent.type).toBe('document');
     const asked = server.asked.find((a) => a.path === 'file')!;
-    expect(asked.init.query).toEqual({ chat: ALI, name: 'INV-2026-319.pdf', caption: 'Invoice', doc: '1' });
+    expect(asked.init.query).toEqual({ chat: ALI, name: 'INV-2026-319.pdf', caption: 'Invoice', doc: '1', key: expect.stringMatching(/^p:/) });
     expect(asked.init.file).toBe(pdf);
     expect(waStore().messages[ALI].at(-1)?.id).toBe('sent2');
     const huge = { size: 60 * 1024 * 1024, type: 'video/mp4' } as Blob;
     await expect(sendWaFile(ALI, huge, { name: 'big.mp4' })).rejects.toMatchObject({ code: 'wa.err.tooBig' });
+  });
+
+  it('v0.84: no network — «В очереди», nothing thrown; back — it goes once, under the same key', async () => {
+    await loadMessages(ALI);
+    server.fail = new SyncError(0, 'offline');
+    let done = false;
+    const going = sendWaText(ALI, 'On my way', undefined, { queue: true }).then(() => (done = true));
+    await ticks();
+    const waiting = waStore().messages[ALI].at(-1)!;
+    expect([waiting.pending, waiting.queued, !!waiting.failed, waiting.text]).toEqual([true, true, false, 'On my way']);
+    expect(done).toBe(false);
+    server.fail = undefined;
+    await flushWa();
+    await going;
+    const sends = server.asked.filter((a) => a.path === 'send');
+    expect(sends).toHaveLength(2);
+    expect((sends[0].init.body as { key: string }).key).toBe((sends[1].init.body as { key: string }).key);
+    expect(waStore().messages[ALI].filter((m) => m.text === 'On my way')).toHaveLength(1);
+    expect(waStore().messages[ALI].some((m) => m.pending)).toBe(false);
+  });
+
+  it('v0.84: WhatsApp not ready — it waits too; a message that cannot go at all is said not sent, with why', async () => {
+    await loadMessages(ALI);
+    server.fail = new SyncError(409, 'whatsapp is not ready');
+    void sendWaText(ALI, 'Later', undefined, { queue: true }).catch(() => undefined);
+    await ticks();
+    expect(waStore().messages[ALI].at(-1)?.queued).toBe(true);
+    server.fail = new SyncError(413, 'too large');
+    await flushWa();
+    const last = waStore().messages[ALI].at(-1)!;
+    expect([last.failed, last.err]).toEqual([true, 'wa.err.tooBig']);
+    dropFailed(ALI, last.id);
+    expect(waStore().messages[ALI].map((m) => m.id)).toEqual(['m1', 'm2']);
+    server.fail = undefined;
+  });
+
+  it('v0.84: «Повторить» — the same message under the same key; after it went, nothing is left to send again', async () => {
+    await loadMessages(ALI);
+    server.fail = new SyncError(502, 'bad gateway');
+    await expect(sendWaText(ALI, 'Again?')).rejects.toBeInstanceOf(AppError);
+    const failed = waStore().messages[ALI].at(-1)!;
+    expect([failed.failed, canRetryWa(failed.id)]).toEqual([true, true]);
+    server.fail = undefined;
+    await retryWa(ALI, failed.id);
+    const sends = server.asked.filter((a) => a.path === 'send');
+    expect((sends.at(-1)!.init.body as { key: string }).key).toBe(failed.id);
+    expect((sends.at(-2)!.init.body as { key: string }).key).toBe(failed.id);
+    expect(canRetryWa(failed.id)).toBe(false);
+    expect(waStore().messages[ALI].some((m) => m.failed || m.pending)).toBe(false);
+  });
+
+  it('v0.84: a file waits for the network as well; «Удалить» takes it out — it is not sent later', async () => {
+    await loadMessages(ALI);
+    server.fail = new SyncError(0, 'offline');
+    const photo = new Blob(['jpeg'], { type: 'image/jpeg' });
+    void sendWaFile(ALI, photo, { name: 'car.jpg', queue: true }).catch(() => undefined);
+    await ticks();
+    const waiting = waStore().messages[ALI].at(-1)!;
+    expect([waiting.type, waiting.queued]).toEqual(['image', true]);
+    dropFailed(ALI, waiting.id);
+    server.fail = undefined;
+    await flushWa();
+    expect(server.asked.filter((a) => a.path === 'file')).toHaveLength(1);
+    expect(waStore().messages[ALI].map((m) => m.id)).toEqual(['m1', 'm2']);
+  });
+
+  it('v0.84: a draft and the message answered stay with their own chat', () => {
+    setWaDraft(ALI, 'half typed');
+    setWaDraft('971500000002@c.us', 'another');
+    expect(waDraft(ALI)).toBe('half typed');
+    setWaDraft(ALI, '');
+    expect(waDraft(ALI)).toBe('');
+    expect(waDraft('971500000002@c.us')).toBe('another');
+    setWaReply(ALI, msg('m1'));
+    expect(waReplyOf(ALI)?.id).toBe('m1');
+    expect(waReplyOf('971500000002@c.us')).toBeNull();
+    setWaReply(ALI, null);
+    expect(waReplyOf(ALI)).toBeNull();
   });
 
   it('opened: read — here at once, and on WhatsApp', async () => {

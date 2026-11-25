@@ -21,6 +21,7 @@ import { createOutbox } from './waOutbox.mjs';
  *   POST /api/wa/send {chat, text, quote} · /seen {chat} · /forward {id, to} (v0.80.3) · /delete {id} (v0.83: ours, for
  *        everyone — while WhatsApp allows it)
  *   POST /api/wa/file?chat=&name=&caption=      — a file (the body is its bytes)
+ *        `key` on a send or a file (v0.84) — the app's own: the same key again is the same message, never a second one
  *   GET  /api/wa/media?id= · /avatar?id=        — a message's file, a chat's picture: by the device's key, or by
  *                                                 `?d=<device>&k=<media key>` (a picture element sends no key)
  *
@@ -368,7 +369,8 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     if (get && what === 'number') return send(res, 200, await call(`/number${query(url, ['phone'])}`, { timeout: 40_000 })), true;
     if (req.method === 'POST' && what === 'send') {
       const body = await readJson(req, 256 * 1024);
-      send(res, 200, await call('/send', { method: 'POST', body: { chat: body.chat, text: body.text, quote: body.quote }, timeout: 70_000 }));
+      // `key` (v0.84): the app's own key of this send — sent again under it, it is not sent twice (whatsapp/once.mjs).
+      send(res, 200, await call('/send', { method: 'POST', body: { chat: body.chat, text: body.text, quote: body.quote, key: body.key }, timeout: 70_000 }));
       return true;
     }
     if (req.method === 'POST' && what === 'forward') {
@@ -388,7 +390,7 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     }
     if (req.method === 'POST' && what === 'file') {
       if (Number(req.headers['content-length']) > MAX_FILE) throw httpError(413, 'file too large');
-      await pipe(req, res, `/file${query(url, ['chat', 'name', 'caption', 'doc', 'quote', 'voice'])}`, { body: true });
+      await pipe(req, res, `/file${query(url, ['chat', 'name', 'caption', 'doc', 'quote', 'voice', 'key'])}`, { body: true });
       return true;
     }
     if (get && (what === 'media' || what === 'avatar')) {
