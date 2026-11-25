@@ -172,7 +172,7 @@ export function JobChat({ b, open = true, onOpen, unread = 0 }: { b: OrderBundle
       <button type="button" className="wa-icon-btn tap" aria-label={t('wa.pickChat')} onClick={() => setPicking(true)} data-job-chat-pick>
         <IconMessageCircleSearch size={20} stroke={1.9} />
       </button>
-      <button type="button" className="wa-icon-btn tap" aria-label={t('wa.wholeChat')} onClick={() => navigate(chatPath(chatId))} data-job-chat-whole>
+      <button type="button" className="wa-icon-btn tap" aria-label={t('wa.wholeChat')} data-route={chatPath(chatId)} onClick={() => navigate(chatPath(chatId))} data-job-chat-whole>
         <IconExternalLink size={19} stroke={1.9} />
       </button>
     </div>

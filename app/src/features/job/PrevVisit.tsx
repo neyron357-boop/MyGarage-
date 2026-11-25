@@ -43,7 +43,7 @@ export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' |
   const ago = days < 1 ? t('job.prevToday') : days < 60 ? t('job.prevDays', { n: days }) : t('job.prevMonths', { n: Math.round(days / 30) });
   const warranty = settings.warrantyLaborMonths > 0 && days <= settings.warrantyLaborMonths * 30.5 && prev.titles.length > 0;
   return (
-    <UnstyledButton className="job-line job-complaint" mt="sm" onClick={() => navigate(`/orders/${prev.order.id}`)} aria-label={t('job.prevVisit')}>
+    <UnstyledButton className="job-line job-complaint" mt="sm" data-route={`/orders/${prev.order.id}`} onClick={() => navigate(`/orders/${prev.order.id}`)} aria-label={t('job.prevVisit')}>
       <IconHistory size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
       <Text size="sm" lineClamp={2} style={{ flex: 1 }}>
         {ago}

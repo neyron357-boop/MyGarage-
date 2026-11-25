@@ -50,7 +50,7 @@ function DebtJobRow({ j, indent }: { j: DebtJob; indent?: boolean }) {
   return (
     <ListRow
       chevron
-      onClick={() => navigate(`/orders/${j.order.id}`)}
+      data-route={`/orders/${j.order.id}`} onClick={() => navigate(`/orders/${j.order.id}`)}
       left={indent ? <span className="row-indent" aria-hidden /> : undefined}
       title={[j.vehicle.make, j.vehicle.model].filter(Boolean).join(' ') || formatPlate(j.vehicle.plate, lang)}
       subtitle={
@@ -136,7 +136,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
                     датам»), where it is paid, closed, and a job forgotten added. Its invoices from before the app are in it. */}
                 <ListRow
                   chevron
-                  onClick={() => navigate(`/money/months?who=${d.customer.id}&month=${m.month}`)}
+                  data-route={`/money/months?who=${d.customer.id}&month=${m.month}`} onClick={() => navigate(`/money/months?who=${d.customer.id}&month=${m.month}`)}
                   left={
                     <span className="row-icon" style={tint(d.customer.lockedMonths?.includes(m.month) ? 'gray' : 'green')} aria-hidden>
                       {d.customer.lockedMonths?.includes(m.month) ? <IconLock size={19} stroke={2} /> : <IconCalendarDollar size={19} stroke={2} />}
@@ -176,7 +176,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
             <ListRow
               key={m.month}
               chevron
-              onClick={() => navigate(`/money/months?who=${d.customer.id}&month=${m.month}`)}
+              data-route={`/money/months?who=${d.customer.id}&month=${m.month}`} onClick={() => navigate(`/money/months?who=${d.customer.id}&month=${m.month}`)}
               left={
                 <span className="row-icon" style={tint('teal')} aria-hidden>
                   <IconCalendarCheck size={19} stroke={2} />
@@ -201,14 +201,14 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           <span>{t('debt.takeShort')}</span>
         </button>
         {/* Every month of its works (v0.69): open each, close a month, add a job forgotten. */}
-        <button type="button" className="action-tile" data-debtor-months onClick={() => navigate(`/money/months?who=${d.customer.id}`)}>
+        <button type="button" className="action-tile" data-debtor-months data-route={`/money/months?who=${d.customer.id}`} onClick={() => navigate(`/money/months?who=${d.customer.id}`)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-indigo-6)' } as React.CSSProperties}>
             <IconCalendarMonth size={21} stroke={1.9} aria-hidden />
           </span>
           <span>{t('months.tile')}</span>
         </button>
         {/* Its payments (v0.62.2): what it paid, when, for which months, what was left after each. */}
-        <button type="button" className="action-tile" data-debtor-payments onClick={() => navigate(`/money/payments?side=owed&who=${d.customer.id}`)}>
+        <button type="button" className="action-tile" data-debtor-payments data-route={`/money/payments?side=owed&who=${d.customer.id}`} onClick={() => navigate(`/money/payments?side=owed&who=${d.customer.id}`)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-teal-6)' } as React.CSSProperties}>
             <IconReceipt size={21} stroke={1.9} aria-hidden />
           </span>
@@ -229,7 +229,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
             <span>{t('debt.zip')}</span>
           </button>
         )}
-        <button type="button" className="action-tile" onClick={() => navigate(`/customers/${d.customer.id}`)}>
+        <button type="button" className="action-tile" data-route={`/customers/${d.customer.id}`} onClick={() => navigate(`/customers/${d.customer.id}`)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-indigo-6)' } as React.CSSProperties}>
             <IconUser size={21} stroke={1.9} aria-hidden />
           </span>
@@ -402,7 +402,7 @@ const CreditorCard = memo(function CreditorCard({ c, catName, onOpen, onPay, onC
             <span>{t('debt.takeShort')}</span>
           </button>
           {/* What was paid to him (v0.62.2), when, and what was left after each. */}
-          <button type="button" className="action-tile" data-creditor-payments onClick={() => navigate(`/money/payments?side=owe&who=${encodeURIComponent(c.key)}`)}>
+          <button type="button" className="action-tile" data-creditor-payments data-route={`/money/payments?side=owe&who=${encodeURIComponent(c.key)}`} onClick={() => navigate(`/money/payments?side=owe&who=${encodeURIComponent(c.key)}`)}>
             <span className="tile-icon" style={{ '--c': 'var(--mantine-color-teal-6)' } as React.CSSProperties}>
               <IconReceipt size={21} stroke={1.9} aria-hidden />
             </span>
@@ -714,7 +714,7 @@ export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
       <List>
         <ListRow
           chevron
-          onClick={() => navigate(`/money/payments?side=${side}`)}
+          data-route={`/money/payments?side=${side}`} onClick={() => navigate(`/money/payments?side=${side}`)}
           left={
             <span className="row-icon" style={tint('teal')} aria-hidden>
               <IconReceipt size={19} stroke={2} />

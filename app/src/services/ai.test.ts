@@ -200,3 +200,66 @@ describe('v0.86: every line’s name, the labour charge said by the parts', () =
     expect((await db.items.get(labour.id))!.titleEn).toBe('LABOR CHARGE: REPLACE FRONT BRAKE PADS & DISCS');
   });
 });
+
+describe('v0.89: the car off its photo, then its VIN', () => {
+  const VELOZ = 'MHFAB1BY4P3069309';
+  const photo = () => new Blob([new Uint8Array(4000).fill(7)], { type: 'image/jpeg' });
+
+  it('a car with no make: its photo looked at once — the card filled (said as the photo’s); the VIN says another model — the person is asked; chosen — the question goes', async () => {
+    const { carPhotoLater, settleCarCheck } = await import('./carPhoto');
+    answers.car = { isCar: true, make: 'TOYOTA', model: 'Land Cruiser', confidence: 0.8 };
+    answers.vin = { vin: VELOZ, make: 'Toyota', model: 'Veloz', year: 2023, confidence: 0.9 };
+    const o = await car();
+    const file = photo();
+    carPhotoLater(o.vehicleId, file);
+    await until(async () => !!(await db.vehicles.get(o.vehicleId))?.photoAi);
+    let v = (await db.vehicles.get(o.vehicleId))!;
+    expect([v.make, v.model]).toEqual(['Toyota', 'Land Cruiser']);
+    expect(notices.find((n) => n.kind === 'car')).toMatchObject({ from: 'photo', filled: { make: 'Toyota', model: 'Land Cruiser' } });
+    const pic = asked.find((a) => a.path === 'car')!.body.image as { type: string; data: string };
+    expect(pic.type).toBe('image/jpeg');
+    // The same photo again: not asked again.
+    carPhotoLater(o.vehicleId, file);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(asked.filter((a) => a.path === 'car')).toHaveLength(1);
+    // The VIN: the card is the photo's guess — the VIN's model is asked of the AI and held against it.
+    await updateVehicle(o.vehicleId, { vin: VELOZ });
+    await until(async () => !!(await db.vehicles.get(o.vehicleId))?.carCheck);
+    v = (await db.vehicles.get(o.vehicleId))!;
+    expect(v.carCheck).toMatchObject({ photo: { make: 'Toyota', model: 'Land Cruiser' }, vin: { make: 'Toyota', model: 'Veloz' } });
+    // What the photo said stays in the card until a person chooses — the VIN does not write over it.
+    expect(v.model).toBe('Land Cruiser');
+    await settleCarCheck(o.vehicleId, { make: 'Toyota', model: 'Veloz' });
+    v = (await db.vehicles.get(o.vehicleId))!;
+    expect([v.make, v.model, v.carCheck]).toEqual(['Toyota', 'Veloz', undefined]);
+  });
+
+  it('the photo and the VIN say the same car: nothing asked — the photo is proven; a car with its make and model typed is not looked at', async () => {
+    const { carPhotoLater } = await import('./carPhoto');
+    answers.car = { isCar: true, make: 'Toyota', model: 'Veloz', confidence: 0.8 };
+    answers.vin = { vin: VELOZ, make: 'Toyota', model: 'Veloz', year: 2023, confidence: 0.9 };
+    const o = await car();
+    carPhotoLater(o.vehicleId, photo());
+    await until(async () => !!(await db.vehicles.get(o.vehicleId))?.photoAi);
+    await updateVehicle(o.vehicleId, { vin: VELOZ });
+    await until(async () => !!(await db.vehicles.get(o.vehicleId))?.photoAi?.checked);
+    const v = (await db.vehicles.get(o.vehicleId))!;
+    expect([v.model, v.photoAi?.checked, v.carCheck]).toEqual(['Veloz', true, undefined]);
+    // Typed: no tokens on its photo.
+    const typed = await car('Nissan', 'Patrol');
+    const before = asked.length;
+    carPhotoLater(typed.vehicleId, photo());
+    await new Promise((r) => setTimeout(r, 30));
+    expect(asked.length).toBe(before);
+  });
+
+  it('a person writing the make or model answers the question', async () => {
+    const { askCarCheck } = await import('./carPhoto');
+    const o = await car('Toyota', 'Land Cruiser');
+    await askCarCheck(o.vehicleId, { photo: { make: 'Toyota', model: 'Land Cruiser' }, vin: { make: 'Toyota', model: 'Veloz' } });
+    await updateVehicle(o.vehicleId, { color: 'white' });
+    expect((await db.vehicles.get(o.vehicleId))!.carCheck).toBeDefined();
+    await updateVehicle(o.vehicleId, { model: 'Veloz' });
+    expect((await db.vehicles.get(o.vehicleId))!.carCheck).toBeUndefined();
+  });
+});

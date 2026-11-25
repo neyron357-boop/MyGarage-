@@ -103,7 +103,7 @@ function DebtParts({ entry }: { entry: LedgerEntry }) {
           <ListRow
             key={p.orderId}
             chevron
-            onClick={() => navigate(`/orders/${p.orderId}`)}
+            data-route={`/orders/${p.orderId}`} onClick={() => navigate(`/orders/${p.orderId}`)}
             title={p.order ? `№${p.order.number}` : ''}
             subtitle={p.vehicle && <PlateLine plate={p.vehicle.plate}>{[p.vehicle.make, p.vehicle.model].filter(Boolean).join(' ')}</PlateLine>}
             right={<Money fils={p.amountFils} size="sm" />}
@@ -306,7 +306,7 @@ export function EntryDetails({
         {entry.source !== 'closing' && <ShareEntryButton entry={entry} label={label} />}
         <Group justify="space-between">
           {entry.orderId ? (
-            <Button variant="light" onClick={() => navigate(`/orders/${entry.orderId}`)}>
+            <Button variant="light" data-route={`/orders/${entry.orderId}`} onClick={() => navigate(`/orders/${entry.orderId}`)}>
               {t('order.open')}
             </Button>
           ) : (

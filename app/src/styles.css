@@ -803,7 +803,7 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
   .qa-added-x {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x, .car-check-pill)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -10063,4 +10063,44 @@ html.desk .wa-pane-foot {
   padding: 8px 12px;
   border-radius: 12px;
   background: var(--app-canvas);
+}
+
+/* v0.89: the photo and the VIN say different cars — under the car's name on a job, orange until a person chooses. */
+.car-check-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mantine-color-orange-filled);
+  background: color-mix(in srgb, var(--mantine-color-orange-6) 14%, transparent);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.car-pick-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--mantine-color-cobalt-6);
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 12%, var(--app-card));
+}
+/* «по фото» by the make and model the AI filled in «Новый заказ». */
+.by-photo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-label-2);
+  vertical-align: middle;
 }

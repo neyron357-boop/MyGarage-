@@ -264,7 +264,7 @@ export function CustomerMonthsPage() {
         title={t('months.title')}
         right={
           // A job forgotten, this month (a month of the list — its «＋»).
-          <Button variant="light" leftSection={<IconPlus size={18} />} onClick={() => navigate(`/orders/new?customerId=${view.customer.id}&day=${today}`)} data-months-add>
+          <Button variant="light" leftSection={<IconPlus size={18} />} data-route={`/orders/new?customerId=${view.customer.id}&day=${today}`} onClick={() => navigate(`/orders/new?customerId=${view.customer.id}&day=${today}`)} data-months-add>
             {t('months.addShort')}
           </Button>
         }

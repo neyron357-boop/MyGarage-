@@ -93,7 +93,7 @@ export function CustomersPage() {
       {list && list.length === 0 ? (
         <EmptyState icon={IconUsers} title={q ? t('search.noResults') : t('customer.empty')} />
       ) : !phone ? (
-        list && <DataTable rows={list} columns={cols} rowKey={(r) => r.c.id} onRow={(r) => open1(r.c)} initialSort={{ key: 'customer', dir: 1 }} sortId="customers" label={t('nav.customers')} />
+        list && <DataTable rows={list} columns={cols} rowKey={(r) => r.c.id} onRow={(r) => open1(r.c)} rowRoute={(r) => `/customers/${r.c.id}`} initialSort={{ key: 'customer', dir: 1 }} sortId="customers" label={t('nav.customers')} />
       ) : (
         <List>
           {list?.map(({ c, cars, visits }) => (

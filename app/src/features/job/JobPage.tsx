@@ -1,5 +1,6 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
 import { AiLineWork, AiMark } from '../ai/Ai';
+import { CarCheckPill } from '../ai/CarCheck';
 import { IconHelpCircle,
   IconBrandWhatsapp,
   IconPlus,
@@ -1051,7 +1052,7 @@ export function JobPage() {
       chevron
       left={<IconLock size={20} stroke={1.8} color="var(--mantine-color-gray-6)" aria-hidden />}
       title={<Text span c="dimmed" inherit data-job-month-locked>{t('job.monthLocked', { month: monthLong(lockedMonth, lang) })}</Text>}
-      onClick={() => navigate(`/money/months?who=${b.order.customerId}&month=${lockedMonth}`)}
+      data-route={`/money/months?who=${b.order.customerId}&month=${lockedMonth}`} onClick={() => navigate(`/money/months?who=${b.order.customerId}&month=${lockedMonth}`)}
     />
   ) : null;
   // A signed debt, under the total: the date it is due, and its paper (the customer's signature) a tap away.
@@ -1580,11 +1581,17 @@ export function JobPage() {
         eyebrow={phase === 'booked' ? `№${b.order.number}` : `№${b.order.number} · ${formatDate(b.order.arrivedAt ?? b.order.createdAt)}`}
         // The VIN alone, one tap (v0.70) — small, under the car's name (v0.71, «переместить наверх под названием авто мелко»).
         subtitle={
-          vin ? (
-            <button type="button" className="vin-line" onClick={() => void copyVin()} aria-label={t('job.copyVin')} data-vin-copy>
-              <span className="vin-line-text">VIN {vin}</span>
-              <IconCopy size={14} stroke={2} aria-hidden />
-            </button>
+          vin || b.vehicle.carCheck ? (
+            <>
+              {vin && (
+                <button type="button" className="vin-line" onClick={() => void copyVin()} aria-label={t('job.copyVin')} data-vin-copy>
+                  <span className="vin-line-text">VIN {vin}</span>
+                  <IconCopy size={14} stroke={2} aria-hidden />
+                </button>
+              )}
+              {/* The photo and the VIN say different cars (v0.89): the person chooses. */}
+              <CarCheckPill vehicle={b.vehicle} />
+            </>
           ) : undefined
         }
         title={

@@ -43,6 +43,10 @@ export const ru = {
     // A new job beside the job (v0.80).
     twin: 'Вкладка рядом',
     twinClose: 'Закрыть вкладку',
+    // v0.89: the PC's own tabs.
+    tabs: 'Вкладки',
+    newTab: 'Новая вкладка',
+    openInTab: 'Открыть в новой вкладке',
     keyLines: 'Работа · Запчасть · Услуга в заказе',
     keyClose: 'Закрыть окно',
     actions: 'Действия',
@@ -521,6 +525,8 @@ export const ru = {
     startIntake: 'Начать приёмку',
     book: 'Записать',
     makeModel: 'Марка и модель',
+    // v0.89: filled from the car's photo by the AI.
+    byPhoto: 'по фото',
     makePlaceholder: 'Другая марка',
     otherModel: 'Другая модель',
     customerOptional: 'Клиент — можно позже',
@@ -2633,6 +2639,13 @@ export const ru = {
     carTitle: 'Машина по VIN',
     // v0.88: the car filled from the garage's own cars of the same VIN (no AI).
     carGarage: 'Как у машин мастерской',
+    // v0.89: the make and model seen on the car's photo; the photo and the VIN say different cars.
+    carPhoto: 'Машина по фото',
+    checkTitle: 'Фото или VIN?',
+    checkPill: 'Фото ≠ VIN',
+    byPhotoShort: 'Фото',
+    byVin: 'VIN',
+    otherCar: 'Другая',
     nameTitle: 'Название исправлено',
     working: 'ИИ работает',
     yandex: 'Найти в Яндексе',

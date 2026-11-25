@@ -142,6 +142,23 @@ describe('a chat', () => {
     expect(server.asked.at(-1)?.init.query).toEqual({ chat: ALI, limit: '120' });
   });
 
+  it('v0.89: a message that comes while the chat and the list are read is not put out by their answers', async () => {
+    let free = () => {};
+    server.hold = new Promise((r) => (free = r));
+    const reading = loadMessages(ALI);
+    const listing = loadChats(true);
+    await ticks();
+    const m3 = msg('m3', { t: 3000, text: 'here?' });
+    tellSaid(`data: ${JSON.stringify({ wa: { t: 'msg', msg: m3, chat: chat(ALI, { unread: 3, t: 3000, last: { id: 'm3', t: 3000, me: false, type: 'chat', text: 'here?', ack: 0 } }) } })}`);
+    // The server read both before the message came.
+    free();
+    server.hold = undefined;
+    await Promise.all([reading, listing]);
+    expect(waStore().messages[ALI].map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);
+    const line = waStore().chats.find((c) => c.id === ALI)!;
+    expect([line.last?.id, line.unread]).toEqual(['m3', 3]);
+  });
+
   it('a text: shown as on its way at once, then as WhatsApp has it — once', async () => {
     await loadMessages(ALI);
     let free = () => {};

@@ -4,6 +4,7 @@ import type { Icon } from '@tabler/icons-react';
 import { createContext, useContext, useLayoutEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { DeskTabContext, deskTabs } from './deskTabs';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 /*
@@ -24,7 +25,8 @@ export const useDesk = () => useContext(DeskContext);
  * новая вкладка, чтобы в одном экране видел оба заказа и управлял»): the window's screen is the main pane, the job beside
  * it — the side pane with its own history. A screen in a pane asks which it is in; outside the two — null.
  */
-export type DeskPaneId = 'main' | 'side';
+/** `main` and `side` — the window's screen and the one beside it; a tab of its own (v0.89) — its id. */
+export type DeskPaneId = string;
 export interface DeskPaneInfo {
   id: DeskPaneId;
   /** «Назад» of a screen in the pane: a step back in its own history; at its first screen it closes the pane. */
@@ -83,6 +85,15 @@ export function deskPage(pathname: string): string {
 }
 
 /**
+ * The screen an address is, for the PC's shell (its key — a new key, a new screen made from nothing). WhatsApp's list and
+ * its chats are one screen (v0.89, the owner: «каждый раз, когда переключаю чат… эта панель обновляется, как будто заново
+ * отрисовывается»): choosing another chat changes the address, the list beside it stays as it is — its place, its pictures.
+ */
+export function deskScreenKey(pathname: string): string {
+  return /^\/whatsapp(\/chat\/[^/]+)?\/?$/.test(pathname) ? '/whatsapp' : pathname;
+}
+
+/**
  * Is a sheet, a dialog or a menu open? Keys of the page wait while one is (they would act behind it). A closed modal
  * keeps its root in the page; an open one has its content (as `ui/escapeTop.ts` finds the top one).
  */
@@ -95,10 +106,13 @@ export const sheetOpen = () => !!document.querySelector('.mantine-Modal-content,
 export function useDeskHotkeys(keys: [string, () => void][], enabled = true) {
   // Two jobs side by side (v0.80): a screen's keys act in the pane last clicked only — not in both jobs at once.
   const pane = useContext(DeskPaneContext)?.id;
+  // The PC's tabs (v0.89): a screen's keys act only while its tab is in front.
+  const tab = useContext(DeskTabContext);
   const items: HotkeyItem[] = enabled
     ? keys.map(([key, fn]) => [
         key,
         () => {
+          if (tab !== deskTabs().active) return;
           if (pane && pane !== activePane) return;
           // A job shown to its customer (v0.67): the keys do nothing — no new job, no search over the lock.
           if (!sheetOpen() && !document.documentElement.hasAttribute('data-client-lock')) fn();

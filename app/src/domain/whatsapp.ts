@@ -484,10 +484,18 @@ export function sameMessages(a: readonly WaMessage[] | undefined, b: readonly Wa
 }
 
 /**
- * A message's own key — the last part of its id. The same message under a chat's two ids (its number's, and the one
- * WhatsApp hides the number behind — @lid) has the same key.
+ * A message's own key — the third part of its id (`fromMe_chat_KEY`). The same message under a chat's two ids (its
+ * number's, and the one WhatsApp hides the number behind — @lid) has the same key.
+ *
+ * Not the last part (v0.89, the owner: «сообщение… как будто 2 раза отправляется, но в настоящем ватсапе один раз»): an
+ * id may go on after the key — a group's message with its author (`…_KEY_971…@c.us`), and every message of the chat with
+ * oneself with `_out`. The last part made all of «Вы (себе)» one key: a new message took an older one's place, the chat
+ * read again brought both back. An id not of that shape (`p:…` — one being sent) is its own key.
  */
-export const msgKey = (id: string): string => id.slice(id.lastIndexOf('_') + 1);
+export const msgKey = (id: string): string => {
+  const parts = id.split('_');
+  return parts.length >= 3 && (parts[0] === 'true' || parts[0] === 'false') && parts[2] ? parts[2] : id;
+};
 
 /**
  * A chat's messages with these put in: one of the same id replaces it, the order is the time's. Its ticks only grow

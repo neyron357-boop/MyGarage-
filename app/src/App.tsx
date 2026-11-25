@@ -3,10 +3,12 @@ import { DatesProvider } from '@mantine/dates';
 import { useHotkeys } from '@mantine/hooks';
 import { notifications, Notifications } from '@mantine/notifications';
 import {
+  IconArrowRight,
   IconBell,
   IconBrandWhatsapp,
   IconCash,
   IconChartBar,
+  IconExternalLink,
   IconInfoCircle,
   IconLayoutColumns,
   IconLayoutKanban,
@@ -21,7 +23,8 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useCallback, useEffect, useMemo, useRef, useState, type ContextType } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ContextType } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HashRouter, Link, MemoryRouter, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { ClaimPage } from './features/claims/ClaimPage';
@@ -57,9 +60,10 @@ import { PwaUpdater } from './ui/pwa';
 import { useBackClosesSheets } from './ui/backCloses';
 import { useEscapeClosesTopSheet } from './ui/escapeTop';
 import { useSheetSwipe } from './ui/sheetSwipe';
-import { PhoneStack, useViewportSync } from './ui/stack';
-import { DeskContext, DeskKeys, DeskPaneContext, MOD_KEY, deskPage, setActivePane, sheetOpen, useDeskShell, useDeskWheel, type DeskPaneInfo } from './ui/desk';
+import { PhoneStack, useScreenTitle, useViewportSync } from './ui/stack';
+import { DeskContext, DeskKeys, DeskMenu, DeskPaneContext, MOD_KEY, deskPage, deskScreenKey, setActivePane, sheetOpen, useDeskShell, useDeskWheel, type DeskPaneInfo } from './ui/desk';
 import { DeskTips } from './ui/deskTips';
+import { closeTab, DeskTabContext, focusTab, MAIN_TAB, noteTab, openTab, scrollOfTab, useDeskTab, useDeskTabs, type DeskTab } from './ui/deskTabs';
 import { useWaSideHidden } from './ui/deskSide';
 import { closeTwin, keepTwinPath, openTwin, useTwin } from './ui/deskTwin';
 import { DeskPalette } from './features/search/DeskPalette';
@@ -198,6 +202,8 @@ function SideNav() {
   const location = useLocation();
   const cash = useLiveQuery(cashState, []);
   const twinOpen = !!useTwin();
+  // The panes side by side live in the window's own tab (v0.89): from another tab the button is not offered.
+  const inMain = useDeskTab() === MAIN_TAB;
   const settings = useSettings();
   // WhatsApp messages waiting to be read (v0.78): a number beside its item — its own component (v0.80.2): the menu does not
   // draw again at each message.
@@ -210,7 +216,7 @@ function SideNav() {
   };
   return (
     <>
-      <Link to="/" className="desk-brand" aria-label={t('nav.board')}>
+      <Link to="/" className="desk-brand" aria-label={t('nav.board')} data-route="/">
         {settings?.logoDataUrl ? (
           <>
             <span className="desk-brand-logo">
@@ -231,7 +237,7 @@ function SideNav() {
             {g.items.map((s) => {
               const on = isActive(s.to, s.end);
               return (
-                <Link key={s.to} to={s.to} className="desk-nav-item" data-active={on || undefined} aria-current={on ? 'page' : undefined}>
+                <Link key={s.to} to={s.to} className="desk-nav-item" data-active={on || undefined} aria-current={on ? 'page' : undefined} data-route={s.to}>
                   <s.icon size={18} stroke={1.9} aria-hidden />
                   <span>{t(s.key)}</span>
                   {s.to === '/whatsapp' && <WaCount className="desk-nav-count tnum" />}
@@ -243,17 +249,19 @@ function SideNav() {
       </div>
       <div className="desk-side-foot">
         {cash && (
-          <UnstyledButton className="desk-side-btn desk-side-cash" onClick={() => navigate('/money?tab=cash')}>
+          <UnstyledButton className="desk-side-btn desk-side-cash" data-route={'/money?tab=cash'} onClick={() => navigate('/money?tab=cash')}>
             <IconCash size={18} stroke={1.9} aria-hidden />
             <span>{t('board.cash')}</span>
             <Money fils={cash.expected} fw={600} />
           </UnstyledButton>
         )}
         {/* A second tab beside the screen (v0.80.3): opened from anywhere, closed by its own «×». */}
-        <UnstyledButton className="desk-side-btn" onClick={() => (twinOpen ? closeTwin() : openTwin('/'))} aria-pressed={twinOpen} data-twin-side>
-          <IconLayoutColumns size={18} stroke={1.9} aria-hidden />
-          <span>{t(twinOpen ? 'desk.twinClose' : 'desk.twin')}</span>
-        </UnstyledButton>
+        {inMain && (
+          <UnstyledButton className="desk-side-btn" onClick={() => (twinOpen ? closeTwin() : openTwin('/'))} aria-pressed={twinOpen} data-twin-side>
+            <IconLayoutColumns size={18} stroke={1.9} aria-hidden />
+            <span>{t(twinOpen ? 'desk.twinClose' : 'desk.twin')}</span>
+          </UnstyledButton>
+        )}
         <AppearanceButton />
       </div>
     </>
@@ -294,17 +302,19 @@ function PreviewNotice() {
  * PC: new screens open at the top; "Back" returns to where the list was scrolled.
  * Also drops stale toasts queued on the previous screen.
  */
-function ScrollManager() {
+function ScrollManager({ active = true }: { /** The tab is in front (v0.89): a tab behind neither notes nor moves the window's scroll. */ active?: boolean }) {
   const location = useLocation();
   const type = useNavigationType();
   const positions = useRef(new Map<string, number>());
   const current = useRef(location.key);
+  const front = useRef(active);
+  front.current = active;
   useEffect(() => {
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
     let frame = 0;
     const onScroll = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => positions.current.set(current.current, window.scrollY));
+      frame = requestAnimationFrame(() => front.current && positions.current.set(current.current, window.scrollY));
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => {
@@ -314,6 +324,7 @@ function ScrollManager() {
   }, []);
   useEffect(() => {
     current.current = location.key;
+    if (!front.current) return undefined;
     notifications.cleanQueue();
     const saved = positions.current.get(location.key);
     if (type === 'POP' && saved !== undefined) {
@@ -354,7 +365,7 @@ function TwinBar() {
         const on = pl.end ? pathname === pl.to : pathname.startsWith(pl.to);
         return (
           // A symbol each (its name under the mouse — ui/deskTips.tsx): all of them and «×» fit half a window.
-          <UnstyledButton key={pl.to} className="desk-twin-place" aria-label={t(pl.key)} data-active={on || undefined} aria-current={on ? 'page' : undefined} onClick={() => navigate(pl.to)} data-twin-place={pl.to}>
+          <UnstyledButton key={pl.to} className="desk-twin-place" aria-label={t(pl.key)} data-active={on || undefined} aria-current={on ? 'page' : undefined} data-route={pl.to} onClick={() => navigate(pl.to)} data-twin-place={pl.to}>
             <pl.icon size={18} stroke={1.9} aria-hidden />
           </UnstyledButton>
         );
@@ -384,8 +395,8 @@ function SidePaneRoutes() {
   return (
     <DeskPaneContext.Provider value={pane}>
       <TwinBar />
-      <ErrorBoundary resetKey={location.pathname}>
-        <div key={location.pathname} className="page-enter" data-pane-page={deskPage(location.pathname)}>
+      <ErrorBoundary resetKey={deskScreenKey(location.pathname)}>
+        <div key={deskScreenKey(location.pathname)} className="page-enter" data-pane-page={deskPage(location.pathname)}>
           <AppRoutes location={location} />
         </div>
       </ErrorBoundary>
@@ -410,28 +421,196 @@ function SidePane({ start }: { start: string }) {
   );
 }
 
-function DesktopShell() {
+/**
+ * The side menu and the window's keys belong to the tab in front (v0.89): drawn from inside its router into the menu's
+ * place — a section clicked, «Новый заказ», the search, N — open in that tab, as a browser's address bar does.
+ */
+function FrontTabParts({ slot }: { slot: HTMLElement | null }) {
+  if (!slot) return null;
+  return createPortal(
+    <>
+      <SideNav />
+      <DeskKeys />
+    </>,
+    slot,
+  );
+}
+
+/** Another tab (v0.89): a router of its own in memory, its screens, its «Назад»; it stays as it was while behind. */
+function TabPane({ tab, front, slot }: { tab: DeskTab; front: boolean; slot: HTMLElement | null }) {
+  const [first] = useState(tab.path);
+  return (
+    <UNSAFE_LocationContext.Provider value={null as unknown as ContextType<typeof UNSAFE_LocationContext>}>
+      <UNSAFE_RouteContext.Provider value={{ outlet: null, matches: [], isDataRoute: false }}>
+        <MemoryRouter initialEntries={[first]}>
+          <TabRoutes id={tab.id} front={front} slot={slot} />
+        </MemoryRouter>
+      </UNSAFE_RouteContext.Provider>
+    </UNSAFE_LocationContext.Provider>
+  );
+}
+
+function TabRoutes({ id, front, slot }: { id: string; front: boolean; slot: HTMLElement | null }) {
+  const location = useLocation();
+  const type = useNavigationType();
+  const navigate = useNavigate();
+  // How deep in its own history: at its first screen «Назад» closes the tab (×).
+  const [depth, setDepth] = useState(0);
+  const last = useRef(location.key);
+  useEffect(() => {
+    if (last.current === location.key) return;
+    last.current = location.key;
+    setDepth((d) => (type === 'PUSH' ? d + 1 : type === 'POP' ? Math.max(0, d - 1) : d));
+  }, [location.key, type]);
+  useEffect(() => noteTab(id, { path: location.pathname + location.search }), [id, location.pathname, location.search]);
+  const pane = useMemo<DeskPaneInfo>(() => ({ id, closes: depth === 0, back: () => (depth > 0 ? navigate(-1) : void closeTab(id)) }), [id, depth, navigate]);
+  return (
+    <DeskTabContext.Provider value={id}>
+      <DeskPaneContext.Provider value={pane}>
+        <ScrollManager active={front} />
+        {front && <FrontTabParts slot={slot} />}
+        <div className="page-shell" data-page={deskPage(location.pathname)}>
+          <div className="desk-page">
+            <ErrorBoundary resetKey={deskScreenKey(location.pathname)}>
+              <div key={deskScreenKey(location.pathname)} className="page-enter">
+                <AppRoutes location={location} />
+              </div>
+            </ErrorBoundary>
+          </div>
+        </div>
+      </DeskPaneContext.Provider>
+    </DeskTabContext.Provider>
+  );
+}
+
+/** The tabs over the screens (v0.89), when there are two or more: a click — that tab; × or the wheel — closed; ＋ — a new one. */
+function DeskTabStrip({ onMainTo }: { onMainTo: (path: string) => void }) {
+  const { t } = useTranslation();
+  const tabs = useDeskTabs();
+  const titleOf = useScreenTitle();
+  const close = (id: string) => {
+    const { mainTo } = closeTab(id);
+    if (mainTo) onMainTo(mainTo);
+  };
+  return (
+    <div className="desk-tabs" role="tablist" aria-label={t('desk.tabs')}>
+      {tabs.tabs.map((tab) => {
+        const on = tab.id === tabs.active;
+        const name = tab.title || String(titleOf(tab.path.split('?')[0]) || 'MyGarage');
+        return (
+          <div
+            key={tab.id}
+            className="desk-tab-chip"
+            role="tab"
+            tabIndex={0}
+            aria-selected={on}
+            data-active={on || undefined}
+            data-tab-chip={tab.id}
+            onClick={() => focusTab(tab.id)}
+            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), focusTab(tab.id))}
+            onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+            onAuxClick={(e) => e.button === 1 && (e.preventDefault(), close(tab.id))}
+          >
+            <span className="desk-tab-name dt-clip">{name}</span>
+            <button
+              type="button"
+              className="desk-tab-x"
+              aria-label={t('common.close')}
+              onClick={(e) => {
+                e.stopPropagation();
+                close(tab.id);
+              }}
+            >
+              <IconX size={14} stroke={2.2} aria-hidden />
+            </button>
+          </div>
+        );
+      })}
+      <button type="button" className="desk-tab-new" aria-label={t('desk.newTab')} onClick={() => openTab('/')} data-tab-new>
+        <IconPlus size={16} stroke={2.2} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A control that opens a screen (v0.89, the owner: «правая кнопка мыши по любой кнопке, которая ведёт в другой экран, —
+ * открыть в новой вкладке, как в браузере»): its address is on it (`data-route`, or a link's own). A right click — «Открыть
+ * в новой вкладке» and «Открыть»; the wheel or Ctrl+click — a new tab behind, as a browser does. A control with a menu
+ * of its own (a job's card, a table's row) says it in that menu.
+ */
+function DeskRouteMenu() {
+  const { t } = useTranslation();
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; to: string; el: HTMLElement } | null>(null);
+  useEffect(() => {
+    const routeOf = (target: EventTarget | null) => {
+      const el = (target as Element | null)?.closest?.('[data-route], a[href^="#/"]') as HTMLElement | null;
+      if (!el || el.closest('[data-no-tab]')) return null;
+      const to = el.dataset.route ?? el.getAttribute('href')?.slice(1) ?? '';
+      return to.startsWith('/') ? { el, to } : null;
+    };
+    const onMenu = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      const r = routeOf(e.target);
+      if (!r) return;
+      e.preventDefault();
+      setMenu({ at: { x: e.clientX, y: e.clientY }, ...r });
+    };
+    // (The wheel pressed on it: no scrolling cross.)
+    const onDown = (e: MouseEvent) => e.button === 1 && routeOf(e.target) && e.preventDefault();
+    const onAux = (e: MouseEvent) => {
+      if (e.button !== 1) return;
+      const r = routeOf(e.target);
+      if (!r) return;
+      e.preventDefault();
+      openTab(r.to, { front: false });
+    };
+    const onClick = (e: MouseEvent) => {
+      if (e.button !== 0 || !(e.ctrlKey || e.metaKey)) return;
+      const r = routeOf(e.target);
+      if (!r) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openTab(r.to, { front: false });
+    };
+    document.addEventListener('contextmenu', onMenu);
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('auxclick', onAux, true);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('contextmenu', onMenu);
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('auxclick', onAux, true);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, []);
+  return (
+    <DeskMenu
+      at={menu?.at ?? null}
+      onClose={() => setMenu(null)}
+      items={[
+        { key: 'tab', label: t('desk.openInTab'), icon: IconExternalLink, onClick: () => menu && openTab(menu.to) },
+        { key: 'open', label: t('common.open'), icon: IconArrowRight, onClick: () => menu?.el.click() },
+      ]}
+    />
+  );
+}
+
+/** The window's own tab: its address is the window's; the second tab beside it (v0.80.3) lives here. */
+function MainTab({ front, slot }: { front: boolean; slot: HTMLElement | null }) {
   const { t } = useTranslation();
   const location = useLocation();
   // The second tab (v0.80.3): open beside whatever screen the window shows; closed only by its own «×».
   const side = useTwin();
   const twin = !!side;
   useEffect(() => {
-    if (!twin) setActivePane('main');
-  }, [twin]);
-  // The computer's own layout (v0.41): every rule of it is under html.desk, which the phone never has.
-  useDeskShell();
-  useDeskWheel();
-  // WhatsApp's screens may put the side menu away (v0.80): the chats get the whole window.
-  const sideHidden = useWaSideHidden() && /^\/whatsapp(\/chat\/[^/]+)?$/.test(location.pathname);
+    if (!twin && front) setActivePane('main');
+  }, [twin, front]);
+  useEffect(() => noteTab(MAIN_TAB, { path: location.pathname + location.search }), [location.pathname, location.search]);
   return (
-    <DeskContext.Provider value>
-      <div className="desk-shell" data-side-hidden={sideHidden || undefined}>
-        <ScrollManager />
-        <nav className="app-nav desk-side" aria-label={t('nav.menu')}>
-          <SideNav />
-        </nav>
-        <main className="desk-main">
+    <>
+      <ScrollManager active={front} />
+      {front && <FrontTabParts slot={slot} />}
           {/* The screen decides its width (desk.css): the board the whole window, a job two columns, a form one. */}
           <div className="page-shell" data-page={twin ? 'twin' : deskPage(location.pathname)}>
             <div className="desk-page">
@@ -441,8 +620,8 @@ function DesktopShell() {
                 <div className="desk-twin">
                   <section className="desk-twin-pane" data-pane="main" onPointerDownCapture={() => setActivePane('main')} onFocusCapture={() => setActivePane('main')}>
                     <DeskPaneContext.Provider value={MAIN_PANE}>
-                      <ErrorBoundary resetKey={location.pathname}>
-                        <div key={location.pathname} className="page-enter">
+                      <ErrorBoundary resetKey={deskScreenKey(location.pathname)}>
+                        <div key={deskScreenKey(location.pathname)} className="page-enter">
                           <AppRoutes location={location} />
                         </div>
                       </ErrorBoundary>
@@ -453,17 +632,60 @@ function DesktopShell() {
                   </section>
                 </div>
               ) : (
-                <ErrorBoundary resetKey={location.pathname}>
-                  <div key={location.pathname} className="page-enter">
+                <ErrorBoundary resetKey={deskScreenKey(location.pathname)}>
+                  <div key={deskScreenKey(location.pathname)} className="page-enter">
                     <AppRoutes location={location} />
                   </div>
                 </ErrorBoundary>
               )}
             </div>
           </div>
+    </>
+  );
+}
+
+function DesktopShell() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const tabs = useDeskTabs();
+  // The side menu's place: the tab in front draws its menu there (v0.89).
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  // The computer's own layout (v0.41): every rule of it is under html.desk, which the phone never has.
+  useDeskShell();
+  useDeskWheel();
+  const front = tabs.tabs.find((tab) => tab.id === tabs.active) ?? tabs.tabs[0];
+  // The tab in front: its keys act, its scroll comes back, the window says its title.
+  useLayoutEffect(() => {
+    if (tabs.active !== MAIN_TAB) setActivePane(tabs.active);
+    window.scrollTo(0, scrollOfTab(tabs.active));
+  }, [tabs.active]);
+  useEffect(() => {
+    if (front?.title) document.title = window.matchMedia('(display-mode: standalone)').matches ? front.title : `${front.title} — MyGarage`;
+  }, [front?.title, tabs.active]);
+  const many = tabs.tabs.length > 1;
+  useEffect(() => {
+    document.documentElement.toggleAttribute('data-tabs', many);
+    return () => document.documentElement.removeAttribute('data-tabs');
+  }, [many]);
+  // WhatsApp's screens may put the side menu away (v0.80): the chats get the whole window.
+  const sideHidden = useWaSideHidden() && /^\/whatsapp(\/chat\/[^/]+)?$/.test((front?.path ?? '').split('?')[0]);
+  return (
+    <DeskContext.Provider value>
+      <div className="desk-shell" data-side-hidden={sideHidden || undefined}>
+        <nav className="app-nav desk-side" aria-label={t('nav.menu')} ref={setSlot} />
+        <main className="desk-main">
+          {many && <DeskTabStrip onMainTo={(path) => navigate(path)} />}
+          {tabs.tabs.map((tab) => {
+            const on = tab.id === tabs.active;
+            return (
+              <div key={tab.id} className="desk-tab" data-tab={tab.id} style={on ? undefined : { display: 'none' }}>
+                {tab.id === MAIN_TAB ? <MainTab front={on} slot={on ? slot : null} /> : <TabPane tab={tab} front={on} slot={on ? slot : null} />}
+              </div>
+            );
+          })}
         </main>
-        <DeskKeys />
         <DeskTips />
+        <DeskRouteMenu />
         <PwaUpdater />
         <UnsavedGuard />
       </div>
@@ -515,7 +737,11 @@ function Shell() {
   // Screens opened from outside the screens (a notification, a toast's button) go through the router (ui/openRoute.ts).
   const navigate = useNavigate();
   useEffect(() => {
-    setRouteOpener((to) => navigate(to));
+    // (A PC's tabs, v0.89: such a screen opens in the window's own tab, brought to the front.)
+    setRouteOpener((to) => {
+      focusTab(MAIN_TAB);
+      navigate(to);
+    });
     return () => setRouteOpener(null);
   }, [navigate]);
   const { pathname } = useLocation();

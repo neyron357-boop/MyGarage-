@@ -5,6 +5,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { db } from '../../db/db';
 import { useTranslation } from 'react-i18next';
 import { carOwned, coverOf, MULKIYA_SIDES, mulkiyaOf, removeCarPhoto, restoreCarPhoto, rotateCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type CarSlot, type MulkiyaSide } from '../../services/cover';
+import { carPhotoLater } from '../../services/carPhoto';
 import { MediaImage, undoToast } from '../../ui/components';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
@@ -67,7 +68,13 @@ export function CarCover({ vehicleId, hideEmpty }: { vehicleId: string; hideEmpt
     return { id, own: !!id && (await carOwned([id])).has(id) };
   }, [vehicleId]);
   const [viewing, setViewing] = useState(false);
-  const pick = usePhotoPick(([file]) => void run(() => setCover(vehicleId, file)));
+  // A car with no make or model yet: the AI looks at the photo (v0.89, services/carPhoto.ts — once, a small picture).
+  const pick = usePhotoPick(([file]) =>
+    void run(async () => {
+      await setCover(vehicleId, file);
+      carPhotoLater(vehicleId, file);
+    }),
+  );
   const edits = useCarPhotoEdits(vehicleId);
   if (!cover) return <div className="action-tile job-cover" data-empty="true" aria-hidden="true" />;
   // A closed job shows the photo if the car has one — not a tile asking for it.

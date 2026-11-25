@@ -204,6 +204,8 @@ const TAPPABLE = [
   'button.qty-short',
   // v0.71: the VIN under the car's name.
   'button.vin-line',
+  // v0.89: the photo-or-VIN question under the car's name.
+  'button.car-check-pill',
 ].join(',');
 /** Real check boxes and switches: they become switch controls and tick by themselves. */
 const CHECKABLE = '.mantine-Switch-input, .mantine-Checkbox-input, .mantine-Chip-input';

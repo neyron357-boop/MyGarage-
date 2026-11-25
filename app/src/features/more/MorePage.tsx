@@ -40,7 +40,7 @@ function GarageCard() {
   const settings = useScreenLiveQuery(() => getSettings(), []);
   if (!settings) return null;
   return (
-    <button type="button" className="garage-card tap" onClick={() => navigate('/settings')}>
+    <button type="button" className="garage-card tap" data-route={'/settings'} onClick={() => navigate('/settings')}>
       <span className="garage-logo">
         {settings.logoDataUrl ? <Image src={settings.logoDataUrl} alt="" fit="contain" w={52} h={52} /> : <IconTool size={28} stroke={1.8} aria-hidden />}
       </span>
@@ -84,7 +84,7 @@ export function MorePage() {
                 <WaCount className="wa-badge" />
               ) : undefined
             }
-            onClick={() => navigate(l.to)}
+            data-route={l.to} onClick={() => navigate(l.to)}
             chevron
           />
         ))}
@@ -99,7 +99,7 @@ export function MorePage() {
             }
             title={t('more.localTitle')}
             subtitle={backup.at ? t('settings.lastBackup', { date: formatDateTime(backup.at) }) : t('backupReminder.never')}
-            onClick={() => navigate('/settings?tab=data')}
+            data-route={'/settings?tab=data'} onClick={() => navigate('/settings?tab=data')}
             chevron
           />
           <ListRow

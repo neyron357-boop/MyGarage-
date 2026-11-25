@@ -68,7 +68,7 @@ export function VehiclePage() {
             <Box className="surface" p="md">
               <Group justify="space-between" align="flex-start">
                 <PlateText plate={v.plate} size="lg" />
-                <Button leftSection={<IconPlus size={18} />} onClick={() => navigate(`/orders/new?vehicleId=${v.id}`)}>
+                <Button leftSection={<IconPlus size={18} />} data-route={`/orders/new?vehicleId=${v.id}`} onClick={() => navigate(`/orders/new?vehicleId=${v.id}`)}>
                   {t('search.newJob')}
                 </Button>
               </Group>
@@ -82,7 +82,7 @@ export function VehiclePage() {
                 <Field label={t('vehicle.color')}>{v.color || '—'}</Field>
                 <Field label={t('vehicle.owner')}>
                   {owner ? (
-                    <Text span size="sm" fw={600} c="cobalt.6" style={{ cursor: 'pointer' }} onClick={() => navigate(`/customers/${owner.id}`)}>
+                    <Text span size="sm" fw={600} c="cobalt.6" style={{ cursor: 'pointer' }} data-route={`/customers/${owner.id}`} onClick={() => navigate(`/customers/${owner.id}`)}>
                       {owner.name}
                     </Text>
                   ) : (
@@ -133,7 +133,7 @@ export function VehiclePage() {
               ) : (
                 <List>
                   {orders.map((o) => (
-                    <ListRow key={o.id} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.arrivedAt ?? o.createdAt)}`} subtitle={[o.complaint, o.driver ? o.driver.name || formatPhone(o.driver.phone) : ''].filter(Boolean).join(' · ') || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
+                    <ListRow key={o.id} data-route={`/orders/${o.id}`} onClick={() => navigate(`/orders/${o.id}`)} chevron title={`№${o.number} · ${formatDate(o.arrivedAt ?? o.createdAt)}`} subtitle={[o.complaint, o.driver ? o.driver.name || formatPhone(o.driver.phone) : ''].filter(Boolean).join(' · ') || undefined} right={<OrderStatus orderId={o.id} stage={o.stage} />} />
                   ))}
                 </List>
               )}

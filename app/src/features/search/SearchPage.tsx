@@ -84,7 +84,7 @@ function Marked({ text, terms }: { text: string; terms: Term[] }) {
 }
 
 /** A job found by what was done in it: the matching lines first, then the job, car and customer. */
-function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }) {
+function JobRow({ m, onClick, 'data-route': route }: { m: JobMatch<JobHitData>; onClick: () => void; 'data-route'?: string }) {
   const { t } = useTranslation();
   const nameOf = useCustomerName();
   const { order: o, vehicle: v, customer: c } = m.doc.data;
@@ -94,6 +94,7 @@ function JobRow({ m, onClick }: { m: JobMatch<JobHitData>; onClick: () => void }
   // The car first (that is what the manager looks for), what matched under it in one line.
   return (
     <ListRow
+      data-route={route}
       onClick={onClick}
       chevron
       title={<PlateLine plate={v?.plate}>{car || nameOf(c) || `№${o.number}`}</PlateLine>}
@@ -190,7 +191,7 @@ export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<
             {h.history?.map((o) => (
               <ListRow
                 key={o.id}
-                onClick={() => navigate(`/orders/${o.id}`)}
+                data-route={`/orders/${o.id}`} onClick={() => navigate(`/orders/${o.id}`)}
                 chevron
                 left={<IconHistory size={18} stroke={1.8} className="history-icon" aria-hidden />}
                 title={<Text span fz={15}>{[`№${o.number}`, formatDate(o.createdAt)].join(' · ')}</Text>}
@@ -207,7 +208,7 @@ export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<
               />
             ))}
             {h.vehicle && (h.historyCount ?? 0) > (h.history?.length ?? 0) && (
-              <ListRow onClick={() => navigate(`/vehicles/${h.vehicle!.id}`)} chevron left={<span className="history-icon-space" />} title={<Text span fz={15} c="cobalt.6">{t('search.allVisits', { n: h.historyCount })}</Text>} />
+              <ListRow data-route={`/vehicles/${h.vehicle!.id}`} onClick={() => navigate(`/vehicles/${h.vehicle!.id}`)} chevron left={<span className="history-icon-space" />} title={<Text span fz={15} c="cobalt.6">{t('search.allVisits', { n: h.historyCount })}</Text>} />
             )}
           </Fragment>
         ))}
@@ -222,7 +223,7 @@ export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<
     >
       <List key="jobs">
         {jobs.matches.map((m) => (
-          <JobRow key={m.doc.orderId} m={m} onClick={() => navigate(`/orders/${m.doc.orderId}`)} />
+          <JobRow key={m.doc.orderId} m={m} data-route={`/orders/${m.doc.orderId}`} onClick={() => navigate(`/orders/${m.doc.orderId}`)} />
         ))}
       </List>
     </Section>
@@ -235,7 +236,7 @@ export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<
             key={s.id}
             title={s.name}
             subtitle={[s.service ? t('suppliers.contractor') : '', s.makes?.join(', '), s.parts].filter(Boolean).join(' · ') || (s.phone ? formatPhone(s.phone) : undefined)}
-            onClick={() => navigate(`/parts?tab=suppliers&q=${encodeURIComponent(s.name)}`)}
+            data-route={`/parts?tab=suppliers&q=${encodeURIComponent(s.name)}`} onClick={() => navigate(`/parts?tab=suppliers&q=${encodeURIComponent(s.name)}`)}
             right={
               s.phone ? (
                 <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -260,7 +261,7 @@ export function SearchResults({ q, exclude, quiet }: { q: string; exclude?: Set<
           icon={IconUserSearch}
           title={t('search.noResults')}
           action={
-            <Button leftSection={<IconPlus size={18} />} onClick={() => navigate('/orders/new')}>
+            <Button leftSection={<IconPlus size={18} />} data-route={'/orders/new'} onClick={() => navigate('/orders/new')}>
               {t('nav.newOrder')}
             </Button>
           }
@@ -326,7 +327,7 @@ export function SearchPage() {
                 {recent.map(({ o, v, c }) => (
                   <ListRow
                     key={o.id}
-                    onClick={() => navigate(`/orders/${o.id}`)}
+                    data-route={`/orders/${o.id}`} onClick={() => navigate(`/orders/${o.id}`)}
                     chevron
                     title={v ? `${v.make} ${v.model}` : `№${o.number}`}
                     subtitle={

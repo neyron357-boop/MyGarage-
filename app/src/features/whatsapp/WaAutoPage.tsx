@@ -126,7 +126,7 @@ export function WaAutoPage() {
             {data.groups.map((c) => (
               <ListRow
                 key={c.id}
-                onClick={() => navigate(`/customers/${c.id}`)}
+                data-route={`/customers/${c.id}`} onClick={() => navigate(`/customers/${c.id}`)}
                 chevron
                 left={
                   <span className="row-icon" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden>

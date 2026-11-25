@@ -22,6 +22,7 @@ import { DIRS, httpError } from './store.mjs';
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
  *        /api/ai/receipt {image}          — the garage's AI (v0.48, ai.mjs; the part-number search — gone, v0.85)
  *        /api/ai/labour {parts, work}, /api/ai/reply {text, quote, asks}, /api/ai/roles {chats} — v0.86, light models
+ *        /api/ai/car {image}              — a car's make and model off a small photo (v0.89)
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
@@ -213,10 +214,12 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
         if (req.method === 'POST') {
           // A receipt comes as a picture (v0.50): up to 8 MB; the other questions are a few lines.
-          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : 16 * 1024);
+          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : parts[2] === 'car' ? 2 * 1024 * 1024 : 16 * 1024);
           ai.allow(device.id);
           if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
           if (parts[2] === 'receipt') return send(res, 200, await ai.receipt(body));
+          // v0.89: the car's make and model off a small photo.
+          if (parts[2] === 'car') return send(res, 200, await ai.car(body));
           if (parts[2] === 'part-name') return send(res, 200, await ai.partName(body));
           // v0.86: the labour line said by the parts; a supplier's answer; who chats are.
           if (parts[2] === 'labour') return send(res, 200, await ai.labour(body));

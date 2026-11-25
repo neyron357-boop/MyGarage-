@@ -68,7 +68,7 @@ export function WaGate({ s }: { s: WaStore }) {
       IconServer,
       t('wa.gate.server'),
       t('wa.gate.serverHint'),
-      <Button onClick={() => navigate('/settings?tab=data')} data-wa-gate="server">
+      <Button data-route={'/settings?tab=data'} onClick={() => navigate('/settings?tab=data')} data-wa-gate="server">
         {t('wa.gate.connect')}
       </Button>,
     );
@@ -97,7 +97,7 @@ export function WaGate({ s }: { s: WaStore }) {
       IconBrandWhatsapp,
       t('wa.gate.off'),
       t('wa.gate.offHint'),
-      <Button color="green" leftSection={<IconBrandWhatsapp size={20} />} onClick={() => navigate('/whatsapp/setup')} data-wa-gate="link">
+      <Button color="green" leftSection={<IconBrandWhatsapp size={20} />} data-route={'/whatsapp/setup'} onClick={() => navigate('/whatsapp/setup')} data-wa-gate="link">
         {t('wa.gate.link')}
       </Button>,
     );
@@ -107,7 +107,7 @@ export function WaGate({ s }: { s: WaStore }) {
     t(`wa.state.${st.phase}`),
     st.phase === 'loading' && st.loading ? `${st.loading} %` : undefined,
     st.phase === 'qr' ? (
-      <Button color="green" onClick={() => navigate('/whatsapp/setup')}>
+      <Button color="green" data-route={'/whatsapp/setup'} onClick={() => navigate('/whatsapp/setup')}>
         {t('wa.setup')}
       </Button>
     ) : (
@@ -124,6 +124,8 @@ const ChatRow = memo(function ChatRow({ c, who, role, byAi, when, active, onOpen
   return (
     <ListRow
       selected={active || picked}
+      // The chat in a tab of its own (v0.89, the PC's right click, the wheel, Ctrl+click) — not while picking chats.
+      data-route={picking ? undefined : chatPath(c.id)}
       onClick={() => onOpen(c)}
       left={
         <span className="wa-row-left">
@@ -572,7 +574,7 @@ function HeaderButtons({ onNew, ready }: { onNew: () => void; ready: boolean }) 
           <IconPlus size={22} stroke={2} />
         </ActionIcon>
       )}
-      <ActionIcon variant="default" size={40} radius="xl" aria-label={t('wa.setup')} onClick={() => navigate('/whatsapp/setup')} data-wa-setup-btn>
+      <ActionIcon variant="default" size={40} radius="xl" aria-label={t('wa.setup')} data-route={'/whatsapp/setup'} onClick={() => navigate('/whatsapp/setup')} data-wa-setup-btn>
         <IconSettings size={21} stroke={1.9} />
       </ActionIcon>
     </Group>
@@ -607,7 +609,13 @@ export function WhatsAppPage() {
   useEffect(() => screen?.watch(() => void refreshWa().then(() => loadChats())), [screen]);
 
   // On a PC choosing another chat is not a step of history («Назад» leaves WhatsApp, not the last chat).
-  const openChat = useCallback((c: Pick<WaChat, 'id'>) => navigate(chatPath(c.id), { replace: desk && !!chatId }), [navigate, desk, chatId]);
+  // (The same function whichever chat is open — v0.89: the list's rows are not drawn again on every other chat.)
+  // React Router's navigate is a new function at every address, so it is read from a ref too.
+  const inChat = useRef(!!chatId);
+  inChat.current = !!chatId;
+  const go = useRef(navigate);
+  go.current = navigate;
+  const openChat = useCallback((c: Pick<WaChat, 'id'>) => go.current(chatPath(c.id), { replace: desk && inChat.current }), [desk]);
   const openNumber = useCallback(
     async (phone: string) => {
       const r = await numberOnWa(phone);
@@ -654,7 +662,7 @@ export function WhatsAppPage() {
               {face && chatId ? (
                 <>
                   <div className="wa-chat-head">
-                    <button type="button" className="wa-icon-btn wa-desk-back tap" aria-label={t('common.back')} onClick={() => navigate('/whatsapp')} data-wa-desk-back>
+                    <button type="button" className="wa-icon-btn wa-desk-back tap" aria-label={t('common.back')} data-route={'/whatsapp'} onClick={() => navigate('/whatsapp')} data-wa-desk-back>
                       <IconChevronLeft size={24} stroke={2} />
                     </button>
                     {/* Whose it is — in the line under the name, as on the phone (v0.87: not said twice). */}

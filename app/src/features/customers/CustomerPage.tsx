@@ -139,7 +139,7 @@ export function CustomerPage() {
                   {cars.map((v) => (
                     <ListRow
                       key={v.id}
-                      onClick={() => navigate(`/vehicles/${v.id}`)}
+                      data-route={`/vehicles/${v.id}`} onClick={() => navigate(`/vehicles/${v.id}`)}
                       chevron
                       left={<PlateText plate={v.plate} size="sm" />}
                       title={`${v.make} ${v.model}${v.year ? ` ${v.year}` : ''}`}
@@ -177,7 +177,7 @@ export function CustomerPage() {
                     return (
                       <ListRow
                         key={o.id}
-                        onClick={() => navigate(`/orders/${o.id}`)}
+                        data-route={`/orders/${o.id}`} onClick={() => navigate(`/orders/${o.id}`)}
                         chevron
                         title={
                           <>

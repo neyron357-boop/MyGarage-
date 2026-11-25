@@ -42,6 +42,10 @@ export const en: typeof ru = {
     keys: 'Keyboard',
     twin: 'Tab beside',
     twinClose: 'Close the tab',
+    // v0.89: the PC's own tabs.
+    tabs: 'Tabs',
+    newTab: 'New tab',
+    openInTab: 'Open in a new tab',
     keyLines: 'Work · Part · Service on a job',
     keyClose: 'Close the sheet',
     actions: 'Actions',
@@ -519,6 +523,8 @@ export const en: typeof ru = {
     startIntake: 'Start check-in',
     book: 'Book',
     makeModel: 'Make and model',
+    // v0.89: filled from the car's photo by the AI.
+    byPhoto: 'from the photo',
     makePlaceholder: 'Other make',
     otherModel: 'Other model',
     customerOptional: 'Customer — can be added later',
@@ -2622,6 +2628,13 @@ export const en: typeof ru = {
     carTitle: 'Car by VIN',
     // v0.88: the car filled from the garage's own cars of the same VIN (no AI).
     carGarage: "As the garage's own cars",
+    // v0.89: the make and model seen on the car's photo; the photo and the VIN say different cars.
+    carPhoto: 'The car from its photo',
+    checkTitle: 'Photo or VIN?',
+    checkPill: 'Photo ≠ VIN',
+    byPhotoShort: 'Photo',
+    byVin: 'VIN',
+    otherCar: 'Other',
     nameTitle: 'Name corrected',
     working: 'AI at work',
     yandex: 'Search on Yandex',

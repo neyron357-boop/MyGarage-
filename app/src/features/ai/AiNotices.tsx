@@ -31,7 +31,8 @@ export function AiNotices() {
         // Said by the garage's own car of the same VIN (v0.88): not the AI's — no mark of it, no sound.
         const garage = n.kind === 'car' && n.from === 'garage';
         if (n.kind === 'car') {
-          title = garage ? t('ai.carGarage') : t('ai.carTitle');
+          // Seen on the car's photo (v0.89): the AI's, its mark and sound.
+          title = garage ? t('ai.carGarage') : n.from === 'photo' ? t('ai.carPhoto') : t('ai.carTitle');
           const values = [n.filled.make, n.filled.model, n.filled.year, n.filled.engine, n.filled.type ? t(`vehicle.bodyTypes.${n.filled.type}`) : ''].filter(Boolean);
           body = (
             <span className="ai-pills">

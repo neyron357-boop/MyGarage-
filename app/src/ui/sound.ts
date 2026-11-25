@@ -61,9 +61,14 @@ function unlock(): void {
 export function armSound(): void {
   if (typeof window === 'undefined') return;
   const events = ['pointerdown', 'touchend', 'keydown'] as const;
+  const off = () => {
+    for (const e of events) window.removeEventListener(e, on, true);
+  };
+  // Let go as soon as it runs — its resume says so later, not at once (v0.89: it was asked again on every key typed).
   const on = () => {
-    unlock();
-    if (ctx?.state === 'running') for (const e of events) window.removeEventListener(e, on, true);
+    const a = audio();
+    if (!a || a.state === 'running') return off();
+    if (a.state === 'suspended') void a.resume().then(() => a.state === 'running' && off(), () => undefined);
   };
   for (const e of events) window.addEventListener(e, on, { capture: true, passive: true });
 }

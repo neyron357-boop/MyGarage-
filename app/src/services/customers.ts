@@ -83,6 +83,8 @@ export async function updateVehicle(id: string, patch: Partial<VehicleInput>): P
     const fixed = (['make', 'model', 'year', 'engine', 'type'] as const).filter((k) => k in patch && patch[k as keyof typeof patch] !== was[k]);
     if (fixed.length) out.vinAi = { ...was.vinAi, filled: was.vinAi.filled.filter((k) => !fixed.includes(k)) };
   }
+  // The make or the model written by a person (v0.89): the photo-or-VIN question is answered.
+  if (was?.carCheck && ((patch.make !== undefined && patch.make !== was.make) || (patch.model !== undefined && patch.model !== was.model))) out.carCheck = undefined;
   await db.vehicles.update(id, out);
   // A VIN put in the card: the garage's AI reads it (v0.48) — what is empty in the card filled, not waited for.
   if (out.vin) aiReadVinLater(id);

@@ -11,7 +11,6 @@ import { formatPhone } from '../../domain/phone';
 import { EMIRATES } from '../../domain/plates';
 import { checkDigitOk, isVin, vinChars } from '../../domain/vin';
 import type { VinCar } from '../../domain/vinDecode';
-import { quickList } from '../../domain/quickLists';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
 import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
 import { setCover, setVinPhoto } from '../../services/cover';
@@ -30,6 +29,11 @@ import { PrevVisit } from '../job/PrevVisit';
 import { DateTimeField, DayPill } from '../../ui/DateFields';
 import { typedOnly, useAction, useLang, usePhone, useSettings } from '../../ui/hooks';
 import { DeskSplit } from '../../ui/desk';
+import { useTypedValue } from '../../ui/typedValue';
+import { carCheckOf, photoFill, sameMake, type PhotoCar, type VinSaid } from '../../domain/carPhoto';
+import { askCarCheck, CAR_PHOTO_WORK, carPhotoLater, guessCar, takePhotoCar } from '../../services/carPhoto';
+import { AiMark, useAiWorking } from '../ai/Ai';
+import { CarChoice } from '../ai/CarCheck';
 
 const LAST_EMIRATE = 'mygarage.lastEmirate';
 
@@ -60,11 +64,13 @@ function who(c: Customer | undefined, noName: string): string {
 /**
  * Big UAE plate: emirate chips, code and number, live preview. The number is the one thing check-in needs. Read off a
  * photo (v0.28), what the reading was not sure of is ringed orange until it is typed over; the camera (a hold — the
- * phone's photos) reads it off a photo.
+ * phone's photos) reads it off a photo. Typed, it is drawn here at once and the page hears of it without hurry
+ * (v0.89, `useTypedValue`): a key never waits for the whole page to be drawn again.
  */
-function PlateBlock({ plate, onChange, unsure, focus, camera, children }: { plate: Plate; onChange: (p: Plate) => void; unsure?: { code: boolean; number: boolean }; focus: boolean; camera?: ReactNode; children?: ReactNode }) {
+function PlateBlock({ plate: page, onChange, unsure, focus, camera, children }: { plate: Plate; onChange: (p: Plate) => void; unsure?: { code: boolean; number: boolean }; focus: boolean; camera?: ReactNode; children?: ReactNode }) {
   const { t } = useTranslation();
   const lang = useLang();
+  const [plate, setPlate] = useTypedValue(page, onChange);
   return (
     <Box className="surface" p="md" pos="relative">
       {camera}
@@ -81,7 +87,7 @@ function PlateBlock({ plate, onChange, unsure, focus, camera, children }: { plat
       </Box>
       <div className="chip-row" role="radiogroup" aria-label={t('vehicle.emirate')}>
         {EMIRATES.map((e) => (
-          <button key={e.code} type="button" className="chip" role="radio" aria-checked={plate.emirate === e.code} data-active={plate.emirate === e.code} onClick={() => onChange({ ...plate, emirate: e.code })}>
+          <button key={e.code} type="button" className="chip" role="radio" aria-checked={plate.emirate === e.code} data-active={plate.emirate === e.code} onClick={() => setPlate({ ...plate, emirate: e.code })}>
             {e[lang]}
           </button>
         ))}
@@ -91,7 +97,7 @@ function PlateBlock({ plate, onChange, unsure, focus, camera, children }: { plat
           aria-label={t('vehicle.plateCode')}
           placeholder={t('vehicle.plateCode')}
           value={plate.code}
-          onChange={(e) => onChange({ ...plate, code: e.currentTarget.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
+          onChange={(e) => setPlate({ ...plate, code: e.currentTarget.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
           maxLength={3}
           autoCapitalize="characters"
           autoCorrect="off"
@@ -107,7 +113,7 @@ function PlateBlock({ plate, onChange, unsure, focus, camera, children }: { plat
           aria-label={t('vehicle.plateNumber')}
           placeholder={t('vehicle.plateNumber')}
           value={plate.number}
-          onChange={(e) => onChange({ ...plate, number: e.currentTarget.value.replace(/\D/g, '') })}
+          onChange={(e) => setPlate({ ...plate, number: e.currentTarget.value.replace(/\D/g, '') })}
           inputMode="numeric"
           enterKeyHint="done"
           autoComplete="off"
@@ -273,19 +279,16 @@ const MakeModelBlock = memo(function MakeModelBlock({ make, model, year, onMake,
   );
 });
 
-/** What the customer complains of: the garage's phrases as chips, and free text (not drawn again while the plate is typed). */
-const ComplaintBlock = memo(function ComplaintBlock({ complaint, complaints, onAdd, onChange }: { complaint: string; complaints: string[]; onAdd: (p: string) => void; onChange: (v: string) => void }) {
+/**
+ * What the customer complains of, in their words (not drawn again while the plate is typed). No ready phrases here
+ * (v0.89, the owner: «убрать готовые подсказки жалоб… я 99 % не использую»): the garage's list (Settings → Lists) stays
+ * in the job's «Жалоба» sheet.
+ */
+const ComplaintBlock = memo(function ComplaintBlock({ complaint, onChange }: { complaint: string; onChange: (v: string) => void }) {
   const { t } = useTranslation();
   return (
     <Box className="surface" p="md">
-      <div className="chip-row wrap">
-        {complaints.map((p) => (
-          <button key={p} type="button" className="chip" data-active={complaint.includes(p)} onClick={() => onAdd(p)}>
-            {p}
-          </button>
-        ))}
-      </div>
-      <Textarea mt="sm" aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => onChange(e.currentTarget.value)} />
+      <Textarea aria-label={t('order.complaint')} placeholder={t('order.complaintHint')} autosize minRows={2} value={complaint} onChange={(e) => onChange(e.currentTarget.value)} />
     </Box>
   );
 });
@@ -339,7 +342,15 @@ export function NewOrderPage() {
   const [openedAt] = useState(nowIso);
   // On a PC (v0.42) the form is two columns: the car | what is wrong and whose it is.
   const onPhone = usePhone();
-  const [plate, setPlate] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
+  const [plate, setPlateState] = useState<Plate>(() => ({ emirate: lastEmirate(), code: '', number: '' }));
+  // The plate as typed this moment (v0.89): the field tells the page without hurry, so a tap on «Принять» right after the
+  // last key reads it here, not from the page's last drawing.
+  const plateNow = useRef(plate);
+  const setPlate = useCallback((next: Plate | ((p: Plate) => Plate)) => {
+    const p = typeof next === 'function' ? next(plateNow.current) : next;
+    plateNow.current = p;
+    setPlateState(p);
+  }, []);
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
   const [year, setYear] = useState<number>();
@@ -349,6 +360,15 @@ export function NewOrderPage() {
   const [vinOpen, setVinOpen] = useState(false);
   const [vinShot, setVinShot] = useState<{ file: File; crop?: string }>();
   const vinFilled = useRef<VinCar>({});
+  // The car's make and model off its photo (v0.89, the owner: «распознавание марки и модели по фотографии, чтобы сразу
+  // заполнить»): asked once the plate says the car is new, put only into what is empty. The VIN after it is held against
+  // it — another car, the person chooses here (`clash`); chosen or not, the job keeps the question for the VIN.
+  const [photoGuess, setPhotoGuess] = useState<PhotoCar>();
+  const photoNow = useRef<PhotoCar>();
+  const formCar = useRef({ make: '', model: '' });
+  formCar.current = { make, model };
+  const [clash, setClash] = useState<{ photo: PhotoCar; vin: VinSaid }>();
+  const chosen = useRef<'photo' | 'vin'>();
   const fillFromVin = useCallback((v: string) => {
     void decodeVin(v).then((car) => {
       const was = vinFilled.current;
@@ -358,6 +378,13 @@ export function NewOrderPage() {
       setYear((y) => (car.year && (!y || y === was.year) ? car.year : y));
       vinFilled.current = car;
       if (car.make || car.model || car.year) haptic('success');
+      // What the photo said, still in the form: the VIN says another car — the person chooses.
+      const g = photoNow.current;
+      if (g && !chosen.current) {
+        const off = carCheckOf({ ...formCar.current, photoAi: { ...g, at: '' } }, v, { make: car.make, model: car.model });
+        setClash(off);
+        if (off) haptic('warning');
+      }
     });
   }, []);
   const vinPick = usePhotoPick((files) => {
@@ -442,11 +469,14 @@ export function NewOrderPage() {
     return () => {
       alive = false;
     };
-  }, [shot]);
-  const typePlate = useCallback((p: Plate) => {
-    typed.current = true;
-    setPlate(p);
-  }, []);
+  }, [shot, setPlate]);
+  const typePlate = useCallback(
+    (p: Plate) => {
+      typed.current = true;
+      setPlate(p);
+    },
+    [setPlate],
+  );
   // What the reading was not sure of, while it is still as read.
   const fromPhoto = read?.found;
   const unsure = fromPhoto ? { code: !!fromPhoto.code && !fromPhoto.codeSure && plate.code === fromPhoto.code, number: !fromPhoto.sure && plate.number === fromPhoto.number } : undefined;
@@ -486,6 +516,28 @@ export function NewOrderPage() {
   const known = picked ?? auto;
   const owner = known?.owner ?? pickedCustomer;
 
+  // The photo asked about the car only once the plate is looked up and the car is not in the base (a car the garage
+  // knows has its make and model — no tokens), and only while its make or model is empty.
+  const carIsNew = !!shot && !known && !byNumber.length && !!plate.number && lookup === plate && !!found;
+  useEffect(() => {
+    if (!shot || !carIsNew || (formCar.current.make.trim() && formCar.current.model.trim())) return;
+    let alive = true;
+    void guessCar(shot.file).then((g) => {
+      if (!alive || !g) return;
+      const fill = photoFill(formCar.current, g);
+      photoNow.current = g;
+      setPhotoGuess(g);
+      if (fill.make) setMake(fill.make);
+      if (fill.model) setModel(fill.model);
+      if (fill.make || fill.model) haptic('success');
+    });
+    return () => {
+      alive = false;
+    };
+  }, [shot, carIsNew]);
+  const photoBusy = useAiWorking(CAR_PHOTO_WORK);
+  const byPhoto = !!photoGuess && sameMake(make, photoGuess.make) && (!photoGuess.model || model.trim().toLowerCase() === photoGuess.model.toLowerCase());
+
   // A job forgotten, from «По месяцам» (v0.69): its customer comes with it (`?customerId=`), and its cars are offered a tap
   // each — a company's dozen cars without typing a plate.
   const askedCustomer = useLiveQuery(async () => {
@@ -524,15 +576,10 @@ export function NewOrderPage() {
     };
   }, [carId, ownerId, ownerCompany]);
 
-  // Complaint chips: the garage's list (Settings → Lists) — English by default, as it goes on the documents.
-  const complaints = useMemo(() => quickList(settings, 'complaints'), [settings]);
-  const addQuick = useCallback((phrase: string) => {
-    setComplaint((c) => (c.includes(phrase) ? c : c ? `${c}, ${phrase}` : phrase));
-  }, []);
-
   const submit = (target: 'job' | 'book') =>
     run(async () => {
       // Typed fast and tapped at once: the lookup may not have caught up with the plate — it is looked up here too.
+      const plate = plateNow.current;
       const fresh = lookup === plate ? known : await findVehicleForCheckIn(plate);
       const car = picked ?? fresh;
       const company = (car?.owner ?? pickedCustomer)?.type === 'company';
@@ -561,6 +608,15 @@ export function NewOrderPage() {
       if (shot) {
         await setCover(o.vehicleId, shot.file).catch(() => undefined);
         if (shot.id) dropCarShot(shot.id);
+        // A new car's make and model off this photo (v0.89), kept for its VIN: chosen here or still in question — as it
+        // stands; else its answer (now or when it comes) goes to the car's card.
+        if (!car) {
+          const g = photoNow.current;
+          if (g && (chosen.current || clash)) {
+            await takePhotoCar(o.vehicleId, g, { checked: chosen.current === 'photo' });
+            if (clash) await askCarCheck(o.vehicleId, clash);
+          } else carPhotoLater(o.vehicleId, shot.file);
+        }
       }
       // The VIN's photo is the car's VIN photo (its «VIN» chip on the job reads it there again, if it was not sure).
       if (vinShot && !car) await setVinPhoto(o.vehicleId, vinShot.file).catch(() => undefined);
@@ -601,7 +657,7 @@ export function NewOrderPage() {
                   </Group>
                   {!picked.activeOrder && settings && <PrevVisit order={{ id: '', vehicleId: picked.vehicle.id, createdAt: openedAt }} settings={settings} lang={lang} />}
                   {picked.activeOrder && (
-                    <button type="button" className="suggest" style={{ marginTop: 12 }} onClick={() => navigate(`/orders/${picked.activeOrder!.id}`)}>
+                    <button type="button" className="suggest" style={{ marginTop: 12 }} data-route={`/orders/${picked.activeOrder!.id}`} onClick={() => navigate(`/orders/${picked.activeOrder!.id}`)}>
                       <Text size="sm" fw={600} style={{ flex: 1 }}>
                         {t('newOrder.inWork', { n: picked.activeOrder.number })}
                       </Text>
@@ -669,7 +725,7 @@ export function NewOrderPage() {
                       type="button"
                       className="suggest rise-enter"
                       style={{ marginTop: 10 }}
-                      onClick={() => navigate(`/orders/${match.activeOrder!.id}`)}
+                      data-route={`/orders/${match.activeOrder!.id}`} onClick={() => navigate(`/orders/${match.activeOrder!.id}`)}
                     >
                       <IconCar size={22} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
                       <Box style={{ flex: 1, minWidth: 0 }}>
@@ -742,8 +798,37 @@ export function NewOrderPage() {
                     <>
                       <div className="group-title" style={{ marginTop: 22 }}>
                         {t('newOrder.makeModel')}
+                        {/* The AI looking at the photo, then what it filled (v0.89). */}
+                        {photoBusy ? (
+                          <span className="by-photo">
+                            <AiMark size={18} busy label={t('ai.working')} />
+                          </span>
+                        ) : byPhoto ? (
+                          <span className="by-photo" data-by-photo>
+                            <AiMark size={18} />
+                            {t('newOrder.byPhoto')}
+                          </span>
+                        ) : null}
                       </div>
                       <MakeModelBlock make={make} model={model} year={year} onMake={setMake} onModel={setModel} onYear={setYear} />
+                      {clash && (
+                        // The photo and the VIN say different cars (v0.89): one tap — which.
+                        <Box className="surface rise-enter" p="md" mt={10} data-car-clash>
+                          <Text fw={600} c="orange.7" mb={10}>
+                            {t('ai.checkTitle')}
+                          </Text>
+                          <CarChoice
+                            check={clash}
+                            onPick={(p) => {
+                              const photo = sameMake(p.make, clash.photo.make) && (p.model ?? '') === clash.photo.model;
+                              chosen.current = photo ? 'photo' : 'vin';
+                              if (p.make) setMake(p.make);
+                              setModel(p.model ?? (sameMake(p.make, formCar.current.make) ? formCar.current.model : ''));
+                              setClash(undefined);
+                            }}
+                          />
+                        </Box>
+                      )}
                     </>
                   )}
                 </>
@@ -755,7 +840,7 @@ export function NewOrderPage() {
               <div className="group-title" style={{ marginTop: 22 }}>
                 {t('job.complaint')}
               </div>
-              <ComplaintBlock complaint={complaint} complaints={complaints} onAdd={addQuick} onChange={setComplaint} />
+              <ComplaintBlock complaint={complaint} onChange={setComplaint} />
 
               <div className="group-title" style={{ marginTop: 22 }}>
                 {t('job.client')}

@@ -83,7 +83,7 @@ function DeviceCard() {
       'gray',
       t('notify.needServer'),
       t('notify.needServerHint'),
-      <Button size="compact-md" variant="light" onClick={() => navigate('/settings?tab=data')}>
+      <Button size="compact-md" variant="light" data-route={'/settings?tab=data'} onClick={() => navigate('/settings?tab=data')}>
         {t('notify.connect')}
       </Button>,
     );

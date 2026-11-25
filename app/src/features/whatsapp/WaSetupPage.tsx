@@ -173,7 +173,7 @@ export function WaSetupPage() {
       <div className="notify-group">
         <List>
           <ListRow
-            onClick={() => navigate('/whatsapp/auto')}
+            data-route={'/whatsapp/auto'} onClick={() => navigate('/whatsapp/auto')}
             chevron
             left={
               <span className="row-icon" style={{ background: 'var(--mantine-color-green-6)' }} aria-hidden>

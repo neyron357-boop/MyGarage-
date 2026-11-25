@@ -14,6 +14,7 @@ import {
   type Person,
   type WaChat,
   type WaEvent,
+  type WaLists,
   type WaMessage,
   type WaStatus,
   type WaTag,
@@ -419,6 +420,25 @@ let chatsWanted = false;
 export const ensureChats = (): Promise<void> => (store.chatsAt ? Promise.resolve() : loadChats());
 
 /** The chats, read from the server (`force` — again, though read a moment ago). */
+/**
+ * What WhatsApp said while a read was on its way (v0.89, the owner: «ватсап должен в реальном времени обрабатывать входящие
+ * сообщения и события моментально»): the read's answer was made before it — a message that came meanwhile was put in,
+ * and then the answer put it out again until the next event (through the garage's tunnel a read takes a second or
+ * three). What was said meanwhile is put again over the answer; it changes nothing twice (one id — one message, ticks only
+ * grow, a chat's line by its time).
+ */
+const reads = new Set<WaEvent[]>();
+async function heardWhile<T>(read: () => Promise<T>): Promise<{ answer: T; said: WaEvent[] }> {
+  const said: WaEvent[] = [];
+  reads.add(said);
+  try {
+    return { answer: await read(), said };
+  } finally {
+    reads.delete(said);
+  }
+}
+const sayAgain = (lists: WaLists, said: WaEvent[]): WaLists => said.reduce(applyEvent, lists);
+
 export function loadChats(force = false): Promise<void> {
   chatsWanted = true;
   if (!waReady()) return Promise.resolve();
@@ -426,8 +446,9 @@ export function loadChats(force = false): Promise<void> {
   chatsAsking ??= (async () => {
     set({ chatsLoading: true });
     try {
-      const r = await call<{ chats: WaChat[]; total: number; unread: number }>('chats', { query: { limit: '1000' }, timeout: 60_000 });
-      set({ chats: r.chats ?? [], chatsAt: Date.now(), chatsKept: undefined, chatsLoading: false, chatsFailed: false });
+      const { answer: r, said } = await heardWhile(() => call<{ chats: WaChat[]; total: number; unread: number }>('chats', { query: { limit: '1000' }, timeout: 60_000 }));
+      const next = sayAgain({ chats: r.chats ?? [], messages: store.messages }, said);
+      set({ chats: next.chats, messages: next.messages, chatsAt: Date.now(), chatsKept: undefined, chatsLoading: false, chatsFailed: false });
     } catch {
       set({ chatsLoading: false, chatsFailed: true });
     } finally {
@@ -445,11 +466,13 @@ export async function loadMessages(chat: string, limit = metaOf(chat).limit): Pr
   if (!waReady() || !chat || metaOf(chat).loading) return;
   set({ meta: { ...store.meta, [chat]: { ...metaOf(chat), loading: true, failed: false } } });
   try {
-    const r = await call<{ messages: WaMessage[]; more: boolean }>('messages', { query: { chat, limit: String(limit) }, timeout: 100_000 });
-    // What is being sent from here and not on WhatsApp yet stays in the list.
+    const { answer: r, said } = await heardWhile(() => call<{ messages: WaMessage[]; more: boolean }>('messages', { query: { chat, limit: String(limit) }, timeout: 100_000 }));
+    // What is being sent from here and not on WhatsApp yet stays in the list; what came while it was read, too.
     const waiting = (store.messages[chat] ?? []).filter((m) => m.pending);
+    const next = sayAgain({ chats: store.chats, messages: { ...store.messages, [chat]: mergeMessages(r.messages ?? [], waiting) } }, said);
     set({
-      messages: { ...store.messages, [chat]: mergeMessages(r.messages ?? [], waiting) },
+      chats: next.chats,
+      messages: next.messages,
       meta: { ...store.meta, [chat]: { more: !!r.more && (r.messages?.length ?? 0) >= limit, limit, loading: false, at: Date.now() } },
     });
   } catch {
@@ -1182,6 +1205,7 @@ function waHeard(value: unknown) {
   }
   if (!store.chatsAt && ev.t === 'chat' && store.status && typeof ev.unread === 'number') set({ status: { ...store.status, unread: ev.unread } });
   const said: WaEvent = ev.t === 'msg' ? { ...ev, msg: withEarlyAck(ev.msg) } : ev;
+  for (const log of reads) log.push(said);
   const had = store.messages;
   const next = applyEvent({ chats: store.chats, messages: had }, said);
   if (next.chats !== store.chats || next.messages !== had) set({ chats: next.chats, messages: next.messages });

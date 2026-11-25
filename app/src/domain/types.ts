@@ -130,7 +130,24 @@ export interface Vehicle {
    * The garage's AI read this VIN (v0.48, domain/ai.ts): asked once a VIN — what it filled (only empty fields), and what
    * they were, for «Отменить».
    */
-  vinAi?: { vin: string; at: string; filled: ('make' | 'model' | 'year' | 'engine' | 'type')[] };
+  vinAi?: {
+    vin: string;
+    at: string;
+    filled: ('make' | 'model' | 'year' | 'engine' | 'type')[];
+    /** What the VIN said the car is (v0.89 — its maker, the model when known): held against the photo's word. */
+    make?: string;
+    model?: string;
+  };
+  /**
+   * The make and model the garage's AI saw on the car's photo at check-in (v0.89, domain/carPhoto.ts): put only into what
+   * was empty; held against the VIN when one comes. `checked` — the VIN said the same car (its model too).
+   */
+  photoAi?: { make: string; model: string; at: string; checked?: true };
+  /**
+   * The photo and the VIN say different cars (v0.89, the owner: «если есть разногласия — приложение должно попросить ручное
+   * вмешательство»): what each said, until a person chooses (`settleCarCheck`) or writes the make and model themselves.
+   */
+  carCheck?: { photo: { make: string; model: string }; vin: { make?: string; model?: string }; at: string };
   customerId: string;
   notes?: string;
   /** "Time for a service" sent (or dismissed) after its last job: it leaves the Today list until the next one. */

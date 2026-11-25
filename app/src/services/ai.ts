@@ -4,7 +4,10 @@ import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { matchPartName } from '../domain/partsVocab';
 import type { OrderItem, Vehicle } from '../domain/types';
-import { isVin } from '../domain/vin';
+import { isVin, makeMatches } from '../domain/vin';
+import { canonicalMake, canonicalModel } from '../domain/carCatalog';
+import { photoSays, type VinSaid } from '../domain/carPhoto';
+import { checkCarByVin } from './carPhoto';
 import { stemCar, vinStem } from '../domain/vinDecode';
 import { callJson } from './sync/api';
 import { syncConfig } from './sync/config';
@@ -28,7 +31,7 @@ import { namedByParts, partNames, partsKey } from '../domain/labourName';
  * определения VIN.»): not to come back without his word.
  */
 
-export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles';
+export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car';
 type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
@@ -85,8 +88,8 @@ export const yandexUrl = (number: string): string => `https://yandex.ru/search/?
 
 export type CarFill = Partial<Pick<Vehicle, 'make' | 'model' | 'year' | 'engine' | 'type'>>;
 export type AiNotice =
-  /** `from: 'garage'` (v0.88): said by the garage's own car of the same VIN, not by the AI. */
-  | { kind: 'car'; vehicleId: string; filled: CarFill; from?: 'garage'; undo: () => Promise<void> }
+  /** `from: 'garage'` (v0.88): said by the garage's own car of the same VIN, not by the AI; `'photo'` (v0.89): seen on its photo by the AI. */
+  | { kind: 'car'; vehicleId: string; filled: CarFill; from?: 'garage' | 'photo'; undo: () => Promise<void> }
   | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
   /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
   | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; date: string; dateSure: boolean; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
@@ -130,21 +133,30 @@ export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
     // The garage's own cars of this VIN's maker and model code first (v0.88): what a person wrote on them — with or without
     // the AI, and over it.
     const known = await garageCarOf(vin, vehicleId);
-    if (whole({ ...v, ...emptyOf(v, known) })) {
+    // The card's make and model are the photo's guess (v0.89): the VIN's model is wanted to hold it against — asked even
+    // when the card is full, unless the garage's own cars of this VIN say it.
+    const verify = photoSays(v) && !known?.model;
+    if (whole({ ...v, ...emptyOf(v, known) }) && !verify) {
       if (!known || whole(v)) {
-        await db.vehicles.update(vehicleId, { vinAi: { vin, at: nowIso(), filled: [] } });
+        const said = saidOf(known);
+        await db.vehicles.update(vehicleId, { vinAi: { vin, at: nowIso(), filled: [], ...said } });
+        await checkCarByVin(vehicleId, vin, said);
         return {};
       }
     }
     let ai: AiVin | undefined;
-    if (aiOn() && !whole({ ...v, ...emptyOf(v, known) })) {
+    if (aiOn() && (!whole({ ...v, ...emptyOf(v, known) }) || verify)) {
       try {
         ai = await askAi<AiVin>('vin', { vin }, `car:${vehicleId}`);
       } catch {
         // offline, no key: the garage's own word stands, the AI is asked the next time
       }
     }
-    if (!ai && !known) return undefined;
+    if (!ai && !known) {
+      // Its maker alone (its first characters) is enough to tell the photo's make was another.
+      await checkCarByVin(vehicleId, vin, {});
+      return undefined;
+    }
     // Read again: something may have been typed in the card while the AI was asked.
     const now = await db.vehicles.get(vehicleId);
     if (!now || now.vin?.toUpperCase() !== vin) return undefined;
@@ -156,7 +168,10 @@ export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
     const before: CarFill = Object.fromEntries(keys.map((k) => [k, now[k]]));
     // Marked read once the AI answered (or had nothing to add): the garage's own word alone leaves it to be asked later.
     const done = !!ai || whole({ ...now, ...fill });
-    await db.vehicles.update(vehicleId, { ...fill, ...(done ? { vinAi: { vin, at: nowIso(), filled: byAi } } : {}) });
+    // What the VIN says the car is (v0.89): the garage's own cars first, the AI when it is sure and its maker is the VIN's.
+    const said = saidOf(known, ai, vin);
+    await db.vehicles.update(vehicleId, { ...fill, ...(done ? { vinAi: { vin, at: nowIso(), filled: byAi, ...said } } : {}) });
+    await checkCarByVin(vehicleId, vin, said);
     if (keys.length)
       notify({
         kind: 'car',
@@ -180,6 +195,13 @@ export function aiReadVin(vehicleId: string): Promise<CarFill | undefined> {
 /** Asked about a VIN put in the card — not waited for (the garage's own cars answer without the AI too, v0.88). */
 export function aiReadVinLater(vehicleId: string) {
   void aiReadVin(vehicleId);
+}
+
+/** What the VIN says the car is (v0.89): the garage's own cars of it, else the AI when sure of it and its maker is the VIN's. */
+function saidOf(known: ReturnType<typeof stemCar>, ai?: AiVin, vin = ''): VinSaid {
+  if (known) return { make: known.make, model: known.model };
+  if (!ai?.make?.trim() || (ai.confidence ?? 0) < 0.6 || makeMatches(vin, ai.make) === false) return {};
+  return { make: canonicalMake(ai.make.trim()), ...(ai.model?.trim() ? { model: canonicalModel(ai.make.trim(), ai.model.trim()) } : {}) };
 }
 
 /** The card has all a VIN can fill. */

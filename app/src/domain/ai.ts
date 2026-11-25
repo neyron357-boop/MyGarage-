@@ -38,7 +38,7 @@ const TYPES: VehicleType[] = ['pickup', 'van', 'bus', 'truck', 'suv', 'mpv', 'se
 const titleCase = (s: string) => (s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase()) : s);
 const same = (a?: string, b?: string) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 /** Two names of one model: «HiLux» and «Hilux», «Land Cruiser» and «Land Cruiser 200» — not «Land Cruiser» and «Veloz». */
-const sameModel = (a: string, b: string) => {
+export const sameModel = (a: string, b: string): boolean => {
   const x = a.toLowerCase().replace(/[^a-z0-9]/g, '');
   const y = b.toLowerCase().replace(/[^a-z0-9]/g, '');
   return !!x && !!y && (x === y || x.startsWith(y) || y.startsWith(x));

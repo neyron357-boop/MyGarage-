@@ -503,7 +503,8 @@ async function launchBrowser() {
     await page.evaluate(() => localStorage.removeItem('mygarage.board'));
   });
   await step('quick lists', async () => {
-    // Settings → Lists: a line added to the complaints is a chip in "New job" (English by default).
+    // Settings → Lists: a line added to the complaints is a chip in the job's «Жалоба» sheet (English by default) — not in
+    // "New job" (v0.89: the owner never used them there; its complaint is free text only).
     await page.goto(BASE + '#/settings?tab=lists');
     // The lines are editable fields: the standard complaints are their values.
     await page.locator('input.quick-input[value="Scheduled service"]').first().waitFor();
@@ -513,8 +514,9 @@ async function launchBrowser() {
     await page.waitForTimeout(400);
     await shot('34-settings-lists', true);
     await page.goto(BASE + '#/orders/new');
-    await page.getByRole('button', { name: 'Wheel balancing' }).waitFor();
-    await page.getByRole('button', { name: 'Brake noise' }).waitFor();
+    await page.getByLabel('Номер').waitFor();
+    await page.waitForTimeout(400);
+    if (await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Brake noise' }).count()) throw new Error('complaint chips are back in "New job"');
   });
   await step('delete job', async () => {
     // A job opened by mistake: "…" → "Delete job" takes it off the board; "Undo" brings it back.
@@ -546,7 +548,8 @@ async function launchBrowser() {
     await page.getByLabel('Номер').fill('31415');
     await page.getByRole('button', { name: 'Nissan', exact: true }).click();
     await page.getByRole('button', { name: 'Sunny', exact: true }).click();
-    await page.getByRole('button', { name: 'Brake noise', exact: true }).click();
+    // The complaint in words (v0.89: no ready phrases in «Новый заказ»).
+    await page.locator('.screen[data-role="top"] textarea[aria-label="Жалоба клиента"]').fill('Brake noise');
     await shot('30-check-in');
     await page.getByRole('button', { name: 'Принять' }).click();
     // No photo of the car yet: the tile opens the camera; the shot becomes the car's main photo.
@@ -948,6 +951,9 @@ async function launchBrowser() {
     const complaintLine = page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Жалоба', exact: true });
     await complaintLine.click();
     const complaint = page.getByRole('dialog', { name: 'Жалоба' });
+    // The garage's phrases (Settings → Lists, the line added there too) are here.
+    await complaint.getByRole('button', { name: 'Wheel balancing' }).waitFor();
+    await complaint.getByRole('button', { name: 'Brake noise' }).waitFor();
     await complaint.getByRole('textbox', { name: 'Жалоба' }).fill('Стук спереди при торможении');
     await complaint.getByRole('button', { name: 'Сохранить' }).click();
     await complaintLine.getByText('Стук спереди при торможении').waitFor();

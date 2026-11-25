@@ -87,7 +87,7 @@ export function TabBar({ plus }: { /** «＋» with its quick actions (features/
         ))}
       </nav>
       {plus ?? (
-        <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} onClick={() => navigate('/orders/new')}>
+        <button type="button" className="tab-plus" aria-label={t('nav.newOrder')} data-route={'/orders/new'} onClick={() => navigate('/orders/new')}>
           <IconPlus size={28} stroke={2.2} aria-hidden />
         </button>
       )}

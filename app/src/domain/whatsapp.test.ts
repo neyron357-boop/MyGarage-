@@ -13,6 +13,7 @@ import {
   kindOf,
   marks,
   mergeMessages,
+  msgKey,
   orderChats,
   peopleIndex,
   previewOf,
@@ -281,6 +282,30 @@ describe('what WhatsApp says, into the lists', () => {
     const next = applyEvent(start, { t: 'msg', msg: msg('true_B_1', { chat: B, me: true, text: 'ok', t: 5100, ack: 1 }), chat: null });
     expect(next.messages[A].map((m) => m.id)).toEqual(['p:1']);
     expect(next.messages[B].map((m) => m.id)).toEqual(['true_B_1']);
+  });
+
+  it('v0.89: a message’s key is the third part of its id — the chat with oneself (…_out) and a group’s (…_author)', () => {
+    expect(msgKey('true_55512345678901@lid_3EB0AA_out')).toBe('3EB0AA');
+    expect(msgKey('false_120363000000000001@g.us_3EB0BB_971501234567@c.us')).toBe('3EB0BB');
+    expect(msgKey('true_971501234567@c.us_3EB0CC')).toBe('3EB0CC');
+    expect(msgKey('p:abc_def')).toBe('p:abc_def');
+    // «Вы (себе)»: every message ends `_out`. A new one sent there is one more, not an older one replaced; a tick for it
+    // ticks it alone.
+    const ME = '55512345678901@lid';
+    const old = msg(`true_${ME}_3EB001_out`, { chat: ME, me: true, text: 'first', t: 1000, ack: 3 });
+    const start: WaLists = { chats: [chat(ME, { phone: '971501234567' })], messages: { [ME]: [old, msg('p:9', { chat: ME, me: true, text: 'second', t: 5000, pending: true })] } };
+    const sent = applyEvent(start, { t: 'msg', msg: msg(`true_${ME}_3EB002_out`, { chat: ME, me: true, text: 'second', t: 5100, ack: 1 }), chat: null });
+    expect(sent.messages[ME].map((m) => [m.id, m.text])).toEqual([[old.id, 'first'], [`true_${ME}_3EB002_out`, 'second']]);
+    const ticked = applyEvent({ ...sent, messages: { [ME]: sent.messages[ME].map((m) => ({ ...m, ack: 1 })) } }, { t: 'ack', chat: ME, id: `true_${ME}_3EB002_out`, ack: 2 });
+    expect(ticked.messages[ME].map((m) => m.ack)).toEqual([1, 2]);
+    // The chat read again: the same two.
+    expect(mergeMessages(sent.messages[ME], [old, msg(`true_${ME}_3EB002_out`, { chat: ME, me: true, text: 'second', t: 5100, ack: 2 })]).length).toBe(2);
+    // A group: two messages of one author are two.
+    const G = '120363000000000001@g.us';
+    const g1 = msg(`false_${G}_3EB011_971501234567@c.us`, { chat: G, text: 'one', t: 1000 });
+    const groups: WaLists = { chats: [chat(G, { group: true })], messages: { [G]: [g1] } };
+    const g2 = applyEvent(groups, { t: 'msg', msg: msg(`false_${G}_3EB012_971501234567@c.us`, { chat: G, text: 'two', t: 2000 }), chat: null });
+    expect(g2.messages[G].map((m) => m.text)).toEqual(['one', 'two']);
   });
 
   it('a chat’s line: read on the phone', () => {

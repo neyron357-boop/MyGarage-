@@ -77,6 +77,7 @@ export function DataTable<T>({
   rowKey,
   onRow,
   onRowMenu,
+  rowRoute,
   rowDim,
   initialSort = null,
   sortId,
@@ -93,6 +94,8 @@ export function DataTable<T>({
   onRow?: (row: T) => void;
   /** A right click on a row: its menu where the mouse is. */
   onRowMenu?: (row: T, at: { x: number; y: number }) => void;
+  /** The screen a row opens (v0.89): a right click, the wheel or Ctrl+click opens it in a new tab (App.tsx `DeskRouteMenu`). */
+  rowRoute?: (row: T) => string | undefined;
   /** A row that steps back (done with, cancelled). */
   rowDim?: (row: T) => boolean;
   initialSort?: Sort;
@@ -119,6 +122,7 @@ export function DataTable<T>({
       <tr
         key={k}
         data-row={onRow ? '' : undefined}
+        data-route={rowRoute?.(r)}
         data-dim={rowDim?.(r) || undefined}
         tabIndex={onRow ? 0 : undefined}
         // (A name or a phone drawn over with the mouse to copy it is not a click on the row.)

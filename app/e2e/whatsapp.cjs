@@ -775,10 +775,20 @@ let current = null;
     await wait(500);
     check((await p.locator('.wa-desk-none').count()) === 1, `PC ${scheme}: the chats, and a place for the chosen one`);
     await p.screenshot({ path: `${OUT}/pc-${scheme}-01-chats.png` });
+    // v0.89: the list is one and the same as chats are chosen (the owner: «каждый раз, когда переключаю чат, эта панель
+    // обновляется, как будто заново отрисовывается») — not made again from nothing at each address.
+    await p.evaluate(() => {
+      document.querySelector('.wa-desk-list').dataset.e2eSame = '1';
+    });
     await p.locator('[data-wa-chat]').first().click();
     await p.locator('[data-wa-list]').waitFor();
     await wait(900);
     check(await p.locator('.wa-desk-list [data-wa-chat]').first().isVisible(), `PC ${scheme}: the list stays beside the open chat`);
+    await p.locator('.wa-desk-list [data-wa-chat]').nth(1).click();
+    await wait(700);
+    await p.locator('.wa-desk-list [data-wa-chat]').first().click();
+    await wait(700);
+    check(await p.evaluate(() => document.querySelector('.wa-desk-list')?.dataset.e2eSame === '1'), `PC ${scheme} v0.89: the chats’ list stays the same as one chat and another are opened`);
     const box = await p.locator('.wa-pane-foot').boundingBox();
     check(box && box.y + box.height <= 900 && box.y > 600, `PC ${scheme}: the composer is at the foot of the window`);
     check(await p.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 2), `PC ${scheme}: the window itself does not scroll`);

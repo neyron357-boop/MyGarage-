@@ -41,6 +41,7 @@ import { useLang, usePhone } from './hooks';
 import { useScreen, useScreenTitle, useStack } from './stack';
 import { useSwipeRow, type SwipeSpec } from './swipe';
 import { useDesk, useDeskPane } from './desk';
+import { deskTabs, noteTab, useDeskTab } from './deskTabs';
 import { onCelebrate, useAutoAnimate, useRolling } from './motion';
 import { createPortal } from 'react-dom';
 
@@ -394,10 +395,16 @@ export function PageHeader(props: HeaderProps) {
 function DeskBar({ title, back, right, subtitle, eyebrow }: HeaderProps) {
   const ref = useRef<HTMLElement>(null);
   const head = useRef<HTMLHeadingElement>(null);
+  const tab = useDeskTab();
+  const inPane = useDeskPane()?.id;
   // The window's own title follows the screen (v0.72): the task bar, Alt+Tab and a second window say which screen it
   // is — «Honda Accord 2017», not «MyGarage» five times. The installed app's window puts its name before it itself.
+  // The PC's tabs (v0.89): the screen names its tab; the window says the tab in front's (the job beside — not its).
   useEffect(() => {
+    if (inPane === 'side') return;
     const text = head.current?.textContent?.replace(/\s+/g, ' ').trim();
+    if (text) noteTab(tab, { title: text });
+    if (deskTabs().active !== tab) return;
     const alone = window.matchMedia('(display-mode: standalone)').matches;
     const next = text ? (alone ? text : `${text} — MyGarage`) : 'MyGarage';
     if (document.title !== next) document.title = next;
@@ -621,6 +628,7 @@ export function ListRow({
   leading,
   dim,
   grip,
+  'data-route': route,
 }: {
   left?: ReactNode;
   title: ReactNode;
@@ -640,6 +648,8 @@ export function ListRow({
   dim?: boolean;
   /** The handle that moves the row in edit mode (≡, `ui/sortable.ts`), at its very end. */
   grip?: ReactNode;
+  /** The screen the row opens (v0.89): on a PC a right click opens it in a new tab (App.tsx `DeskRouteMenu`). */
+  'data-route'?: string;
 }) {
   const sw = useSwipeRow({ trailing, leading });
   // On a PC (v0.41) there is no finger to swipe with: the same actions are buttons that show under the mouse.
@@ -692,6 +702,7 @@ export function ListRow({
       }}
       data-selected={selected || undefined}
       data-done={dim || undefined}
+      data-route={route}
       aria-pressed={selected}
       className={`list-row${onClick ? ' clickable' : ''}${swipes ? ' swipe-row' : ''}`}
       style={swipes ? sw.style : undefined}

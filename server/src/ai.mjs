@@ -11,7 +11,9 @@ import { DIRS, httpError } from './store.mjs';
  *                       when they are enough (v0.49), else Gemini reads them with the VIN (cars sold outside the USA:
  *                       the decoder knows little of them);
  *   partName(…)       — a part's name as typed, its spelling mistakes put right, and its English name;
- *   receipt(…)        — a supplier's receipt read off its photo (v0.50).
+ *   receipt(…)        — a supplier's receipt read off its photo (v0.50);
+ *   car(…)            — a car's make and model off a small photo taken at check-in (v0.89: low resolution, a few
+ *                       hundred tokens).
  *
  * The search for a part's number, diagram and photos in the catalogues on the web (v0.49–v0.84: partfind.mjs,
  * catalog.mjs, Google Search grounding) is gone (v0.85, the owner: «Убери поиск каталогов полностью, направим ИИ на
@@ -50,6 +52,10 @@ const P = {
   vin: (vin, facts, built) =>
     `VIN ${vin}, a car at a garage in the UAE. Characters 1-3 ("${vin.slice(0, 3)}") are the maker and its plant${built ? ` (built in ${built})` : ''}; 4-8 ("${vin.slice(3, 8)}") are that maker's code of the model, body and engine; the 10th the model year. NHTSA decoder says: ${facts ? JSON.stringify(facts) : 'nothing'}.
 Give make, model (the name it is sold under), year, engine (litres and cylinders; "" if unknown), body (one of pickup, van, bus, truck, suv, mpv, sedan; "" if unknown), confidence 0..1 that the model is right. The model only if characters 1-8 tell it — never a model that plant does not build; "" rather than a guess.`,
+  // v0.89 (the owner: «распознавание марки и модели автомобиля по фотографии… расход токенов минимальным»): a small photo
+  // of the car taken at check-in; no model named in the question (v0.88: a light model gives an example back).
+  car: () =>
+    `A photo taken as a car comes into a garage in the UAE. isCar: a car (or van, pickup, truck) is the main thing in it. make and model: as it is sold, read off its badges, grille, lights and body; "" for what you cannot tell. confidence 0..1 that the model is right.`,
   name: (name, car) =>
     `A line of a car repair job typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}" — a spare part, a service or work. It may have typos; it may be English, Russian, or Russian in Latin letters.
 fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; confidence 0..1 for fixed.`,
@@ -217,17 +223,20 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
   /**
    * One question to Gemini; the next model when one is busy or gone. `schema` — the answer as that JSON; `images` —
    * pictures to look at (inline); `models` — which, in turn; `thinking` — how much ("low" unless there is a reason;
-   * «minimal» — the light models only, the stronger ones refuse it: «low»).
+   * «minimal» — the light models only, the stronger ones refuse it: «low»); `media: 'low'` — the pictures looked at in
+   * low resolution (v0.89: a car's make — a few hundred tokens, not a thousand; a model that does not take it is asked
+   * again without it).
    */
-  async function ask(text, { kind = 'other', schema, images = [], models: list, timeout = 25_000, thinking = 'low' } = {}) {
+  async function ask(text, { kind = 'other', schema, images = [], models: list, timeout = 25_000, thinking = 'low', media } = {}) {
     if (!key()) throw httpError(503, 'ai off');
-    const bodyFor = (model) => ({
+    const bodyFor = (model, low) => ({
       // Each picture under its own label («Picture 1:»…).
       contents: [{ parts: [{ text }, ...images.flatMap((i, k) => [{ text: `Picture ${k + 1}:` }, { inline_data: { mime_type: i.type, data: i.data } }])] }],
       generationConfig: {
         temperature: 0,
         maxOutputTokens: 2048,
         thinkingConfig: { thinkingLevel: thinking === 'minimal' && !/lite/.test(model) ? 'low' : thinking },
+        ...(low ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
         ...(schema ? { responseMimeType: 'application/json', responseJsonSchema: schema } : {}),
       },
     });
@@ -235,7 +244,9 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     for (const model of order(list)) {
       let res;
       try {
-        res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model)) }, timeout);
+        res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model, media === 'low')) }, timeout);
+        // The low resolution refused by this model: the same question at its own.
+        if (res.status === 400 && media === 'low') res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model, false)) }, timeout);
       } catch (e) {
         last = httpError(504, `gemini ${model}: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
         cooling.set(model, now() + COOL);
@@ -422,6 +433,26 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         );
         const num = (x) => (x === '' || x === null || x === undefined || Number.isNaN(Number(x)) ? undefined : Number(x));
         return { ...value, subtotal: num(value.subtotal), vat: num(value.vat), total: num(value.total), by: model };
+      });
+    },
+
+    /**
+     * The car's make and model off its photo at check-in (v0.89): a small picture (the app sends ~512 px), looked at in low
+     * resolution by a light model with no thinking — a few hundred tokens; the same picture never twice. The app takes
+     * it only where the card is empty, and holds it against the VIN later (domain/carPhoto.ts).
+     */
+    async car({ image } = {}) {
+      const type = String(image?.type ?? '');
+      const data = String(image?.data ?? '');
+      if (!/^image\/(jpeg|png|webp)$/.test(type) || data.length < 1000 || data.length > 1_500_000) throw httpError(400, 'no picture');
+      const hash = createHash('sha256').update(data).digest('hex');
+      return cached(`car:1:${hash}`, 'car', async () => {
+        const { value, model } = await json(
+          P.car(),
+          { type: 'object', properties: { isCar: { type: 'boolean' }, make: { type: 'string' }, model: { type: 'string' }, confidence: { type: 'number' } }, required: ['isCar', 'make', 'model', 'confidence'] },
+          { kind: 'car', images: [{ type, data }], thinking: 'minimal', media: 'low', timeout: 30_000 },
+        );
+        return { ...value, by: model };
       });
     },
 

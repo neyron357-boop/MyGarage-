@@ -145,6 +145,28 @@ describe('the AI', () => {
       await assert.rejects(ai.receipt(bad), /no picture/);
   });
 
+  it('v0.89: a car’s make and model off its photo — a light model, low resolution, no thinking, no model named; the same photo once', async () => {
+    let first = true;
+    const { f, seen } = fake([
+      // The first model takes no low resolution (400): asked again at its own, not passed over.
+      [/gemini-3\.5-flash-lite/, (url, init) => (JSON.parse(init.body).generationConfig.mediaResolution && first ? ((first = false), new Response('{"error":{"message":"mediaResolution"}}', { status: 400 })) : answer({ isCar: true, make: 'Toyota', model: 'Veloz', confidence: 0.8 }))],
+    ]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const image = { type: 'image/jpeg', data: 'y'.repeat(30_000) };
+    const r = await ai.car({ image });
+    assert.deepEqual([r.isCar, r.make, r.model, r.by], [true, 'Toyota', 'Veloz', 'gemini-3.5-flash-lite']);
+    const asks = seen.filter((x) => /generateContent/.test(x.url));
+    assert.equal(asks.length, 2);
+    assert.equal(asks[0].body.generationConfig.mediaResolution, 'MEDIA_RESOLUTION_LOW');
+    assert.equal(asks[1].body.generationConfig.mediaResolution, undefined);
+    assert.equal(asks[0].body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+    assert.doesNotMatch(asks[0].body.contents[0].parts[0].text, /Land Cruiser|Camry|Corolla|Patrol/);
+    await ai.car({ image });
+    assert.equal(seen.filter((x) => /generateContent/.test(x.url)).length, 2);
+    for (const bad of [{ image: { type: 'image/gif', data: 'x'.repeat(5000) } }, { image: { type: 'image/jpeg', data: 'x'.repeat(2_000_000) } }, {}])
+      await assert.rejects(ai.car(bad), /no picture/);
+  });
+
   it('a device may ask 120 times a minute (a long list of parts is asked at once)', () => {
     let t = 0;
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, now: () => t });

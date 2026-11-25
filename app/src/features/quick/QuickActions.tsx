@@ -469,7 +469,7 @@ export function QuickNewButton() {
             // Its key (v0.41): N, from anywhere on the PC (ui/desk.tsx).
             rightSection={<Kbd className="desk-kbd-on-fill">N</Kbd>}
             mb="lg"
-            onClick={() => navigate('/orders/new')}
+            data-route={'/orders/new'} onClick={() => navigate('/orders/new')}
             onContextMenu={(e) => {
               e.preventDefault();
               setOpen(true);

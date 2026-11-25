@@ -89,7 +89,12 @@ export interface StemCar {
   type?: string;
   /** What the AI put in its card (domain/types.ts `Vehicle.vinAi`): not a person's word. */
   vinAi?: { filled: string[] };
+  /** What the AI saw on its photo (v0.89): not a person's word either while the card still says it, unproven by the VIN. */
+  photoAi?: { make: string; model: string; checked?: true };
 }
+
+/** The card's make and model are still the photo's guess, no VIN has said the same (domain/carPhoto.ts). */
+const photoGuess = (c: StemCar): boolean => !!c.photoAi && !c.photoAi.checked && plain(c.model ?? '') === plain(c.photoAi.model) && plain(canonicalMake(c.make ?? '')) === plain(canonicalMake(c.photoAi.make));
 
 /**
  * What the garage itself knows of a VIN (v0.88, the owner: «по VIN ИИ узнала… марку угадала, но модель неверная: верный
@@ -100,7 +105,7 @@ export interface StemCar {
 export function stemCar(vin: string, cars: StemCar[], selfId?: string): { make: string; model: string; engine?: string; type?: string } | undefined {
   const stem = vinStem(vin);
   if (!stem) return undefined;
-  const theirs = cars.filter((c) => c.id !== selfId && vinStem(c.vin) === stem && c.make?.trim() && c.model?.trim() && !c.vinAi?.filled.includes('model') && !c.vinAi?.filled.includes('make'));
+  const theirs = cars.filter((c) => c.id !== selfId && vinStem(c.vin) === stem && c.make?.trim() && c.model?.trim() && !c.vinAi?.filled.includes('model') && !c.vinAi?.filled.includes('make') && !photoGuess(c));
   if (!theirs.length) return undefined;
   const said = new Set(theirs.map((c) => `${plain(canonicalMake(c.make!.trim()))}|${plain(c.model!)}`));
   if (said.size !== 1) return undefined;

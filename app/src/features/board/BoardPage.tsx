@@ -25,6 +25,7 @@ import { useBoardView, type BoardTab } from '../../ui/boardView';
 import { EmptyState, List, ListRow, MediaImage, Money, PageHeader, PageSkeleton, PlateText, SearchField, StickyBar, undoToast, type TabItem } from '../../ui/components';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
+import { openTab } from '../../ui/deskTabs';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { LazySheet } from '../../ui/lazy';
 import { checkForUpdate } from '../../ui/pwa';
@@ -157,6 +158,8 @@ function DeskArchive({ jobs, byHand, covers, onBack }: { jobs: Job[]; byHand: Se
   const items: DeskMenuItem[] = menu
     ? [
         { key: 'open', label: t('common.open'), icon: IconExternalLink, onClick: () => open(menu.j) },
+        // The PC's own tabs (v0.89).
+        { key: 'tab', label: t('desk.openInTab'), icon: IconExternalLink, onClick: () => void openTab(`/orders/${menu.j.b.order.id}`) },
         ...(byHand.has(menu.j.b.order.id) ? [{ key: 'back', label: t('board.unarchive'), icon: IconArrowBackUp, onClick: () => onBack(menu.j.b) }] : []),
       ]
     : [];
@@ -464,10 +467,10 @@ export function BoardPage() {
             title={t('board.emptyTitle')}
             action={
               <Group justify="center">
-                <Button leftSection={<IconPlus size={18} />} onClick={() => navigate('/orders/new')}>
+                <Button leftSection={<IconPlus size={18} />} data-route={'/orders/new'} onClick={() => navigate('/orders/new')}>
                   {t('nav.newOrder')}
                 </Button>
-                <Button variant="default" onClick={() => navigate('/settings?tab=data')}>
+                <Button variant="default" data-route={'/settings?tab=data'} onClick={() => navigate('/settings?tab=data')}>
                   {t('board.tryDemo')}
                 </Button>
               </Group>

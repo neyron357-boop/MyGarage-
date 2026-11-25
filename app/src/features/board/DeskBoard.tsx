@@ -42,6 +42,7 @@ import type { BoardTab } from '../../ui/boardView';
 import { EmptyState, List, MediaImage, Money, PlateText, undoToast } from '../../ui/components';
 import { DataTable, type Column, type TableSection } from '../../ui/DataTable';
 import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
+import { openTab } from '../../ui/deskTabs';
 import { arrange, CARD, cardHeight, clampWidth, pinnedFirst, placeNew, resizeStep, setDeskBoard, setPlace, toggleImportant, togglePinned, useDeskBoard, type DeskMode, type Place } from '../../ui/deskBoard';
 import { useAction, useLang } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
@@ -187,7 +188,7 @@ function DeskCardView({ b, phase, cover, important, pinned, onMenu }: CardProps)
         onMenu({ b, phase }, { x: e.clientX, y: e.clientY });
       }}
     >
-      <button type="button" className="dcard-open" onPointerDown={() => prefetchBundle(id)} onClick={() => navigate(`/orders/${id}`)}>
+      <button type="button" className="dcard-open" onPointerDown={() => prefetchBundle(id)} data-route={`/orders/${id}`} onClick={() => navigate(`/orders/${id}`)}>
         <span className="dcard-pic">{cover ? <MediaImage id={cover} card h="100%" w="100%" radius="0" /> : <IconCar size={44} stroke={1.3} aria-hidden />}</span>
         <span className="dcard-body">
           <span className="dcard-row dcard-status">
@@ -242,6 +243,8 @@ function JobMenu({ target, onClose, archive, canvas }: { target: { j: DeskJob; a
     label = `№${b.order.number} · ${f.car}`.trim();
     items = [
       { key: 'open', label: t('common.open'), icon: IconExternalLink, onClick: () => navigate(`/orders/${id}`) },
+      // The PC's own tabs (v0.89): the job in a new tab, the board stays.
+      { key: 'tab', label: t('desk.openInTab'), icon: IconExternalLink, onClick: () => void openTab(`/orders/${id}`) },
       ...(f.doc ? [{ key: 'doc', label: t(f.doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote'), icon: f.doc === 'invoice' ? IconFileInvoice : IconFileTypePdf, onClick: () => void run(async () => openPdf(f.inv ? await invoicePdf(f.inv.id) : await quotationPdf(id))) }] : []),
       ...(f.wa ? [{ key: 'wa', label: 'WhatsApp', icon: IconBrandWhatsapp, onClick: () => openChat(f.wa) }] : []),
       { key: 'important', label: t(important ? 'deskBoard.notImportant' : 'deskBoard.important'), icon: important ? IconStarFilled : IconStar, divided: true, onClick: () => toggleImportant(id) },

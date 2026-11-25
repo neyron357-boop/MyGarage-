@@ -380,7 +380,7 @@ html.desk .page-enter {
 /* The toolbar: back, the title and its small line, the screen's own buttons — one row at the top. */
 html.desk .desk-bar {
   position: sticky;
-  top: 0;
+  top: var(--desk-tabs-h, 0px);
   z-index: 60;
   display: flex;
   align-items: center;
@@ -1282,7 +1282,7 @@ html.desk .job-desk-main {
 }
 /* The tabs stay under the toolbar and keep to their column. */
 html.desk .job-desk .job-tabs {
-  top: var(--app-nav-h);
+  top: calc(var(--app-nav-h) + var(--desk-tabs-h, 0px));
   margin-inline: 0;
   padding-inline: 0;
   padding-top: 0;
@@ -1380,8 +1380,8 @@ html.desk .job-desk-main .job-panel > .chip-row {
   html.desk .job-desk-aside {
     grid-area: aside;
     position: sticky;
-    top: calc(var(--app-nav-h) + 4px);
-    max-height: calc(100dvh - var(--app-nav-h) - 12px);
+    top: calc(var(--app-nav-h) + var(--desk-tabs-h, 0px) + 4px);
+    max-height: calc(100dvh - var(--app-nav-h) - var(--desk-tabs-h, 0px) - 12px);
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: none;
@@ -1484,7 +1484,7 @@ html.desk .desk-twin-pane[data-pane='side'] .dt th {
 /* WhatsApp in a pane: its chats and chat within the pane's height (under its bars), the list narrower. */
 html.desk .desk-twin .wa-desk {
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
-  height: calc(100dvh - var(--app-nav-h, 64px) - 48px - var(--twin-bar, 0px));
+  height: calc(100dvh - var(--app-nav-h, 64px) - 48px - var(--twin-bar, 0px) - var(--desk-tabs-h, 0px));
 }
 html.desk .desk-twin .job-body.job-desk {
   grid-template-columns: minmax(0, 1fr);
@@ -1552,7 +1552,7 @@ html.desk .dt table {
 }
 html.desk .dt th {
   position: sticky;
-  top: var(--app-nav-h);
+  top: calc(var(--app-nav-h) + var(--desk-tabs-h, 0px));
   z-index: 2;
   height: 36px;
   padding: 0 12px;
@@ -2100,7 +2100,7 @@ html.desk .months-split.desk-split {
 }
 html.desk .months-split .desk-split-side {
   position: sticky;
-  top: calc(var(--app-nav-h) + 12px);
+  top: calc(var(--app-nav-h) + var(--desk-tabs-h, 0px) + 12px);
   align-self: start;
 }
 html.desk .month-panel .month-actions {
@@ -2211,7 +2211,7 @@ html.desk .wa-desk {
   display: grid;
   grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
   gap: 16px;
-  height: calc(100vh - var(--app-nav-h, 64px) - 48px);
+  height: calc(100vh - var(--app-nav-h, 64px) - 48px - var(--desk-tabs-h, 0px));
   min-height: 420px;
 }
 html.desk .wa-desk-list {
@@ -2299,7 +2299,7 @@ html.desk .job-chat {
   display: flex;
   flex-direction: column;
   max-width: none;
-  height: calc(100vh - var(--app-nav-h, 64px) - 96px);
+  height: calc(100vh - var(--app-nav-h, 64px) - 96px - var(--desk-tabs-h, 0px));
   min-height: 420px;
   margin-top: 12px;
   border: 1px solid var(--app-hairline);
@@ -2460,4 +2460,101 @@ html.desk .wa-more {
   html.desk .wa-more:focus-visible {
     opacity: 1;
   }
+}
+
+/* ---------- The PC's own tabs (v0.89) ----------
+   The owner: «добавить собственные вкладки внутри приложения для мультизадач… как в браузере». Shown when two or more are
+   open; sticky over the screens, whose toolbar and sticky parts sit under it (--desk-tabs-h). A tab is a quiet chip, the
+   one in front — the card's colour with a hairline, as a browser's; its × under the mouse, ＋ — a new one. */
+html.desk[data-tabs] {
+  --desk-tabs-h: 40px;
+}
+html.desk .desk-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: var(--desk-tabs-h);
+  margin: 0;
+  padding: 6px 12px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--app-canvas);
+  border-bottom: 1px solid var(--app-hairline);
+}
+html.desk .desk-tabs::-webkit-scrollbar {
+  display: none;
+}
+html.desk .desk-tab-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 220px;
+  min-width: 96px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  font-size: 13px;
+  color: var(--app-label-2);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+html.desk .desk-tab-chip:hover {
+  background: var(--app-press);
+}
+html.desk .desk-tab-chip[data-active] {
+  margin-bottom: -1px;
+  height: 35px;
+  color: var(--mantine-color-text);
+  font-weight: 600;
+  background: var(--app-card);
+  border-color: var(--app-hairline);
+}
+html.desk .desk-tab-chip:focus-visible {
+  outline: 2px solid var(--mantine-color-cobalt-6);
+  outline-offset: -2px;
+}
+html.desk .desk-tab-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+html.desk .desk-tab-x,
+html.desk .desk-tab-new {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--app-label-2);
+  background: none;
+  cursor: pointer;
+}
+html.desk .desk-tab-x {
+  opacity: 0;
+}
+html.desk .desk-tab-chip:hover .desk-tab-x,
+html.desk .desk-tab-chip[data-active] .desk-tab-x,
+html.desk .desk-tab-x:focus-visible {
+  opacity: 1;
+}
+html.desk .desk-tab-x:hover,
+html.desk .desk-tab-new:hover {
+  color: var(--mantine-color-text);
+  background: var(--app-press);
+}
+html.desk .desk-tab-new {
+  width: 30px;
+  height: 30px;
+  margin: 0 0 3px 2px;
 }
