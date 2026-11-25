@@ -52,6 +52,16 @@ describe('a job typed in after the fact (v0.53)', () => {
     await expect(quickInvoice(o.id, { day: shiftDay(today, -2) })).rejects.toThrow('err.beforeJobDay');
     await expect(quickInvoice(o.id, { day: shiftDay(today, 1) })).rejects.toThrow('err.futureDate');
     await expect(job({ day: shiftDay(today, 1) })).rejects.toThrow('err.futureDate');
+    // Refused before anything is written (audit 25/11): no version, no answer, the line still a draft.
+    let b = (await loadOrderBundle(o.id))!;
+    expect([b.versions.length, b.items[0].approvalState, b.invoices.length]).toEqual([0, 'draft', 0]);
+    // «Готово» twice at once: one invoice; the second is told there is one.
+    const twice = await Promise.allSettled([quickInvoice(o.id), quickInvoice(o.id)]);
+    expect(twice.map((r) => r.status)).toEqual(['fulfilled', 'rejected']);
+    b = (await loadOrderBundle(o.id))!;
+    expect([b.invoices.length, b.versions.length]).toEqual([1, 1]);
+    // A payment not after today — the service says so too.
+    await expect(addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 100, date: shiftDay(today, 1) })).rejects.toThrow('err.futureDate');
   });
 
   it('«…» → «День»: an earlier day makes it typed in later, today an ordinary one again; not after its invoice', async () => {

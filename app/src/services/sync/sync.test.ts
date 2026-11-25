@@ -353,6 +353,32 @@ describe('syncing with the garage’s server (v0.40)', () => {
     expect((await db.orders.get(orderId))?.complaint).toBe('phone says');
   });
 
+  it('a record deleted here and not sent yet is not brought back by another device’s version of it (audit 25/11)', async () => {
+    as('phone');
+    const id = uid();
+    const driver = { id, name: 'Rashid', phone: '+971501234567', createdAt: '2026-11-25T08:00:00.000Z' };
+    await db.drivers.add(driver);
+    await syncNow();
+    as('pc');
+    await syncNow();
+    expect(await db.drivers.get(id)).toBeDefined();
+    // The phone deletes it; before its deletion goes up, the computer's change of it reaches the phone.
+    as('phone');
+    await db.drivers.delete(id);
+    await new Promise((r) => setTimeout(r, 0));
+    as('pc');
+    await db.drivers.update(id, { name: 'Rashid K' });
+    await syncNow();
+    as('phone');
+    await applyChanges([{ t: 'drivers', k: id, d: { ...driver, name: 'Rashid K' } }]);
+    expect(await db.drivers.get(id)).toBeUndefined();
+    await syncNow();
+    expect(store.record('drivers', id)).toBeUndefined();
+    as('pc');
+    await syncNow();
+    expect(await db.drivers.get(id)).toBeUndefined();
+  });
+
   it('a photo’s record goes only once its file is on the server — the rest does not wait for it', async () => {
     as('phone');
     const photo = await addMedia({ ownerType: 'order', ownerId: orderId, slot: 'car', file: new Blob([bytes(90_000, 3)], { type: 'image/jpeg' }), compress: false });

@@ -9,6 +9,7 @@ import { AppError } from './errors';
 import { placeInDay } from './cashDays';
 import { settleIfPaid } from './money';
 import { logEvent } from './orders';
+import { oneAtATime } from './serial';
 
 /*
  * Who owes whom (v0.20).
@@ -172,8 +173,14 @@ const receiptYear = () => Number(dubaiDate().slice(0, 4));
  * What is not owed by anyone — no customer picked, or more than they owe — stays in the income as money in with no
  * debt to it.
  */
-export async function addDebtPayment(input: DebtPaymentInput): Promise<{ income: Income; parts: DebtShare[]; historyParts: { invoiceId: string; amountFils: number }[]; restFils: number }> {
+export function addDebtPayment(input: DebtPaymentInput): Promise<{ income: Income; parts: DebtShare[]; historyParts: { invoiceId: string; amountFils: number }[]; restFils: number }> {
+  // One after another (audit 25/11): each reads the debts the one before it paid.
+  return oneAtATime('debt-payment', () => payDebts(input));
+}
+
+async function payDebts(input: DebtPaymentInput): Promise<{ income: Income; parts: DebtShare[]; historyParts: { invoiceId: string; amountFils: number }[]; restFils: number }> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  if (input.date && input.date > dubaiDate()) throw new AppError('err.futureDate');
   const customer = input.customerId ? await db.customers.get(input.customerId) : undefined;
   if (input.customerId && !customer) throw new AppError('err.notFound');
   const [debts, history] = customer ? await Promise.all([loadDebtJobs(customer.id), loadHistoryDebts(customer.id)]) : [[], []];
@@ -314,8 +321,13 @@ export async function loadCreditors(): Promise<{ creditors: Creditor<CompanyDebt
  * `payCredit`: the money moves by the way it is paid). More than is owed — refused. v0.62: the credits of the months
  * picked (`first`) go first, the oldest of them first.
  */
-export async function paySupplier(expenseIds: string[], input: { amountFils: number; method: PayMethod; date?: string; first?: string[] }): Promise<CreditPayment[]> {
+export function paySupplier(expenseIds: string[], input: { amountFils: number; method: PayMethod; date?: string; first?: string[] }): Promise<CreditPayment[]> {
+  return oneAtATime('credit', () => payOldestFirst(expenseIds, input));
+}
+
+async function payOldestFirst(expenseIds: string[], input: { amountFils: number; method: PayMethod; date?: string; first?: string[] }): Promise<CreditPayment[]> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  if (input.date && input.date > dubaiDate()) throw new AppError('err.futureDate');
   const debts = (await Promise.all(expenseIds.map((id) => companyDebtOf(id)))).filter((d): d is CompanyDebt => !!d && d.leftFils > 0);
   const { parts, restFils } = spread(
     input.amountFils,
@@ -324,7 +336,8 @@ export async function paySupplier(expenseIds: string[], input: { amountFils: num
   );
   if (restFils > 0) throw new AppError('err.creditOver');
   const done: CreditPayment[] = [];
-  for (const p of parts) done.push(await payCredit(p.key, { amountFils: p.amountFils, method: input.method, date: input.date }));
+  // Checked as a whole above, the credits not changed meanwhile (one credit payment at a time): no part is refused.
+  for (const p of parts) done.push(await payOne(p.key, { amountFils: p.amountFils, method: input.method, date: input.date }));
   return done;
 }
 
@@ -332,8 +345,13 @@ export async function paySupplier(expenseIds: string[], input: { amountFils: num
  * Pay towards an expense on credit — all of it or a part. The money moves now and by the way it is paid (cash:
  * out of the cash box); the expense itself is not counted again.
  */
-export async function payCredit(expenseId: string, input: { amountFils: number; method: PayMethod; date?: string; note?: string }): Promise<CreditPayment> {
+export function payCredit(expenseId: string, input: { amountFils: number; method: PayMethod; date?: string; note?: string }): Promise<CreditPayment> {
+  return oneAtATime('credit', () => payOne(expenseId, input));
+}
+
+async function payOne(expenseId: string, input: { amountFils: number; method: PayMethod; date?: string; note?: string }): Promise<CreditPayment> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  if (input.date && input.date > dubaiDate()) throw new AppError('err.futureDate');
   const now = nowIso();
   const movementId = uid();
   const paid = await db.transaction('rw', db.expenses, db.creditPayments, db.cashMovements, async () => {

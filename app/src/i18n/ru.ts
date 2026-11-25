@@ -1606,6 +1606,7 @@ export const ru = {
     partsCost: 'Себестоимость запчастей',
     expenses: 'Расходы',
     otherIncome: 'Прочие приходы (без инвойса)',
+    writtenOff: 'Закрыто без оплаты',
     grossProfit: 'Валовая прибыль',
     breakdown: 'Детали',
     other: 'Прочее (сборы, скидки)',

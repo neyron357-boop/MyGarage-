@@ -211,6 +211,7 @@ export function ReportsPage() {
               <List>
                 <ListRow title={t('report.revenueGross')} right={<Money fils={r.revenueGross} size="sm" />} />
                 {r.otherIncome > 0 && <ListRow title={`+ ${t('report.otherIncome')}`} right={<Money fils={r.otherIncome} size="sm" />} />}
+                {r.writtenOffGross > 0 && <ListRow title={`− ${t('report.writtenOff')}`} right={<Money fils={r.writtenOffGross} size="sm" />} />}
                 <ListRow title={`− ${t('report.partsCost')}`} right={<Money fils={r.partsCostGross} size="sm" />} />
                 <ListRow title={`− ${t('report.expenses')}`} right={<Money fils={r.expensesGross} size="sm" />} />
                 <ListRow title={<Text fw={700} size="sm">{t('report.grossProfit')}</Text>} right={<Money fils={r.grossProfit} size="sm" fw={700} c={r.grossProfit >= 0 ? 'green' : 'red'} />} />

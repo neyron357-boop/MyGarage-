@@ -64,7 +64,7 @@ import { formatDate, hoursBetween, monthLong, shortDuration } from '../../domain
 import { lockedMonthOf } from '../../domain/monthLock';
 import { discountBase } from '../../domain/discount';
 import { liveLines, type Phase } from '../../domain/flow';
-import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet } from '../../domain/invoice';
+import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet, reissueDue } from '../../domain/invoice';
 import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGross, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
@@ -749,8 +749,9 @@ export function JobPage() {
   // The invoice is out, the job open: its lines can be changed (credit note, then a new invoice) — the car here or
   // gone on credit (v0.34).
   const amendable = !lockedMonth && canAmendInvoice(b.order.stage, b.invoices);
-  // A car gone on credit whose invoice is being changed: it stays handed over, "Done" issues the new invoice.
-  const reissue = phase === 'debt' && !inv;
+  // A car gone on credit whose invoice is being changed: it stays handed over, "Done" issues the new invoice — paid
+  // in full meanwhile too (audit 25/11: it no longer closes without one, so "Done" stays).
+  const reissue = !inv && (phase === 'debt' || (b.order.stage === 'delivered' && reissueDue(b.invoices)));
   // Lines back from the bin (v0.68; v0.70 — the refused ones too, a job closed reopened for them): before the invoice.
   const binRestore = !lockedMonth && !reissue && !inv && (editable || canReopen(b.order));
   const ctx = { customer: c, vehicle: b.vehicle, order: b.order, garageName: b.settings.name };

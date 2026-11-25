@@ -611,3 +611,24 @@ describe('the account, its statement and the payments of debts (v0.62.2, «та�
     expect(v.owners.map((o) => [o.name, o.paidFils, o.leftFils])).toEqual([['Gulf Star', 5_000, 7_000]]);
   });
 });
+
+describe('two debt payments at once (audit 25/11)', () => {
+  it('the second reads what the first paid: no job is paid twice, the rest goes on', async () => {
+    const { a, b, customerId } = await twoDebts();
+    const both = await Promise.all([
+      addDebtPayment({ amountFils: 60_000, method: 'cash', customerId, orderId: a.id }),
+      addDebtPayment({ amountFils: 60_000, method: 'cash', customerId, orderId: a.id }),
+    ]);
+    expect(await due(a.id)).toBe(0);
+    expect(await due(b.id)).toBe(0);
+    expect(both.map((r) => r.restFils)).toEqual([0, 20_000]);
+    const paid = (await db.payments.toArray()).filter((p) => p.incomeId).reduce((s, p) => s + p.amountFils, 0);
+    expect(paid).toBe(100_000);
+  });
+
+  it('not on a day after today', async () => {
+    const { customerId } = await twoDebts();
+    const tomorrow = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+    await expect(addDebtPayment({ amountFils: 1_000, method: 'cash', customerId, date: tomorrow })).rejects.toThrow('err.futureDate');
+  });
+});

@@ -1604,6 +1604,7 @@ export const en: typeof ru = {
     partsCost: 'Parts cost',
     expenses: 'Expenses',
     otherIncome: 'Other income (no invoice)',
+    writtenOff: 'Closed without payment',
     grossProfit: 'Gross profit',
     breakdown: 'Details',
     other: 'Other (fees, discounts)',

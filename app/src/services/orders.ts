@@ -5,7 +5,9 @@ import { dubaiDate, hoursBetween, nowIso, onDubaiDay } from '../domain/dates';
 import { atDay, jobMoment, lastJobDay } from '../domain/jobDay';
 import { whatJobHolds, whyJobStays, type DeleteBlock } from '../domain/deletion';
 import { orderDue } from '../domain/debts';
+import { activeInvoice, reissueDue } from '../domain/invoice';
 import { byPosition } from '../domain/items';
+import { lockedMonthOf } from '../domain/monthLock';
 import { checkTransition, isBackward, type StageContext } from '../domain/stages';
 import type {
   Addendum,
@@ -175,6 +177,10 @@ export async function checkIn(input: CheckInInput): Promise<Order> {
  * invoice already issued keeps its buyer — what that left blank shows the job's customer now (`invoiceBuyer`).
  */
 export async function setJobCustomer(orderId: string, customerId: string): Promise<void> {
+  // Neither out of a closed month nor into one (audit 25/11; v0.69): the month's statement and debt payments stand.
+  await assertJobOpen(orderId);
+  const [job, to, invoices] = await Promise.all([db.orders.get(orderId), db.customers.get(customerId), db.invoices.where('orderId').equals(orderId).toArray()]);
+  if (job && to && job.customerId !== customerId && lockedMonthOf(job, invoices, to)) throw new AppError('err.monthLocked');
   await db.transaction('rw', [db.orders, db.vehicles, db.ownerships, db.customers, db.messages, db.claims, db.payments, db.debts, db.expenses, db.incomes, db.events], async () => {
     const [order, next] = await Promise.all([db.orders.get(orderId), db.customers.get(customerId)]);
     if (!order || !next || next.archivedAt) throw new AppError('err.notFound');
@@ -397,7 +403,9 @@ export function stageContext(b: OrderBundle): StageContext {
     amountDueFils: bundleAmountDue(b),
     debtSigned: b.debts.some((d) => d.status === 'open'),
     qcComplete: !!b.order.qcDoneAt,
-    invoiced: b.invoices.some((i) => i.status === 'issued'),
+    // A credit note is issued too — it is not an invoice in force (audit 25/11).
+    invoiced: !!activeInvoice(b.invoices),
+    reissue: reissueDue(b.invoices),
   };
 }
 

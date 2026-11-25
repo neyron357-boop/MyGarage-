@@ -39,6 +39,8 @@ export interface StageContext {
   qcComplete: boolean;
   /** An active (not credited) invoice exists. */
   invoiced: boolean;
+  /** An invoice was cancelled by a credit note and the new one is not out yet (`reissueDue`). */
+  reissue?: boolean;
 }
 
 export type TransitionCheck = { ok: true } | { ok: false; reason: string };
@@ -124,6 +126,8 @@ export function checkTransition(from: Stage, to: Stage, ctx: StageContext): Tran
     case 'closed':
       // Closed without payment and without a debt: whatever was due is let go (services/flow.ts closeUnpaid).
       if (ctx.order.waived) return { ok: true };
+      // The invoice changed and the new one not issued: «Готово» first, whatever was paid (audit 25/11).
+      if (ctx.reissue && !nothingToBill(ctx.items)) return { ok: false, reason: 'stageErr.noInvoice' };
       if (from === 'delivered') return ctx.amountDueFils <= 0 ? { ok: true } : { ok: false, reason: 'stageErr.unpaid' };
       // Quick path: the car leaves with an issued invoice that is paid, or with a signed debt.
       // Nothing to charge for (the customer refused the repair, a free look): the car just leaves.

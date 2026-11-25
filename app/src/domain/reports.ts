@@ -1,4 +1,5 @@
 import { dubaiDate, inRange } from './dates';
+import { activeInvoice } from './invoice';
 import { itemCostPaid } from './items';
 import { partsPaid } from './profit';
 import type { CashClosing, Expense, Income, Invoice, Order, OrderItem, Payment } from './types';
@@ -41,6 +42,11 @@ export interface Report {
   expensesByCategory: { categoryId: string; gross: number }[];
   /** Received without an invoice (gross, as received). */
   otherIncome: number;
+  /**
+   * Let go in the period — jobs closed «Без оплаты» (`closeUnpaid`): their invoice is in the revenue, the money will not
+   * come. Off the profit, as `jobProfit` takes it off the job's; «Оплата у главного» is the garage's money and stays.
+   */
+  writtenOffGross: number;
   grossProfit: number;
   payments: { cash: number; card: number; transfer: number; outside: number };
   cashDiffFils: number;
@@ -64,6 +70,7 @@ export function computeReport(input: ReportInput): Report {
     expensesGross: 0,
     expensesByCategory: [],
     otherIncome: 0,
+    writtenOffGross: 0,
     grossProfit: 0,
     payments: { cash: 0, card: 0, transfer: 0, outside: 0 },
     cashDiffFils: 0,
@@ -122,7 +129,21 @@ export function computeReport(input: ReportInput): Report {
   for (const p of input.payments) if (p.incomeId) toJobs.set(p.incomeId, (toJobs.get(p.incomeId) ?? 0) + (p.kind === 'refund' ? -p.amountFils : p.amountFils));
   for (const i of input.incomes ?? []) if (!i.voidedAt && inRange(i.date, from, to)) r.otherIncome += i.category === 'debt' ? Math.max(0, i.amountFils - (toJobs.get(i.id) ?? 0)) : i.amountFils;
 
-  r.grossProfit = r.revenueGross + r.otherIncome - r.partsCostGross - r.expensesGross;
+  // Written off when it was let go; only what an invoice put into the revenue (a job never invoiced added nothing).
+  const invoicesOf = new Map<string, Invoice[]>();
+  for (const inv of input.invoices) {
+    const list = invoicesOf.get(inv.orderId);
+    if (list) list.push(inv);
+    else invoicesOf.set(inv.orderId, [inv]);
+  }
+  for (const o of input.orders) {
+    const w = o.waived;
+    if (!w || w.via === 'owner' || w.fils <= 0 || !inPeriod(w.at)) continue;
+    const inv = activeInvoice(invoicesOf.get(o.id) ?? []);
+    if (inv) r.writtenOffGross += Math.min(w.fils, inv.totalFils);
+  }
+
+  r.grossProfit = r.revenueGross + r.otherIncome - r.writtenOffGross - r.partsCostGross - r.expensesGross;
   r.averageTicketGross = salesCount ? Math.round(r.revenueGross / salesCount) : 0;
   return r;
 }

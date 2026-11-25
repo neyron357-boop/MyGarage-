@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { activeInvoice, canAmendInvoice } from '../domain/invoice';
+import { activeInvoice, canAmendInvoice, reissueDue } from '../domain/invoice';
 import { byPosition, itemTitle, lineName } from '../domain/items';
 import { createCustomer, suggestCustomers } from './customers';
 import { addItem, updateItem } from './estimate';
@@ -176,6 +176,31 @@ describe('changing the lines after the invoice', () => {
     expect(bundleAmountDue(b)).toBe(0);
     expect(b.order.stage).toBe('closed');
     expect(b.debts[0].status).toBe('paid');
+  });
+
+  it('does not close a job gone on credit paid in full while its changed invoice is not issued again (audit 25/11)', async () => {
+    const o = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 20000 });
+    await quickInvoice(o.id);
+    await leaveOnDebt(o.id, { amountFils: 21000, dueDate: '2026-12-01', signature: signature() });
+    await amendInvoice(o.id);
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Oil filter', unitPriceFils: 2000 });
+    // The customer pays the debt before «Готово»: nothing due by the agreed lines — the job stays open (it closed with
+    // only the credit note in force, the filter never billed).
+    await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 21000 });
+    let b = (await loadOrderBundle(o.id))!;
+    expect(bundleAmountDue(b)).toBe(0);
+    expect(reissueDue(b.invoices)).toBe(true);
+    expect(b.order.stage).toBe('delivered');
+    // «Готово» issues the new invoice: the filter is owed; paid — it closes.
+    const again = await quickInvoice(o.id);
+    expect(again.totalFils).toBe(23100);
+    b = (await loadOrderBundle(o.id))!;
+    expect(reissueDue(b.invoices)).toBe(false);
+    expect(bundleAmountDue(b)).toBe(2100);
+    expect(b.order.stage).toBe('delivered');
+    await addPayment(o.id, { kind: 'payment', method: 'cash', amountFils: 2100 });
+    expect((await loadOrderBundle(o.id))!.order.stage).toBe('closed');
   });
 });
 

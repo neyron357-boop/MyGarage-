@@ -130,6 +130,9 @@ export async function applyChanges(changes: Change[]): Promise<void> {
   const pushedT = syncState().pushedT;
   const tables = [...new Set(changes.map((c) => c.t))].map(tableOf).filter((t): t is Table => !!t);
   if (!tables.length) return;
+  // Deleted here and not sent yet (audit 25/11): this device's deletion goes up next and wins, as a change here does —
+  // another device's version of the record does not bring it back (and with it, say, a debt payment's job payment).
+  const gone = new Set((await db.syncTombs.toArray()).map((t) => `${t.t}\u0000${t.k}`));
   // (Told after this call's own work; the listeners wait a few seconds before they read anyway.)
   setTimeout(dataChanged, 0);
   await db.transaction('rw', tables, async () => {
@@ -140,6 +143,7 @@ export async function applyChanges(changes: Change[]): Promise<void> {
       const local = (await table.get(c.k)) as Row | undefined;
       // Changed here and not sent yet: this device's goes up next (and wins).
       if (local && Number(local[STAMP] ?? 0) > pushedT) continue;
+      if (!local && gone.has(`${c.t}\u0000${c.k}`)) continue;
       if (c.d === null) {
         if (local) await table.delete(c.k);
         continue;

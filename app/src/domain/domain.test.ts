@@ -621,6 +621,18 @@ describe('reports', () => {
     expect(r.payments.card).toBe(31500);
     expect(r.cashDiffFils).toBe(-500);
     expect(r.averageTicketGross).toBe(31500);
+    // Closed «Без оплаты» (audit 25/11): the invoice stays in the revenue, what was let go is off the profit — in the
+    // period it was let go; «Оплата у главного» is the garage's money; a job never invoiced added nothing to take off.
+    const base = { from: '2026-11-01', to: '2026-11-30', items: [], expenses: [], payments: [], closings: [] };
+    const waived = (w: Order['waived'], invoices = [inv]) => computeReport({ ...base, orders: [order({ waived: w })], invoices });
+    const let_go = waived({ at: '2026-11-07T10:00:00.000Z', fils: 31500 });
+    expect(let_go.revenueGross).toBe(31500);
+    expect(let_go.writtenOffGross).toBe(31500);
+    expect(let_go.grossProfit).toBe(0);
+    expect(waived({ at: '2026-11-07T10:00:00.000Z', fils: 10000 }).grossProfit).toBe(21500);
+    expect(waived({ at: '2026-11-07T10:00:00.000Z', fils: 31500, via: 'owner' }).writtenOffGross).toBe(0);
+    expect(waived({ at: '2026-12-02T10:00:00.000Z', fils: 31500 }).writtenOffGross).toBe(0);
+    expect(waived({ at: '2026-11-07T10:00:00.000Z', fils: 31500 }, []).writtenOffGross).toBe(0);
   });
 });
 

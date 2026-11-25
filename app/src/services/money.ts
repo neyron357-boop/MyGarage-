@@ -18,6 +18,7 @@ import { owedFields } from './lenders';
 import { addMedia } from './media';
 import { bundleAmountDue, loadOrderBundle, logEvent, tryStage } from './orders';
 import { setProcurement } from './parts';
+import { oneAtATime } from './serial';
 
 const year = () => Number(dubaiDate().slice(0, 4));
 
@@ -34,6 +35,8 @@ export async function addPayment(orderId: string, input: PaymentInput): Promise<
   const order = await db.orders.get(orderId);
   if (!order) throw new AppError('err.notFound');
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
+  // Not after today — the services say it too, not only the day picker (audit 25/11).
+  if (input.date && input.date > dubaiDate()) throw new AppError('err.futureDate');
   const typedAt = nowIso();
   const earlier = !!input.date && input.date !== dubaiDate(typedAt);
   const now = earlier ? onDubaiDay(typedAt, input.date!) : typedAt;
@@ -87,8 +90,17 @@ export async function settleIfPaid(orderId: string) {
  * (a version and decisions are still recorded), marked done — bought parts as received — and the
  * invoice is issued. The job moves to "ready": it waits only for payment and pickup.
  */
-export async function quickInvoice(orderId: string, { day }: { day?: string } = {}): Promise<Invoice> {
-  const drafts = (await db.items.where('orderId').equals(orderId).toArray()).filter((i) => i.approvalState === 'draft');
+export function quickInvoice(orderId: string, { day }: { day?: string } = {}): Promise<Invoice> {
+  return oneAtATime(`invoice:${orderId}`, () => issueQuick(orderId, day));
+}
+
+async function issueQuick(orderId: string, day: string | undefined): Promise<Invoice> {
+  // Everything that would stop the invoice — said before anything is written (audit 25/11: a day of a closed month
+  // refused only after the version and the customer's answers were recorded for good).
+  const b = await loadOrderBundle(orderId);
+  if (!b) throw new AppError('err.notFound');
+  invoiceCheck(b, day, b.items.map((i) => (i.approvalState === 'draft' ? { ...i, approvalState: 'approved' as const } : i)));
+  const drafts = b.items.filter((i) => i.approvalState === 'draft');
   if (drafts.length) {
     const v = await sendVersion(orderId, { via: 'in_person' });
     await recordDecisions(
@@ -111,13 +123,8 @@ export async function quickInvoice(orderId: string, { day }: { day?: string } = 
   return inv;
 }
 
-/**
- * `day` (v0.53): the invoice issued on an earlier day — a job typed in after the fact; not after today, not before the
- * job's own day. Its number takes that day's year.
- */
-export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 'credit_note'>, { day }: { day?: string } = {}): Promise<Invoice> {
-  const b = await loadOrderBundle(orderId);
-  if (!b) throw new AppError('err.notFound');
+/** What stops an invoice of these lines on that day; the moment it is issued at. */
+function invoiceCheck(b: NonNullable<Awaited<ReturnType<typeof loadOrderBundle>>>, day: string | undefined, items = b.items): string {
   const typed = nowIso();
   if (day && day > dubaiDate(typed)) throw new AppError('err.futureDate');
   if (day && day < jobDay(b.order)) throw new AppError('err.beforeJobDay');
@@ -125,12 +132,25 @@ export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 
   // Not on a day of the customer's closed month (v0.69).
   assertDayOpen(b.customer, dubaiDate(issuedAt));
   if (activeInvoice(b.invoices)) throw new AppError('err.invoiceExists');
+  if (invoiceLines(items, 'en').length === 0) throw new AppError('err.nothingToInvoice');
+  return issuedAt;
+}
+
+/**
+ * `day` (v0.53): the invoice issued on an earlier day — a job typed in after the fact; not after today, not before the
+ * job's own day. Its number takes that day's year.
+ */
+export async function issueInvoice(orderId: string, type?: Exclude<InvoiceType, 'credit_note'>, { day }: { day?: string } = {}): Promise<Invoice> {
+  const b = await loadOrderBundle(orderId);
+  if (!b) throw new AppError('err.notFound');
+  const issuedAt = invoiceCheck(b, day);
   const lines = invoiceLines(b.items, 'en');
-  if (lines.length === 0) throw new AppError('err.nothingToInvoice');
   const s = b.settings;
   const c = b.customer;
   const invType = type ?? chooseInvoiceType(c);
   return db.transaction('rw', [db.invoices, db.counters, db.events], async () => {
+    // Asked again inside the write (audit 25/11): an invoice issued since the check above — no second one with its number.
+    if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
     // The job's own number (v0.42.3): the invoice in force has it; the one a credit note cancelled before becomes «-1»
     // (the garage's server renames it — invoices never change here).
     const inv: Invoice = {

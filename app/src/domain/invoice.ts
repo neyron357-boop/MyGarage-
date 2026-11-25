@@ -84,6 +84,15 @@ export function invoicePaidAt(inv: Invoice, invoices: Invoice[], payments: Payme
   return payments.filter((p) => p.kind !== 'refund').map((p) => p.receivedAt).sort().at(-1) ?? inv.issuedAt;
 }
 
+/**
+ * An invoice cancelled by a credit note and the new one not issued yet (`amendInvoice`): the job's paper is not done —
+ * it does not close, however much is paid (audit 25/11: a car gone on credit, its invoice changed and the debt paid,
+ * closed with no invoice in force — the revenue was INV − CN = 0 and the new lines never billed).
+ */
+export function reissueDue(invoices: Invoice[]): boolean {
+  return !activeInvoice(invoices) && invoices.some((i) => i.type === 'credit_note' && i.status === 'issued');
+}
+
 /** The invoice that currently counts for an order (issued and not credited). */
 export function activeInvoice(invoices: Invoice[]): Invoice | undefined {
   return invoices

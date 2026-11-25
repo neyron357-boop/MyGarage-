@@ -1819,8 +1819,9 @@ async function launchBrowser() {
       const r = rows.find(([t]) => t.includes(name));
       return r ? fils(r[1]) : 0;
     };
-    const [rev, other, parts, spent, profit] = ['Выручка с VAT', 'Прочие приходы', 'Себестоимость запчастей', 'Расходы', 'Валовая прибыль'].map(val);
-    if (rev !== kpi || profit !== rev + other - parts - spent) throw new Error('report rows: ' + JSON.stringify(rows));
+    // v0.84.1: a job closed «Без оплаты» in the month — what its invoice will not bring — is off the profit.
+    const [rev, other, waived, parts, spent, profit] = ['Выручка с VAT', 'Прочие приходы', 'Закрыто без оплаты', 'Себестоимость запчастей', 'Расходы', 'Валовая прибыль'].map(val);
+    if (rev !== kpi || profit !== rev + other - waived - parts - spent) throw new Error('report rows: ' + JSON.stringify(rows));
     // The month's invoices with VAT, credit notes less — counted here on their own.
     const want = await page.evaluate(async () => {
       const { db } = await import('/src/db/db.ts');

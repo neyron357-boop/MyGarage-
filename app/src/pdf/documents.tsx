@@ -621,6 +621,7 @@ export async function renderReport(r: Report, from: string, to: string, lang: La
         {row(`\u00a0\u00a0\u00a0${t('item.kind.part')}`, a(r.partsGross))}
         {row(`\u00a0\u00a0\u00a0${t('report.other')}`, a(r.otherGross))}
         {r.otherIncome > 0 && row(t('report.otherIncome'), a(r.otherIncome))}
+        {r.writtenOffGross > 0 && row(t('report.writtenOff'), a(r.writtenOffGross))}
         {row(t('report.partsCost'), a(r.partsCostGross))}
         {row(t('report.expenses'), a(r.expensesGross))}
         {row(t('report.grossProfit'), a(r.grossProfit), true)}
