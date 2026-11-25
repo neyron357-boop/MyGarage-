@@ -11,10 +11,9 @@ import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from
 import { buildSuggestions, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
 import type { OrderItem, Outsource, PartOffer } from '../../domain/types';
 import { aiAfterPart } from '../../services/ai';
-import { AiPartNumbers, YandexButton } from '../ai/Ai';
+import { YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
-import { FitCurrent, MarkingRow, readMarkingLater, useLineFitment, useOrderGuard, VinCatalogsRow, VinFound } from '../fitment/Fitment';
-import { sameNumber } from '../../domain/partNumbers';
+import { VinCatalogsRow } from './VinCatalogs';
 import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
@@ -178,13 +177,8 @@ export function LineSheet({
   // Photos of the line: the stored ones kept, and new ones picked (saved with the line).
   const [kept, setKept] = useState<string[]>([]);
   const [fresh, setFresh] = useState<{ id: string; file: File; src: string }[]>([]);
-  // What the garage's AI found for the part (v0.48), as it comes: read live — the form itself keeps what is typed.
+  // The line as it is now, read live (its pictures and outlines on top of the sheet) — the form itself keeps what is typed.
   const live = useScreenLiveQuery(() => (item ? db.items.get(item.id) : undefined), [item?.id]);
-  // Each number's fitment to the car (v0.65): the one typed or taken under «Номер», the belt's marking.
-  const fitment = useLineFitment(kind === 'part' ? item?.id : undefined);
-  // The number typed: as the search judged it — or found by the VIN in a catalogue (v0.66), saved or not yet.
-  const typedFit = partNumber.trim() ? (fitment?.rows.find((r) => sameNumber(r.number, partNumber)) ?? (fitment?.vinFit && sameNumber(fitment.vinFit.number, partNumber) ? fitment.vinFit : undefined)) : undefined;
-  const order = useOrderGuard();
   const incl = b.settings.pricesIncludeVat;
   const taxRate = item?.vatRateBp ? item.vatRateBp : b.settings.vatRateBp;
   // Lines added one after another in this sheet (v0.68, the user: «механик диктует 10 деталей — я быстро заполняю
@@ -236,12 +230,6 @@ export function LineSheet({
     setTyping(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, item, lang, incl, service]);
-  // A number the AI proved (two catalogues) while the sheet is open, into an empty field: the save keeps it. Only this
-  // line's own record (v0.49: a new line opened right after another one must not inherit that line's number from a
-  // live read still on its way out).
-  useEffect(() => {
-    if (opened && item && live?.id === item.id && live.partNumber && live.aiFind?.filled === live.partNumber) setPartNumber((n) => n || live.partNumber!);
-  }, [opened, item, live?.id, live?.partNumber, live?.aiFind?.filled]);
   const names = useMemo(() => [...(suggestions?.list.keys() ?? [])], [suggestions]);
   /** A suggestion's price as it is typed: with VAT if it was typed with VAT last time. */
   const suggested = (s: Suggestion) => {
@@ -271,11 +259,6 @@ export function LineSheet({
   const priced = { ...priceFromEntered(own ? 0 : price ?? 0, taxRate, mode), vatRateBp: rateFor(mode, taxRate) };
   const lineTotal = price && !own ? itemAmounts({ kind: lineKind, qty: lineQty, ...priced, lineOff: cleanOff(off) } as OrderItem) : undefined;
   const save = async (next = false) => {
-    // Ordered with a number the search found and not verified (v0.65): the manager's reason first — or not ordered.
-    if (kind === 'part' && item && part === 'ordered' && partStateOf(item) !== 'ordered' && !(await order.guard([item.id], { [item.id]: partNumber }))) {
-      setPart(partStateOf(item));
-      return;
-    }
     return run(async () => {
       const typed = lineName(title.trim());
       // A typed name goes where its letters belong (Cyrillic → Russian title), whatever the documents' language.
@@ -309,10 +292,8 @@ export function LineSheet({
       await syncStage(b.order.id);
       forgetSuggestions();
       haptic('light');
-      // A part saved: the garage's AI looks at its name and looks up its number (v0.48) — in the background.
+      // A part saved: the garage's AI looks at its name (v0.48) — in the background.
       if (kind === 'part' && itemId) aiAfterPart(itemId);
-      // A belt's new photo: its marking read for the fitment (v0.65) — in the background.
-      if (kind === 'part' && itemId && fresh.length) readMarkingLater(itemId);
       if (!next || !itemId) return onClose();
       // The next one: the sheet empty again, the keyboard still up in the name.
       setAdded((a) => [...a, { id: itemId!, title: typed }]);
@@ -379,7 +360,6 @@ export function LineSheet({
     });
   return (
     <Modal opened={opened} onClose={onClose} title={item ? t(service ? 'job.addService' : kind === 'labor' ? 'job.addWork' : 'job.addPart') : service ? t('qi.addService') : kind === 'labor' ? t('qi.addWork') : t('qi.addPart')} classNames={{ content: 'sheet-grouped' }}>
-      {order.node}
       <Stack gap="lg">
         {!item && !typing && (suggestions?.top.length ?? 0) > 0 && (
           // The usual ones, one tap each: two columns of tiles (name, last price) — all in sight, none off the side.
@@ -514,19 +494,7 @@ export function LineSheet({
               </div>
             </div>
           )}
-          {kind === 'part' && typedFit && <FitCurrent number={typedFit.number} fit={typedFit.fit} />}
-          {/* Found by the car's VIN in a catalogue (v0.66): the manager's proof — unless the number is verified otherwise. */}
-          {kind === 'part' && item && fitment && !(typedFit?.fit.status === 'verified' && !typedFit.fit.reasons.some((r) => r.code === 'vinCatalogue')) && (
-            <VinFound itemId={item.id} number={partNumber} fitment={fitment} />
-          )}
-          {kind === 'part' && item && fitment?.marked && <MarkingRow itemId={item.id} fitment={fitment} hasPhotos={kept.length > 0} />}
-          {kind === 'part' && item && (
-            // The garage's AI (v0.48): the part's numbers from the catalogues — a tap takes one into «Номер».
-            <div className="ios-row ai-row" style={{ display: 'block' }}>
-              <AiPartNumbers itemId={item.id} chosen={partNumber} onPick={setPartNumber} />
-            </div>
-          )}
-          {/* The catalogues by this car's VIN (v0.66): where the manager finds what the search did not. */}
+          {/* The catalogues by this car's VIN (v0.66): links — the manager looks the part up there by the car's VIN. */}
           {kind === 'part' && <VinCatalogsRow car={{ vin: b.vehicle.vin, make: b.vehicle.make, model: b.vehicle.model, year: b.vehicle.year }} />}
           {kind === 'part' && (
             <div className="ios-row">

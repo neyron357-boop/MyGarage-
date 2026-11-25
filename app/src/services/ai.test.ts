@@ -1,10 +1,9 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { aiAfterPart, aiAllParts, aiFindPart, aiFixPartName, aiPartsPercent, aiProgress, aiReadVin, aiWorking, forgetPriorParts, onAiNotice, setAiTransport, type AiNotice } from './ai';
+import { aiAfterPart, aiFixPartName, aiReadVin, aiWorking, onAiNotice, setAiTransport, type AiNotice } from './ai';
 import { updateVehicle } from './customers';
-import { addItem, updateItem } from './estimate';
-import { addMedia } from './media';
+import { addItem } from './estimate';
 import { checkIn } from './orders';
 import { ensureSeed } from './seed';
 
@@ -18,24 +17,11 @@ beforeEach(async () => {
   db.close();
   setDb(new GarageDB('test-' + uid()));
   await ensureSeed();
-  // A new garage each test: the parts memory of the last one forgotten.
-  forgetPriorParts();
   asked = [];
   notices.length = 0;
   answers = {
     vin: { vin: VIN, make: 'TOYOTA', model: 'Corolla', year: 2009, engine: '1.8L 4-cyl', body: 'sedan', confidence: 0.9 },
     'part-name': { fixed: 'колодки тормозные передние', english: 'FRONT BRAKE PADS', isPart: true, confidence: 0.95 },
-    'part-find': {
-      search: 'web',
-      numbers: [
-        { number: '04465-12610', brand: 'Toyota', seen: ['https://www.amayama.com/p/1', 'https://megazip.net/p/2'] },
-        { number: '04465-02220', brand: 'Toyota', seen: [] },
-      ],
-      images: [
-        { type: 'image/png', data: btoa('x'.repeat(9000)), source: 'https://www.amayama.com/p/1', number: '04465-12610', kind: 'diagram' },
-        { type: 'image/jpeg', data: btoa('y'.repeat(9000)), source: 'https://www.rockauto.com/p/2', kind: 'photo' },
-      ],
-    },
   };
   setAiTransport(async (path, body) => {
     asked.push({ path, body: body as Record<string, unknown> });
@@ -129,72 +115,6 @@ describe('the AI looks at a part', () => {
     expect(asked).toHaveLength(1);
   });
 
-  it('its number from the garage’s own jobs, no AI: fitted on another car of the model — offered, not written (v0.65); fitted on this very car — written', async () => {
-    const first = await car('Toyota', 'Corolla');
-    await updateVehicle(first.vehicleId, { year: 2018, engine: '1.8L' });
-    const done = await addItem(first.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0, partNumber: '90915-YZZE1' });
-    const pic = await addMedia({ ownerType: 'item', ownerId: done.id, slot: 'diagram', file: new Blob([new Uint8Array(9000)], { type: 'image/png' }), name: 'https://www.amayama.com/p/1', compress: false });
-    await db.items.update(done.id, { procurementStatus: 'received', diagramIds: [pic.id] });
-    // The same model two years on, the engine the same: the same part.
-    const next = await car('Toyota', 'Corolla');
-    await updateVehicle(next.vehicleId, { year: 2020, engine: '1.8L' });
-    const it1 = await addItem(next.id, { kind: 'part', block: 'A', titleRu: 'масляный фильтр', qty: 1, unitPriceFils: 0 });
-    await aiFixPartName(it1.id);
-    await aiFindPart(it1.id);
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
-    const i = (await db.items.get(it1.id))!;
-    // Another car of the model (its engine, its drive not proven the same): a candidate, a tap away — not the line's number.
-    expect(i.partNumber).toBeUndefined();
-    expect(i.aiFind).toMatchObject({ search: 'garage', filled: undefined });
-    expect(i.aiFind!.numbers[0]).toMatchObject({ number: '90915-YZZE1', garage: 1 });
-    expect(i.diagramIds).toHaveLength(1);
-    expect(i.diagramIds![0]).not.toBe(pic.id);
-    expect(notices.some((n) => n.kind === 'number')).toBe(false);
-    // The same car back (a second job of its): the filter fitted on it — its number, written.
-    await db.items.update(done.id, { procurementStatus: 'installed' });
-    forgetPriorParts();
-    const back = await checkIn({ vehicleId: first.vehicleId, plate: { emirate: 'DXB', code: 'K', number: '1' }, make: 'Toyota', model: 'Corolla', name: '', phone: '', docLanguage: 'en', complaint: '', arrivedNow: true });
-    const it3 = await addItem(back.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it3.id);
-    expect((await db.items.get(it3.id))!.partNumber).toBe('90915-YZZE1');
-    expect(notices.find((n) => n.kind === 'number')).toMatchObject({ number: '90915-YZZE1', garage: 1, catalogs: 0 });
-    // Another car: not the same part — the AI is asked, with the garage's number as a hint only when the car is the same.
-    const other = await car('Nissan', 'Patrol');
-    const it2 = await addItem(other.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it2.id);
-    const q = asked.find((a) => a.path === 'part-find')!;
-    expect(q.body).toMatchObject({ part: 'OIL FILTER', make: 'Nissan', hints: [] });
-  });
-
-  it('a number used before but not fitted is a hint to the AI and a candidate on the line; a web search made lately for the same part serves again', async () => {
-    const first = await car('Toyota', 'Camry');
-    await updateVehicle(first.vehicleId, { year: 2018, engine: '2.5L', vin: VIN });
-    asked = [];
-    const used = await addItem(first.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-33480' });
-    expect(used.partNumber).toBe('04465-33480');
-    const second = await car('Toyota', 'Camry');
-    await updateVehicle(second.vehicleId, { year: 2019, engine: '2.5L' });
-    const it1 = await addItem(second.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it1.id);
-    const q = asked.find((a) => a.path === 'part-find')!;
-    expect(q.body).toMatchObject({ hints: ['04465-33480'], built: '' });
-    // The garage's number joins the web's as a candidate; seen on two sites is that a number exists — nothing is written (v0.65).
-    const i = (await db.items.get(it1.id))!;
-    expect(i.aiFind!.numbers.map((n) => [n.number, n.garage ?? 0])).toEqual([['04465-12610', 0], ['04465-02220', 0], ['04465-33480', 1]]);
-    expect(i.partNumber).toBeUndefined();
-    // A third car of the kind within the month: the web answer again — the AI is not asked.
-    const third = await car('Toyota', 'Camry');
-    await updateVehicle(third.vehicleId, { year: 2018, engine: '2.5L' });
-    const it2 = await addItem(third.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it2.id);
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(1);
-    const j = (await db.items.get(it2.id))!;
-    expect(j.aiFind?.search).toBe('web');
-    expect(j.partNumber).toBeUndefined();
-    expect(j.diagramIds).toHaveLength(1);
-    expect(j.sampleIds).toHaveLength(1);
-  });
-
   it('a line sent to the customer keeps its words', async () => {
     const o = await car();
     const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'alternater', qty: 1, unitPriceFils: 0 });
@@ -203,113 +123,8 @@ describe('the AI looks at a part', () => {
     expect(asked).toHaveLength(0);
   });
 
-  it('its numbers: seen in two catalogues or not, all offered — none written itself (v0.65: a number that exists is not one that fits); the diagram kept with the line', async () => {
-    const o = await car('Toyota', 'Corolla');
-    await updateVehicle(o.vehicleId, { vin: VIN, year: 2009 });
-    asked = [];
-    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it1.id);
-    expect(asked.find((a) => a.path === 'part-find')?.body).toMatchObject({ part: 'FRONT BRAKE PADS', make: 'Toyota', model: 'Corolla', year: 2009, vin: VIN, built: 'Japan', hints: [] });
-    const i = (await db.items.get(it1.id))!;
-    expect(i.partNumber).toBeUndefined();
-    expect(i.aiFind).toMatchObject({ search: 'web', part: 'FRONT BRAKE PADS', filled: undefined });
-    expect(i.aiFind!.numbers.map((n) => n.number)).toEqual(['04465-12610', '04465-02220']);
-    // The diagram: a picture of the line's own, not one of its photos (those go with a quote).
-    expect(i.diagramIds).toHaveLength(1);
-    expect(i.mediaIds).toBeUndefined();
-    expect((await db.media.get(i.diagramIds![0]))?.slot).toBe('diagram');
-    // A photo of the part itself — a sample, kept apart from the diagram and from the line's own photos.
-    expect(i.sampleIds).toHaveLength(1);
-    expect((await db.media.get(i.sampleIds![0]))?.slot).toBe('sample');
-    // Looked up again: the new pictures take the place of the earlier ones.
-    const old = [...i.diagramIds!, ...i.sampleIds!];
-    await aiFindPart(it1.id, { again: true });
-    const j = (await db.items.get(it1.id))!;
-    expect([j.diagramIds!.length, j.sampleIds!.length]).toEqual([1, 1]);
-    for (const id of old) expect(await db.media.get(id)).toBeUndefined();
-    // Not looked up again; no number was written — no card for one.
-    expect(await aiFindPart(it1.id)).toBeUndefined();
-    expect(notices.some((x) => x.kind === 'number')).toBe(false);
-  });
 
-  it('a guess made without the web is looked up again; a find on the web is not', async () => {
-    const o = await car('Toyota', 'Corolla');
-    answers['part-find'] = { search: 'model', numbers: [{ number: '04465-02220', seen: [] }], images: [] };
-    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it1.id);
-    // The paid plan on since: the same line, saved again, goes to the catalogues.
-    answers['part-find'] = { search: 'web', numbers: [{ number: '04465-02220', seen: ['https://a.com/1', 'https://b.com/2'] }], images: [] };
-    await aiFindPart(it1.id);
-    expect((await db.items.get(it1.id))!.aiFind?.search).toBe('web');
-    expect(await aiFindPart(it1.id)).toBeUndefined();
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(2);
-  });
-
-  it('a number not proven is only offered; a new name is looked up again', async () => {
-    const o = await car('Toyota', 'Corolla');
-    answers['part-find'] = { search: 'model', numbers: [{ number: '04465-02220', seen: [] }], images: [] };
-    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(it1.id);
-    expect((await db.items.get(it1.id))!.partNumber).toBeUndefined();
-    expect(notices.some((n) => n.kind === 'number')).toBe(false);
-    await updateItem(it1.id, { titleEn: 'REAR BRAKE PADS' });
-    await aiFindPart(it1.id);
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part)).toEqual(['BRAKE PADS', 'REAR BRAKE PADS']);
-    // A number typed by hand: not looked up, unless asked (✦).
-    await updateItem(it1.id, { titleEn: 'OIL FILTER', partNumber: '90915-YZZE1' });
-    expect(await aiFindPart(it1.id)).toBeUndefined();
-    await aiFindPart(it1.id, { again: true });
-    expect((await db.items.get(it1.id))!.partNumber).toBe('90915-YZZE1');
-  });
-});
-
-describe('every part of a job at once (v0.52)', () => {
-  it('the names put right first (quietly), then each part looked up: a number only when it is the one found and proven; the pictures on every line; one card — «Отменить» brings names and numbers back', async () => {
-    const o = await car('Toyota', 'Corolla');
-    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'колодки тормазные передние', qty: 1, unitPriceFils: 0 });
-    const filter = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
-    const work = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'BRAKE SERVICE', qty: 1, unitPriceFils: 0 });
-    // The filter's search finds two numbers, both seen in a catalogue: neither is written.
-    const one = answers['part-find'];
-    setAiTransport(async (path, body) => {
-      asked.push({ path, body: body as Record<string, unknown> });
-      if (path !== 'part-find') return answers[path];
-      if ((body as { part: string }).part === 'OIL FILTER')
-        return { ...(one as object), numbers: [{ number: '90915-YZZE1', brand: 'Toyota', seen: ['https://www.amayama.com/a', 'https://megazip.net/b'] }, { number: '90915-10003', brand: 'Toyota', seen: ['https://partsouq.com/c'] }] };
-      return one;
-    });
-    const r = await aiAllParts(o.id);
-    // v0.65: no number written — none of them is verified for this car (found on pages, not fitted on it).
-    expect(r).toEqual({ lines: 2, names: 1, numbers: 0, pictures: 2 });
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part).sort()).toEqual(['FRONT BRAKE PADS', 'OIL FILTER']);
-    const [p, f, w] = await Promise.all([db.items.get(pads.id), db.items.get(filter.id), db.items.get(work.id)]);
-    expect([p!.titleRu, p!.titleEn, p!.partNumber]).toEqual(['КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ', 'FRONT BRAKE PADS', undefined]);
-    expect([f!.partNumber, f!.aiFind?.numbers.length]).toEqual([undefined, 2]);
-    expect([p!.diagramIds?.length, p!.sampleIds?.length, f!.diagramIds?.length]).toEqual([1, 1, 1]);
-    expect(w!.aiFind).toBeUndefined();
-    // One card for all of it — no card per line.
-    expect(notices.map((n) => n.kind)).toEqual(['parts']);
-    const card = notices[0];
-    if ('undo' in card) await card.undo();
-    const back = (await db.items.get(pads.id))!;
-    expect([back.titleRu, back.titleEn, back.partNumber]).toEqual(['КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ', undefined, undefined]);
-    expect(back.diagramIds).toHaveLength(1);
-  });
-
-  it('a line with its number but no pictures is looked up for them; a line already looked up is not asked again', async () => {
-    const o = await car('Toyota', 'Corolla');
-    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-99999' });
-    await aiAllParts(o.id);
-    const i = (await db.items.get(it1.id))!;
-    expect([i.partNumber, i.diagramIds?.length]).toEqual(['04465-99999', 1]);
-    asked = [];
-    await aiAllParts(o.id);
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
-  });
-});
-
-describe('the part search only when asked (v0.53)', () => {
-  it('a part saved: its name put right at once, its number not looked up — until asked', async () => {
+  it('a part saved: its name put right at once — and nothing else is asked (v0.85: the search for its number is gone)', async () => {
     const o = await car('Toyota', 'Corolla');
     const pads = await addItem(o.id, { kind: 'part', block: 'A', titleRu: 'колодки тормазные передние', qty: 1, unitPriceFils: 0 });
     aiAfterPart(pads.id);
@@ -317,153 +132,7 @@ describe('the part search only when asked (v0.53)', () => {
     await until(async () => !aiWorking(`name:${pads.id}`));
     await new Promise((r) => setTimeout(r, 30));
     const i = (await db.items.get(pads.id))!;
-    expect([i.titleRu, i.titleEn, i.partNumber, i.aiFind]).toEqual(['КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ', 'FRONT BRAKE PADS', undefined, undefined]);
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
-    // Asked («Найти номер» in its sheet): looked up.
-    await aiFindPart(pads.id, { again: true });
-    const j = (await db.items.get(pads.id))!;
-    expect([j.partNumber, j.aiFind?.numbers.length]).toEqual([undefined, 2]);
-  });
-
-  it('the same part picked again on the same car: the garage’s memory answers (the web search of minutes ago), the server is not asked', async () => {
-    const o = await car('Toyota', 'Corolla');
-    const first = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(first.id, { again: true });
-    const second = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    asked = [];
-    const r = await aiAllParts(o.id, { only: [second.id] });
-    expect(r).toEqual({ lines: 1, names: 0, numbers: 0, pictures: 1 });
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
-    const i = (await db.items.get(second.id))!;
-    expect([i.partNumber, i.aiFind?.search, i.diagramIds?.length, i.sampleIds?.length]).toEqual([undefined, 'web', 1, 1]);
-  });
-
-  it('the parts picked on the job: only they are looked at', async () => {
-    const o = await car('Toyota', 'Corolla');
-    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    const filter = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
-    const r = await aiAllParts(o.id, { only: [filter.id] });
-    expect(r?.lines).toBe(1);
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part)).toEqual(['OIL FILTER']);
-    expect((await db.items.get(pads.id))!.aiFind).toBeUndefined();
-    expect((await db.items.get(filter.id))!.diagramIds).toHaveLength(1);
-  });
-});
-
-describe('the maker’s catalogue behind the search (v0.55)', () => {
-  const fits = { search: 'web', stage: 0, numbers: [{ number: '04465-60280', brand: 'Toyota', seen: ['https://www.megazip.net/parts/toyota-0446560280'], fits: true, name: 'Pad Kit, Disc Brake, Front', model: 'Land Cruiser GRJ200 · 2007–2021', replaces: ['04465-60270'] }, { number: '04465-60320', brand: 'Toyota', seen: ['https://partsouq.com/x'] }], images: [] };
-
-  it('on the model’s diagram: offered, not written (v0.65 — the model’s diagram is not the car’s configuration); on the car’s own frame code, as typed: written', async () => {
-    const o = await car('Toyota', 'Land Cruiser');
-    await updateVehicle(o.vehicleId, { year: 2016 });
-    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    answers['part-find'] = fits;
-    expect(await aiAllParts(o.id)).toMatchObject({ lines: 1, numbers: 0 });
-    const i = (await db.items.get(pads.id))!;
-    expect(i.partNumber).toBeUndefined();
-    expect(i.aiFind?.numbers[0]).toMatchObject({ number: '04465-60280', fits: true, name: 'Pad Kit, Disc Brake, Front', model: 'Land Cruiser GRJ200 · 2007–2021', replaces: ['04465-60270'] });
-    // The manager typed the car's frame code: the maker's diagram is of it — the number fits this car, and is written.
-    const lc = await car('Toyota', 'Land Cruiser GRJ200');
-    await updateVehicle(lc.vehicleId, { year: 2016 });
-    const pads2 = await addItem(lc.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await aiFindPart(pads2.id, { again: true });
-    expect((await db.items.get(pads2.id))!.partNumber).toBe('04465-60280');
-  });
-
-  it('the line’s own number goes with the question; ↻ on a line looked up asks to dig deeper; nothing is asked without a car', async () => {
-    const o = await car('Toyota', 'Land Cruiser');
-    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-60280' });
-    answers['part-find'] = fits;
-    await aiFindPart(pads.id, { again: true });
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => [a.body.number, a.body.deep])).toEqual([['04465-60280', undefined]]);
-    await aiFindPart(pads.id, { again: true });
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.deep)).toEqual([undefined, true]);
-    // A car with no make and no VIN: «Укажите машину», no question.
-    const bare = await car('', '');
-    const part = await addItem(bare.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
-    asked = [];
-    notices.length = 0;
-    expect(await aiFindPart(part.id, { again: true })).toBeUndefined();
-    expect([asked.length, notices.map((n) => n.kind)]).toEqual([0, ['needCar']]);
-  });
-
-  it('every part of a job: tyres and fluids are passed by; no car — said once, the names still put right, nothing looked up', async () => {
-    const o = await car('Toyota', 'Hiace');
-    await addItem(o.id, { kind: 'part', block: 'A', titleEn: '2 FRONT TYRES', qty: 2, unitPriceFils: 0 });
-    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'ENGINE OIL 5W30', qty: 4, unitPriceFils: 0 });
-    const plug = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'SPARK PLUG', qty: 4, unitPriceFils: 0 });
-    answers['part-find'] = { search: 'web', numbers: [], images: [] };
-    expect(await aiAllParts(o.id)).toMatchObject({ lines: 1 });
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => a.body.part)).toEqual(['SPARK PLUG']);
-    expect((await db.items.get(plug.id))!.aiFind).toBeDefined();
-    const bare = await car('', '');
-    await addItem(bare.id, { kind: 'part', block: 'A', titleRu: 'колодки тормазные передние', qty: 1, unitPriceFils: 0 });
-    asked = [];
-    notices.length = 0;
-    expect(await aiAllParts(bare.id)).toMatchObject({ lines: 1, names: 1, numbers: 0 });
-    expect(asked.filter((a) => a.path === 'part-find')).toHaveLength(0);
-    expect(notices.map((n) => n.kind)).toEqual(['needCar', 'parts']);
-  });
-
-  it('a number the garage fitted on this car before, with no pictures to copy: its diagram from the catalogue — the server asked for the catalogue only', async () => {
-    const o = await car('Toyota', 'Land Cruiser');
-    const first = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0, partNumber: '04465-60280' });
-    // Fitted (v0.65: installed — a part merely received is not proof it fits).
-    await updateItem(first.id, { procurementStatus: 'installed' });
-    const second = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    answers['part-find'] = { search: 'web', numbers: [{ number: '04465-60280', seen: [], fits: true }], images: [{ type: 'image/png', data: btoa('z'.repeat(900)), source: 'https://www.megazip.net/parts/toyota-0446560280', kind: 'diagram', marks: [{ x1: 1, y1: 2, x2: 3, y2: 4 }] }] };
-    await aiFindPart(second.id);
-    expect(asked.filter((a) => a.path === 'part-find').map((a) => [a.body.number, a.body.catalogOnly])).toEqual([['04465-60280', true]]);
-    const i = (await db.items.get(second.id))!;
-    expect([i.partNumber, i.aiFind?.search, i.diagramIds?.length]).toEqual(['04465-60280', 'garage', 1]);
-  });
-});
-
-describe('the note and how far a search has got (v0.64)', () => {
-  it('the AI’s note kept with what it found; while it searches — its percent, only forward; after — none', async () => {
-    const o = await car('Toyota', 'Corolla');
-    const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    answers['part-find'] = { ...(answers['part-find'] as object), note: '04465-12610 for GCC cars; 04465-02220 — Japan built. Check the VIN.' };
-    setAiTransport(async (path) => {
-      if (path === 'part-find') await gate;
-      return answers[path];
-    });
-    const going = aiFindPart(it1.id);
-    await until(async () => aiProgress(`find:${it1.id}`) !== undefined);
-    const first = aiProgress(`find:${it1.id}`)!;
-    expect(first).toBeGreaterThanOrEqual(1);
-    expect(first).toBeLessThan(95);
-    // No server to count it (a test's): the time alone — a second on, a little further.
-    await new Promise((r) => setTimeout(r, 1100));
-    expect(aiProgress(`find:${it1.id}`)!).toBeGreaterThanOrEqual(first);
-    release();
-    await going;
-    expect(aiProgress(`find:${it1.id}`)).toBeUndefined();
-    expect((await db.items.get(it1.id))!.aiFind?.note).toBe('04465-12610 for GCC cars; 04465-02220 — Japan built. Check the VIN.');
-  });
-
-  it('every part of a job in percent: a line done counts whole; none while nothing runs', async () => {
-    const o = await car('Toyota', 'Corolla');
-    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 0 });
-    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'OIL FILTER', qty: 1, unitPriceFils: 0 });
-    expect(aiPartsPercent(o.id)).toBeUndefined();
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    let calls = 0;
-    setAiTransport(async (path) => {
-      // The first part answers at once, the second waits.
-      if (path === 'part-find' && calls++ === 1) await gate;
-      return answers[path];
-    });
-    const going = aiAllParts(o.id);
-    await until(async () => (aiPartsPercent(o.id) ?? 0) >= 50);
-    const p = aiPartsPercent(o.id)!;
-    expect(p).toBeGreaterThanOrEqual(50);
-    expect(p).toBeLessThan(100);
-    release();
-    await going;
-    expect(aiPartsPercent(o.id)).toBeUndefined();
+    expect([i.titleRu, i.titleEn, i.partNumber, i.aiFind, i.diagramIds, i.sampleIds]).toEqual(['КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ', 'FRONT BRAKE PADS', undefined, undefined, undefined, undefined]);
+    expect(asked.map((a) => a.path).filter((p) => p !== 'part-name')).toEqual([]);
   });
 });

@@ -1,5 +1,4 @@
 import { notifications } from '@mantine/notifications';
-import { IconCircleCheckFilled, IconHistory } from '@tabler/icons-react';
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { dayShort, dubaiDate } from '../../domain/dates';
@@ -12,7 +11,7 @@ import { AiMark } from './Ai';
 /**
  * What the garage's AI did by itself (v0.48, services/ai.ts), said once — as its own card (v0.48.1): its mark, what it
  * is about, the result to read at a glance (the car's values as pills; the name as it was, crossed, and as it is;
- * the number and how many catalogues have it), and «Отменить». It came by itself, so it waits its turn: it never takes
+ * a receipt's sum, seller and day), and «Отменить». It came by itself, so it waits its turn: it never takes
  * away the undo of what the user just did (as `undoToast` with `replace: false`).
  */
 export function AiNotices() {
@@ -48,15 +47,7 @@ export function AiNotices() {
               {n.from !== n.to && <span className="ai-toast-was">{n.from}</span>}
             </>
           );
-        } else if (n.kind === 'parts') {
-          // Every part of a job (v0.52): how many lines, and what was done to them.
-          title = t('ai.partsTitle', { count: n.lines });
-          body = (
-            <span className="ai-toast-sub" data-ai-parts-done>
-              {[n.names ? t('ai.partsNames', { count: n.names }) : '', n.numbers ? t('ai.partsNumbers', { count: n.numbers }) : '', n.pictures ? t('ai.partsPictures', { count: n.pictures }) : ''].filter(Boolean).join(' · ') || t('ai.partsNothing')}
-            </span>
-          );
-        } else if (n.kind === 'expense') {
+        } else {
           // A receipt recorded as an expense (v0.50): the sum and the seller, the job it went to (or none — a tap away in the sheet).
           title = n.close ? t('ai.receiptClose') : t('ai.receiptTitle');
           body = (
@@ -73,34 +64,10 @@ export function AiNotices() {
               </span>
             </>
           );
-        } else if (n.kind === 'needCar') {
-          // No car to look a part up for (v0.55): what is missing, in two words — nothing was asked, nothing to undo.
-          title = t('ai.needCar');
-          body = <span className="ai-toast-sub">{t('ai.needCarHint')}</span>;
-        } else {
-          // From the garage's own jobs (v0.49) — said so: no catalogue was asked.
-          title = n.catalogs === 0 && n.garage > 0 ? t('ai.numberGarage') : t('ai.numberTitle');
-          body = (
-            <span className="ai-toast-main" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span className="ai-num-no">{n.number}</span>
-              {n.catalogs > 0 && (
-                <span className="ai-seen" aria-label={t('ai.seenIn', { count: n.catalogs })}>
-                  <IconCircleCheckFilled size={15} aria-hidden />
-                  {n.catalogs}
-                </span>
-              )}
-              {n.garage > 0 && (
-                <span className="ai-seen" aria-label={t('ai.usedIn', { count: n.garage })}>
-                  <IconHistory size={15} stroke={2.2} aria-hidden />
-                  {n.garage}
-                </span>
-              )}
-            </span>
-          );
         }
-        // The AI has finished with a result: its sound (v0.52) — a long work finished, three notes. Not a result — no sound.
-        if (n.kind !== 'needCar') chime(n.kind === 'parts' ? 'done' : 'found');
-        const undo = 'undo' in n ? n.undo : undefined;
+        // The AI has finished with a result: its sound (v0.52).
+        chime('found');
+        const undo = n.undo;
         notifications.show({
           id,
           className: 'ai-toast',

@@ -28,7 +28,6 @@ import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks
 import { useTabSwipe } from '../../ui/tabSwipe';
 import { ProcurementModal } from './Procurement';
 import { SuppliersTab } from './Suppliers';
-import { useOrderGuard } from '../fitment/Fitment';
 
 const STATUS_META: Record<string, { icon: Icon; color: string }> = {
   needed: { icon: IconShoppingCart, color: 'orange' },
@@ -59,7 +58,6 @@ export function PartsPage() {
   const lang = useLang();
   const navigate = useNavigate();
   const { run } = useAction();
-  const order = useOrderGuard();
   const [params, setParams] = useSearchParams();
   const explicitTab = params.get('tab');
   const [proc, setProc] = useState<OrderItem | null>(null);
@@ -80,8 +78,6 @@ export function PartsPage() {
   for (const i of pickup) groups.set(i.supplierId ?? '', [...(groups.get(i.supplierId ?? '') ?? []), i]);
 
   const step = async (i: OrderItem, status: 'ordered' | 'received') => {
-    // A number the search found and not verified for its car (v0.65): the manager's reason first.
-    if (status === 'ordered' && !(await order.guard([i.id]))) return;
     return run(async () => {
       await setProcurement(i.id, { status });
       await syncStage(i.orderId);
@@ -319,7 +315,6 @@ export function PartsPage() {
       {tab === 'suppliers' && <SuppliersTab />}
       </div>
       <ProcurementModal item={proc} onClose={() => setProc(null)} />
-      {order.node}
     </>
   );
 }

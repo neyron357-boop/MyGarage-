@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Text, Textarea, UnstyledButton } from '@mantine/core';
-import { AiLineWork, AiPartsTile, AiPickedButton } from '../ai/Ai';
+import { AiLineWork } from '../ai/Ai';
 import {
   IconBrandWhatsapp,
   IconPlus,
@@ -904,7 +904,7 @@ export function JobPage() {
         <Text span inherit td={i.approvalState === 'declined' ? 'line-through' : undefined} c={i.approvalState === 'declined' ? 'dimmed' : undefined}>
           {itemTitle(i, docLang) || '—'}
           {!!i.mediaIds?.length && i.kind !== 'part' && <IconPhoto size={15} stroke={1.9} color="var(--mantine-color-dimmed)" aria-label={t('slot.photo')} style={{ marginLeft: 6, verticalAlign: -2 }} />}
-          {/* The garage's AI looking at the part (its name, its number): its mark twinkles after the name. */}
+          {/* The garage's AI looking at the part's name: its mark twinkles after the name. */}
           {i.kind === 'part' && <AiLineWork itemId={i.id} />}
         </Text>
       }
@@ -1239,15 +1239,6 @@ export function JobPage() {
             <IconTruckDelivery size={21} stroke={1.9} />
           </ActionIcon>
         )}
-        {/* The AI for the picked parts (v0.53): names, numbers, diagrams and photos — the picking ends, the lines show it at work. */}
-        <AiPickedButton
-          orderId={oid}
-          itemIds={pickedParts.map((i) => i.id)}
-          onStart={() => {
-            haptic('light');
-            setPicked(null);
-          }}
-        />
         <Button
           color="red"
           loading={busy}
@@ -1470,8 +1461,6 @@ export function JobPage() {
             {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
             {/* v0.82 (#22, in «Копия»'s place — the copy is in its sheet): the parts to the suppliers that fit, by WhatsApp. */}
             {parts.length > 0 && <AddExtra icon={IconTruck} label={t('ask.title')} word={t('ask.title')} onClick={() => setAskOpen(true)} />}
-            {/* The AI for every part at once (v0.52): names, numbers, diagrams and photos. */}
-            {parts.length > 0 && <AiPartsTile orderId={oid} />}
             {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} word={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
           </AddBar>
         )}

@@ -1,5 +1,4 @@
 import type { WaAuto, WaTarget } from './waAuto';
-import type { FitStatus, Marking, NumberCheck, VinCheck } from './fitment';
 import type { NotifySettings } from './notify';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
 // Money is always integer fils (1 AED = 100 fils). VAT rates are basis points (500 = 5%).
@@ -708,23 +707,15 @@ export interface OrderItem {
   partNumber?: string;
   /** The garage's AI looked at the part's name as typed (v0.48): what it was, so it is not asked again; «Отменить» puts it back. */
   aiName?: { from: string; to?: string; at: string };
-  /** The part's numbers the AI found (v0.48, domain/ai.ts `AiFind`): candidates on the line, a proven one written itself. */
-  aiFind?: {
-    at: string;
-    /** `web` — found by Google Search; `model` — the AI's own guess; `garage` — the garage's own jobs (v0.49, no AI). */
-    search: 'web' | 'model' | 'garage';
-    /** The name it was looked up by (a new name — looked up again). */
-    part?: string;
-    /**
-     * `garage` — on how many of the garage's own lines for this car the number was (v0.49); `fits`, `name`, `model`,
-     * `replaces` — the maker's catalogue's word on it (v0.55, domain/ai.ts `FoundNumber`).
-     */
-    numbers: { number: string; brand?: string; note?: string; seen: string[]; garage?: number; fits?: boolean; name?: string; model?: string; replaces?: string[]; check?: NumberCheck }[];
-    filled?: string;
-    /** The AI's note on the numbers (v0.64, domain/ai.ts `findNote`): why they differ, what to check — in English. */
-    note?: string;
-  };
-  /** The part's diagram pictures taken off the catalogue pages (media, slot `diagram`) — the garage's, never sent with a quote. */
+  /**
+   * Left by the AI's search for the part's number (v0.48–v0.84: the numbers it found, their catalogues' word) — gone
+   * v0.85 by the owner's decision. Records may still hold it; nothing reads or writes it now (kept as data, no migration).
+   */
+  aiFind?: unknown;
+  /**
+   * The part's diagram pictures (media, slot `diagram`) — the garage's, never sent with a quote: added by hand
+   * (`addDiagram`), or taken off the catalogue pages by the AI's search before v0.85 (those stay with their lines).
+   */
   diagramIds?: string[];
   /**
    * The part ringed on its diagram by the manager (v0.59, domain/diagramSheet.ts): the ring drawn on the sheet of
@@ -737,18 +728,11 @@ export interface OrderItem {
    */
   diagramMarks?: { id: string; x: number; y: number; rx: number; ry: number }[];
   /**
-   * The part's fitment to the car (v0.65, domain/fitment.ts): the marking of the part on the car (typed, or read off the
-   * line's photo — a belt's «7PK2164»), the photos already read for it, and a risk taken knowingly — ordered with a number
-   * not verified, the manager's reason (it does not make the number verified).
+   * Left by the fitment of the AI's numbers (v0.65–v0.84: the part's marking on the car, a risk ordered knowingly, a
+   * number found by the VIN) — gone v0.85 with the search. Kept as data; nothing reads or writes it now.
    */
-  fitment?: {
-    marking?: Marking;
-    read?: string[];
-    ack?: { number: string; status: FitStatus; reason: string; at: string };
-    /** The number found by the car's VIN in a catalogue — the manager's word (v0.66, domain/vinCatalogs.ts). */
-    vinCheck?: VinCheck;
-  };
-  /** Photos of the part itself off the catalogue pages (v0.48.2, media, slot `sample`): what it looks like — not sent with a quote either. */
+  fitment?: unknown;
+  /** Photos of the part itself off the catalogue pages (v0.48.2–v0.84, the AI's search; media, slot `sample`) — not sent with a quote either. */
   sampleIds?: string[];
   brand?: string;
   customerSupplied?: boolean;

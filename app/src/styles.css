@@ -798,13 +798,12 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
   .stage-btn,
   .search-clear,
   .day-pill-input,
-  .fit-badge,
   .price-add,
   .price-tap-row,
   .qa-added-x {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .fit-badge, .price-add, .price-tap-row, .qa-added-x)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -6518,15 +6517,6 @@ button.kpi-tab .eyebrow {
     opacity: 1;
   }
 }
-/* The AI's words: its colours on the text (a title, «Найти номер»). */
-.ai-text {
-  background: var(--ai-grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  font-weight: 700;
-}
-
 /* Its notice: the glass banner with a hairline of its colours, the mark, a title, what changed. */
 .mantine-Notification-root.ai-toast::after {
   content: '';
@@ -6627,115 +6617,6 @@ html.desk .ai-scan-pill {
   align-self: center;
 }
 
-/* The part's numbers from the catalogues (the part's sheet): a row a number — the number large, what it is under it,
-   seen in catalogues (green, how many) or not checked (orange); a tap takes it, the globe looks it up on Yandex. */
-.ai-block {
-  display: grid;
-  gap: 2px;
-  padding: 10px 0 4px;
-}
-.ai-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-}
-.ai-head .ai-text {
-  font-size: 15px;
-  flex: 1;
-}
-.ai-num {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-top: 0.5px solid var(--app-hairline);
-}
-.ai-pick {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  min-height: 54px;
-  padding: 6px 4px 6px 0;
-  border: 0;
-  border-radius: 12px;
-  background: none;
-  color: inherit;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-  transition: transform var(--dur-3) var(--spring), background-color var(--dur-1) ease;
-  -webkit-tap-highlight-color: transparent;
-}
-.ai-pick:active {
-  transform: scale(0.98);
-  background: var(--app-press);
-  transition-duration: var(--dur-0);
-}
-.ai-num-main {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-}
-.ai-num-no {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-rounded);
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.ai-num-sub {
-  font-size: 13px;
-  color: var(--mantine-color-dimmed);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ai-seen {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--mantine-color-green-7);
-  white-space: nowrap;
-}
-.ai-seen[data-unsure] {
-  color: var(--mantine-color-orange-7);
-}
-/* On this car's diagram in the maker's catalogue (v0.55): the surest mark — two ticks. */
-.ai-seen[data-fits] {
-  color: var(--mantine-color-green-6);
-}
-.ai-num[data-unsure] .ai-num-no {
-  color: var(--mantine-color-orange-7);
-}
-.ai-skel {
-  height: 44px;
-  border-radius: 12px;
-  margin-top: 6px;
-}
-.ai-find {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 48px;
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-  padding: 0;
-  -webkit-tap-highlight-color: transparent;
-}
-.ai-find .ai-text {
-  font-size: 17px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .ai-mark[data-busy] svg,
   .ai-ring[data-ai-busy]::before {
@@ -6743,118 +6624,6 @@ html.desk .ai-scan-pill {
   }
 }
 
-/* ---------- A part number's fitment (v0.65, features/fitment/Fitment.tsx) ----------
-   Its status as a word in its colour — green for verified only; partly — yellow, not checked — orange, a conflict and
-   «does not fit» — red; how many independent sources have it — grey, apart (its existence, not its fitting). */
-.fit-badge {
-  --c: var(--mantine-color-orange-light-color);
-  --b: var(--mantine-color-orange-light);
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 10px 0 8px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--b);
-  color: var(--c);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: transform var(--dur-1) var(--spring);
-  -webkit-tap-highlight-color: transparent;
-}
-.fit-badge:active {
-  transform: scale(0.95);
-}
-.fit-badge[data-status='verified'] {
-  --c: var(--mantine-color-green-light-color);
-  --b: var(--mantine-color-green-light);
-}
-.fit-badge[data-status='partial'] {
-  --c: var(--mantine-color-yellow-light-color);
-  --b: var(--mantine-color-yellow-light);
-}
-.fit-badge[data-status='conflict'],
-.fit-badge[data-status='rejected'] {
-  --c: var(--mantine-color-red-light-color);
-  --b: var(--mantine-color-red-light);
-}
-.fit-sources {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-right: 6px;
-  color: var(--app-label-3);
-  font-size: 12px;
-  font-weight: 600;
-  vertical-align: -0.1em;
-}
-/* A number's row: the number whole on top (never cut by the badge), its status under it, the globe on the right. */
-.ai-num[data-fit] {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 8px;
-}
-.ai-num[data-fit] > .ai-pick {
-  grid-column: 1;
-  grid-row: 1;
-}
-.ai-num[data-fit] > :not(.ai-pick):not(.fit-badge) {
-  grid-column: 2;
-  grid-row: 1;
-}
-.ai-num[data-fit] > .fit-badge {
-  grid-column: 1;
-  grid-row: 2;
-  justify-self: start;
-  margin: -6px 0 8px 32px;
-}
-.ai-num[data-fit='conflict'] .ai-num-no,
-.ai-num[data-fit='rejected'] .ai-num-no {
-  color: var(--mantine-color-red-light-color);
-}
-.ai-num[data-fit='rejected'] .ai-num-no {
-  text-decoration: line-through;
-}
-.ai-num[data-fit='verified'] .ai-num-no {
-  color: var(--mantine-color-green-light-color);
-}
-/* The line's own number under «Номер»: its status, in a few words why it is not green. */
-.fit-current {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.fit-hint {
-  flex: 1;
-  min-width: 0;
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  color: var(--app-label-2);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.3;
-  text-align: left;
-  cursor: pointer;
-}
-.fit-current[data-fit-current='conflict'] .fit-hint,
-.fit-current[data-fit-current='rejected'] .fit-hint {
-  color: var(--mantine-color-red-light-color);
-}
-.fit-marking .value {
-  display: grid;
-  gap: 6px;
-  justify-items: end;
-}
-.fit-photo-read[data-unsure] {
-  color: var(--mantine-color-orange-light-color);
-}
 /* ---------- A job shown to its customer (v0.67, ui/clientLock.ts, features/job/ClientView.tsx) ----------
    The app's chrome away — the tab bar and «＋», the PC's side menu, «Назад», the notes' pencil; the job's own view only. */
 html[data-client-lock] .tab-bar-wrap,
@@ -6930,10 +6699,6 @@ html[data-client-lock] .fb-fab {
     --hold-p: 100%;
   }
 }
-/* The AI's numbers' row with nothing in it (no server, nothing looked up): not an empty band in the sheet. */
-.ios-row.ai-row:empty {
-  display: none;
-}
 /* The catalogues by the car's VIN (v0.66): a row of chips, each opening a catalogue on this car. */
 .ios-row.vin-cats {
   display: block;
@@ -6961,98 +6726,6 @@ a.chip.vin-cat {
 }
 a.chip.vin-cat svg {
   color: var(--app-label-3);
-}
-.vin-found {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.vin-found-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--mantine-color-green-light-color);
-}
-/* «Почему этот номер?» */
-.fit-head {
-  display: grid;
-  gap: 6px;
-  justify-items: start;
-}
-.fit-section-title {
-  margin-bottom: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-label-2);
-}
-.fit-line {
-  padding: 6px 0;
-  border-top: 0.5px solid var(--app-hairline);
-  font-size: 15px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-.fit-line[data-tone='bad'] {
-  color: var(--mantine-color-red-light-color);
-}
-.fit-line[data-tone='warn'] {
-  color: var(--mantine-color-orange-light-color);
-}
-.fit-line[data-tone='good'] {
-  color: var(--mantine-color-green-light-color);
-}
-.fit-ev {
-  padding: 8px 0;
-  border-top: 0.5px solid var(--app-hairline);
-}
-.fit-ev-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-}
-.fit-ev-weight {
-  font-weight: 500;
-  color: var(--app-label-3);
-  white-space: nowrap;
-}
-.fit-ev[data-weight='fits'] .fit-ev-weight {
-  color: var(--mantine-color-green-light-color);
-}
-.fit-ev[data-weight='against'] .fit-ev-weight {
-  color: var(--mantine-color-red-light-color);
-}
-.fit-ev-body {
-  font-size: 13px;
-  color: var(--app-label-2);
-  overflow-wrap: anywhere;
-}
-.fit-ev-body a {
-  color: var(--mantine-color-cobalt-6);
-}
-/* Ordering with a number not verified: each part, its number and status. */
-.fit-risk {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 0;
-  border-top: 0.5px solid var(--app-hairline);
-}
-.fit-risk-main {
-  display: grid;
-  min-width: 0;
-}
-.fit-risk-name {
-  font-size: 13px;
-  color: var(--app-label-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* A line's pictures on top of its sheet (v0.52): one row, one size — «Фото», its own, then the AI's (marked). */
@@ -7148,54 +6821,6 @@ a.chip.vin-cat svg {
   bottom: 2px;
   line-height: 0;
 }
-/* The AI for every part of a job: a narrow tile under the lines, how far it got under the mark. */
-.ai-parts-tile {
-  position: relative;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 2px;
-}
-.ai-parts-tile:disabled {
-  opacity: 1;
-}
-.ai-parts-n {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--app-label-2);
-}
-/* How far a search has got (v0.64): its percent beside the AI's mark, and a thin bar of its colours that only grows —
-   transform only (the sheet is not laid out again a second). */
-.ai-progress {
-  position: relative;
-  height: 4px;
-  margin: 2px 0 6px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--ai-b) 14%, transparent);
-}
-.ai-progress > span {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: var(--ai-grad);
-  transform-origin: left center;
-  transition: transform var(--dur-4) var(--ease-out);
-}
-.ai-parts-tile .ai-progress {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 6px;
-  height: 3px;
-  margin: 0;
-}
-.ai-pct {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-label-2);
-  white-space: nowrap;
-}
 .ai-line-work {
   display: inline-flex;
   align-items: center;
@@ -7204,34 +6829,6 @@ a.chip.vin-cat svg {
 }
 .ai-line-work .ai-mark {
   vertical-align: 0;
-}
-.ai-line-pct {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--app-label-2);
-  white-space: nowrap;
-}
-/* The note on what was found (v0.64): a line or two under the numbers, in English. */
-.ai-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 10px 0 4px;
-  border-top: 0.5px solid var(--app-hairline);
-  font-size: 13px;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
-  color: var(--app-label-2);
-}
-.ai-note svg {
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: var(--ai-b);
-}
-@media (prefers-reduced-motion: reduce) {
-  .ai-progress > span {
-    transition: none;
-  }
 }
 
 /* A job typed in after the fact (v0.53): its day, a chip on the card beside the promised time — a tap changes it. */
