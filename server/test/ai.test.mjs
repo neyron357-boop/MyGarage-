@@ -3,16 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { createAi, diagramImages, pageText, parseJson, plainNumber, publicUrl } from '../src/ai.mjs';
+import { builtWhere, createAi, parseJson } from '../src/ai.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-ai-'));
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-/** Addresses as the internet has them — and one name that points inside this computer's network. */
-const lookup = async (host) => (host === 'evil.example' ? [{ address: '192.168.1.10' }] : [{ address: '93.184.216.34' }]);
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const answer = (obj, extra = {}) => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] }, ...extra }] });
-const png = () => new Response(new Uint8Array(20_000).fill(7), { headers: { 'Content-Type': 'image/png' } });
 
 function fake(routes) {
   const seen = [];
@@ -30,32 +27,23 @@ describe('helpers', () => {
     assert.deepEqual(parseJson('Here it is: {"n":[1,2]} — done'), { n: [1, 2] });
     assert.equal(parseJson('no json'), undefined);
   });
-  it('writes a part number by its letters and digits only', () => {
-    assert.equal(plainNumber('04465-33471'), '0446533471');
-    assert.equal(plainNumber(' 04465 33471 '), '0446533471');
-  });
-  it('opens only addresses on the open internet', async () => {
-    assert.equal(await publicUrl('https://www.amayama.com/en/part/x', lookup), true);
-    for (const u of ['http://127.0.0.1:8788/status.json', 'http://localhost/', 'http://192.168.0.5/', 'http://[::1]/', 'https://evil.example/', 'file:///C:/x', 'ftp://a.com/', 'http://10.0.0.1/', 'https://user:pw@a.com/'])
-      assert.equal(await publicUrl(u, lookup), false, u);
-  });
-  it('picks a page’s diagram: its picture, and pictures that name the number or a diagram — no logos', () => {
-    const html = `<meta property="og:image" content="/img/og.jpg"><img src="/logo.png"><img src="/cat/04465-33471.jpg" alt="pads"><img src="/x/1.jpg" alt="Front brake exploded diagram"><img src="/y.jpg">`;
-    const got = diagramImages(html, 'https://parts.example/p/1', ['04465-33471']).map((x) => x.url);
-    assert.deepEqual(got, ['https://parts.example/cat/04465-33471.jpg', 'https://parts.example/og.jpg'.replace('og.jpg', 'img/og.jpg'), 'https://parts.example/x/1.jpg']);
-    assert.equal(pageText('<p>Part&nbsp;No <b>04465-33471</b></p><script>x</script>').trim(), 'Part No 04465-33471');
+  it('says where a VIN’s car was built by its first characters', () => {
+    assert.equal(builtWhere('JTDBR42E39J016456'), 'Japan');
+    assert.equal(builtWhere('4T1B11HK5JU123456'), 'USA');
+    assert.equal(builtWhere('MR0FZ29G601000000'), 'Thailand');
+    assert.equal(builtWhere('x'), '');
   });
 });
 
 describe('the AI', () => {
   it('is off without a key; the key set here is kept in Служебное/ai.json', () => {
-    const ai = createAi({ dataDir: dir, env: {}, fetchImpl: async () => json({}), lookup });
+    const ai = createAi({ dataDir: dir, env: {}, fetchImpl: async () => json({}) });
     assert.equal(ai.on(), false);
     ai.setKey('AQ.test-key-1234567890');
     assert.equal(ai.on(), true);
     assert.equal(ai.status().key, '…7890');
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'Служебное', 'ai.json'), 'utf8')).key, 'AQ.test-key-1234567890');
-    assert.equal(createAi({ dataDir: dir, env: {}, lookup }).on(), true);
+    assert.equal(createAi({ dataDir: dir, env: {} }).on(), true);
   });
 
   it('decodes a VIN: the official decoder’s facts go to Gemini with it; the next busy model answers; asked once', async () => {
@@ -65,7 +53,7 @@ describe('the AI', () => {
       [/gemini-3\.5-flash-lite/, () => (tries++, json({ error: { message: 'high demand' } }, 503))],
       [/gemini-3\.1-flash-lite/, () => answer({ make: 'Toyota', model: 'Corolla', year: 2009, engine: '1.8L 4-cyl', body: 'sedan', confidence: 0.9 })],
     ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
     const r = await ai.vin('jtdbr42e39j016456');
     assert.deepEqual([r.make, r.model, r.year, r.engine, r.body], ['Toyota', 'Corolla', 2009, '1.8L 4-cyl', 'sedan']);
     assert.equal(r.facts.make, 'TOYOTA');
@@ -84,7 +72,7 @@ describe('the AI', () => {
 
   it('a part’s name: its mistakes put right, its English name', async () => {
     const { f, seen } = fake([[/generateContent/, () => answer({ fixed: 'колодки тормозные', english: 'BRAKE PADS', isPart: true, confidence: 0.92 })]]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
     const r = await ai.partName({ name: 'колодки тормазные', make: 'Toyota', model: 'Camry', year: 2018 });
     assert.equal(r.fixed, 'колодки тормозные');
     assert.equal(r.english, 'BRAKE PADS');
@@ -99,7 +87,7 @@ describe('the AI', () => {
       [/vpic\.nhtsa/, () => json({ Results: [{ Make: 'TOYOTA', Model: 'Camry', ModelYear: '2018', DisplacementL: '2.5', EngineCylinders: '4', BodyClass: 'Sedan/Saloon', PlantCountry: 'UNITED STATES (USA)' }] })],
       [/generateContent/, () => (gemini++, answer({ fixed: 'oil filter', english: 'OIL FILTER', isPart: true, confidence: 0.9 }))],
     ]);
-    const one = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, store });
+    const one = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, store });
     const v = await one.vin('4T1B11HK5JU123456');
     assert.deepEqual([v.by, v.make, v.model, v.year, v.engine, v.body, v.built], ['nhtsa', 'Toyota', 'Camry', 2018, '2.5L 4-cyl', 'sedan', 'USA']);
     assert.equal(gemini, 0);
@@ -107,7 +95,7 @@ describe('the AI', () => {
     assert.equal(gemini, 1);
     assert.equal(rows.size, 2);
     // Another start (another server, a restart): the same questions, the store's answers, no tokens.
-    const two = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup, store });
+    const two = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, store });
     assert.equal((await two.vin('4T1B11HK5JU123456')).by, 'nhtsa');
     assert.equal((await two.partName({ name: 'oil filtre' })).english, 'OIL FILTER');
     assert.equal(gemini, 1);
@@ -117,7 +105,7 @@ describe('the AI', () => {
     const { f, seen } = fake([
       [/gemini-3\.8-flash/, () => answer({ isReceipt: true, kind: 'parts', dateText: '18-Nov-2026', dateSure: true, vendor: 'AL QUOZ AUTO PARTS', vendorPhone: '050 442 1190', invoiceNo: 'A-1042', date: '2026-11-18', items: [{ name: 'OIL FILTER', partNumber: '90915-YZZE1', qty: 1, unitPrice: 35, total: 35 }], subtotal: '35', vat: '1.75', total: 36.75, paymentMethod: 'cash', carText: '', confidence: 0.9 })],
     ]);
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f, lookup });
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
     const image = { type: 'image/jpeg', data: 'x'.repeat(5000) };
     const r = await ai.receipt({ image });
     assert.deepEqual([r.vendor, r.vendorPhone, r.kind, r.subtotal, r.vat, r.total, r.items[0].partNumber, r.by], ['AL QUOZ AUTO PARTS', '050 442 1190', 'parts', 35, 1.75, 36.75, '90915-YZZE1', 'gemini-3.8-flash']);
@@ -143,7 +131,7 @@ describe('the AI', () => {
 
   it('a device may ask 120 times a minute (a long list of parts is asked at once)', () => {
     let t = 0;
-    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, lookup, now: () => t });
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, now: () => t });
     for (let i = 0; i < 120; i++) ai.allow('d1');
     assert.throws(() => ai.allow('d1'), /too many/);
     ai.allow('d2');
@@ -163,7 +151,7 @@ describe('the AI through the API', () => {
     const pairing = createPairing();
     let on = false;
     const asked = [];
-    const ai = { on: () => on, status: () => ({ on }), allow: () => {}, vin: async (v) => (asked.push(v), { make: 'Toyota', model: 'Camry' }), partName: async () => ({}), partFind: async () => ({}), receipt: async (b) => ({ got: b.image.data.length }) };
+    const ai = { on: () => on, status: () => ({ on }), allow: () => {}, vin: async (v) => (asked.push(v), { make: 'Toyota', model: 'Camry' }), partName: async () => ({}), receipt: async (b) => ({ got: b.image.data.length }) };
     const server = createServer(createApi({ store, config: loadConfig({ DATA_DIR: d }), pairing, log: () => {}, ai }));
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -184,6 +172,9 @@ describe('the AI through the API', () => {
       assert.equal(rr.status, 200);
       assert.deepEqual(await rr.json(), { got: 200_000 });
       assert.equal((await post('vin', JSON.stringify({ vin: 'x'.repeat(20_000) }))).status, 413);
+      // The part-number search is gone (v0.85, the owner's decision): no route for it, nor for its progress.
+      assert.equal((await post('part-find', JSON.stringify({ part: 'FRONT BRAKE PADS', make: 'Toyota' }))).status, 404);
+      assert.equal((await fetch(`${base}/api/ai/progress?t=a`, { headers: { Authorization: `Bearer ${token}` } })).status, 404);
     } finally {
       server.close();
       store.close();

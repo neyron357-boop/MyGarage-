@@ -14,7 +14,6 @@ import { useAction, useLang } from '../../ui/hooks';
 import { PhotoStrip } from '../../ui/PhotoStrip';
 import { ReturnTerms } from '../job/LineExtras';
 import { SupplierChips } from '../job/PartTools';
-import { useOrderGuard } from '../fitment/Fitment';
 
 const STEPS: ProcurementStatus[] = ['needed', 'ordered', 'in_transit', 'received'];
 
@@ -27,7 +26,6 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
   const { t } = useTranslation();
   const lang = useLang();
   const { run, busy } = useAction();
-  const order = useOrderGuard();
   const make = useLiveQuery(async () => {
     if (!item) return undefined;
     const o = await db.orders.get(item.orderId);
@@ -62,9 +60,6 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
   }, [item]);
   if (!item || !live) return null;
   const save = async () => {
-    // Ordered with a number not verified (v0.65): the manager's reason first.
-    const toOrder = (status === 'ordered' || status === 'in_transit') && !['ordered', 'in_transit'].includes(item.procurementStatus ?? '');
-    if (toOrder && !(await order.guard([item.id]))) return;
     return run(async () => {
       await setProcurement(item.id, { status, supplierId: supplierId ?? '', costPriceFils: cost, purchaseVatFils: vat, expectedAt: expected, receipt: receipt?.file, paidCash });
       await syncStage(item.orderId);
@@ -75,7 +70,6 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
   const bought = ['ordered', 'in_transit', 'received'].includes(live.procurementStatus ?? '');
   return (
     <Modal opened onClose={onClose} title={itemTitle(item, lang)} classNames={{ content: 'sheet-grouped' }}>
-      {order.node}
       <Stack gap="lg">
         <div className="ios-group">
           <div className="ios-row">

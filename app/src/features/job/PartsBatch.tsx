@@ -8,7 +8,6 @@ import { haptic } from '../../ui/haptics';
 import { useAction } from '../../ui/hooks';
 import { PART_COLOR } from './LineSheet';
 import { SupplierChips } from './PartTools';
-import { useOrderGuard } from '../fitment/Fitment';
 
 const STATES: Extract<ProcurementStatus, 'needed' | 'ordered' | 'received'>[] = ['needed', 'ordered', 'received'];
 
@@ -19,7 +18,6 @@ const STATES: Extract<ProcurementStatus, 'needed' | 'ordered' | 'received'>[] = 
 export function PartsBatchSheet({ parts, vehicle, opened, onClose, onDone }: { parts: OrderItem[]; vehicle: Vehicle; opened: boolean; onClose: () => void; onDone: () => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
-  const order = useOrderGuard();
   const [supplierId, setSupplierId] = useState<string>();
   const [status, setStatus] = useState<(typeof STATES)[number]>();
   useEffect(() => {
@@ -30,8 +28,6 @@ export function PartsBatchSheet({ parts, vehicle, opened, onClose, onDone }: { p
     setStatus(undefined);
   }, [opened, parts]);
   const save = async () => {
-    // Ordered with numbers not verified (v0.65): the manager's reason first — else nothing is set.
-    if (status === 'ordered' && !(await order.guard(parts.filter((p) => !['ordered', 'in_transit'].includes(p.procurementStatus ?? '')).map((p) => p.id)))) return undefined;
     return run(async () => {
       const n = await setPartsBatch(
         parts.map((p) => p.id),
@@ -44,7 +40,6 @@ export function PartsBatchSheet({ parts, vehicle, opened, onClose, onDone }: { p
   };
   return (
     <Modal opened={opened} onClose={onClose} title={t('job.partsN', { n: parts.length })}>
-      {order.node}
       <Stack gap="lg">
         <div>
           <Text size="sm" fw={600} mb={8}>

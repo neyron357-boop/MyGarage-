@@ -69,8 +69,8 @@ export function armSound(): void {
 }
 
 /**
- * The AI's sound: `found` — a result for one thing (a car filled, a name, a number, a receipt), two rising notes;
- * `done` — a long work finished (every part of a job), three. Quiet, short, not a ring.
+ * The AI's sound: `found` — a result for one thing (a car filled, a name, a receipt), two rising notes; `done` — a long
+ * work finished, three. Quiet, short, not a ring.
  */
 export function chime(kind: 'found' | 'done' = 'found'): void {
   if (!enabled) return;

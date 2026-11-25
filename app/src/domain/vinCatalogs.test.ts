@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { carFacts, fitmentOf } from './fitment';
-import { carRegion, catalogOfHost, vinCatalogs } from './vinCatalogs';
+import { carRegion, vinCatalogs } from './vinCatalogs';
 
 describe('the catalogues by the car’s VIN (v0.66)', () => {
   it('the likeliest first, by where the car was built', () => {
@@ -27,30 +26,5 @@ describe('the catalogues by the car’s VIN (v0.66)', () => {
     // No VIN: the sites' own pages, nothing made up.
     const none = Object.fromEntries(vinCatalogs({ make: 'Honda' }).map((c) => [c.id, c]));
     expect([none.emex.url, none.emex.vinInUrl, none.rockauto.url]).toEqual(['https://emexdwc.ae/', false, 'https://www.rockauto.com/']);
-    expect(catalogOfHost('www.emexdwc.ae')).toBe('emex');
-  });
-
-  it('a number the manager found by this car’s VIN is verified — for that number and that VIN only; a conflict still wins', () => {
-    const car = carFacts({ id: 'v', make: 'Honda', model: 'Civic', year: 2008, engine: '1.8L', vin: 'JHMFD16408S200000' });
-    const check = { number: '56992-RNA-A02', vin: 'JHMFD16408S200000', source: 'emexdwc.ae', at: '2026-11-22T10:00:00.000Z' };
-    const f = fitmentOf({ part: 'ENGINE BELT', car, candidate: { number: '56992RNAA02', seen: [] }, search: 'web', vinCheck: check });
-    expect(f.status).toBe('verified');
-    expect(f.reasons).toEqual([{ code: 'vinCatalogue', params: { site: 'emexdwc.ae' } }]);
-    expect(f.evidence[0]).toMatchObject({ kind: 'vin', source: 'emexdwc.ae', weight: 'fits' });
-    // Another number, or another VIN in the card: it no longer holds — and the check by VIN is what is missing.
-    const other = fitmentOf({ part: 'ENGINE BELT', car, candidate: { number: '31110-RSA-G01', seen: [] }, search: 'web', vinCheck: check });
-    expect(other.status).toBe('unverified');
-    expect(other.missing).toContain('vinCheck');
-    expect(fitmentOf({ part: 'ENGINE BELT', car: { ...car, vinCode: 'JHMFD16408S299999' }, candidate: { number: '56992-RNA-A02', seen: [] }, search: 'web', vinCheck: check }).status).not.toBe('verified');
-    // The belt on the car says otherwise (a 7PK1535 stated for it): a conflict, whatever was clicked.
-    const conflict = fitmentOf({
-      part: 'ENGINE BELT',
-      car,
-      candidate: { number: '56992-RNA-A02', seen: [], check: { at: check.at, epc: { state: 'unread' }, web: [], specs: [{ text: '7PK1535', by: 'page', from: 'https://a.example' }], named: 'search' } },
-      search: 'web',
-      vinCheck: check,
-      marking: { text: '7PK2164', from: 'typed', confidence: 1, at: check.at },
-    });
-    expect(conflict.status).toBe('conflict');
   });
 });

@@ -1,48 +1,18 @@
-import { ActionIcon, Text } from '@mantine/core';
-import { IconCircle, IconCircleCheckFilled, IconInfoCircle, IconRefresh, IconSparkles, IconWorldSearch } from '@tabler/icons-react';
-import { useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { ActionIcon } from '@mantine/core';
+import { IconSparkles, IconWorldSearch } from '@tabler/icons-react';
+import { useSyncExternalStore, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { db } from '../../db/db';
-import { findNote } from '../../domain/ai';
-import { aiAllParts, aiFindPart, aiOn, aiPartsPercent, aiPartsProgress, aiProgress, aiProgressVersion, aiWorking, aiWorkVersion, subscribeAiProgress, subscribeAiWork, yandexUrl } from '../../services/ai';
-import { useAction, useScreenLiveQuery } from '../../ui/hooks';
-import { FitBadge, FitSheet, FitSources, useLineFitment } from '../fitment/Fitment';
+import { aiWorking, aiWorkVersion, subscribeAiWork, yandexUrl } from '../../services/ai';
 
 /*
  * How the garage's AI looks (v0.48.1, the user: «улучши дизайн под ИИ, качественно и профессионально»): one mark — a
- * sparkle on its own colours — wherever it acts; it twinkles while the AI works; what it found is laid out to be read
- * at a glance and taken with a tap. Styles — «The garage's AI» in styles.css.
+ * sparkle on its own colours — wherever it acts; it twinkles while the AI works. Styles — «The garage's AI» in styles.css.
  */
 
-/** The AI is working on one of these (`car:<vehicleId>`, `name:<itemId>`, `find:<itemId>` — services/ai.ts). */
+/** The AI is working on one of these (`car:<vehicleId>`, `name:<itemId>` — services/ai.ts). */
 export function useAiWorking(...keys: string[]): boolean {
   useSyncExternalStore(subscribeAiWork, aiWorkVersion);
   return keys.some(aiWorking);
-}
-
-/** How far the AI's search under this key has got, 0…99 (v0.64; none — not searching). */
-export function useAiProgress(key: string): number | undefined {
-  useSyncExternalStore(subscribeAiProgress, aiProgressVersion);
-  return aiProgress(key);
-}
-
-/** A percent as the language writes it («42 %», «42%»). */
-function Percent({ value, className }: { value: number; className: string }) {
-  const { t } = useTranslation();
-  return (
-    <span className={`${className} tnum`} aria-label={t('ai.progress', { p: value })}>
-      {t('ai.percent', { p: value })}
-    </span>
-  );
-}
-
-/** A search's progress as a thin bar of the AI's colours (transform only: it does not lay the sheet out again). */
-function ProgressBar({ value }: { value: number }) {
-  return (
-    <div className="ai-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
-      <span style={{ transform: `scaleX(${Math.max(0.02, value / 100)})` }} />
-    </div>
-  );
 }
 
 /** The AI's mark: a sparkle on its colours, like an app's icon; `busy` — twinkling, the AI at work. */
@@ -54,77 +24,15 @@ export function AiMark({ size = 22, busy, label }: { size?: number; busy?: boole
   );
 }
 
-/** On a job's line: the AI looking at it (its name, its number) — the mark twinkling after the name. */
+/** On a job's line: the AI looking at the part's name — the mark twinkling after the name. */
 export function AiLineWork({ itemId }: { itemId: string }) {
   const { t } = useTranslation();
-  const busy = useAiWorking(`name:${itemId}`, `find:${itemId}`);
-  // Its search's percent after the mark (v0.64): how far it has got, how long it has to go.
-  const p = useAiProgress(`find:${itemId}`);
+  const busy = useAiWorking(`name:${itemId}`);
   if (!busy) return null;
   return (
     <span style={{ marginLeft: 6 }} className="fade-enter ai-line-work">
       <AiMark size={17} busy label={t('ai.working')} />
-      {p !== undefined && <Percent value={p} className="ai-line-pct" />}
     </span>
-  );
-}
-
-/**
- * In the job's picking bar (v0.53, the user: «выбрать несколько деталей и запустить по ним поиск ИИ»): the AI for the parts
- * picked — names, then each one's number, diagram and photos, as the tile under the lines does for all of them; the
- * picking ends at once (the lines show the AI at work, the tile under them how far it has got).
- */
-export function AiPickedButton({ orderId, itemIds, onStart }: { orderId: string; itemIds: string[]; onStart?: () => void }) {
-  const { t } = useTranslation();
-  useSyncExternalStore(subscribeAiWork, aiWorkVersion);
-  if (!aiOn() || !itemIds.length) return null;
-  const busy = aiWorking(`all:${orderId}`);
-  return (
-    <ActionIcon
-      size={44}
-      radius="xl"
-      variant="default"
-      aria-label={t('ai.pickedParts')}
-      data-ai-picked
-      disabled={busy}
-      onClick={() => {
-        void aiAllParts(orderId, { only: itemIds });
-        onStart?.();
-      }}
-      style={{ flex: '0 0 auto' }}
-    >
-      <AiMark size={22} busy={busy} />
-    </ActionIcon>
-  );
-}
-
-/**
- * Under a job's lines (v0.52): the AI for every part at once — its mark on a narrow tile, twinkling while it works,
- * how many lines are done under it. Only where the garage's AI is.
- */
-export function AiPartsTile({ orderId }: { orderId: string }) {
-  const { t } = useTranslation();
-  useSyncExternalStore(subscribeAiWork, aiWorkVersion);
-  useSyncExternalStore(subscribeAiProgress, aiProgressVersion);
-  if (!aiOn()) return null;
-  const busy = aiWorking(`all:${orderId}`);
-  const p = aiPartsProgress(orderId);
-  // v0.64: how far all of them have got, in percent (the lines done count whole, those being looked up — by their search).
-  const pct = busy ? aiPartsPercent(orderId) : undefined;
-  return (
-    <button
-      type="button"
-      className="action-tile add-extra ai-parts-tile"
-      aria-label={busy && p ? `${t('ai.allParts')}: ${p.done}/${p.total}` : t('ai.allParts')}
-      aria-busy={busy || undefined}
-      data-ai-parts={busy ? 'busy' : ''}
-      disabled={busy}
-      onClick={() => void aiAllParts(orderId)}
-    >
-      <AiMark size={24} busy={busy} />
-      {busy && pct !== undefined ? <Percent value={pct} className="ai-parts-n" /> : <span className="add-extra-word">{t('ai.tileWord')}</span>}
-      {busy && pct !== undefined && <ProgressBar value={pct} />}
-    </button>
   );
 }
 
@@ -150,100 +58,3 @@ export function YandexButton({ number, size = 34 }: { number: string; size?: num
     </ActionIcon>
   );
 }
-
-const plain = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-/**
- * The part's numbers from the catalogues (the part's sheet): while the AI looks — its mark twinkles over two shimmering
- * rows; then a row a number: the number large, the maker and what it is for under it, seen in how many catalogues
- * (green) or not checked (orange); a tap takes it into «Номер», the globe looks it up on Yandex, ↻ looks again.
- */
-export function AiPartNumbers({ itemId, chosen, onPick }: { itemId: string; chosen: string; onPick: (n: string) => void }) {
-  const { t } = useTranslation();
-  const { run } = useAction();
-  const live = useScreenLiveQuery(() => db.items.get(itemId), [itemId]);
-  const busy = useAiWorking(`find:${itemId}`, `name:${itemId}`);
-  const p = useAiProgress(`find:${itemId}`);
-  const fits = useLineFitment(itemId);
-  const [why, setWhy] = useState<string | null>(null);
-  const on = aiOn();
-  const find = live?.aiFind;
-  if (!live || (!find && !on)) return null;
-  const again = () => run(async () => void (await aiFindPart(itemId, { again: true })));
-  return (
-    <div className="ai-block" aria-busy={busy || undefined} data-ai-numbers>
-      {find || busy ? (
-        <div className="ai-head">
-          <AiMark busy={busy} />
-          <span className="ai-text">{find?.search === 'garage' ? t('ai.ownJobs') : t('ai.catalogs')}</span>
-          {busy && p !== undefined && <Percent value={p} className="ai-pct" />}
-          {on && !busy && (
-            <ActionIcon variant="subtle" color="gray" radius="xl" size={32} aria-label={t('ai.again')} onClick={again}>
-              <IconRefresh size={18} stroke={1.8} />
-            </ActionIcon>
-          )}
-        </div>
-      ) : (
-        <button type="button" className="ai-find" onClick={again}>
-          <AiMark />
-          <span className="ai-text">{t('ai.find')}</span>
-        </button>
-      )}
-      {busy && p !== undefined && <ProgressBar value={p} />}
-      {busy && !find?.numbers.length && (
-        <>
-          <div className="skeleton ai-skel" />
-          <div className="skeleton ai-skel" style={{ width: '72%' }} />
-        </>
-      )}
-      {find && !busy && !find.numbers.length && (
-        <Text size="sm" c="dimmed" py={6}>
-          {t('ai.none')}
-        </Text>
-      )}
-      {find?.numbers.map((n) => {
-        const garage = n.garage ?? 0;
-        // v0.65: its status by the fitment's rules (domain/fitment.ts) — green only when it fits this very car; how many
-        // independent sources have it, apart (its existence, not its fitting).
-        const fit = fits?.rows.find((r) => r.number === n.number)?.fit;
-        const taken = !!chosen.trim() && plain(chosen) === plain(n.number);
-        return (
-          <div key={n.number} className="ai-num" data-fit={fit?.status} data-unsure={fit?.status === 'unverified' || undefined} data-garage={garage || undefined}>
-            <button type="button" className="ai-pick" aria-pressed={taken} onClick={() => onPick(n.number)}>
-              {taken ? <IconCircleCheckFilled size={22} color="var(--mantine-color-cobalt-6)" aria-hidden /> : <IconCircle size={22} stroke={1.6} color="var(--app-label-3)" aria-hidden />}
-              <span className="ai-num-main">
-                <span className="ai-num-no">{n.number}</span>
-                {/* The maker's catalogue's word (v0.55): its own name of the part, the model and years of its diagram, the
-                    older numbers it stands for. */}
-                {(n.brand || n.note || n.name || n.model || garage > 0 || (fit?.sources ?? 0) > 0) && (
-                  <span className="ai-num-sub">
-                    {fit && <FitSources count={fit.sources} />}
-                    {[garage > 0 ? t('ai.usedIn', { count: garage }) : '', n.name || n.brand, n.model, n.replaces?.length ? t('ai.replaces', { numbers: n.replaces.join(', ') }) : '', n.note].filter(Boolean).join(' · ')}
-                  </span>
-                )}
-              </span>
-            </button>
-            {fit && <FitBadge fit={fit} onClick={() => setWhy(n.number)} />}
-            <YandexButton number={n.number} />
-          </div>
-        );
-      })}
-      {/* v0.64: a short note in English — why the numbers differ, what to check (the AI's line, else the app's own). */}
-      {find && !busy && <FindNote find={find} />}
-      <FitSheet number={why ?? ''} fit={fits?.rows.find((r) => r.number === why)?.fit} opened={!!why} onClose={() => setWhy(null)} />
-    </div>
-  );
-}
-
-function FindNote({ find }: { find: Parameters<typeof findNote>[0] }) {
-  const { t } = useTranslation();
-  const note = findNote(find);
-  if (!note) return null;
-  return (
-    <div className="ai-note" aria-label={t('ai.note')} data-ai-note>
-      <IconInfoCircle size={16} stroke={1.9} aria-hidden />
-      <span lang="en">{note}</span>
-    </div>
-  );
-}
-

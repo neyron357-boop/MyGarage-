@@ -18,8 +18,7 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/sync/numbers               — job numbers kept for this device, for jobs made without the server (v0.84.2)
  *   POST /api/forget                     — this device leaves (its key no longer works)
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
- *        /api/ai/part-find {part, make, model, year, engine, vin, track}, /api/ai/receipt {image} — the garage's AI (v0.48, ai.mjs);
- *   GET  /api/ai/progress?t=a,b          — how far the part searches marked so have got, 0…100 (v0.64: no question asked)
+ *        /api/ai/receipt {image}          — the garage's AI (v0.48, ai.mjs; the part-number search — gone, v0.85)
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
@@ -209,8 +208,6 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
       if (parts[0] === 'api' && parts[1] === 'ai' && parts.length === 3) {
         if (!ai?.on()) throw httpError(503, 'ai off');
         if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
-        // How far a part's search has got (v0.64): counted here, no question to Gemini — not counted against the device's.
-        if (req.method === 'GET' && parts[2] === 'progress') return send(res, 200, ai.progress(url.searchParams.get('t')));
         if (req.method === 'POST') {
           // A receipt comes as a picture (v0.50): up to 8 MB; the other questions are a few lines.
           const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : 16 * 1024);
@@ -218,7 +215,6 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
           if (parts[2] === 'receipt') return send(res, 200, await ai.receipt(body));
           if (parts[2] === 'part-name') return send(res, 200, await ai.partName(body));
-          if (parts[2] === 'part-find') return send(res, 200, await ai.partFind(body));
         }
       }
 

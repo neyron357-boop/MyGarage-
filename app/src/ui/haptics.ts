@@ -168,7 +168,6 @@ const TAPPABLE = [
   'button.money-card-main',
   'button.job-card-open',
   'button.action-tile',
-  'button.fit-badge',
   '.scroll-tabs > button',
   '.tab-bar button',
   'button.tab-plus',
@@ -176,9 +175,6 @@ const TAPPABLE = [
   'button.car-shot-img',
   'button.car-shot-x',
   'button.part-thumb',
-  // v0.48.1: the AI's rows — a number to take, «Найти номер».
-  'button.ai-pick',
-  'button.ai-find',
   // v0.52: a line's pictures on top of its sheet (its own and the AI's).
   'button.line-media-tile',
   'button.job-card-doc',

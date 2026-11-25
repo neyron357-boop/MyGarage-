@@ -10,10 +10,9 @@ import { isVin, vinBuilt } from './vin';
  * finds the car by a VIN in the address — the rest of their catalogues (the car's units, the search by a part's name) are
  * closed to programs by their own rules (robots.txt: Vehicle.aspx, Unit.aspx, QuickDetails.aspx; elcats.ru — everything);
  * 7zap's search by VIN is a paid plan's; showmetheparts.com and partsgeek.com turn programs away (Incapsula, 403);
- * RockAuto opens a car's catalogue by make, year and model. So the garage's server does not walk them — the manager is
- * taken there in one tap, on this car, the VIN copied for the sites that do not take it in the address; and the AI's
- * search is sent to them first (server/src/partfind.mjs). A number found there by the car's VIN is the manager's proof
- * (domain/fitment.ts `vinCheck`).
+ * RockAuto opens a car's catalogue by make, year and model. So nothing walks them — the manager is taken there in one
+ * tap, on this car, the VIN copied for the sites that do not take it in the address (v0.85: links only — the AI's
+ * catalogue search and the fitment's «found by VIN» are gone, the owner's decision).
  */
 
 export type CatalogId = 'emex' | 'exist' | '7zap' | 'elcats' | 'catcar' | 'showmetheparts' | 'partsgeek' | 'rockauto';
@@ -21,8 +20,6 @@ export type CatalogId = 'emex' | 'exist' | '7zap' | 'elcats' | 'catcar' | 'showm
 export interface VinCatalog {
   id: CatalogId;
   name: string;
-  /** Its site, as the fitment's evidence names it. */
-  host: string;
   /** Where it opens: on this car (the VIN, or make–year–model in the address) or its own page. */
   url: string;
   /** The address carries the VIN: nothing to paste. Else the VIN is copied on the tap. */
@@ -60,17 +57,16 @@ export function vinCatalogs(car: { vin?: string; make?: string; model?: string; 
   const make = squash(car.make ?? '');
   const region = carRegion(vin);
   const all: Record<CatalogId, VinCatalog> = {
-    emex: { id: 'emex', name: 'EMEX DWC', host: 'emexdwc.ae', url: valid ? `https://emexdwc.ae/Vehicles.aspx?ft=findByVIN&c=&ssd=&vin=${vin}` : 'https://emexdwc.ae/', vinInUrl: valid },
-    exist: { id: 'exist', name: 'EXIST', host: 'exist.ru', url: valid ? `https://www.exist.ru/Price/Empty.aspx?q=${vin}` : 'https://www.exist.ru/Catalog/', vinInUrl: valid },
-    '7zap': { id: '7zap', name: '7zap', host: '7zap.com', url: 'https://7zap.com/ru/vin-decoder/', vinInUrl: false },
-    elcats: { id: 'elcats', name: 'Elcats', host: 'elcats.ru', url: 'https://www.elcats.ru/', vinInUrl: false },
-    catcar: { id: 'catcar', name: 'Catcar', host: 'catcar.info', url: 'https://www.catcar.info/en/', vinInUrl: false },
-    showmetheparts: { id: 'showmetheparts', name: 'ShowMeTheParts', host: 'showmetheparts.com', url: 'https://www.showmetheparts.com/', vinInUrl: false },
-    partsgeek: { id: 'partsgeek', name: 'PartsGeek', host: 'partsgeek.com', url: 'https://www.partsgeek.com/', vinInUrl: false },
+    emex: { id: 'emex', name: 'EMEX DWC', url: valid ? `https://emexdwc.ae/Vehicles.aspx?ft=findByVIN&c=&ssd=&vin=${vin}` : 'https://emexdwc.ae/', vinInUrl: valid },
+    exist: { id: 'exist', name: 'EXIST', url: valid ? `https://www.exist.ru/Price/Empty.aspx?q=${vin}` : 'https://www.exist.ru/Catalog/', vinInUrl: valid },
+    '7zap': { id: '7zap', name: '7zap', url: 'https://7zap.com/ru/vin-decoder/', vinInUrl: false },
+    elcats: { id: 'elcats', name: 'Elcats', url: 'https://www.elcats.ru/', vinInUrl: false },
+    catcar: { id: 'catcar', name: 'Catcar', url: 'https://www.catcar.info/en/', vinInUrl: false },
+    showmetheparts: { id: 'showmetheparts', name: 'ShowMeTheParts', url: 'https://www.showmetheparts.com/', vinInUrl: false },
+    partsgeek: { id: 'partsgeek', name: 'PartsGeek', url: 'https://www.partsgeek.com/', vinInUrl: false },
     rockauto: {
       id: 'rockauto',
       name: 'RockAuto',
-      host: 'rockauto.com',
       url: car.make?.trim() && car.model?.trim() && car.year ? `https://www.rockauto.com/en/catalog/${slug(car.make)},${car.year},${slug(car.model)}` : 'https://www.rockauto.com/',
       vinInUrl: false,
     },
@@ -87,9 +83,3 @@ export function vinCatalogs(car: { vin?: string; make?: string; model?: string; 
             : ['emex', 'exist', '7zap', 'elcats', 'showmetheparts', 'partsgeek', 'catcar', 'rockauto'];
   return order.map((id) => all[id]);
 }
-
-/** The catalogue a host belongs to (a number found «on emexdwc.ae»). */
-export const catalogOfHost = (host: string): CatalogId | undefined =>
-  (Object.entries({ emex: 'emexdwc.ae', exist: 'exist.ru', '7zap': '7zap.com', elcats: 'elcats.ru', catcar: 'catcar.info', showmetheparts: 'showmetheparts.com', partsgeek: 'partsgeek.com', rockauto: 'rockauto.com' }) as [CatalogId, string][]).find(
-    ([, h]) => host.replace(/^www\./, '').endsWith(h),
-  )?.[0];

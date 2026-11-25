@@ -204,7 +204,7 @@ export function ServerCard() {
   const [leaving, setLeaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const [making, setMaking] = useState(false);
-  // The garage's AI (v0.48): on the server or not, and whether it searches the catalogues on the web (a paid plan).
+  // The garage's AI (v0.48): on the server or not.
   const [ai, setAi] = useState<Awaited<ReturnType<typeof aiStatus>>>();
   useEffect(() => {
     if (config?.url) void aiStatus().then(setAi);
@@ -265,8 +265,8 @@ export function ServerCard() {
             </span>
           }
         >
-          <Text size="sm" c={!ai?.on ? 'dimmed' : ai.search === 'off' ? 'orange' : 'green'} data-ai-status>
-            {!ai ? '…' : !ai.on ? t('ai.off') : ai.search === 'off' ? t('ai.paid') : 'Gemini'}
+          <Text size="sm" c={!ai?.on ? 'dimmed' : 'green'} data-ai-status>
+            {!ai ? '…' : !ai.on ? t('ai.off') : 'Gemini'}
           </Text>
         </FormRow>
         <FormRow label={t('sync.photos')}>
