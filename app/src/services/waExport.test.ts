@@ -21,7 +21,7 @@ const IPHONE = [
 const ANDROID = ['3/12/25, 9:14 AM - Garage: Nissan Patrol 2016 gearbox mounting?', '3/12/25, 1:05 PM - +971 50 111 0002: not available'].join('\n');
 
 const enc = new TextEncoder();
-const zipOf = (name: string, text: string) => new File([zipStore([{ name: '_chat.txt', data: enc.encode(text) }, { name: '00000001-PHOTO.jpg', data: new Uint8Array(2000) }])], name, { type: 'application/zip' });
+const zipOf = (name: string, text: string) => new File([new Uint8Array(zipStore([{ name: '_chat.txt', data: enc.encode(text) }, { name: '00000001-PHOTO.jpg', data: new Uint8Array(2000) }]))], name, { type: 'application/zip' });
 
 beforeEach(async () => {
   db.close();
