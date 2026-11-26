@@ -23,6 +23,7 @@ import { DIRS, httpError } from './store.mjs';
  *        /api/ai/receipt {image}          — the garage's AI (v0.48, ai.mjs; the part-number search — gone, v0.85)
  *        /api/ai/labour {parts, work}, /api/ai/reply {text, quote, asks}, /api/ai/roles {chats} — v0.86, light models
  *        /api/ai/car {image}              — a car's make and model off a small photo (v0.89)
+ *        /api/ai/request {texts, image?}  — a customer’s request in WhatsApp: the car and what is asked (v0.90)
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
@@ -214,7 +215,7 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
         if (req.method === 'POST') {
           // A receipt comes as a picture (v0.50): up to 8 MB; the other questions are a few lines.
-          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : parts[2] === 'car' ? 2 * 1024 * 1024 : 16 * 1024);
+          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : parts[2] === 'car' ? 2 * 1024 * 1024 : parts[2] === 'request' ? 3 * 1024 * 1024 : 16 * 1024);
           ai.allow(device.id);
           if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
           if (parts[2] === 'receipt') return send(res, 200, await ai.receipt(body));
@@ -225,6 +226,8 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           if (parts[2] === 'labour') return send(res, 200, await ai.labour(body));
           if (parts[2] === 'reply') return send(res, 200, await ai.reply(body));
           if (parts[2] === 'roles') return send(res, 200, await ai.roles(body));
+          // v0.90: a customer's request in WhatsApp — the car and what is asked.
+          if (parts[2] === 'request') return send(res, 200, await ai.request(body));
         }
       }
 

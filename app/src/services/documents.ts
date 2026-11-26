@@ -86,6 +86,14 @@ export async function quotationPdf(orderId: string): Promise<PdfFile> {
   return { blob: await (await pdf()).renderQuotation(orderId), filename: documentFileName('Quotation', await carOf(orderId)) };
 }
 
+/** The quote's options (v0.90, #72): a page each; `ids` — only those (one option — «Quotation 434-2»). */
+export async function quoteOptionsPdf(orderId: string, ids?: string[]): Promise<PdfFile> {
+  const order = await db.orders.get(orderId);
+  if (!order) throw new AppError('err.notFound');
+  const k = ids?.length === 1 ? (order.quoteOptions ?? []).findIndex((o) => o.id === ids[0]) : -1;
+  return { blob: await (await pdf()).renderQuoteOptions(orderId, ids), filename: documentFileName(k >= 0 ? `Quotation ${order.number}-${k + 1}` : 'Quotation options', await carOf(orderId)) };
+}
+
 /** Paid invoices stamped this session (made when asked: a payment taken back takes the stamp off). */
 const stampedNow = new Map<string, Promise<Blob>>();
 
@@ -129,14 +137,33 @@ const ua = () => (typeof navigator === 'undefined' ? '' : navigator.userAgent);
 const isIosDevice = () => /iPad|iPhone|iPod/.test(ua()) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const isAndroid = () => /Android/i.test(ua());
 
+type PdfShow = (file: PdfFile | Promise<PdfFile | undefined>, title?: string) => void;
+let viewer: PdfShow | undefined;
+
 /**
- * Show a PDF the way each device handles it best:
+ * The app's own PDF viewer (v0.90, the owner: «удобный просмотр PDF файлов внутри приложения» — ui/PdfViewer.tsx): set
+ * by the app when it starts; every «open the PDF» shows the file there. Without it (tests) — the device's own way below.
+ */
+export function setPdfViewer(show: PdfShow | undefined): void {
+  viewer = show;
+}
+
+/** The PDF in the app's own viewer — a file still being made or fetched is shown the moment it is here. */
+export function viewPdf(file: PdfFile | Promise<PdfFile | undefined>, title?: string): boolean {
+  if (!viewer) return false;
+  viewer(file, title);
+  return true;
+}
+
+/**
+ * Open a PDF: in the app's own viewer (v0.90); where there is none, the way each device handles it best:
  * - iPhone/iPad: the system share sheet with the file (preview, Print, Save to Files, WhatsApp) —
  *   a new tab with a blob link opens blank in an installed app;
  * - Android: download, then the notification opens it in the PDF viewer;
  * - PC: a new tab with the browser's PDF viewer (download if pop-ups are blocked or in the preview).
  */
 export async function openPdf(file: PdfFile): Promise<void> {
+  if (viewPdf(file)) return;
   const pdfFile = typeof File !== 'undefined' ? new File([file.blob], file.filename, { type: 'application/pdf' }) : undefined;
   const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
   if (isIosDevice() && pdfFile && nav.canShare?.({ files: [pdfFile] })) {

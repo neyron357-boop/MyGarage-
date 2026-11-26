@@ -5,10 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { lineName } from '../../domain/items';
 import type { Suggestion, SuggestionSet } from '../../domain/linePrices';
 import { formatAed } from '../../domain/money';
-import { exactTitle, quickMatches, sideOf } from '../../domain/quickAdd';
-import { enteredPrice, vatModeOf } from '../../domain/vat';
+import { exactTitle, quickMatches, sideOf, typedPrice } from '../../domain/quickAdd';
+import { enteredPrice, priceFromEntered, rateFor, vatModeOf } from '../../domain/vat';
 import { aiAfterLine } from '../../services/ai';
-import { addItem } from '../../services/estimate';
+import { addItem, ensureLabourLine } from '../../services/estimate';
 import { removeLines, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
@@ -61,9 +61,12 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
 
   // Work and services: the labour charges / the rest at first; typing finds any of them (linePrices.ts).
   const set = !suggestions ? undefined : mode === 'part' ? suggestions.part : q.trim() ? suggestions.work : suggestions[mode];
-  const matches = useMemo(() => quickMatches(set, q, 8), [set, q]);
-  const exact = exactTitle(set, q);
-  const typed = lineName(q.trim());
+  // «GEAR OIL -- 450» (v0.90, #73): the name is what is before the two hyphens, the number after them — its sale price.
+  const said = useMemo(() => typedPrice(q), [q]);
+  const query = said.priceFils ? said.name : q;
+  const matches = useMemo(() => quickMatches(set, query, 8), [set, query]);
+  const exact = exactTitle(set, query);
+  const typed = lineName(query.trim());
   const incl = b.settings.pricesIncludeVat;
   /** A suggestion's price as the line will show it (with VAT if it was typed with VAT). */
   const shown = (s: Suggestion) => enteredPrice({ unitPriceFils: s.price, unitGrossFils: s.gross }, s.rate || b.settings.vatRateBp, vatModeOf({ vatRateBp: s.rate, unitGrossFils: s.gross }, incl));
@@ -79,8 +82,17 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
       const lineKind = mode === 'part' ? 'part' : 'labor';
       // A name of the history keeps both its languages; a typed one goes where its letters belong.
       const titles = s ? { titleRu: s.titleRu || name, titleEn: s.titleEn || name } : /[а-яё]/i.test(name) ? { titleRu: name } : { titleEn: name };
-      const price = s && s.price > 0 ? { unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) } : {};
+      // A price typed after «--» — the sale price, as «+ Цена» takes it (with VAT or without, as the line's prices are typed).
+      const own = said.priceFils;
+      const vat = vatModeOf(s ? { vatRateBp: s.rate, unitGrossFils: s.gross } : undefined, incl);
+      const price = own
+        ? { ...priceFromEntered(own, b.settings.vatRateBp, vat), vatRateBp: rateFor(vat, b.settings.vatRateBp) }
+        : s && s.price > 0
+          ? { unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) }
+          : {};
       const item = await addItem(b.order.id, { kind: lineKind, block: 'A', qty: 1, ...titles, ...price });
+      // A job's first part brings its labour charge (v0.90, #70): last of the lines, named and priced by itself.
+      await ensureLabourLine(b.order.id);
       await syncStage(b.order.id);
       forgetSuggestions();
       haptic('light');
@@ -123,6 +135,11 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               <button type="button" role="option" aria-selected={false} className="qa-row qa-new" onMouseDown={keep} onClick={() => add(typed)}>
                 <IconPlus size={18} stroke={2.4} aria-hidden />
                 <span className="qa-name">{t('qa.addTyped', { name: typed })}</span>
+                {said.priceFils && (
+                  <Text span className="qa-price tnum" data-typed-price>
+                    {formatAed(said.priceFils, uiLang, false)}
+                  </Text>
+                )}
               </button>
             )}
             {matches.map((title) => {
@@ -131,11 +148,17 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               return (
                 <button key={title} type="button" role="option" aria-selected={title === exact} className="qa-row" data-side={side} onMouseDown={keep} onClick={() => add(title)}>
                   <span className="qa-name">{title}</span>
-                  {s.price > 0 && (
-                    <Text span className="qa-price tnum">
-                      {formatAed(shown(s), uiLang, false)}
-                      <PriceFromMark from={s.from} />
+                  {said.priceFils ? (
+                    <Text span className="qa-price tnum" data-typed-price>
+                      {formatAed(said.priceFils, uiLang, false)}
                     </Text>
+                  ) : (
+                    s.price > 0 && (
+                      <Text span className="qa-price tnum">
+                        {formatAed(shown(s), uiLang, false)}
+                        <PriceFromMark from={s.from} />
+                      </Text>
+                    )
                   )}
                 </button>
               );

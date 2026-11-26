@@ -10,6 +10,7 @@ import { canCloseUnpaid, canReopen, checkTransition, partsReady, reopenStage } f
 import type { DecisionVia, OrderItem, SendVia, Stage } from '../domain/types';
 import { syncDiscount } from './discount';
 import { syncLabourNames } from './labourName';
+import { isCharge } from './labourLine';
 import { AppError } from './errors';
 import { assertJobOpen } from './monthLock';
 import { agreeNewPrice, recordDecisions, removeItem, restoreItem, sendVersion, setDone, updateItem, withdrawItems } from './estimate';
@@ -278,10 +279,12 @@ export async function removeLines(itemIds: string[]): Promise<OrderItem[]> {
     const r = await removeItem(i.id);
     if (r) removed.push(r);
   }
-  // Into the job's bin, as they were (v0.68): to bring back or to see their prices later.
-  if (removed.length) {
+  // Into the job's bin, as they were (v0.68): to bring back or to see their prices later. Its labour charge taken off by
+  // hand (v0.90, #70) — the app does not add one again to this job.
+  const labourOff = items.some(isCharge);
+  if (removed.length || labourOff) {
     const order = await db.orders.get(orderId);
-    if (order) await db.orders.update(orderId, { removedLines: withRemoved(order, removed, nowIso()) });
+    if (order) await db.orders.update(orderId, { ...(removed.length ? { removedLines: withRemoved(order, removed, nowIso()) } : {}), ...(labourOff ? { labourOff: true as const } : {}) });
   }
   const waiting = items.filter((x) => x.approvalState === 'pending').map((x) => x.id);
   if (waiting.length) await withdrawItems(waiting, { cancel: true });

@@ -94,3 +94,21 @@ export function exactTitle(set: Suggestions | undefined, typed: string): string 
   const t = lineName(typed.trim());
   return t && set?.list.has(t) ? t : undefined;
 }
+
+/**
+ * A price typed after the name (v0.90, the owner's note #73: «два дефиса и сумма… после двух дефисов цифру — это нужно
+ * засчитать как цена продажи сразу же»): «GEAR OIL -- 450» is GEAR OIL sold at 450. Two hyphens — or the dash an iPhone
+ * makes of them as they are typed (— or –) — then the amount, as the price fields take it: 450 · 450.50 · 450,50 · 1,200 ·
+ * 1 200 (AED after it is fine). What is before is the name; anything else is no price, and the text is the name as it is.
+ */
+export function typedPrice(text: string): { name: string; priceFils?: number } {
+  const m = /^(.*?\S)\s*(?:-\s*-+|[—–]+|−\s*−)\s*(\d[\d\s,.]*?)\s*(?:AED|ДИРХ\S*|DH)?\s*$/i.exec(text);
+  if (!m) return { name: text };
+  let n = m[2].replace(/\s+/g, '');
+  // «1,200» and «12,500.50» — thousands; «450,50» — the decimals typed with a comma.
+  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(n)) n = n.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(n)) n = n.replace(',', '.');
+  if (!/^\d+(\.\d{1,2})?$/.test(n)) return { name: text };
+  const fils = Math.round(Number(n) * 100);
+  return fils > 0 ? { name: m[1], priceFils: fils } : { name: text };
+}

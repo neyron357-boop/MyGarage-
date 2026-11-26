@@ -6,6 +6,7 @@ import { editAsk, forgetAsks, useWaAsks, type WaAsk } from '../../services/waCon
 import { sendAsked } from '../../services/waAuto';
 import type { OutItem, OutPart } from '../../services/waOutbox';
 import { MediaImage } from '../../ui/components';
+import { showPdf } from '../../ui/PdfViewer';
 import { haptic } from '../../ui/haptics';
 import { useAction } from '../../ui/hooks';
 
@@ -68,6 +69,11 @@ export function WaConfirm() {
   );
 }
 
+const PDF_EXT = /\.pdf$/i;
+const isPdf = (p: OutPart) => /pdf/i.test(p.mime ?? '') || PDF_EXT.test(p.name ?? '');
+/** The file of a part (base64) as it will go. */
+const pdfOf = (p: OutPart) => ({ blob: new Blob([Uint8Array.from(atob(p.data ?? ''), (c) => c.charCodeAt(0))], { type: 'application/pdf' }), filename: p.name || 'document.pdf' });
+
 /** One message: to whom, each of its parts as it will go; the words editable. */
 function Ask({ ask, busy, onSend, onDrop }: { ask: WaAsk; busy: boolean; onSend: () => void; onDrop: () => void }) {
   const { t } = useTranslation();
@@ -99,12 +105,13 @@ function Ask({ ask, busy, onSend, onDrop }: { ask: WaAsk; busy: boolean; onSend:
               {p.caption !== undefined && <Textarea mt={6} autosize minRows={2} maxRows={8} value={p.caption} onChange={(e) => setPart(i, { caption: e.currentTarget.value, fallback: e.currentTarget.value })} />}
             </div>
           ) : p.data ? (
-            <Group key={i} gap={8} className="wa-ask-file" wrap="nowrap">
+            // A PDF is looked at before it goes (v0.90): a tap — the app's own viewer.
+            <button key={i} type="button" className="wa-ask-file" data-wa-ask-file onClick={() => isPdf(p) && showPdf(pdfOf(p), p.name?.replace(PDF_EXT, ''))} disabled={!isPdf(p)}>
               <IconFileTypePdf size={20} />
               <Text size="sm" truncate>
                 {p.name || t('wa.confirm.file')}
               </Text>
-            </Group>
+            </button>
           ) : p.text !== undefined ? (
             <Textarea key={i} autosize minRows={2} maxRows={12} value={p.text} onChange={(e) => setPart(i, { text: e.currentTarget.value })} />
           ) : null,

@@ -745,6 +745,9 @@ async function launchBrowser() {
     await priceLine('Замена масла', { price: 150 });
     // v0.49: the app's own dictionary names it in English at once (no AI): the line reads CABIN FILTER.
     await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().waitFor();
+    // v0.90 (#70): the job has work of its own («Замена масла») — it carries the labour: no labour charge comes by itself.
+    await page.waitForTimeout(500);
+    if (await front('.list-row').filter({ hasText: 'LABOUR CHARGES' }).count()) throw new Error('v0.90: a labour charge beside the job’s own work');
     // No price yet (v0.81: «+ Цена» on its row): the quote cannot go.
     await front('.list-row').filter({ hasText: 'CABIN FILTER' }).first().locator('.price-add').waitFor();
     if (!(await page.getByRole('button', { name: /^Клиенту/ }).isDisabled())) throw new Error('a line without a price must hold the quote');
@@ -792,6 +795,7 @@ async function launchBrowser() {
     await shot('31a-line-no-vat');
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('320,50').first().waitFor(); // 220.50 + 100 without VAT
+    if (await front('.list-row').filter({ hasText: 'LABOUR CHARGES' }).count()) throw new Error('v0.90: a labour charge came by itself');
     // A discount before the invoice: one tap rounds the total down.
     await page.getByRole('button', { name: 'Скидка' }).click();
     await dlg.getByRole('button', { name: 'К оплате 320,00 AED' }).click();
@@ -1488,6 +1492,14 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
     // A part with its number and two offers: the first one goes on the line (cost + markup).
     await addLine('part', 'Headlight LH');
+    // v0.90 (#70): the job's first part, no work of its own — the labour charge came by itself, named by the part, last of
+    // the lines. Taken off by hand here: it does not come back on this job (the paint shop's work below is not ours).
+    const labour = front('.list-row').filter({ hasText: /LABOU?R CHARGES?: HEADLIGHT/ }).first();
+    await labour.waitFor();
+    await shot('34a-labour-by-itself');
+    await labour.click();
+    await dlg.getByRole('button', { name: 'Удалить', exact: true }).click();
+    await labour.waitFor({ state: 'detached' });
     await front('.list-row').filter({ hasText: 'Headlight LH' }).first().click();
     await dlg.getByLabel('Номер').fill('81150-06B20');
     await dlg.getByRole('button', { name: /^Варианты/ }).click();
@@ -2187,17 +2199,18 @@ async function launchBrowser() {
       await nameCard.filter({ hasText: 'Название исправлено' }).waitFor({ timeout: 15000 });
       if ((await nameCard.locator('.ai-toast-main').textContent()) !== 'FRONT BRAKE PADS' || (await nameCard.locator('.ai-toast-was').textContent()) !== 'КОЛОДКИ ТОРМАЗНЫЕ ПЕРЕДНИЕ')
         throw new Error('the name card: ' + (await nameCard.textContent()));
-      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).waitFor();
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).first().waitFor();
       // Only the name was put right: no number, nothing looked up (v0.53), no search for it at all (v0.85).
       await page.waitForTimeout(1500);
       const quiet = await page.evaluate(async (id) => {
         const { db } = await import('/src/db/db.ts');
-        const i = (await db.items.where('orderId').equals(id).toArray())[0];
+        const i = (await db.items.where('orderId').equals(id).toArray()).find((x) => x.kind === 'part');
         return { no: i.partNumber, find: !!i.aiFind, asked: window.__aiAsked.join() };
       }, job.id);
-      if (quiet.no || quiet.find || quiet.asked !== 'vin') throw new Error('the AI looked the part up: ' + JSON.stringify(quiet));
+      // (v0.90: the part brought the labour charge — the AI is asked what it is for, as v0.86.)
+      if (quiet.no || quiet.find || !['vin', 'vin,labour'].includes(quiet.asked)) throw new Error('the AI looked the part up: ' + JSON.stringify(quiet));
       // Its sheet: no AI search, no fitment — the number typed by hand, the globe by it looks it up on Yandex.
-      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).first().click();
       const no = dlg.getByLabel('Номер', { exact: true });
       await no.waitFor();
       if (await dlg.locator('[data-ai-numbers], .ai-find, .fit-badge, [data-vin-found-open], [data-fit-current]').count()) throw new Error('the part search is still in the sheet');
@@ -2226,11 +2239,12 @@ async function launchBrowser() {
           g.stroke();
         }
         const png = await new Promise((r) => c.toBlob(r, 'image/png'));
-        const i = (await db.items.where('orderId').equals(id).toArray())[0];
+        // (The part — v0.90: the job's labour charge is a line of it too.)
+        const i = (await db.items.where('orderId').equals(id).toArray()).find((x) => x.kind === 'part');
         await addDiagram(i.id, png);
         return i.id;
       }, job.id);
-      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).click();
+      await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).first().click();
       await dlg.locator('[data-line-media] .line-media-tile[data-kind="diagram"]').waitFor();
       // Measured once the sheet has come up (while it slides, its rows move each their own way).
       await settled();
@@ -2273,7 +2287,7 @@ async function launchBrowser() {
         const i = await (await import('/src/db/db.ts')).db.items.get(id);
         return { ru: i.titleRu, en: i.titleEn, no: i.partNumber, diagrams: i.diagramIds?.length, photos: i.mediaIds?.length ?? 0, asked: window.__aiAsked };
       }, itemId);
-      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== undefined || line.diagrams !== 1 || line.photos !== 0 || line.asked.join() !== 'vin')
+      if (line.ru !== 'КОЛОДКИ ТОРМОЗНЫЕ ПЕРЕДНИЕ' || line.en !== 'FRONT BRAKE PADS' || line.no !== undefined || line.diagrams !== 1 || line.photos !== 0 || !['vin', 'vin,labour'].includes(line.asked.join()))
         throw new Error('the line after the AI: ' + JSON.stringify(line));
       // The line's preview on the job: its diagram, outlined.
       await front('.list-row').filter({ hasText: 'FRONT BRAKE PADS' }).locator('.part-thumb img.part-thumb-outlined').waitFor();

@@ -167,6 +167,23 @@ describe('the AI', () => {
       await assert.rejects(ai.car(bad), /no picture/);
   });
 
+  it('v0.90: a WhatsApp request — the messages and the last picture at medium resolution, a light model; the same once', async () => {
+    const { f, seen } = fake([[/gemini-3.5-flash-lite/, () => answer({ isRequest: true, car: { make: 'Nissan', model: 'Altima', year: 2015, plate: { emirate: 'DXB', code: 'V', number: '12345' }, vin: '' }, items: [{ name: 'ENGINE MOUNT', kind: 'part', both: true }], owner: '', confidence: 0.9 })]]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const image = { type: 'image/jpeg', data: 'z'.repeat(40_000) };
+    const texts = ['I want to change the engine mount', 'Nissan Altima 2015', 'Original or duplicate?', '[photo]'];
+    const r = await ai.request({ texts, image });
+    assert.deepEqual([r.isRequest, r.car.model, r.items[0].both, r.by], [true, 'Altima', true, 'gemini-3.5-flash-lite']);
+    const ask = seen.find((x) => /generateContent/.test(x.url));
+    assert.equal(ask.body.generationConfig.mediaResolution, 'MEDIA_RESOLUTION_MEDIUM');
+    assert.equal(ask.body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+    assert.match(ask.body.contents[0].parts[0].text, /Original or duplicate?/);
+    assert.ok(ask.body.contents[0].parts.some((p) => p.inline_data?.data === image.data));
+    await ai.request({ texts, image });
+    assert.equal(seen.filter((x) => /generateContent/.test(x.url)).length, 1);
+    await assert.rejects(ai.request({ texts: [] }), /no messages/);
+  });
+
   it('a device may ask 120 times a minute (a long list of parts is asked at once)', () => {
     let t = 0;
     const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, now: () => t });

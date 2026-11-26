@@ -763,6 +763,25 @@ export const ru = {
     wasQuote: 'там это смета, работа не подтверждена',
     continued: 'продолжается здесь',
   },
+  qo: {
+    title: 'Варианты сметы',
+    tile: 'Варианты',
+    name: 'Название варианта',
+    add: 'Вариант',
+    make: 'Сделать варианты',
+    choose: 'Выбрать',
+    chosen: 'Выбран',
+    remove: 'Убрать вариант',
+    removed: 'Вариант убран',
+    send: 'Отправить клиенту · {{n}}',
+  },
+  pdfView: {
+    inBrowser: 'Открыть в браузере',
+    broken: 'PDF не открывается',
+    closer: 'Крупнее',
+    further: 'Мельче',
+    fit: 'По ширине',
+  },
   camera: {
     of: '{{n}} из {{total}}',
     close: 'Закрыть',
@@ -1195,6 +1214,8 @@ export const ru = {
     lineUndone: 'Не сделано',
     // v0.88: a line not confirmed yet — out of the quote and the invoice.
     unconfirmed: 'не подтверждена',
+    byHistory: 'по истории',
+    byHistoryN: 'Цена оплаты труда по истории мастерской: {{n}} работ',
     unconfirm: 'Не подтв.',
     confirm: 'Подтвердить',
     unconfirmChip: 'Не подтверждена',
@@ -2482,6 +2503,8 @@ export const ru = {
     validUntil: 'Оценка действительна до {{date}}.',
     bExplain: 'По позициям «может понадобиться» ответьте: «делайте, если нужно» (в пределах указанной цены) или «позвоните мне». Без вашего согласия их не делаем.',
     answerHint: 'Ответьте «ДА», чтобы согласовать, или напишите, какие позиции не нужны.',
+    quoteOptionsHeader: 'Здравствуйте, {{name}}! Варианты по {{car}} ({{plate}}), заказ №{{number}}:',
+    quoteOptionsHint: 'Напишите номер варианта (1–{{n}}), который выбираете.',
     doneByLimit: '{{name}}, при ремонте {{car}} ({{plate}}) нашли: {{reason}}\n{{items}}\nСделали в рамках вашего лимита без звонка из акта приёмки. Сумма: {{sum}}. Фото — во вложении.',
     verbalHeader: '{{name}}, как договорились по телефону по заказу №{{number}} ({{car}}, {{plate}}):',
     verbalApproved: 'Делаем:',
@@ -2641,6 +2664,8 @@ export const ru = {
     carGarage: 'Как у машин мастерской',
     // v0.89: the make and model seen on the car's photo; the photo and the VIN say different cars.
     carPhoto: 'Машина по фото',
+    // v0.90: a customer's request in WhatsApp made a job of «Заявки».
+    requestTitle: 'Заявка из WhatsApp',
     checkTitle: 'Фото или VIN?',
     checkPill: 'Фото ≠ VIN',
     byPhotoShort: 'Фото',

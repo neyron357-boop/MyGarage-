@@ -82,8 +82,8 @@ export function isLabourCharge(title: string): boolean {
 }
 
 /** How near a job is to this one: 5 — this car, 4 — this customer, 3 — the same model, 2 — the same make, 1 — any. */
-const RANK: Record<Exclude<PriceFrom, 'list'>, number> = { car: 5, customer: 4, model: 3, make: 2, any: 1 };
-function circle(job: HistJob | undefined, ctx: PriceContext): Exclude<PriceFrom, 'list'> {
+export const RANK: Record<Exclude<PriceFrom, 'list'>, number> = { car: 5, customer: 4, model: 3, make: 2, any: 1 };
+export function circle(job: HistJob | undefined, ctx: Omit<PriceContext, 'lang'>): Exclude<PriceFrom, 'list'> {
   if (!job) return 'any';
   if (ctx.vehicleId && job.vehicleId === ctx.vehicleId) return 'car';
   if (ctx.customerId && job.customerId === ctx.customerId) return 'customer';

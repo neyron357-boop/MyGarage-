@@ -29,7 +29,8 @@ const isTabRoot = (pathname: string) => mainTabs().includes(pathname);
 const FOCUS_RE = /^\/(orders\/(new|[^/]+\/invoice)|whatsapp\/chat\/[^/]+)$/;
 /**
  * A job (v0.80, «карточка заказа должна открываться на полный экран… нижнее меню должно скрываться… кроме кнопки плюса»):
- * the tab capsule goes, «＋» stays. Its chat and its notes — the whole screen: their composer is at the bottom edge.
+ * the tab capsule goes, «＋» stays. Its notes — the whole screen: their composer is at the bottom edge (its WhatsApp tab is
+ * gone, v0.90: the customer's chat is «WhatsApp»'s own screen).
  */
 const JOB_RE = /^\/orders\/(?!new$)[^/]+(\/intake)?$/;
 /** Presented from the bottom (and dismissed down), like composing a new message. */
@@ -38,7 +39,7 @@ const MODAL_RE = /^\/orders\/new$/;
 /** What stays at the bottom under a screen: the tab bar with «＋» ('true'), «＋» alone ('plus'), nothing ('false'). */
 export function barOf(loc: Pick<Location, 'pathname' | 'search'>): 'true' | 'plus' | 'false' {
   if (FOCUS_RE.test(loc.pathname)) return 'false';
-  if (JOB_RE.test(loc.pathname)) return /[?&]tab=(chat|notes)(&|$)/.test(loc.search) ? 'false' : 'plus';
+  if (JOB_RE.test(loc.pathname)) return /[?&]tab=notes(&|$)/.test(loc.search) ? 'false' : 'plus';
   return 'true';
 }
 const isModal = (pathname: string) => MODAL_RE.test(pathname);

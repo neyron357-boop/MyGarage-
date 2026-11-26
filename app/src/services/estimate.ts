@@ -33,6 +33,7 @@ import { addMedia, deleteMedia } from './media';
 import { logEvent, tryStage } from './orders';
 import { getSettings } from './settings';
 import { syncLabourNames } from './labourName';
+import { placeLabourLast, usualLabourWords, wantsLabour } from './labourLine';
 import { typedOwnName } from '../domain/labourName';
 import { nameCount, qtyShort } from '../domain/sides';
 
@@ -68,6 +69,18 @@ export async function addItem(orderId: string, input: NewItem): Promise<OrderIte
   // A part added — the labour charge says it; a labour charge added — says the parts (v0.80).
   await syncLabourNames(orderId);
   return item;
+}
+
+/**
+ * The labour charge brought by a job's first part (v0.90, the owner's note #70: «всегда внизу должна быть оплата труда… чтоб
+ * я сам каждый раз не добавлял… если я принудительно это сам не убираю»): added by the app — in the garage's own words,
+ * named by the parts and priced by the history (services/labourLine.ts) — and kept last of the lines. A line added by hand
+ * calls it (the quick sheet, a line's card); the documents carried over, the demo and the services' own work do not.
+ */
+export async function ensureLabourLine(orderId: string): Promise<OrderItem | undefined> {
+  const added = (await wantsLabour(orderId)) ? await addItem(orderId, { kind: 'labor', block: 'A', qty: 1, titleEn: await usualLabourWords(), autoLabour: true }) : undefined;
+  await placeLabourLast(orderId);
+  return added;
 }
 
 export async function addTemplate(orderId: string, templateId: string, block: Block = 'A'): Promise<OrderItem[]> {

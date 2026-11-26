@@ -74,6 +74,7 @@ import { useErrorText, useLang } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { PhotoViewer } from '../../ui/PhotoViewer';
+import { showPdf } from '../../ui/PdfViewer';
 import { downloadFile, shareOrDownload } from '../../ui/share';
 import { useScreen } from '../../ui/stack';
 import { useWaSel } from '../../ui/waSel';
@@ -1589,9 +1590,14 @@ export function ChatThread({
   );
   const onDoc = useCallback(
     (m: WaMessage) => {
-      // A PDF on a PC opens beside the app; anything else is handed over (the phone's share sheet) or saved.
+      // A PDF — in the app's own viewer (v0.90), shown at once and filled when the file is here; a picture on a PC opens
+      // beside the app; anything else is handed over (the phone's share sheet) or saved.
+      if (/pdf/i.test(m.file?.mime ?? '') || /\.pdf$/i.test(m.file?.name ?? '')) {
+        showPdf(fileOf(m).then((f) => (f ? { blob: f, filename: f.name || 'document.pdf' } : undefined)), m.file?.name?.replace(/\.pdf$/i, ''));
+        return;
+      }
       const src = waFileSrc(m.id);
-      if (desk && src && /pdf|^image\//.test(m.file?.mime ?? '')) {
+      if (desk && src && /^image\//.test(m.file?.mime ?? '')) {
         window.open(src, '_blank', 'noopener');
         return;
       }

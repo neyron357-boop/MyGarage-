@@ -2,6 +2,8 @@ import { ActionIcon, Box, Button, Group, Kbd, Modal, SegmentedControl, Stack, Te
 import { AiLineWork, AiMark } from '../ai/Ai';
 import { CarCheckPill } from '../ai/CarCheck';
 import { IconHelpCircle,
+  IconStack2,
+  IconHistory,
   IconBrandWhatsapp,
   IconPlus,
   IconBuildingCommunity,
@@ -78,12 +80,12 @@ import { tFor } from '../../i18n';
 import { syncDiscount } from '../../services/discount';
 import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
-import { addItem, updateItem } from '../../services/estimate';
+import { addItem, ensureLabourLine, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, setUnconfirmed, syncStage, takeBack } from '../../services/flow';
 import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
-import { chatOfPhone, ensureChats, waReady } from '../../services/whatsapp';
+import { waReady } from '../../services/whatsapp';
 import { useWaSel } from '../../ui/waSel';
-import { JobChat, jobChatPhone } from '../whatsapp/JobChat';
+import { useOpenChat } from '../whatsapp/openChat';
 import { waAutoOf } from '../../domain/waAuto';
 import { getSettings } from '../../services/settings';
 import { sendClientReport, sendWorkReport } from '../../services/waAuto';
@@ -111,6 +113,7 @@ import { PriceSheet } from './PriceSheet';
 import { setJobQuiet } from '../../services/notify';
 import { ReminderSheet } from '../notify/ReminderSheet';
 import { OwnerCheckSheet } from './OwnerCheck';
+import { QuoteOptionsSheet } from './QuoteOptions';
 import { PartThumb } from './PartThumb';
 import { PartsBatchSheet } from './PartsBatch';
 import { scrollToTop, useStackBack } from '../../ui/stack';
@@ -544,13 +547,12 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
   );
 }
 
-/** The job's tabs, in their order on screen: the job, and its notes. */
-const JOB_TABS = ['main', 'notes'] as const;
 /**
- * The garage's WhatsApp linked (v0.80, «при свайпе вместо заметки открылась чат с клиентом»): the customer's chat beside
- * the job. Third (v0.83, the owner: «ватсап переместить на третью позицию»): the job, its notes, the chat.
+ * The job's tabs, in their order on screen: the job, and its notes. No «WhatsApp» tab (v0.90, the owner's note #71: «убрать
+ * отсюда WhatsApp, сделать возможным открытие WhatsApp чат клиента только через быстрые действия»): the customer's chat is
+ * «＋» → «Чат» on a phone (the «…» tile on a PC), and opens in «WhatsApp».
  */
-const JOB_TABS_WA = ['main', 'notes', 'chat'] as const;
+const JOB_TABS = ['main', 'notes'] as const;
 
 /**
  * The job, on one screen: who and what, the lines (work and parts) with what the customer said to
@@ -570,31 +572,16 @@ export function JobPage() {
   useEffect(() => {
     if (id) markJobOpened(id);
   }, [id]);
-  // The garage's WhatsApp is linked (v0.78): the customer's chat is a tile of «…» — and (v0.80) a tab of the job.
+  // The garage's WhatsApp is linked (v0.78): the customer's chat — «＋» → «Чат» (a PC: the «…» tile), opened in «WhatsApp».
   const waLinked = useWaSel(waReady);
-  const chatPhone = b ? jobChatPhone(b) : '';
-  const tabs = waLinked && chatPhone ? JOB_TABS_WA : JOB_TABS;
-  // Its unread messages light the tab: the chats are read once WhatsApp is there (kept right by the server after).
-  // (Once: from then on the server's stream keeps them right — v0.80.2.)
-  useEffect(() => {
-    if (waLinked) void ensureChats();
-  }, [waLinked]);
-  // Only this customer's chat: the job draws again when its unread changes, not at every message of every chat.
-  const chatUnreadAny = useWaSel((s) => (chatPhone ? (chatOfPhone(chatPhone, s)?.unread ?? 0) : 0));
-  const chatUnread = tabs === JOB_TABS_WA ? chatUnreadAny : 0;
-  // The tabs — the job, the customer's chat, its notes (a chat with oneself); the address keeps which, without a step
-  // in the history (and keeps the rest of itself: a job beside it on a PC, v0.80).
+  const tabs = JOB_TABS;
+  // The tabs — the job, its notes (a chat with oneself); the address keeps which, without a step in the history (and keeps
+  // the rest of itself: a job beside it on a PC, v0.80).
   const [params, setParams] = useSearchParams();
   const asked = params.get('tab');
-  const tab = asked === 'notes' ? 'notes' : asked === 'chat' && tabs === JOB_TABS_WA ? 'chat' : 'main';
-  // The chat opens locked (v0.83, the owner: «вкладку надо вначале заблокировать, потому что могу случайно не то отправить —
-  // блокировать, по нажатию чтоб открылся чат»): a swipe onto it shows who and how many unread, a tap opens it for this
-  // visit. The green WhatsApp button and the «Чат» tile are that tap already.
-  const [chatOpen, setChatOpen] = useState(false);
-  const openChat = () => {
-    setChatOpen(true);
-    pickTab('chat');
-  };
+  const tab = asked === 'notes' ? 'notes' : 'main';
+  const openCustomerChat = useOpenChat();
+  const openChat = () => b && openCustomerChat(b.customer.whatsapp || b.customer.phone);
   const pickTab = (v: string) => {
     if (v === tab) return;
     setParams(
@@ -689,6 +676,7 @@ export function JobPage() {
   const [profitShown, setProfitShown] = useState(false);
   // The job for the owner to check (v0.29): its picture — parts bought and sold, from whom, the profit.
   const [ownerOpen, setOwnerOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   // The job's bin (v0.68): the lines deleted and taken off, to see and bring back.
   const [binOpen, setBinOpen] = useState(false);
   // The parts picked when it opened (they stay its parts while it slides away).
@@ -821,6 +809,8 @@ export function JobPage() {
   const quickAdd = (s: Suggestion) =>
     run(async () => {
       await addItem(oid, { kind: 'labor', block: 'A', titleRu: s.titleRu || undefined, titleEn: s.titleEn || undefined, qty: 1, unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) });
+      // The labour charge stays last of the lines (v0.90, #70).
+      await ensureLabourLine(oid);
       await syncStage(oid);
       haptic('light');
     });
@@ -951,6 +941,13 @@ export function JobPage() {
           </button>
         ),
         i.kind === 'part' && i.qty !== 1 ? `${i.qty} × ${formatAed(unitGross(i))}` : '',
+        // The labour charge priced by the garage's history (v0.90, #70) — said, until a price is typed by hand.
+        i.labourGuess && i.unitPriceFils > 0 && i.unitPriceFils === i.labourGuess.fils && (
+          <span key="guess" className="labour-guess" data-labour-guess={i.labourGuess.basis} title={t('job.byHistoryN', { n: i.labourGuess.jobs })}>
+            <IconHistory size={13} stroke={2.2} aria-hidden />
+            {t('job.byHistory')}
+          </span>
+        ),
         // Its own discount (v0.82), in green.
         i.lineOff && (
           <span key="off" className="line-off-note">
@@ -1092,15 +1089,10 @@ export function JobPage() {
   // task); the discount — "%" under the lines; the check-in act's photo screen — the job card is the inspection.
   const tiles: Tile[] = [];
   tiles.push({ key: 'customer', icon: IconUser, onClick: () => setCustomerOpen(true) });
-  // The customer's WhatsApp chat in the app (v0.78): while the garage's WhatsApp is linked and there is a number.
+  // The customer's WhatsApp chat in the app (v0.78): while the garage's WhatsApp is linked and there is a number. A phone —
+  // only «＋» → «Чат» (v0.90, #71); a PC, which has no «＋» of the job, — this tile.
   const waPhone = b.customer.whatsapp || b.customer.phone;
-  if (waLinked && waPhone)
-    tiles.push({
-      key: 'whatsapp',
-      icon: IconBrandWhatsapp,
-      // v0.80: the chat is the job's own tab.
-      onClick: openChat,
-    });
+  if (waLinked && waPhone && !phone) tiles.push({ key: 'whatsapp', icon: IconBrandWhatsapp, onClick: openChat });
   // The reports by hand (v0.79): the job to the work group, the visit to the company's own group — no prices.
   // Seen before it goes (v0.85): the report opens in «Проверить и отправить».
   const toWork = () => void run(() => sendWorkReport(oid));
@@ -1338,12 +1330,8 @@ export function JobPage() {
         )}
         {c.phone && (
           <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
-            {tabs === JOB_TABS_WA ? (
-              // The garage's WhatsApp linked (v0.80): the customer's chat is this job's own tab.
-              <ActionIcon variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp" onClick={openChat} data-job-chat-btn>
-                <IconBrandWhatsapp size={21} />
-              </ActionIcon>
-            ) : (
+            {/* The garage's WhatsApp linked: the chat only from «＋» (v0.90, #71); without it — WhatsApp itself, as before. */}
+            {!waLinked && (
               <ActionIcon component="a" href={whatsappUrl(c.whatsapp || c.phone, '')} target="_blank" rel="noopener" variant="light" color="green" size={40} radius="xl" aria-label="WhatsApp">
                 <IconBrandWhatsapp size={21} />
               </ActionIcon>
@@ -1398,14 +1386,11 @@ export function JobPage() {
         items={[
           { value: 'main', label: t('job.tab.main') },
           { value: 'notes', label: t('job.tab.notes'), count: b.notes.length || undefined },
-          ...(tabs === JOB_TABS_WA ? [{ value: 'chat', label: 'WhatsApp', icon: IconBrandWhatsapp, color: 'green', count: chatUnread || undefined }] : []),
         ]}
       />
     </div>
     <div key={tab} ref={sw.panel} className="job-panel">
-    {tab === 'chat' ? (
-      <JobChat b={b} open={chatOpen} onOpen={() => setChatOpen(true)} unread={chatUnread} />
-    ) : tab === 'notes' ? (
+    {tab === 'notes' ? (
       <NotesChat orderId={oid} notes={b.notes} editable={open} />
     ) : (
     <>
@@ -1513,12 +1498,16 @@ export function JobPage() {
             {/* v0.82 (#22, in «Копия»'s place — the copy is in its sheet): the parts to the suppliers that fit, by WhatsApp. */}
             {parts.length > 0 && <AddExtra icon={IconTruck} label={t('ask.title')} word={t('ask.title')} onClick={() => setAskOpen(true)} />}
             {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} word={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
+            {/* v0.90 (#72): the quote's options — the original and the copy, with a part and without it. */}
+            {lines.length > 0 && !inv && <AddExtra icon={IconStack2} label={t('qo.title')} word={t('qo.tile')} onClick={() => setOptionsOpen(true)} />}
           </AddBar>
         )}
         {editable && phase === 'booked' && lines.length > 0 && (
-          // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one.
+          // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one. Its
+          // options (v0.90): a request from WhatsApp comes with them (original or copy) — the prices go before the car.
           <div className="add-row">
             <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />
+            {!inv && <AddExtra icon={IconStack2} label={t('qo.title')} word={t('qo.tile')} onClick={() => setOptionsOpen(true)} />}
           </div>
         )}
         {(phase === 'look' || phase === 'price') && editable && quick.length > 0 && (
@@ -1574,8 +1563,6 @@ export function JobPage() {
     <>
       <PageHeader
         back="/"
-        // The customer's chat (v0.81, «заголовок с названием автомобиля компактнее»): the car in the bar only — room for messages.
-        inline={phone && tab === 'chat'}
         // The day the car came (v0.88, the owner: «первоначальная дата должна сохраниться… какой день физически машина
         // приезжала»): always in sight — work continued later, the job closed and opened again, it stays the first one.
         eyebrow={phase === 'booked' ? `№${b.order.number}` : `№${b.order.number} · ${formatDate(b.order.arrivedAt ?? b.order.createdAt)}`}
@@ -1706,6 +1693,19 @@ export function JobPage() {
           />
         )}
       </SheetFor>
+      <LazySheet opened={optionsOpen}>
+        {(o) => (
+          <QuoteOptionsSheet
+            b={b}
+            opened={o}
+            onClose={() => setOptionsOpen(false)}
+            onSend={(r) => {
+              setOptionsOpen(false);
+              setSend(r);
+            }}
+          />
+        )}
+      </LazySheet>
       <LazySheet opened={ownerOpen}>
         {(o) => <OwnerCheckSheet b={b} expenses={expenses ?? []} partsCategoryId={partsCat || undefined} docLang={docLang} opened={o} onClose={() => setOwnerOpen(false)} />}
       </LazySheet>

@@ -295,6 +295,29 @@ export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {
   return lines.join('\n');
 }
 
+/**
+ * The quote's options in one message (v0.90, #72): each option — its name, its lines, its total; then which to choose. The
+ * customer answers with the option's number.
+ */
+export function optionsMessage(ctx: MsgContext, lang: Lang, options: { name: string; items: OrderItem[] }[], validUntil: string): string {
+  const t = tFor(lang);
+  const money = (f: number) => formatAed(f, lang);
+  const out: string[] = [tidy(t('msg.quoteOptionsHeader', base(ctx, lang)))];
+  options.forEach((o, k) => {
+    out.push('', `*${k + 1}. ${o.name}*`);
+    for (const i of o.items.filter((x) => x.kind !== 'discount')) {
+      let line = `• ${itemTitle(i, lang)} — ${money(itemAmounts(i).gross)}`;
+      if (i.customerSupplied) line += ` (${t('msg.customerPart')})`;
+      out.push(line);
+    }
+    const off = o.items.filter((x) => x.kind === 'discount');
+    if (off.length) out.push(`${itemTitle(off[0], lang)}: ${money(off.reduce((a, i) => a + itemAmounts(i).gross, 0))}`);
+    out.push(t('msg.total', { fixed: money(o.items.reduce((a, i) => a + itemAmounts(i).gross, 0)) }));
+  });
+  out.push('', t('msg.validUntil', { date: formatDate(validUntil) }), '', t('msg.quoteOptionsHint', { n: options.length }));
+  return out.join('\n');
+}
+
 export function limitMessage(ctx: MsgContext, v: EstimateVersion): string {
   const lang = v.language;
   const t = tFor(lang);

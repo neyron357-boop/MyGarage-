@@ -16,6 +16,9 @@ export function useBackClosesSheets(enabled: boolean) {
     const tracked = new Map<Element, { popped: boolean }>();
     let ignorePops = 0;
     let frame = 0;
+    // Entries of sheets closed from inside while a full-screen layer was opened over them (v0.90: «…» → «Смета» — the
+    // sheet closes, the PDF viewer opens before it is gone): under the layer's own entry, dropped once it has gone.
+    let pending = 0;
 
     const sync = () => {
       frame = 0;
@@ -32,16 +35,22 @@ export function useBackClosesSheets(enabled: boolean) {
       }
       // Closed from inside the sheet: drop our entries, unless a button already navigated away — several sheets closed
       // together (a sheet and the list it was opened from) in one step: two history.back() in a row may be taken as one.
-      if (drop && history.state?.mgSheet) {
+      // A layer over them (a viewer, the camera): its own entry is on top — theirs go when it has (or Back would close it).
+      pending += drop;
+      if (pending && layers.open > 0) return;
+      if (pending && history.state?.mgSheet) {
         ignorePops++;
-        history.go(-drop);
+        history.go(-pending);
       }
+      pending = 0;
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(sync);
     };
 
     const onPop = () => {
+      // A layer that just went: the entries of sheets closed under it go now.
+      if (pending) schedule();
       if (ignorePops > 0) {
         ignorePops--;
         return;

@@ -761,6 +761,25 @@ export const en: typeof ru = {
     wasQuote: 'a quotation there, work not confirmed',
     continued: 'continued here',
   },
+  qo: {
+    title: 'Quote options',
+    tile: 'Options',
+    name: 'The option’s name',
+    add: 'Option',
+    make: 'Make options',
+    choose: 'Choose',
+    chosen: 'Chosen',
+    remove: 'Remove the option',
+    removed: 'Option removed',
+    send: 'Send to the customer · {{n}}',
+  },
+  pdfView: {
+    inBrowser: 'Open in the browser',
+    broken: 'The PDF does not open',
+    closer: 'Zoom in',
+    further: 'Zoom out',
+    fit: 'Fit the width',
+  },
   camera: {
     of: '{{n}} of {{total}}',
     close: 'Close',
@@ -1193,6 +1212,8 @@ export const en: typeof ru = {
     lineUndone: 'Not done',
     // v0.88: a line not confirmed yet — out of the quote and the invoice.
     unconfirmed: 'not confirmed',
+    byHistory: 'from history',
+    byHistoryN: 'The labour price from the garage’s history: {{n}} jobs',
     unconfirm: 'Unconfirm',
     confirm: 'Confirm',
     unconfirmChip: 'Not confirmed',
@@ -2473,6 +2494,8 @@ export const en: typeof ru = {
     validUntil: 'The estimate is valid until {{date}}.',
     bExplain: 'For “may be needed” items please reply “do if needed” (within the stated price) or “call me”. We never do them without your consent.',
     answerHint: 'Reply “YES” to approve, or tell us which items you do not want.',
+    quoteOptionsHeader: 'Hello {{name}}! Options for your {{car}} ({{plate}}), job no. {{number}}:',
+    quoteOptionsHint: 'Reply with the number of the option you choose (1–{{n}}).',
     doneByLimit: '{{name}}, while repairing your {{car}} ({{plate}}) we found: {{reason}}\n{{items}}\nDone within your no-call limit from the check-in report. Amount: {{sum}}. Photos attached.',
     verbalHeader: '{{name}}, as agreed by phone for job no. {{number}} ({{car}}, {{plate}}):',
     verbalApproved: 'We will do:',
@@ -2630,6 +2653,8 @@ export const en: typeof ru = {
     carGarage: "As the garage's own cars",
     // v0.89: the make and model seen on the car's photo; the photo and the VIN say different cars.
     carPhoto: 'The car from its photo',
+    // v0.90: a customer's request in WhatsApp made a job of «Заявки».
+    requestTitle: 'A request from WhatsApp',
     checkTitle: 'Photo or VIN?',
     checkPill: 'Photo ≠ VIN',
     byPhotoShort: 'Photo',

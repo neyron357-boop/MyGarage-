@@ -1,4 +1,5 @@
 import { liveLines } from '../domain/flow';
+import { liveOptions, optionItems, optionName } from '../domain/quoteOptions';
 import { Document, Font, Image, Page, pdf, StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { ReactNode } from 'react';
 import { db } from '../db/db';
@@ -12,7 +13,7 @@ import { formatAed } from '../domain/money';
 import { formatPhone } from '../domain/phone';
 import { formatPlate, normalizePlate } from '../domain/plates';
 import type { Report } from '../domain/reports';
-import type { Customer, ExpenseCategory, Lang, Order, PayMethod, Settings, Vehicle } from '../domain/types';
+import type { Customer, ExpenseCategory, Lang, Order, OrderItem, PayMethod, Settings, Vehicle } from '../domain/types';
 import { tFor } from '../i18n';
 import { mediaDataUrl } from '../services/media';
 import { loadOrderBundle } from '../services/orders';
@@ -301,7 +302,7 @@ function oneRate(lines: { kind: string; vatRateBp?: number }[]): number | undefi
   return rates.size === 1 ? [...rates][0] : undefined;
 }
 
-function QuotationDocument({ fam, settings, customer, vehicle, number, date, validUntil, rows, totals, note }: {
+function QuotationDocument({ fam, settings, customer, vehicle, number, date, validUntil, rows, totals, note, option }: {
   fam: string;
   settings: Settings;
   customer: Customer;
@@ -313,6 +314,8 @@ function QuotationDocument({ fam, settings, customer, vehicle, number, date, val
   /** gross: the total; discount: without VAT, negative, if any; vatRateBp: the lines' one rate. */
   totals: { gross: number; vat: number; text?: string; discount?: number; discountLabel?: string; vatRateBp?: number };
   note?: string;
+  /** One option of the quote (v0.90): its name under the number. */
+  option?: string;
 }) {
   const party = partyOf(customer);
   return (
@@ -325,6 +328,7 @@ function QuotationDocument({ fam, settings, customer, vehicle, number, date, val
           lines={
             <>
               <BiLine en="Quotation Number" ar={AR_LABEL.quotationNumber} value={number} />
+              {option ? <BiLine en="Option" ar={AR_LABEL.option} value={option} /> : null}
               <BiLine en="Date" ar={AR_LABEL.date} value={formatDocDate(date)} />
               {validUntil ? <BiLine en="Valid until" ar={AR_LABEL.validUntil} value={formatDate(validUntil)} /> : null}
             </>
@@ -388,11 +392,8 @@ export async function renderVersion(versionId: string): Promise<Blob> {
   ));
 }
 
-/** Quotation of the job's current lines (quick path), before the invoice is issued. */
-export async function renderQuotation(orderId: string): Promise<Blob> {
-  const b = (await loadOrderBundle(orderId))!;
-  // The lines that count — not the unconfirmed ones (v0.88).
-  const items = liveLines(b.items);
+/** The rows and totals of a quote of these lines: the job's own, or one of its options (v0.90). */
+function quoteOf(items: OrderItem[]) {
   const priced = items.map((i) => ({ ...itemAmounts(i), kind: i.kind, vatRateBp: i.vatRateBp, item: i, ...(itemOff(i) ? { discountFils: itemOff(i) } : {}) }));
   const spread = spreadDiscount(priced);
   const rows: DocRow[] = [
@@ -402,6 +403,44 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
   const gross = rows.reduce((x, r) => x + r.total, 0);
   const vat = rows.reduce((x, r) => x + (r.vat ?? 0), 0);
   const discountLabel = pctLabel(priced, items.filter((i) => i.kind === 'discount').map((i) => itemTitle(i, 'en')));
+  return { rows, totals: { gross, vat, discount: netDiscount(priced), discountLabel, vatRateBp: oneRate(priced) } };
+}
+
+/**
+ * The quote's options (v0.90, #72): a page each — its lines, its total, «Option» and its name under the number
+ * («434-1», «434-2»). `ids` — only those.
+ */
+export async function renderQuoteOptions(orderId: string, ids?: string[]): Promise<Blob> {
+  const b = (await loadOrderBundle(orderId))!;
+  const all = liveOptions(b.items, b.order.quoteOptions);
+  const now = nowIso();
+  return render((fam) => (
+    <Document title={`Quotation ${b.order.number} — options`}>
+      {all.map((o, k) =>
+        ids && !ids.includes(o.id) ? null : (
+          <QuotationDocument
+            key={o.id}
+            fam={fam}
+            settings={b.settings}
+            customer={b.customer}
+            vehicle={b.vehicle}
+            number={`${b.order.number}-${k + 1}`}
+            option={optionName(o, k + 1, 'en')}
+            date={now}
+            validUntil={addDays(now, b.settings.estimateValidityDays)}
+            {...quoteOf(optionItems(b.items, o))}
+          />
+        ),
+      )}
+    </Document>
+  ));
+}
+
+/** Quotation of the job's current lines (quick path), before the invoice is issued. */
+export async function renderQuotation(orderId: string): Promise<Blob> {
+  const b = (await loadOrderBundle(orderId))!;
+  // The lines that count — not the unconfirmed ones (v0.88).
+  const { rows, totals } = quoteOf(liveLines(b.items));
   const now = nowIso();
   return render((fam) => (
     <Document title={`Quotation ${b.order.number}`}>
@@ -414,7 +453,7 @@ export async function renderQuotation(orderId: string): Promise<Blob> {
         date={now}
         validUntil={addDays(now, b.settings.estimateValidityDays)}
         rows={rows}
-        totals={{ gross, vat, discount: netDiscount(priced), discountLabel, vatRateBp: oneRate(priced) }}
+        totals={totals}
       />
     </Document>
   ));

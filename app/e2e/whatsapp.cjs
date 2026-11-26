@@ -195,10 +195,14 @@ let current = null;
   watch(page);
   const settle = (ms = 700) => page.waitForTimeout(ms);
   const top = () => page.locator('.screen[data-role="top"]');
-  // v0.83: a job's chat tab opens locked — «Открыть чат» (once a visit).
-  const unlockJobChat = async () => {
-    const lock = top().locator('[data-job-chat-open]');
-    if (await lock.waitFor({ timeout: 4000 }).then(() => true, () => false)) await lock.click();
+  // v0.90 (#71): the customer's chat from a job — only its «＋» → «Чат», and it opens in «WhatsApp».
+  const jobChat = async (id) => {
+    await go(`#/orders/${id}`, 1200);
+    await page.locator('.tab-plus').click();
+    await page.locator('.quick-item[data-job][data-quick="whatsapp"]').waitFor();
+    await page.locator('.quick-item[data-job][data-quick="whatsapp"]').click();
+    await page.waitForURL(/#\/whatsapp\/chat\//, { timeout: 15000 });
+    await top().locator('[data-wa-list]').waitFor();
   };
   const shot = async (name) => {
     await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline === document.timeline).map((a) => a.finished.catch(() => undefined)))).catch(() => undefined);
@@ -617,36 +621,24 @@ let current = null;
   const barBox = await top().locator('.screen-bottom .sticky-bar').boundingBox();
   check(!!plusBox && !!barBox && plusBox.y + plusBox.height <= barBox.y + 1 && barBox.y + barBox.height >= 844 - 2, 'v0.80: … over the job’s own bar, which takes the bottom edge');
   await shot('phone-14-job-full');
-  // The customer's chat is a tab of the job, next to it (a swipe from it); «…» → «Чат» opens it too.
-  check(await top().getByRole('tab', { name: /WhatsApp/ }).isVisible(), 'v0.80: the job has a «WhatsApp» tab');
-  // v0.83 (the owner: «ватсап переместить на третью позицию»; «вначале заблокировать… по нажатию чтоб открылся чат»): the
-  // tabs — the job, its notes, WhatsApp; the chat tab opens locked: whose chat, «Открыть чат», nothing of the chat drawn.
+  // v0.90 (#71, the owner: «убрать отсюда WhatsApp… открытие чата клиента только через быстрые действия»): the job — its
+  // two tabs; no WhatsApp button by the customer, no «Чат» in «…»; «＋» → «Чат» opens the chat in «WhatsApp».
   const tabNames = await top().locator('.job-tabs [role="tab"]').allInnerTexts();
-  check(tabNames.length === 3 && /WhatsApp/.test(tabNames[2]) && /Заметки|Notes/.test(tabNames[1]), 'v0.83: WhatsApp is the job’s third tab: ' + tabNames.join(' | '));
-  await top().getByRole('tab', { name: /WhatsApp/ }).click();
-  await top().locator('[data-job-chat-lock]').waitFor();
-  await settle(500);
-  check(!(await top().locator('[data-wa-list], [data-wa-mic], .notes-field').count()), 'v0.83: the chat tab is locked — no messages, no field, no microphone');
-  await shot('phone-15a-job-chat-locked');
-  await top().locator('[data-job-chat-open]').click();
-  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
-  check(true, 'v0.83: «Открыть чат» opens it');
-  check((await top().locator('[data-wa-field]').inputValue()) === 'draft for the job', 'v0.84: the job’s chat has the same draft as «WhatsApp» — one chat, one draft');
-  check(await top().locator('[data-wa-job-head]').isVisible(), 'v0.84: the job’s chat says whose it is over the messages');
-  await top().locator('[data-wa-field]').fill('');
-  await top().getByRole('tab', { name: /^(Основная|Job)$/ }).click();
-  await settle(600);
-  await go(`#/`, 900);
-  await go(`#/orders/${jobId}`, 1200);
+  check(tabNames.length === 2 && !tabNames.some((x) => /WhatsApp/.test(x)), 'v0.90: the job’s tabs — no WhatsApp: ' + tabNames.join(' | '));
+  check(!(await top().locator('[data-job-chat-btn]').count()), 'v0.90: no WhatsApp button by the customer on the job');
   await top().getByRole('button', { name: /^(Ещё|More)$/ }).first().click();
-  await page.locator('.action-tile', { hasText: 'Чат' }).click();
-  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
+  await settle(500);
+  check(!(await page.locator('.action-tile', { hasText: 'Чат' }).count()), 'v0.90: no «Чат» among the job’s «…» on a phone');
+  await page.keyboard.press('Escape');
+  await settle(400);
+  await jobChat(jobId);
   await settle(700);
-  check(page.url().includes(`/orders/${jobId}`) && page.url().includes('tab=chat'), 'the job’s «Чат» is the customer’s chat, on the job itself (v0.80)');
-  check((await top().locator('[data-job-chat] .note-row').count()) >= 8, 'v0.80: the chat on the job shows the customer’s messages');
-  check(await page.evaluate(() => getComputedStyle(document.querySelector('.tab-bar-wrap')).opacity === '0'), 'v0.80: the job’s chat — the whole screen, its composer at the bottom');
+  check(page.url().includes(`/whatsapp/chat/${encodeURIComponent(A)}`) || page.url().includes(`/whatsapp/chat/${A}`), 'v0.90: «＋» → «Чат» is the customer’s chat in «WhatsApp»');
+  check((await top().locator('[data-wa-field]').inputValue()) === 'draft for the job', 'v0.84: the chat has the draft typed in «WhatsApp» — one chat, one draft');
+  await top().locator('[data-wa-field]').fill('');
+  check((await top().locator('.note-row').count()) >= 8, 'the customer’s chat shows the messages');
   await shot('phone-15-job-chat');
-  // «＋» in the job's chat: this job first, its estimate a tap away.
+  // «＋» in the customer's chat: their jobs, this one's estimate a tap away.
   await top().locator('[data-wa-plus]').click();
   await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
   await settle(500);
@@ -669,10 +661,8 @@ let current = null;
   check(went[1].path === 'file' && went[1].file.type === 'application/pdf' && went[1].query.doc === '1' && /\.pdf$/.test(went[1].query.name), 'its PDF went after them, as a document');
   check(await page.locator('[data-send-direct]').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false), 'the sheet closed: nobody is asked whether it was sent');
 
-  // v0.80: the estimate again from the job's chat («＋» → «Смета»): the version waiting for the answer, its PDF.
-  await go(`#/orders/${jobId}?tab=chat`, 1200);
-  await unlockJobChat();
-  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
+  // v0.80: the estimate again from the customer's chat («＋» → «Смета»): the version waiting for the answer, its PDF.
+  await jobChat(jobId);
   await top().locator('[data-wa-plus]').click();
   await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
   const before2 = await page.evaluate(() => window.__wa.asked.length);
@@ -715,9 +705,7 @@ let current = null;
 
   // v0.80.3: «Сначала боссу» in the sheet to the customer — the boss gets the words (whose they are) and the PDF; the
   // customer is not sent anything, the sheet stays.
-  await go(`#/orders/${jobId}?tab=chat`, 1200);
-  await unlockJobChat();
-  await top().locator('[data-job-chat] [data-wa-list]').waitFor();
+  await jobChat(jobId);
   await top().locator('[data-wa-plus]').click();
   await page.locator(`[data-wa-quick-job="${jobId}"]`).waitFor();
   await page.locator('[data-wa-quick-doc="estimate"]').first().click();

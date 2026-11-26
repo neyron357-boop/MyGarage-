@@ -164,6 +164,9 @@ erDiagram
 | `stage` | этап (см. 4.1) |
 | `outcome` | `in_progress` · `completed` · `repair_declined` · `no_show` · `cancelled` |
 | `complaint` | жалоба клиента |
+| `quoteOptions` | v0.90: варианты сметы — `{ id, name, itemIds, createdAt, sentAt?, chosenAt? }`: какие строки заказа в каждом (строки остаются на заказе); выбранный — его строки на заказе, остальные «не подтверждена» |
+| `labourOff` | v0.90: строку труда убрали руками — приложение не добавит её этому заказу снова |
+| `fromChat` | v0.90: заказ сделан сам из заявки в WhatsApp — `{ chat, msg }` (чат и его последнее сообщение тогда), чтобы не дважды |
 | `mechanic_id` | назначенный механик (с v0.17.2 — первый из `mechanic_ids`) |
 | `mechanic_ids` | механики на заказе, в том порядке, в каком их назначили (v0.17.2; заказ до этого — один `mechanic_id`, читать через `mechanicsOf`) |
 | `doc_language` | язык документов (копия с клиента на момент создания) |
@@ -260,6 +263,8 @@ erDiagram
 | `discount_pct_bp` | у строки скидки (`kind = discount`), данной процентом: 1000 = 10 %; пока черновик — пересчитывается от строк |
 | `price_min_fils`, `price_max_fils` | вилка для блока B |
 | `vat_rate_bp` | обычно 500; `0` — строка без VAT (выбор «Без VAT» под ценой, как позиция без Tax в Eaglecart) |
+| `autoLabour` | v0.90: строку труда добавило само приложение (с первой деталью заказа) |
+| `labourGuess` | v0.90: цена строки труда по истории мастерской — `{ fils, gross?, jobs, basis: same · parts }`; пока цена строки — она, цена следует за деталями |
 | `urgency` | `red` · `yellow` · `green` (для C и доп. согласований) |
 | `if_not_done_ru`, `if_not_done_en` | последствия отказа |
 | `approval_state` | `draft` · `pending` · `approved` · `declined` · `cancelled` (см. 4.2) |

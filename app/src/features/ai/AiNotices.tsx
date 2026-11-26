@@ -6,6 +6,7 @@ import { dayShort, dubaiDate } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { useLang } from '../../ui/hooks';
 import { onAiNotice, type AiNotice } from '../../services/ai';
+import { openRoute } from '../../ui/openRoute';
 import { chime } from '../../ui/sound';
 import { AiMark } from './Ai';
 
@@ -42,6 +43,14 @@ export function AiNotices() {
                 </span>
               ))}
             </span>
+          );
+        } else if (n.kind === 'request') {
+          // A customer's request in WhatsApp made a job of «Заявки» (v0.90, #69): a tap — the job.
+          title = t('ai.requestTitle');
+          body = (
+            <button type="button" className="ai-toast-main ai-toast-link" data-ai-request={n.orderId} onClick={() => (openRoute(`/orders/${n.orderId}`), notifications.hide(id))}>
+              {[`№${n.number}`, n.car].filter(Boolean).join(' · ')}
+            </button>
           );
         } else if (n.kind === 'name') {
           title = t('ai.nameTitle');

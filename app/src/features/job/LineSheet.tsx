@@ -14,7 +14,7 @@ import { aiAfterLine } from '../../services/ai';
 import { AiMark, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
 import { VinCatalogsRow } from './VinCatalogs';
-import { addItem, setLinePhotos, updateItem } from '../../services/estimate';
+import { addItem, ensureLabourLine, setLinePhotos, updateItem } from '../../services/estimate';
 import { setUnconfirmed, syncStage } from '../../services/flow';
 import { offerWhen, optionsText } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
@@ -286,6 +286,8 @@ export function LineSheet({
         if (status && status !== partStateOf(item)) await setProcurement(item.id, { status });
       } else {
         itemId = (await addItem(b.order.id, { kind: lineKind, block: 'A', ...patch, procurementStatus: status })).id;
+        // A job's first part brings its labour charge (v0.90, #70); it stays last of the lines.
+        await ensureLabourLine(b.order.id);
       }
       const before = item?.mediaIds ?? [];
       if (itemId && (fresh.length || kept.length !== before.length)) await setLinePhotos(itemId, kept, fresh.map((p) => p.file));

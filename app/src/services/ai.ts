@@ -31,7 +31,7 @@ import { namedByParts, partNames, partsKey } from '../domain/labourName';
  * определения VIN.»): not to come back without his word.
  */
 
-export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car';
+export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request';
 type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
@@ -92,6 +92,8 @@ export type AiNotice =
   | { kind: 'car'; vehicleId: string; filled: CarFill; from?: 'garage' | 'photo'; undo: () => Promise<void> }
   | { kind: 'name'; itemId: string; from: string; to: string; undo: () => Promise<void> }
   /** A supplier's receipt read and recorded as an expense (v0.50, services/receipts.ts). */
+  /** A customer's request in WhatsApp made a job of «Заявки» (v0.90, services/waRequest.ts). */
+  | { kind: 'request'; orderId: string; number: number; car: string; undo: () => Promise<void> }
   | { kind: 'expense'; expenseId: string; amountFils: number; vendor?: string; date: string; dateSure: boolean; job?: { number: number; car: string }; supplier?: { name: string; added: boolean }; items: number; close: boolean; undo: () => Promise<void> };
 
 const listeners = new Set<(n: AiNotice) => void>();

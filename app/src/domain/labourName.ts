@@ -22,6 +22,9 @@ export const labourWords = (title: string): string => lineName(title.split(':')[
 /** A name of plain labour words, with or without the parts after them. */
 export const plainLabour = (title: string): boolean => PLAIN.test(labourWords(title));
 
+/** Which kind of a part a name says (v0.90: an original and its copy side by side are one part to the labour charge). */
+const KIND_WORDS = /\s*(?<![A-ZА-ЯЁ])(ORIGINAL|GENUINE|OEM|DUPLICATE|AFTERMARKET|COPY|ОРИГИНАЛ|КОПИЯ|ДУБЛИКАТ)(?![A-ZА-ЯЁ])/g;
+
 /** The job's parts by name, in the lines' order, each once (the language asked, else the other). */
 export function partNames(items: OrderItem[], lang: 'en' | 'ru'): string[] {
   const out: string[] = [];
@@ -29,7 +32,7 @@ export function partNames(items: OrderItem[], lang: 'en' | 'ru'): string[] {
     .filter((i) => i.kind === 'part')
     .sort(byPosition);
   for (const p of parts) {
-    const name = lineName(((lang === 'ru' ? p.titleRu || p.titleEn : p.titleEn || p.titleRu) ?? '').trim());
+    const name = lineName(((lang === 'ru' ? p.titleRu || p.titleEn : p.titleEn || p.titleRu) ?? '').trim()).replace(KIND_WORDS, '').trim();
     if (name && !out.includes(name)) out.push(name);
   }
   return out;

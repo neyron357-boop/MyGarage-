@@ -75,6 +75,7 @@ import { QuickNewButton, QuickPlus } from './features/quick/QuickActions';
 // The developer's feedback tool (temporary): removed with src/devtools/feedback and this line and the one below.
 import { FeedbackTool } from './devtools/feedback';
 import { AiNotices } from './features/ai/AiNotices';
+import { PdfViewerHost } from './ui/PdfViewer';
 import { WaNotices } from './features/whatsapp/WaNotices';
 import { WaConfirm } from './features/whatsapp/WaConfirm';
 import { useClientLockGuard } from './ui/clientLock';
@@ -795,6 +796,7 @@ function Providers({ children }: { children: React.ReactNode }) {
       <Celebration />
       <FeedbackTool />
       <AiNotices />
+      <PdfViewerHost />
       <WaNotices />
       <WaConfirm />
       {children}

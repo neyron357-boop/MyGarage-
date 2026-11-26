@@ -49,6 +49,7 @@ export const AR_LABEL = {
   invoiceNumber: 'رقم الفاتورة',
   creditNumber: 'رقم الإشعار',
   quotationNumber: 'رقم عرض السعر',
+  option: 'الخيار',
   order: 'رقم الطلب',
   date: 'التاريخ',
   validUntil: 'صالح حتى',

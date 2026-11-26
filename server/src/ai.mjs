@@ -12,6 +12,8 @@ import { DIRS, httpError } from './store.mjs';
  *                       the decoder knows little of them);
  *   partName(…)       — a part's name as typed, its spelling mistakes put right, and its English name;
  *   receipt(…)        — a supplier's receipt read off its photo (v0.50);
+ *   request(…)        — a customer's request in WhatsApp (v0.90): the car and what is asked, off the chat's words and
+ *                       its last picture (a registration card) — a light model, no thinking, the same messages never twice
  *   car(…)            — a car's make and model off a small photo taken at check-in (v0.89: low resolution, a few
  *                       hundred tokens).
  *
@@ -56,6 +58,12 @@ Give make, model (the name it is sold under), year, engine (litres and cylinders
   // of the car taken at check-in; no model named in the question (v0.88: a light model gives an example back).
   car: () =>
     `A photo taken as a car comes into a garage in the UAE. isCar: a car (or van, pickup, truck) is the main thing in it. make and model: as it is sold, read off its badges, grille, lights and body; "" for what you cannot tell. confidence 0..1 that the model is right.`,
+  // v0.90 (the owner's note #69: «на такие запросы в ватсапе реагировать и автоматически создавать заявку/карточку
+  // заказа»): the messages a chat just sent, a picture last (a registration card, the car) when there was one.
+  request: (texts, picture) =>
+    `WhatsApp messages to a car repair garage in the UAE, oldest first ("[photo]" — a picture${picture ? '; the last one is attached' : ''}):
+${texts.map((t) => `- "${t.slice(0, 400)}"`).join('\n')}
+isRequest: someone asks the garage to repair, service, fit or price parts or work on a car (not a supplier offering parts, not small talk). car: make, model, year (0 if not said), plate (as written or as on the registration card in the picture: emirate — DXB, AUH, SHJ, AJM, UAQ, RAK, FUJ or ""; code — the letters or digits before the number; number; "" for what is not seen), vin (the 17 characters if shown, else ""). items: each part or work asked, as an English invoice line ("ENGINE MOUNT", "FRONT BRAKE PADS", "AC SERVICE"), kind "part" or "work", both: true when they ask the price of the original and of a copy (duplicate, aftermarket). owner: the car owner's name if said, else "". confidence 0..1 that it is a request. Only what the messages and the picture show.`,
   name: (name, car) =>
     `A line of a car repair job typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}" — a spare part, a service or work. It may have typos; it may be English, Russian, or Russian in Latin letters.
 fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; confidence 0..1 for fixed.`,
@@ -225,18 +233,18 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
    * pictures to look at (inline); `models` — which, in turn; `thinking` — how much ("low" unless there is a reason;
    * «minimal» — the light models only, the stronger ones refuse it: «low»); `media: 'low'` — the pictures looked at in
    * low resolution (v0.89: a car's make — a few hundred tokens, not a thousand; a model that does not take it is asked
-   * again without it).
+   * again without it); `'medium'` — a paper's letters (v0.90: a registration card in a WhatsApp request).
    */
   async function ask(text, { kind = 'other', schema, images = [], models: list, timeout = 25_000, thinking = 'low', media } = {}) {
     if (!key()) throw httpError(503, 'ai off');
-    const bodyFor = (model, low) => ({
+    const bodyFor = (model, res) => ({
       // Each picture under its own label («Picture 1:»…).
       contents: [{ parts: [{ text }, ...images.flatMap((i, k) => [{ text: `Picture ${k + 1}:` }, { inline_data: { mime_type: i.type, data: i.data } }])] }],
       generationConfig: {
         temperature: 0,
         maxOutputTokens: 2048,
         thinkingConfig: { thinkingLevel: thinking === 'minimal' && !/lite/.test(model) ? 'low' : thinking },
-        ...(low ? { mediaResolution: 'MEDIA_RESOLUTION_LOW' } : {}),
+        ...(res ? { mediaResolution: res === 'medium' ? 'MEDIA_RESOLUTION_MEDIUM' : 'MEDIA_RESOLUTION_LOW' } : {}),
         ...(schema ? { responseMimeType: 'application/json', responseJsonSchema: schema } : {}),
       },
     });
@@ -244,9 +252,9 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     for (const model of order(list)) {
       let res;
       try {
-        res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model, media === 'low')) }, timeout);
-        // The low resolution refused by this model: the same question at its own.
-        if (res.status === 400 && media === 'low') res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model, false)) }, timeout);
+        res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model, media)) }, timeout);
+        // The resolution refused by this model: the same question at its own.
+        if (res.status === 400 && media) res = await timed(`${API}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key() }, body: JSON.stringify(bodyFor(model, false)) }, timeout);
       } catch (e) {
         last = httpError(504, `gemini ${model}: ${e.name === 'AbortError' ? 'timeout' : e.message}`);
         cooling.set(model, now() + COOL);
@@ -451,6 +459,40 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
           P.car(),
           { type: 'object', properties: { isCar: { type: 'boolean' }, make: { type: 'string' }, model: { type: 'string' }, confidence: { type: 'number' } }, required: ['isCar', 'make', 'model', 'confidence'] },
           { kind: 'car', images: [{ type, data }], thinking: 'minimal', media: 'low', timeout: 30_000 },
+        );
+        return { ...value, by: model };
+      });
+    },
+
+    /**
+     * A customer's request in WhatsApp (v0.90, #69): is it one, the car (its plate and VIN as written or as on the
+     * registration card in the picture), the parts and work asked. A light model, no thinking, the picture at medium
+     * resolution; the same messages and picture never twice. The app checks what it takes (domain/waRequest.ts).
+     */
+    async request({ texts = [], image } = {}) {
+      const list = (Array.isArray(texts) ? texts : []).map((x) => String(x).trim().slice(0, 400)).filter(Boolean).slice(-12);
+      if (!list.length) throw httpError(400, 'no messages');
+      const type = String(image?.type ?? '');
+      const data = String(image?.data ?? '');
+      const pic = /^image\/(jpeg|png|webp)$/.test(type) && data.length > 1000 && data.length < 3_000_000 ? [{ type, data }] : [];
+      const hash = createHash('sha256').update(JSON.stringify(list)).update(pic[0]?.data ?? '').digest('hex');
+      return cached(`request:1:${hash}`, 'request', async () => {
+        const item = { type: 'object', properties: { name: { type: 'string' }, kind: { type: 'string', enum: ['part', 'work'] }, both: { type: 'boolean' } }, required: ['name', 'kind'] };
+        const plate = { type: 'object', properties: { emirate: { type: 'string' }, code: { type: 'string' }, number: { type: 'string' } }, required: ['emirate', 'code', 'number'] };
+        const { value, model } = await json(
+          P.request(list, pic.length > 0),
+          {
+            type: 'object',
+            properties: {
+              isRequest: { type: 'boolean' },
+              car: { type: 'object', properties: { make: { type: 'string' }, model: { type: 'string' }, year: { type: 'integer' }, plate, vin: { type: 'string' } }, required: ['make', 'model'] },
+              items: { type: 'array', items: item },
+              owner: { type: 'string' },
+              confidence: { type: 'number' },
+            },
+            required: ['isRequest', 'items', 'confidence'],
+          },
+          { kind: 'request', images: pic, thinking: 'minimal', media: 'medium', timeout: 40_000 },
         );
         return { ...value, by: model };
       });

@@ -359,6 +359,19 @@ export interface ImportedFrom {
   twins?: { jobId: string; jobNo: string }[];
 }
 
+/** One option of a job's quote (v0.90, #72): its name and which of the job's lines it has. */
+export interface QuoteOption {
+  id: string;
+  /** As typed («Оригинал», «Копия»); empty — «Вариант 1», «Option 1». */
+  name: string;
+  itemIds: string[];
+  createdAt: string;
+  /** When it last went to the customer. */
+  sentAt?: string;
+  /** The customer chose it: the job's lines became its lines (the others — not confirmed). */
+  chosenAt?: string;
+}
+
 export interface Order {
   id: string;
   number: number;
@@ -438,6 +451,18 @@ export interface Order {
    * каждой карточке заказа — вернуть удалённые позиции или посмотреть их»): as they were, to bring back (domain/bin.ts).
    */
   removedLines?: { item: OrderItem; at: string }[];
+  /**
+   * Its labour charge taken off by hand (v0.90, #70): the app does not add one again to this job by itself.
+   */
+  labourOff?: true;
+  /**
+   * The quote's options kept on the job (v0.90, the owner's note #72: «подготовить разные версии сметы и отправлять клиенту
+   * и сохранять эти версии… с этой деталью и без неё… копии деталей и оригиналы»): which of its lines each one has — the
+   * lines themselves stay on the job as they are (domain/quoteOptions.ts).
+   */
+  quoteOptions?: QuoteOption[];
+  /** Made by itself of a customer's request in WhatsApp (v0.90, #69): the chat and its last message then — not twice. */
+  fromChat?: { chat: string; msg: string };
   /** The car's mileage on this visit, km (v0.44): read off the odometer's photo when sure, or typed / looked at. */
   mileageKm?: number;
   /** What the odometer's photo was read as when not sure, best first ([] — nothing read): waits to be looked at. */
@@ -742,6 +767,17 @@ export interface OrderItem {
    * the words after «LABOR CHARGE:». The parts changed — the line is named by the parts again until it is said anew.
    */
   labourAi?: { parts: string; text: string };
+  /**
+   * The labour charge the app added by itself (v0.90, the owner's note #70: «всегда внизу должна быть оплата труда… чтоб я
+   * сам каждый раз не добавлял… если я принудительно это сам не убираю»): the first part of a job brings it.
+   */
+  autoLabour?: true;
+  /**
+   * Its price as the garage's history said it (v0.90, #70 — domain/labourPrice.ts): `fils` the net, `gross` when typed with
+   * VAT, `jobs` how many earlier jobs said it, `basis` — the same work before, or the parts' labour one by one. While the
+   * line's price is this one, it follows the parts; a price typed by hand stays.
+   */
+  labourGuess?: { fils: number; gross?: number; jobs: number; basis: 'same' | 'parts' };
   /** The cost was put by the AI from a supplier's WhatsApp answer (v0.86): shown with the AI's mark. */
   costAi?: true;
   /**

@@ -5,7 +5,7 @@ import type { TextItem } from '../domain/obdReport';
  * large). Used to read a scanner's report and the garage's invoices and quotations.
  */
 let loading: Promise<typeof import('pdfjs-dist')> | undefined;
-function loadPdfjs() {
+export function loadPdfjs() {
   loading ??= (async () => {
     const pdfjs = await import('pdfjs-dist');
     pdfjs.GlobalWorkerOptions.workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;

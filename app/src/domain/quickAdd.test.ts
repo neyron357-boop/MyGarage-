@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Suggestion, Suggestions } from './linePrices';
-import { exactTitle, quickMatches, sideless, sideOf } from './quickAdd';
+import { exactTitle, quickMatches, sideless, sideOf, typedPrice } from './quickAdd';
 
 const s = (titleEn: string, extra: Partial<Suggestion> = {}): [string, Suggestion] => [titleEn, { titleEn, titleRu: '', price: 0, uses: 1, from: 'any', ...extra }];
 const set = (...list: [string, Suggestion][]): Suggestions => ({ list: new Map(list), top: list.filter(([, x]) => x.price > 0).map(([k]) => k) });
@@ -44,5 +44,24 @@ describe('the quick «＋» sheet: what is offered as it is typed (v0.81)', () =
     expect(exactTitle(list, 'oil change')).toBe('OIL CHANGE');
     expect(exactTitle(list, 'oil')).toBeUndefined();
     expect(quickMatches(undefined, 'oil')).toEqual([]);
+  });
+});
+
+describe('typedPrice (v0.90, «два дефиса и сумма»)', () => {
+  it('reads the price after two hyphens, or the dash an iPhone makes of them', () => {
+    expect(typedPrice('GEAR OIL -- 450')).toEqual({ name: 'GEAR OIL', priceFils: 45_000 });
+    expect(typedPrice('GEAR OIL--450')).toEqual({ name: 'GEAR OIL', priceFils: 45_000 });
+    expect(typedPrice('Oil filter — 35.50')).toEqual({ name: 'Oil filter', priceFils: 3_550 });
+    expect(typedPrice('ENGINE MOUNT – 1,200')).toEqual({ name: 'ENGINE MOUNT', priceFils: 120_000 });
+    expect(typedPrice('масло -- 45,5')).toEqual({ name: 'масло', priceFils: 4_550 });
+    expect(typedPrice('BRAKE PADS -- 1 250 AED')).toEqual({ name: 'BRAKE PADS', priceFils: 125_000 });
+  });
+  it('keeps a name with a hyphen of its own, and anything that is not a price', () => {
+    expect(typedPrice('ENGINE OIL 5W-30 -- 120')).toEqual({ name: 'ENGINE OIL 5W-30', priceFils: 12_000 });
+    expect(typedPrice('ENGINE OIL 5W-30')).toEqual({ name: 'ENGINE OIL 5W-30' });
+    expect(typedPrice('CLIP -- 2PCS')).toEqual({ name: 'CLIP -- 2PCS' });
+    expect(typedPrice('GEAR OIL --')).toEqual({ name: 'GEAR OIL --' });
+    expect(typedPrice('-- 450')).toEqual({ name: '-- 450' });
+    expect(typedPrice('GEAR OIL -- 0')).toEqual({ name: 'GEAR OIL -- 0' });
   });
 });

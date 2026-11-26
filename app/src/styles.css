@@ -803,7 +803,7 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
   .qa-added-x {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x, .car-check-pill)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x, .car-check-pill, .qo-drop)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -4322,6 +4322,96 @@ html.kb .screen-bottom > .sticky-bar {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- PDF viewer (v0.90, ui/PdfViewer.tsx): pages on a dark ground, the photo viewer's bar over them ---------- */
+.pdfv {
+  grid-template-rows: auto minmax(0, 1fr);
+  /* One column the screen's width: a long file name is cut, it never widens the viewer past the screen. */
+  grid-template-columns: minmax(0, 1fr);
+  padding-bottom: 0;
+  background: rgb(22, 22, 24);
+}
+.pdfv .cam-title {
+  flex: 1 1 auto;
+}
+.pdfv-scroll {
+  position: relative;
+  overflow: auto;
+  overscroll-behavior: contain;
+  /* One finger — the browser's own scrolling; two — the viewer's zoom (not the page's). */
+  touch-action: pan-x pan-y;
+  outline: none;
+}
+.pdfv-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 8px calc(24px + env(safe-area-inset-bottom));
+}
+.pdfv-page {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.pdfv-page canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pdfv-none {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.55);
+}
+/* A PC: closer, further, the zoom in the middle — a capsule at the foot. */
+.pdfv-zoom {
+  position: absolute;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(44, 44, 46, 0.94);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+.pdfv-zoom .cam-icon {
+  width: 34px;
+  height: 34px;
+}
+.pdfv-zoom .cam-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pdfv-zoom-n {
+  min-width: 64px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pdfv-zoom-n:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* ---------- Camera inside the app (v0.31, «Фото номера») ---------- */
 .cam {
   position: fixed;
@@ -6570,6 +6660,15 @@ button.kpi-tab .eyebrow {
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
+/* v0.90 (#69): the job made of a WhatsApp request — its number and car, a tap opens it. */
+.ai-toast-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mantine-color-cobalt-6);
+  text-align: start;
+  cursor: pointer;
+}
 .ai-toast-was {
   font-size: 13px;
   color: var(--mantine-color-dimmed);
@@ -8465,6 +8564,119 @@ html.desk .mark-layer-body {
   color: var(--mantine-color-yellow-8);
   font-weight: 600;
 }
+/* v0.90 (#72): «Варианты сметы» — an option a card: its number, its name typed in place, its total; the job's lines a tap
+   each in or out of it (in — a filled circle; out — pale). */
+.qo-card {
+  padding: 12px 14px 12px;
+  border-radius: var(--radius-group);
+  background: var(--app-card);
+}
+.qo-card[data-chosen] {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-green-6);
+}
+.qo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+.qo-n {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--mantine-color-cobalt-filled);
+}
+.qo-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.qo-name input {
+  font-size: 17px;
+  font-weight: 600;
+  height: 32px;
+  min-height: 32px;
+}
+.qo-lines {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+.qo-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  border-top: 0.5px solid var(--app-hairline);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  text-align: start;
+  cursor: pointer;
+  transition: opacity var(--dur-1) ease;
+}
+.qo-line[aria-pressed='false'] {
+  opacity: 0.45;
+}
+.qo-check {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--mantine-color-dimmed);
+  transition: background-color var(--dur-1) ease, box-shadow var(--dur-1) ease;
+}
+.qo-line[aria-pressed='true'] .qo-check {
+  background: var(--mantine-color-cobalt-filled);
+  box-shadow: none;
+}
+.qo-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.qo-off {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0 0 32px;
+  border-top: 0.5px solid var(--app-hairline);
+  font-size: 15px;
+  color: var(--mantine-color-green-7);
+}
+.qo-drop {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--mantine-color-dimmed);
+  cursor: pointer;
+}
+/* v0.90 (#70): the labour charge priced by the garage's history — a quiet word, until a price is typed. */
+.labour-guess {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--mantine-color-teal-light-color);
+  font-weight: 500;
+}
 /* «Поставщики»: the parts and the suppliers, a tap each. */
 .ask-row-wrap {
   display: flex;
@@ -10060,9 +10272,22 @@ html.desk .wa-pane-foot {
   color: var(--mantine-color-dimmed);
 }
 .wa-ask-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
   padding: 8px 12px;
+  border: 0;
   border-radius: 12px;
   background: var(--app-canvas);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.wa-ask-file:disabled {
+  cursor: default;
 }
 
 /* v0.89: the photo and the VIN say different cars — under the car's name on a job, orange until a person chooses. */
