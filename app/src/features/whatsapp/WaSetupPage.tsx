@@ -15,6 +15,7 @@ import { copyText } from '../../ui/clipboard';
 import { ConfirmModal, FormRow, List, ListRow, PageHeader, RowGroup, ScrollTabs } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { WaExportGroup } from './WaExport';
 import { WaGate } from './WhatsAppPage';
 
 /*
@@ -288,6 +289,7 @@ export function WaSetupPage() {
       </RowGroup>
 
       {phase === 'ready' && <PhoneHistory />}
+      {phase === 'ready' && <WaExportGroup />}
 
       {/* What WhatsApp says by itself (v0.79): reports, the boss, the wash, suppliers. */}
       <div className="notify-group">

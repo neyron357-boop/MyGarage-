@@ -872,6 +872,13 @@ PWA для менеджера небольшой автомастерской в
     `history.json` — без сообщений. API: `/api/wa/history-state`, `POST /api/wa/history-run`; приложение: `phoneHistoryState`,
     `runPhoneHistory`, событие `history` → `studyNow(chat, deep)` (8 с); экран — `PhoneHistory` (сервер до v0.91.3 —
     `AppPhoneHistory`, `olderFromPhone`). Сообщения нигде не копировать: старое хранит сам WhatsApp Web на ПК.
+    **Экспорт чатов (v0.91.5**, «у меня нету в настройках включить всю историю» — у аккаунта её нет; «Да, сделай»): вся история —
+    «Экспорт чата» телефона. Разбор — только `domain/waExport.ts` (`parseExport`: iPhone/Android, порядок даты по файлу, 12/24 ч,
+    вложения; `exportChatName`, `whoIsGarage`, `exportMessages`); файлы — `services/waExport.ts` (`readExports`: ZIP — только
+    .txt, `unzip(bytes, only)`; `matchChat` — имя или номер среди чатов, изученных, поставщиков и клиентов; `learnExports`);
+    запись — `learnFromExport` в `services/chatStudy.ts` (`spliceTurns`: выгрузка — свой период, остальное остаётся;
+    `KEEP_TURNS` 1000). Экран — `WaExportGroup` / `ExportSheet` (`features/whatsapp/WaExport.tsx`). Не ослаблять: слова выгрузки
+    не хранить и никуда не отправлять (и ИИ — нет); группы не учитывать.
   - **Заявка из WhatsApp (v0.90**, #69: «на такие запросы в ватсапе реагировать и автоматически создавать заявку/карточку
     заказа») — `/api/ai/request` → `services/waRequest.ts` (`startWaRequests`, `considerChat`, `makeRequestJob`). Только главное
     устройство (телефон; два устройства сделали бы дважды); через минуту после последнего сообщения чата (не поставщик,

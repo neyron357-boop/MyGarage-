@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { canonicalMake } from '../domain/carCatalog';
-import { AI_ROLES_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
+import { AI_ROLES_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, spliceTurns, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
 import { knowOf, type SupplierKnow } from '../domain/supplierRank';
 import { nowIso } from '../domain/dates';
 import type { ChatFact, Supplier } from '../domain/types';
@@ -246,6 +246,31 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
     return { studied, suppliers };
   })();
   return sweeping;
+}
+
+/**
+ * What a chat's export from the phone came to, kept with the chat (v0.91.5, services/waExport.ts): its requests over the time
+ * it covers (kept ones before and after stay), what its words show — never its words. Returns how many requests, from when.
+ */
+export async function learnFromExport(chat: { id: string; phone: string; name: string }, messages: Pick<WaMessage, 't' | 'me' | 'type' | 'text'>[]): Promise<{ turns: number; from: number }> {
+  const times = messages.map((m) => m.t).filter((t) => t > 0);
+  if (!times.length) return { turns: 0, from: 0 };
+  const from = Math.min(...times);
+  const to = Math.max(...times);
+  const was = await db.chatFacts.get(chat.id);
+  const fresh = turnsOf(messages);
+  const turns = spliceTurns(was?.turns, fresh, from, to);
+  const signs = mergeSigns(was?.signs, chatSigns(messages, turns));
+  await keep(chat.id, {
+    ...(chat.phone ? { phone: chat.phone } : {}),
+    ...(chat.name && !was?.name ? { name: chat.name } : {}),
+    turns: turns.length ? turns : undefined,
+    through: Math.max(was?.through ?? 0, to),
+    ...(signsKey(signs) ? { signs } : {}),
+    exportAt: nowIso(),
+    exportFrom: Math.min(from, was?.exportFrom ?? from),
+  });
+  return { turns: fresh.length, from };
 }
 
 /* ---------- What stayed on the phone ---------- */

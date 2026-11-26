@@ -236,6 +236,26 @@ async function playServer(page) {
   check(ran === 1 && fast91 === 7, 'v0.91.3: «Загрузить сейчас» — the server’s pass; the chat it brought read again by the app (7 requests): ' + JSON.stringify({ ran, fast91 }));
   check((await top('[data-wa-history-left]').innerText()).trim() === '1', 'v0.91.3: one chat left with more on the phone');
   await shot('phone-04c-phone-history-done');
+
+  // v0.91.5: «Экспорт чатов» — the fast supplier's whole chat exported from the phone (made up), read and counted.
+  const exported = [
+    '[12/03/2025, 09:14:05] Rukn Garage: *Toyota Camry 2018*',
+    '1. FRONT BUMPER',
+    '[12/03/2025, 09:30:41] Fast Toyota Parts: org 950 dup 400',
+    '[20/03/2025, 10:00:00] Rukn Garage: Toyota Hilux 2020 shock absorber?',
+    '[20/03/2025, 10:05:00] Fast Toyota Parts: 350',
+  ].join('\n');
+  await top('[data-wa-export-input]').setInputFiles([{ name: 'WhatsApp Chat - Fast Toyota Parts.txt', mimeType: 'text/plain', buffer: Buffer.from(exported) }]);
+  const exportSheet = page.locator('.mantine-Modal-content').filter({ has: page.locator('[data-wa-export-learn]') });
+  await exportSheet.locator('[data-wa-export-row="0"][data-ready]').waitFor({ timeout: 10000 });
+  check((await exportSheet.locator('[data-wa-export-garage="Rukn Garage"][aria-pressed="true"]').count()) === 1, 'v0.91.5: the export read — its chat found by name, the garage’s side found');
+  await settle(400);
+  await shot('phone-04d-export');
+  await exportSheet.locator('[data-wa-export-learn]').click();
+  await page.locator('.mantine-Notification-root', { hasText: 'Учтено чатов: 1' }).waitFor({ timeout: 10000 });
+  const fastAfter = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.chatFacts.get('971501110001@c.us')) ?? {});
+  check(fastAfter.turns?.length === 9 && !!fastAfter.exportAt && !JSON.stringify(fastAfter).includes('BUMPER'), 'v0.91.5: two older requests of the export counted (9), its words not kept: ' + fastAfter.turns?.length);
+  await settle(500);
   await settle(400);
 
   // 4. «Поставщики» of the Toyota job.
@@ -247,7 +267,7 @@ async function playServer(page) {
   await ask.locator('[data-ask-supplier]').first().waitFor();
   await settle(500);
   const first = await ask.locator('[data-ask-supplier]').first().innerText();
-  check(first.includes('Fast Toyota Parts') && /Toyota · ответил 7/.test(first), 'the fast one first, «Toyota · ответил 7» (four read here, three from the phone): ' + first.replace(/\n/g, ' '));
+  check(first.includes('Fast Toyota Parts') && /Toyota · ответил 9/.test(first), 'the fast one first, «Toyota · ответил 9» (four read here, three from the phone, two from its export): ' + first.replace(/\n/g, ' '));
   const rows = await ask.locator('[data-ask-supplier]').count();
   check(rows > 12, `every supplier, not twelve (#74): ${rows} rows`);
   check((await ask.locator('.ask-row .wa-avatar').count()) >= 10, 'the WhatsApp picture by each supplier with a number');

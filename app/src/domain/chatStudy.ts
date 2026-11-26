@@ -41,8 +41,8 @@ const GAP = 30 * MIN;
 const ANSWER = 48 * 60 * MIN;
 /** What the supplier said within a day of the request is its answer (a price, «not available»). */
 const WINDOW = 24 * 60 * MIN;
-/** The requests kept of a chat (the newest) — v0.91.1: enough for a chat's whole history as WhatsApp gives it. */
-export const KEEP_TURNS = 400;
+/** The requests kept of a chat (the newest) — v0.91.5: enough for a chat's whole history, from the phone's export too. */
+export const KEEP_TURNS = 1000;
 
 /* ---------- Makes in words ---------- */
 
@@ -222,6 +222,15 @@ export function turnsOf(messages: Pick<WaMessage, 't' | 'me' | 'type' | 'text'>[
  */
 export function mergeTurns(kept: Turn[] | undefined, fresh: Turn[], readFrom: number): Turn[] {
   const old = (kept ?? []).filter((x) => x.t < readFrom);
+  return [...old, ...fresh].sort((a, b) => a.t - b.t).slice(-KEEP_TURNS);
+}
+
+/**
+ * A chat's export put over what was kept (v0.91.5): its requests take the time it covers (`from`…`to`); kept ones before and
+ * after it (read from the server since) stay. The newest `KEEP_TURNS`.
+ */
+export function spliceTurns(kept: Turn[] | undefined, fresh: Turn[], from: number, to: number): Turn[] {
+  const old = (kept ?? []).filter((x) => x.t < from || x.t > to);
   return [...old, ...fresh].sort((a, b) => a.t - b.t).slice(-KEEP_TURNS);
 }
 

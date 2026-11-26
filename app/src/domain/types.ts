@@ -543,6 +543,9 @@ export interface ChatFact {
   aiSigns?: string;
   signs?: ChatSigns;
   noRole?: true;
+  /** v0.91.5: its export from the phone was read (the whole history): when, and the time of its first message (ms). */
+  exportAt?: string;
+  exportFrom?: number;
   updatedAt: string;
   _t?: number;
 }

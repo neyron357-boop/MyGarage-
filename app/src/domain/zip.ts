@@ -88,8 +88,8 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/** The files of a .zip by name (not a zip — throws). */
-export async function unzip(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+/** The files of a .zip by name (not a zip — throws); `only` — just those (the rest not unpacked: a chat's photos). */
+export async function unzip(bytes: Uint8Array, only?: (name: string) => boolean): Promise<Map<string, Uint8Array>> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let eocd = bytes.length - 22;
   while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--;
@@ -109,7 +109,7 @@ export async function unzip(bytes: Uint8Array): Promise<Map<string, Uint8Array>>
     const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
     const start = at + 30 + view.getUint16(at + 26, true) + view.getUint16(at + 28, true);
     const raw = bytes.subarray(start, start + size);
-    if (!name.endsWith('/')) out.set(name, method === 8 ? await inflateRaw(raw) : method === 0 ? raw.slice() : new Uint8Array());
+    if (!name.endsWith('/') && (!only || only(name))) out.set(name, method === 8 ? await inflateRaw(raw) : method === 0 ? raw.slice() : new Uint8Array());
     p += 46 + nameLen + extraLen + commentLen;
   }
   return out;

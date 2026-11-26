@@ -10411,3 +10411,39 @@ html.desk .wa-pane-foot {
 .ask-row .person-avatar {
   flex: none;
 }
+
+/* v0.91.5: «Экспорт чатов» — a file a row: its chat, its time, which side is the garage. */
+.wa-export-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--app-hairline);
+}
+.wa-export-row:last-child {
+  border-bottom: 0;
+}
+.wa-export-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding-top: 2px;
+  color: var(--app-label-3);
+}
+.wa-export-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.wa-export-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-export-sub {
+  font-size: 13px;
+  color: var(--app-label-2);
+}
