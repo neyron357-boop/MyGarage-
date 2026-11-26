@@ -222,7 +222,7 @@ async function playServer(page) {
   await page.goto(BASE + '#/whatsapp/setup');
   await top('[data-wa-history-left]').waitFor({ timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] [data-wa-history-left]')?.textContent?.trim() === '2', null, { timeout: 8000 });
-  check((await top('[data-wa-history-phone]').innerText()).includes('не разрешил этому устройству'), 'v0.91.3: the server’s word — the phone has not allowed this device');
+  check((await top('[data-wa-history-phone]').innerText()).includes('не отдаёт этому устройству'), 'v0.91.3: the server’s word — the phone has not allowed this device');
   await top('[data-wa-history-ask]').scrollIntoViewIfNeeded();
   await shot('phone-04b-phone-history');
   await top('[data-wa-history-ask]').click();
