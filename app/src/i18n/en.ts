@@ -1970,6 +1970,11 @@ export const en: typeof ru = {
       silent: 'The phone did not answer. Open WhatsApp on it, allow this device all chat history and tap again.',
       paused: 'WhatsApp paused history requests after failures — try later',
       error: 'It did not work — check the connection to the garage server',
+      server: 'The server fetches the older history by itself, in the background: every 15 minutes and when you write from the phone. The app need not stay open.',
+      phone: 'Phone',
+      says: { gives: 'gives the history', noAccess: 'has not allowed this device', silent: 'does not answer', unknown: 'not asked yet' },
+      came: 'Came for chats',
+      now: 'Load now',
     },
     know: {
       asked: 'Asked {{count}}',

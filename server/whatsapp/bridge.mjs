@@ -17,7 +17,8 @@
  *   GET  /history?chat=&limit=&before= — a chat's history as the app studies it (v0.91.1): who, when, the kind and a few
  *        words of each message, as deep as WhatsApp Web has it; `end` — whether older messages are left on the phone
  *   POST /history-sync {chat}         — ask the phone for a chat's older messages (WhatsApp's own «get older messages
- *        from your phone»); one ask every few seconds at most
+ *        from your phone»); one ask every few seconds at most; `older` — whether older messages did come
+ *   GET  /history-state               — each person's chat and WhatsApp's word on its older messages (v0.91.3)
  *   GET  /media?id=                   — a message's file (in parts when asked: a video plays as it comes)
  *   GET  /avatar?id=                  — a chat's picture
  *   POST /send {chat, text, quote}    — a text
@@ -697,6 +698,16 @@ const PAGE_HISTORY_SYNC = async (chatId, waitMs) => {
     // not said
   }
   if ((end !== 0 && end !== 2) || paused) return { asked: false, end, gate, paused };
+  // The oldest message WhatsApp Web keeps of the chat (its own database): did older ones come with the answer?
+  const oldest = async () => {
+    try {
+      const m = await window.require('WAWebNonMessageDataRequestHistorySyncOnDemandUtils').getOldestMsgInChatFromDB(chat.id);
+      return m && typeof m.t === 'number' ? m.t : null;
+    } catch {
+      return null;
+    }
+  };
+  const before = await oldest();
   const jid = typeof chat.id.toJid === 'function' ? chat.id.toJid() : chat.id._serialized;
   let events = null;
   try {
@@ -725,8 +736,26 @@ const PAGE_HISTORY_SYNC = async (chatId, waitMs) => {
   });
   await window.require('WAWebSendNonMessageDataRequest').sendPeerDataOperationRequest(3, { chatId: chat.id });
   const result = await answer;
-  return { asked: true, end, gate, result, endNow: typeof chat.endOfHistoryTransferType === 'number' ? chat.endOfHistoryTransferType : null };
+  // What the answer brought is written a moment after it is said.
+  if (result === 'ok') await new Promise((r) => setTimeout(r, 1500));
+  const after = await oldest();
+  return {
+    asked: true,
+    end,
+    gate,
+    result,
+    endNow: typeof chat.endOfHistoryTransferType === 'number' ? chat.endOfHistoryTransferType : null,
+    older: before !== null && after !== null ? after < before : null,
+  };
 };
+
+/** Each person's chat (not a group, a channel, the status) and WhatsApp's word on its older messages (v0.91.3). */
+const PAGE_HISTORY_STATE = () =>
+  window
+    .require('WAWebCollections')
+    .Chat.getModelsArray()
+    .map((c) => ({ id: c.id?._serialized || '', end: typeof c.endOfHistoryTransferType === 'number' ? c.endOfHistoryTransferType : null }))
+    .filter((c) => /@(c\.us|lid)$/.test(c.id));
 /** One ask of the phone at a time, a few seconds apart. */
 let historyAsks = Promise.resolve();
 let historyAskedAt = 0;
@@ -1129,6 +1158,11 @@ const server = http.createServer(async (req, res) => {
         if (!got) return sendJson(res, 200, { messages: [], more: false });
         const messages = got.rows.map((d) => messageRow(d, { me: meId })).filter(Boolean);
         return sendJson(res, 200, { messages, more: got.more });
+      }
+      if (p === '/history-state') {
+        const c = need();
+        const chats = await within(c.pupPage.evaluate(PAGE_HISTORY_STATE), 30_000, 'history state');
+        return sendJson(res, 200, { chats: (chats ?? []).filter((x) => CHAT_ID.test(x.id)) });
       }
       if (p === '/history') {
         const c = need();

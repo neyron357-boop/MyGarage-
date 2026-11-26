@@ -347,11 +347,11 @@ const waiting = new Map<string, ReturnType<typeof setTimeout>>();
 /** A chat a minute after its last message (a conversation is read once it rests). */
 const QUIET_MS = 60_000;
 
-async function studyNow(chat: WaChat) {
+async function studyNow(chat: WaChat, deep = false) {
   // The garage's people as read once (a busy account speaks often: the whole base is not read for each message).
   const [people, roles] = await Promise.all([knownPeople(), loadChatRoles()]);
   if (!worthStudy(chat, people, roles)) return;
-  const r = await studyChat(chat, { force: true });
+  const r = await studyChat(chat, { force: true, deep });
   const who = whoOf(chat, people);
   const [fact, sup] = await Promise.all([db.chatFacts.get(chat.id), who?.kind === 'supplier' ? db.suppliers.get(who.id) : undefined]);
   const want = aiWanted(chat, fact, people, roles, new Map(sup ? [[sup.id, sup]] : []));
@@ -367,6 +367,24 @@ export function startChatStudy() {
   started = true;
   onWaEvent((ev) => {
     const e = ev as WaEvent;
+    // The server brought a chat's older messages from the phone (v0.91.3): read it as deep again, a moment later.
+    if (e.t === 'history') {
+      const id = e.chat;
+      clearTimeout(waiting.get(`h:${id}`));
+      waiting.set(
+        `h:${id}`,
+        setTimeout(() => {
+          waiting.delete(`h:${id}`);
+          void (async () => {
+            const fact = await db.chatFacts.get(id);
+            const known = waStore().chats.find((c) => c.id === id);
+            const chat: WaChat = known ?? { id, name: fact?.name ?? '', phone: fact?.phone ?? '', group: false, unread: 0, t: 0, archived: false, pinned: false, muted: false, self: false, last: null };
+            await studyNow(chat, true);
+          })().catch(() => undefined);
+        }, 8000),
+      );
+      return;
+    }
     if (e.t !== 'msg' || !e.chat || e.chat.group || e.chat.self) return;
     const chat = e.chat;
     clearTimeout(waiting.get(chat.id));

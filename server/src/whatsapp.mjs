@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { findBrowser } from '../whatsapp/browser.mjs';
 import { liteRow } from '../whatsapp/rows.mjs';
 import { DIRS, httpError } from './store.mjs';
+import { createHistoryLoader } from './waHistory.mjs';
 import { createOutbox } from './waOutbox.mjs';
 
 /*
@@ -21,6 +22,8 @@ import { createOutbox } from './waOutbox.mjs';
  *   GET  /api/wa/chats · /messages?chat= · /number?phone=
  *   GET  /api/wa/history?chat=&limit=&before= — a chat's history, light, as deep as WhatsApp Web has it (v0.91.1)
  *   POST /api/wa/history-sync {chat}         — ask the phone for a chat's older messages (v0.91.1)
+ *   GET  /api/wa/history-state · POST /api/wa/history-run — this server fetching the older messages by itself (v0.91.3,
+ *        waHistory.mjs): where it stands; a pass now
  *   POST /api/wa/send {chat, text, quote} · /seen {chat} · /forward {id, to} (v0.80.3) · /delete {id} (v0.83: ours, for
  *        everyone — while WhatsApp allows it)
  *   POST /api/wa/file?chat=&name=&caption=      — a file (the body is its bytes)
@@ -221,9 +224,14 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
           try {
             const ev = JSON.parse(data);
             if (ev.t === 'state') {
+              const was = last?.phase;
               last = ev.state;
               tell({ t: 'state', state: status() });
+              // Ready again (v0.91.3): the older messages fetched from the phone a minute later.
+              if (ev.state?.phase === 'ready' && was !== 'ready') history.ready();
             } else {
+              // The garage wrote from its phone: WhatsApp is open there — the phone may answer now (v0.91.3).
+              if (ev.t === 'msg' && ev.msg?.me && !ev.was) history.nudge();
               // How many chats there are and how many messages wait: kept with the state (this computer's page shows them).
               if (last && ev.t === 'chats') last = { ...last, chats: ev.n, unread: ev.unread };
               if (last && ev.t === 'chat' && typeof ev.unread === 'number') last = { ...last, unread: ev.unread };
@@ -394,6 +402,8 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     }
     if (get && what === 'number') return send(res, 200, await call(`/number${query(url, ['phone'])}`, { timeout: 40_000 })), true;
     // v0.91.1 (the owner: «чтобы ИИ посмотрел абсолютно все истории»): a chat read deep, and its older messages asked of the phone.
+    if (get && what === 'history-state') return send(res, 200, history.summary()), true;
+    if (req.method === 'POST' && what === 'history-run') return send(res, 200, history.run()), true;
     if (get && what === 'history') return send(res, 200, await call(`/history${query(url, ['chat', 'limit', 'before'])}`, { timeout: 160_000 })), true;
     if (req.method === 'POST' && what === 'history-sync') {
       const body = await readJson(req, 4096);
@@ -433,6 +443,16 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     return false;
   }
 
+  /* ----- The older messages, fetched from the phone by this server itself (v0.91.3, waHistory.mjs) ----- */
+
+  const history = createHistoryLoader({
+    file: path.join(config.dataDir, DIRS.service, 'whatsapp', 'history.json'),
+    ready: () => available() && turnedOn() && last?.phase === 'ready',
+    tell,
+    log,
+    bridge: { json: (p, init = {}) => call(p, { ...init, timeout: 90_000 }) },
+  });
+
   /** A message's file or a chat's picture for an element of the page: the device's media key is the permission. */
   async function file(req, res, { url, parts }) {
     const what = parts[2];
@@ -447,10 +467,12 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       if (turnedOn() && available()) run();
       if (given) listen();
       outbox.start();
+      history.start();
     },
     stop() {
       stopping = true;
       outbox.stop();
+      history.stop();
       clearTimeout(respawn);
       listening?.destroy();
       end();
@@ -459,6 +481,7 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     available,
     api,
     outbox,
+    history,
     file,
     /** This computer's page: link, unlink, start again — as the app does. */
     async admin(what) {

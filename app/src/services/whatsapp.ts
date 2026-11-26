@@ -12,6 +12,7 @@ import {
   unreadTotal,
   type ChatRoles,
   type Person,
+  type PhoneHistoryState,
   type WaChat,
   type WaEvent,
   type WaLists,
@@ -364,6 +365,13 @@ export interface PhoneHistoryAsk {
   endNow?: number | null;
 }
 export const askPhoneHistory = (chat: string): Promise<PhoneHistoryAsk> => call<PhoneHistoryAsk>('history-sync', { method: 'POST', body: { chat }, timeout: 100_000 });
+
+/**
+ * The server fetching the older messages from the phone by itself (v0.91.3): where it stands, and a pass now. A server from
+ * before it answers 404 (`SyncError`) — the app's own asks then (services/chatStudy.ts `olderFromPhone`).
+ */
+export const phoneHistoryState = (): Promise<PhoneHistoryState> => call<PhoneHistoryState>('history-state', { timeout: 20_000 });
+export const runPhoneHistory = (): Promise<PhoneHistoryState> => call<PhoneHistoryState>('history-run', { method: 'POST', body: {}, timeout: 20_000 });
 
 async function call<T>(path: string, init: WaCallInit = {}): Promise<T> {
   if (transport) return (await transport(path, init)) as T;
@@ -1255,6 +1263,8 @@ function waHeard(value: unknown) {
     catchUpWa();
     return;
   }
+  // The server's fetching of the older messages (v0.91.3): for its listeners only (services/chatStudy.ts, «Настройка»).
+  if (ev.t === 'history' || ev.t === 'historyState') return;
   if (!store.chatsAt && ev.t === 'chat' && store.status && typeof ev.unread === 'number') set({ status: { ...store.status, unread: ev.unread } });
   const said: WaEvent = ev.t === 'msg' ? { ...ev, msg: withEarlyAck(ev.msg) } : ev;
   for (const log of reads) log.push(said);

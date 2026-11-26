@@ -13,7 +13,8 @@ const { chromium } = require('playwright');
  *   (#75) — and the one only in WhatsApp becomes a supplier of the base;
  * - the PC's tabs dragged along the strip, Ctrl+Shift+→ (#29);
  * - v0.91.1: each chat read deep the first time; «История с телефона» in WhatsApp's settings — the phone asked, what it
- *   sends read (three older requests of the fast supplier).
+ *   sends read (three older requests of the fast supplier); v0.91.3 — the server fetches it by itself: its state shown
+ *   («не разрешил этому устройству»), «Загрузить сейчас», the chat it brought read again by the app on the server's word.
  * Screenshots — test-results/v091/.
  *
  * Usage: start the dev server afresh (npm run dev -- --port 5173), then: node e2e/v091.cjs (BASE_URL to aim elsewhere).
@@ -57,7 +58,8 @@ async function playServer(page) {
     // What stayed on the phone (v0.91.1): WhatsApp's word per chat, and three older Toyota requests of the fast one.
     const ends = { [FAST.id]: 0, [SILENT.id]: 2, [DESERT.id]: 1 };
     const older = [-40, -39, -38].flatMap((d) => [msg(FAST, d * 1440, true, '*Toyota Prado 2016*\n1. HEADLIGHT'), msg(FAST, d * 1440 + 15, false, '650')]);
-    const world = { out: [], chats: [FAST, SILENT, DESERT, OMAR, TEAM], messages, read: [], ai: [], ends, phone: {}, phoneAsked: [] };
+    const historyState = { more: 2, noAccess: 1, chats: 5, came: 0, asks: 3, phone: 'noAccess', okAt: 0, passAt: Date.now() - 600_000, running: false, done: 0, total: 0 };
+    const world = { out: [], chats: [FAST, SILENT, DESERT, OMAR, TEAM], messages, read: [], ai: [], ends, phone: {}, phoneAsked: [], historyState };
     window.__wa = world;
     setWaTransport(async (p, init) => {
       await new Promise((r) => setTimeout(r, 120));
@@ -67,6 +69,22 @@ async function playServer(page) {
         const id = init.query.chat;
         world.read.push(id);
         return { messages: [...(world.phone[id] ?? []), ...(world.messages[id] ?? [])].map(({ id: mid, t, me, type, text }) => ({ id: mid, t, me, type, text })), more: false, end: world.ends[id] ?? null };
+      }
+      // v0.91.3: the server fetching the older messages by itself — its state, and a pass now.
+      if (p === 'history-state') return world.historyState;
+      if (p === 'history-run' && init.method === 'POST') {
+        world.ran = (world.ran ?? 0) + 1;
+        world.historyState = { ...world.historyState, running: true, done: 0, total: 2 };
+        // The phone answers for the fast supplier: its older requests come, the devices are told.
+        setTimeout(async () => {
+          const { waSaid } = await import('/src/services/whatsapp.ts');
+          world.ends[FAST.id] = 1;
+          world.phone[FAST.id] = older;
+          waSaid({ t: 'history', chat: FAST.id });
+          world.historyState = { ...world.historyState, running: false, more: 1, came: 1, phone: 'gives', done: 0, total: 0 };
+          waSaid({ t: 'historyState', state: world.historyState });
+        }, 1500);
+        return world.historyState;
       }
       if (p === 'history-sync' && init.method === 'POST') {
         const id = init.body.chat;
@@ -199,20 +217,24 @@ async function playServer(page) {
   await page.keyboard.press('Escape');
   await settle(400);
 
-  // v0.91.1: «История с телефона» — two chats have more there; the phone answers for one, its older requests are counted.
+  // v0.91.3: «История с телефона» — the server fetches it by itself: what the phone says, «Загрузить сейчас», the chat it
+  // brought read again by the app on the server's word.
   await page.goto(BASE + '#/whatsapp/setup');
   await top('[data-wa-history-left]').waitFor({ timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] [data-wa-history-left]')?.textContent?.trim() === '2', null, { timeout: 8000 });
+  check((await top('[data-wa-history-phone]').innerText()).includes('не разрешил этому устройству'), 'v0.91.3: the server’s word — the phone has not allowed this device');
   await top('[data-wa-history-ask]').scrollIntoViewIfNeeded();
   await shot('phone-04b-phone-history');
   await top('[data-wa-history-ask]').click();
-  await page.locator('.mantine-Notification-root', { hasText: 'С телефона пришло' }).waitFor({ timeout: 20000 });
-  const after91 = await page.evaluate(async () => {
-    const { db } = await import('/src/db/db.ts');
-    return { asked: window.__wa.phoneAsked, fast: (await db.chatFacts.get('971501110001@c.us'))?.turns?.length };
-  });
-  check(after91.asked.length === 2 && after91.fast === 7, 'v0.91.1: the phone asked for the two chats with more there; the fast one’s three older requests read: ' + JSON.stringify(after91));
-  await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] [data-wa-history-left]')?.textContent?.trim() === '1', null, { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] [data-wa-history-phone]')?.getAttribute('data-wa-history-phone') === 'gives', null, { timeout: 15000 });
+  let fast91 = 0;
+  for (let i = 0; i < 60 && fast91 !== 7; i++) {
+    await settle(500);
+    fast91 = await page.evaluate(async () => (await (await import('/src/db/db.ts')).db.chatFacts.get('971501110001@c.us'))?.turns?.length ?? 0);
+  }
+  const ran = await page.evaluate(() => window.__wa.ran);
+  check(ran === 1 && fast91 === 7, 'v0.91.3: «Загрузить сейчас» — the server’s pass; the chat it brought read again by the app (7 requests): ' + JSON.stringify({ ran, fast91 }));
+  check((await top('[data-wa-history-left]').innerText()).trim() === '1', 'v0.91.3: one chat left with more on the phone');
   await shot('phone-04c-phone-history-done');
   await settle(400);
 

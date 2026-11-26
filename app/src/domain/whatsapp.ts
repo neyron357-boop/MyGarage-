@@ -468,7 +468,29 @@ export type WaEvent =
   | { t: 'chats'; n: number; unread: number }
   | { t: 'state'; state: WaStatus }
   /** The server did not hear the bridge for a while (v0.87): what is on a screen is read again. */
-  | { t: 'gap' };
+  | { t: 'gap' }
+  /** v0.91.3: the server fetched a chat's older messages from the phone (server/src/waHistory.mjs) — read it again. */
+  | { t: 'history'; chat: string }
+  /** v0.91.3: where the server's fetching of the older messages stands. */
+  | { t: 'historyState'; state: PhoneHistoryState };
+
+/** Where the server's fetching of the older messages from the phone stands (v0.91.3, server/src/waHistory.mjs `summary`). */
+export interface PhoneHistoryState {
+  /** Chats with older messages on the phone; of them — not given to this device. */
+  more: number;
+  noAccess: number;
+  chats: number;
+  /** Chats older messages came for. */
+  came: number;
+  asks: number;
+  /** The phone's last word: gave them; answered without (no access); did not answer; not asked yet. */
+  phone: 'gives' | 'noAccess' | 'silent' | 'unknown';
+  okAt: number;
+  passAt: number;
+  running: boolean;
+  done: number;
+  total: number;
+}
 
 /**
  * The same messages, as a screen shows them (v0.87): read again after a gap, a chat whose messages did not change is

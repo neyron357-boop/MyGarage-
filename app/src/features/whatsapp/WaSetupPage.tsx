@@ -5,10 +5,11 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatPhone } from '../../domain/phone';
-import { waDigits, type WaStatus } from '../../domain/whatsapp';
+import { waDigits, type PhoneHistoryState, type WaEvent, type WaStatus } from '../../domain/whatsapp';
 import { olderFromPhone, onStudyProgress, phoneHistoryChats, studyProgress } from '../../services/chatStudy';
+import { SyncError } from '../../services/sync/api';
 import { getSettings } from '../../services/settings';
-import { linkWa, linkWaCode, restartWa, setWaPrefs, unlinkWa, useWaPrefs, waCan } from '../../services/whatsapp';
+import { linkWa, linkWaCode, onWaEvent, phoneHistoryState, restartWa, runPhoneHistory, setWaPrefs, unlinkWa, useWaPrefs, waCan } from '../../services/whatsapp';
 import { useWaStatus } from '../../ui/waSel';
 import { copyText } from '../../ui/clipboard';
 import { ConfirmModal, FormRow, List, ListRow, PageHeader, RowGroup, ScrollTabs } from '../../ui/components';
@@ -34,7 +35,81 @@ const PLATFORM: Record<string, string> = { iphone: 'iPhone', smbi: 'iPhone · Bu
  * device (Linked devices → this device → Chat history → «All chat history»). How many chats have them there, the two steps on
  * the phone, the button; what came, or that the phone did not answer.
  */
+/** The phone's last word on the older messages, as the server heard it (v0.91.3): its colour. */
+const PHONE_COLOR: Record<PhoneHistoryState['phone'], string> = { gives: 'green', noAccess: 'orange', silent: 'orange', unknown: 'gray' };
+
+/**
+ * v0.91.3 (the owner: «загрузи всю историю сам на сервер»): the server fetches the older messages by itself, in the background
+ * (server/src/waHistory.mjs) — every 15 minutes and when the garage writes from the phone; here: how many chats still have
+ * more on the phone, what the phone says (gives them; does not let this device; does not answer), how many came, the two
+ * steps on the phone, «Загрузить сейчас». A server from before v0.91.3 — the app's own asks (`AppPhoneHistory`).
+ */
 function PhoneHistory() {
+  const { t } = useTranslation();
+  const [st, setSt] = useState<PhoneHistoryState | null | 'old'>(null);
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    let timer = 0;
+    const read = () =>
+      void phoneHistoryState()
+        .then((s) => alive && setSt(s))
+        .catch((e) => alive && e instanceof SyncError && e.status === 404 && setSt('old'))
+        .finally(() => {
+          if (alive) timer = window.setTimeout(read, 15_000);
+        });
+    read();
+    const off = onWaEvent((ev) => {
+      const e = ev as WaEvent;
+      if (e.t === 'historyState' && alive) setSt(e.state);
+    });
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      off();
+    };
+  }, []);
+  if (st === 'old') return <AppPhoneHistory />;
+  const running = asking || !!(st && st.running);
+  const ask = () => {
+    setAsking(true);
+    haptic('light');
+    void runPhoneHistory()
+      .then((s) => setSt(s))
+      .catch(() => notifications.show({ color: 'red', message: t('wa.history.error') }))
+      .finally(() => window.setTimeout(() => setAsking(false), 3000));
+  };
+  return (
+    <RowGroup title={t('wa.history.title')} note={t('wa.history.server')}>
+      <FormRow label={t('wa.history.left')}>
+        <Text className="tnum" data-wa-history-left>
+          {st ? st.more : '…'}
+        </Text>
+      </FormRow>
+      <FormRow label={t('wa.history.phone')}>
+        <Text c={st ? PHONE_COLOR[st.phone] : 'dimmed'} fw={500} data-wa-history-phone={st?.phone}>
+          {st ? t(`wa.history.says.${st.phone}`) : '…'}
+        </Text>
+      </FormRow>
+      {!!st?.came && (
+        <FormRow label={t('wa.history.came')}>
+          <Text className="tnum" c="green">
+            {st.came}
+          </Text>
+        </FormRow>
+      )}
+      <Steps lines={[t('wa.history.step1'), t('wa.history.step2')]} />
+      <div style={{ padding: '4px 16px 14px' }}>
+        <Button fullWidth leftSection={<IconHistory size={18} />} loading={running} disabled={!st || !st.more} onClick={ask} data-wa-history-ask>
+          {st?.running && st.total ? t('wa.study.phone', { done: st.done, total: st.total }) : t('wa.history.now')}
+        </Button>
+      </div>
+    </RowGroup>
+  );
+}
+
+/** A server from before v0.91.3: the app asks the phone itself (v0.91.1), while this screen is open. */
+function AppPhoneHistory() {
   const { t } = useTranslation();
   const left = useScreenLiveQuery(phoneHistoryChats, []);
   const going = useSyncExternalStore(onStudyProgress, studyProgress);
