@@ -1,11 +1,12 @@
 import { ActionIcon, Modal, Text, TextInput } from '@mantine/core';
-import { IconArrowUp, IconBuildingStore, IconPackage, IconPlus, IconSearch, IconTool, IconX, type Icon } from '@tabler/icons-react';
+import { IconArrowUp, IconBuildingStore, IconPackage, IconPlus, IconSearch, IconSparkles, IconTool, IconX, type Icon } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lineName } from '../../domain/items';
 import type { Suggestion, SuggestionSet } from '../../domain/linePrices';
 import { formatAed } from '../../domain/money';
-import { exactTitle, quickMatches, sideOf, typedPrice } from '../../domain/quickAdd';
+import { autoMatches, exactTitle, guessKind, quickMatches, sideOf, typedPrice, type AutoKind } from '../../domain/quickAdd';
+import { matchPartName } from '../../domain/partsVocab';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf } from '../../domain/vat';
 import { aiAfterLine } from '../../services/ai';
 import { addItem, ensureLabourLine } from '../../services/estimate';
@@ -28,22 +29,43 @@ import { forgetSuggestions, PriceFromMark, type LineKind } from './LineSheet';
  * The rest of a line (the price, the number, the supplier, photos) — on its row: «+ Цена», its name — its card.
  */
 
-const KINDS: { kind: LineKind; icon: Icon; color: string; label: string }[] = [
+/** v0.91.7: «Авто» first — the kind of each line found as it is typed (domain/quickAdd.ts `guessKind`); the others force it. */
+export type QuickKind = LineKind | 'auto';
+const KINDS: { kind: QuickKind; icon: Icon; color: string; label: string }[] = [
+  { kind: 'auto', icon: IconSparkles, color: 'cobalt', label: 'qa.auto' },
   { kind: 'part', icon: IconPackage, color: 'orange', label: 'job.addPart' },
   { kind: 'labor', icon: IconTool, color: 'blue', label: 'qa.labor' },
   { kind: 'service', icon: IconBuildingStore, color: 'violet', label: 'job.addService' },
 ];
+const KIND_OF: Record<AutoKind, { icon: Icon; color: string; label: string }> = {
+  part: { icon: IconPackage, color: 'orange', label: 'job.addPart' },
+  labor: { icon: IconTool, color: 'blue', label: 'qa.labor' },
+  service: { icon: IconBuildingStore, color: 'violet', label: 'job.addService' },
+};
+
+/** A line's kind at its end, in its colour: the symbol and the word (one «Добавить» for every kind, v0.91.7). */
+function KindMark({ kind, unsure }: { kind: AutoKind; unsure?: boolean }) {
+  const { t } = useTranslation();
+  const k = KIND_OF[kind];
+  const I = k.icon;
+  return (
+    <span className="qa-kind-mark" style={{ '--c': `var(--mantine-color-${k.color}-6)` } as React.CSSProperties} data-unsure={unsure || undefined} data-qa-kind={kind}>
+      <I size={13} stroke={2.4} aria-hidden />
+      {t(k.label)}
+    </span>
+  );
+}
 
 /** Taps on the sheet's buttons keep the field's focus (and the keyboard): a mouse's press does not take it either. */
 const keep = (e: React.MouseEvent) => e.preventDefault();
 
-export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: OrderBundle; kind: LineKind; opened: boolean; onClose: () => void; suggestions?: SuggestionSet }) {
+export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: OrderBundle; kind: QuickKind; opened: boolean; onClose: () => void; suggestions?: SuggestionSet }) {
   const { t } = useTranslation();
   const uiLang = useLang();
   const { run } = useAction();
-  const [mode, setMode] = useState<LineKind>(kind);
+  const [mode, setMode] = useState<QuickKind>(kind);
   const [q, setQ] = useState('');
-  const [added, setAdded] = useState<{ id: string; title: string }[]>([]);
+  const [added, setAdded] = useState<{ id: string; title: string; kind?: AutoKind }[]>([]);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!opened) return;
@@ -59,14 +81,23 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
   }, [opened]);
   const focus = () => field.current?.focus({ preventScroll: true });
 
+  const auto = mode === 'auto';
   // Work and services: the labour charges / the rest at first; typing finds any of them (linePrices.ts).
-  const set = !suggestions ? undefined : mode === 'part' ? suggestions.part : q.trim() ? suggestions.work : suggestions[mode];
+  const set = !suggestions || auto ? undefined : mode === 'part' ? suggestions.part : q.trim() ? suggestions.work : suggestions[mode];
   // «GEAR OIL -- 450» (v0.90, #73): the name is what is before the two hyphens, the number after them — its sale price.
   const said = useMemo(() => typedPrice(q), [q]);
   const query = said.priceFils ? said.name : q;
-  const matches = useMemo(() => quickMatches(set, query, 8), [set, query]);
-  const exact = exactTitle(set, query);
-  const typed = lineName(query.trim());
+  // v0.91.7: the spelling put right at once by the parts' dictionary («BRAK PADS» → «BRAKE PADS»); the AI looks later.
+  const dict = useMemo(() => (query.trim() ? matchPartName(query) : undefined), [query]);
+  const fixedName = dict?.known && dict.changed ? dict.fixed : undefined;
+  const autoList = useMemo(() => (auto ? autoMatches(suggestions, query, 8, fixedName) : []), [auto, suggestions, query, fixedName]);
+  const matches = useMemo(() => (auto ? autoList.map((m) => m.title) : quickMatches(set, query, 8)), [auto, autoList, set, query]);
+  const kindOfMatch = useMemo(() => new Map(autoList.map((m) => [m.title, m.kind])), [autoList]);
+  const exact = auto ? (exactTitle(suggestions?.part, query) ?? exactTitle(suggestions?.work, query)) : exactTitle(set, query);
+  const typed = lineName((auto && fixedName ? fixedName : query).trim());
+  const typedGuess = useMemo(() => (auto && typed ? guessKind(typed, suggestions, !!dict?.known) : undefined), [auto, typed, suggestions, dict]);
+  /** A title's suggestion, from the set it is in. */
+  const sugOf = (title: string) => (auto ? (kindOfMatch.get(title) === 'part' ? suggestions?.part : suggestions?.work)?.list.get(title) ?? suggestions?.part.list.get(title) ?? suggestions?.work.list.get(title) : set?.list.get(title));
   const incl = b.settings.pricesIncludeVat;
   /** A suggestion's price as the line will show it (with VAT if it was typed with VAT). */
   const shown = (s: Suggestion) => enteredPrice({ unitPriceFils: s.price, unitGrossFils: s.gross }, s.rate || b.settings.vatRateBp, vatModeOf({ vatRateBp: s.rate, unitGrossFils: s.gross }, incl));
@@ -76,10 +107,13 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
     focus();
     const name = lineName(title.trim());
     if (!name) return;
-    const s = set?.list.get(name);
+    const s = sugOf(name);
+    // The kind: forced by the row above the keyboard, else the suggestion's own, else what the name says (v0.91.7).
+    const guess = auto ? (kindOfMatch.has(name) ? { kind: kindOfMatch.get(name)!, sure: true } : guessKind(name, suggestions, matchPartName(name).known)) : undefined;
+    const kindNow: AutoKind = guess?.kind ?? (mode === 'auto' ? 'part' : mode);
     setQ('');
     return run(async () => {
-      const lineKind = mode === 'part' ? 'part' : 'labor';
+      const lineKind = kindNow === 'part' ? 'part' : 'labor';
       // A name of the history keeps both its languages; a typed one goes where its letters belong.
       const titles = s ? { titleRu: s.titleRu || name, titleEn: s.titleEn || name } : /[а-яё]/i.test(name) ? { titleRu: name } : { titleEn: name };
       // A price typed after «--» — the sale price, as «+ Цена» takes it (with VAT or without, as the line's prices are typed).
@@ -90,13 +124,13 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
         : s && s.price > 0
           ? { unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) }
           : {};
-      const item = await addItem(b.order.id, { kind: lineKind, block: 'A', qty: 1, ...titles, ...price });
+      const item = await addItem(b.order.id, { kind: lineKind, block: 'A', qty: 1, ...titles, ...price, ...(guess && !guess.sure ? { autoKind: true as const } : {}) });
       // A job's first part brings its labour charge (v0.90, #70): last of the lines, named and priced by itself.
       await ensureLabourLine(b.order.id);
       await syncStage(b.order.id);
       forgetSuggestions();
       haptic('light');
-      setAdded((a) => [...a, { id: item.id, title: name }]);
+      setAdded((a) => [...a, { id: item.id, title: name, kind: kindNow }]);
       // A part: the app's own dictionary names it in English (and the garage's AI looks it up) — in the background.
       // Every line's name looked at, and the labour charge said by the parts (v0.86).
       aiAfterLine(item.id);
@@ -112,7 +146,7 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
     });
   };
 
-  const placeholder = t(mode === 'part' ? 'qi.partPlaceholder' : mode === 'labor' ? 'qi.workPlaceholder' : 'qi.servicePlaceholder');
+  const placeholder = t(mode === 'auto' ? 'qa.autoPlaceholder' : mode === 'part' ? 'qi.partPlaceholder' : mode === 'labor' ? 'qi.workPlaceholder' : 'qi.servicePlaceholder');
   return (
     <Modal opened={opened} onClose={onClose} title={added.length ? t('qa.addedN', { n: added.length }) : t('qa.title')} classNames={{ content: 'sheet-grouped qa-sheet' }}>
       <div className="qa-body">
@@ -120,7 +154,7 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
           // What this sheet added: each a tap away from coming off again.
           <div className="qa-added" aria-label={t('qa.addedN', { n: added.length })}>
             {added.map((a) => (
-              <span key={a.id} className="qa-added-name">
+              <span key={a.id} className="qa-added-name" data-kind={a.kind}>
                 <span className="qa-added-text">{a.title}</span>
                 <button type="button" className="qa-added-x" aria-label={t('qa.undo', { name: a.title })} onMouseDown={keep} onClick={() => takeOff(a.id)}>
                   <IconX size={14} stroke={2.6} />
@@ -135,6 +169,9 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               <button type="button" role="option" aria-selected={false} className="qa-row qa-new" onMouseDown={keep} onClick={() => add(typed)}>
                 <IconPlus size={18} stroke={2.4} aria-hidden />
                 <span className="qa-name">{t('qa.addTyped', { name: typed })}</span>
+                {/* v0.91.7: put right by the dictionary as it was typed; and its kind as the name says it. */}
+                {fixedName && <span className="qa-fixed" data-qa-fixed>{t('qa.fixed')}</span>}
+                {typedGuess && <KindMark kind={typedGuess.kind} unsure={!typedGuess.sure} />}
                 {said.priceFils && (
                   <Text span className="qa-price tnum" data-typed-price>
                     {formatAed(said.priceFils, uiLang, false)}
@@ -143,11 +180,14 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               </button>
             )}
             {matches.map((title) => {
-              const s = set!.list.get(title)!;
+              const s = sugOf(title);
+              if (!s) return null;
               const side = sideOf(title);
+              const k = auto ? kindOfMatch.get(title) : undefined;
               return (
                 <button key={title} type="button" role="option" aria-selected={title === exact} className="qa-row" data-side={side} onMouseDown={keep} onClick={() => add(title)}>
                   <span className="qa-name">{title}</span>
+                  {k && <KindMark kind={k} />}
                   {said.priceFils ? (
                     <Text span className="qa-price tnum" data-typed-price>
                       {formatAed(said.priceFils, uiLang, false)}
@@ -211,6 +251,7 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
                 if (mode !== k) haptic('selection');
                 setMode(k);
               }}
+              data-qa-mode={k}
             >
               <I size={17} stroke={2.1} aria-hidden />
               <span>{t(label)}</span>

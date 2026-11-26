@@ -137,8 +137,8 @@ export async function considerChat(chatId: string): Promise<void> {
     const [people, roles] = await Promise.all([loadPeople(), loadChatRoles()]);
     // The boss's chat is one of the garage's own (its reports go there) — and requests come through it.
     const role = chatRole(chat, people, roles);
-    // Suppliers, contractors, mechanics: not customers' requests.
-    if (role === 'supplier' || role === 'service' || role === 'employee') return;
+    // Suppliers, contractors, mechanics: not customers' requests; nor a chat «Не относится к гаражу» by hand (v0.91.7).
+    if (role === 'supplier' || role === 'service' || role === 'employee' || roles.off?.has(chatId)) return;
     const all = (await fetchChatMessages(chatId, 30)).sort((a, b) => a.t - b.t);
     const last = [...all].reverse().find((m) => !m.me);
     const was = seen()[chatId] ?? 0;

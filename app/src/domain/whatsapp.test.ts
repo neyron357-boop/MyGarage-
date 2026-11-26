@@ -333,10 +333,13 @@ describe('«Только гараж» and the statuses given by hand (v0.81)', (
   const all = [ali, stranger, tagged, workGroup, family, me];
   const roles = { tags: { [tagged.id]: 'service' as const }, groups: new Set([workGroup.id]) };
 
-  it('what a chat is to the garage: its person first, then the status given by hand, then a group the garage writes to', () => {
+  it('what a chat is to the garage: the status given by hand first, then its person, then a group the garage writes to', () => {
     expect(all.map((c) => chatRole(c, people, roles))).toEqual(['customer', undefined, 'service', 'work', undefined, undefined]);
-    // A status given by hand does not hide the base's own: a customer's number stays a customer's.
-    expect(chatRole(ali, people, { tags: { [ali.id]: 'supplier' }, groups: new Set() })).toBe('customer');
+    // v0.91.7 (the owner: «меняю статус, а оно не меняется»): given by hand — it, whoever the number is in the base.
+    expect(chatRole(ali, people, { tags: { [ali.id]: 'supplier' }, groups: new Set() })).toBe('supplier');
+    // «Не относится к гаражу» by hand — no status, a customer's number too; a status given later — that one.
+    expect(chatRole(ali, people, { tags: {}, groups: new Set(), off: new Set([ali.id]) })).toBeUndefined();
+    expect(chatRole(ali, people, { tags: { [ali.id]: 'work' }, groups: new Set(), off: new Set([ali.id]) })).toBe('work');
   });
 
   it('on — the garage’s chats (and oneself); off — every chat; a search keeps to it (v0.84); a service is among the suppliers', () => {

@@ -46,7 +46,7 @@ export const en: typeof ru = {
     tabs: 'Tabs',
     newTab: 'New tab',
     openInTab: 'Open in a new tab',
-    keyLines: 'Work · Part · Service on a job',
+    keyLines: 'Add a line · Part · Work · Service on a job',
     keyClose: 'Close the sheet',
     actions: 'Actions',
     palette: {
@@ -471,11 +471,13 @@ export const en: typeof ru = {
     mileageHistory: 'Mileage by visit',
   },
   // v0.81: the job's quick «＋» sheet and «+ Price».
-  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add' },
+  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
   ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}', top: 'Main' },
+  priceBook: { tab: 'Prices', search: 'Part, make, model, VIN, brand', allMakes: 'All makes', empty: 'No prices yet', emptyHint: 'Prices come by themselves — from the suppliers’ WhatsApp answers and the prices on the jobs’ lines.', none: 'Nothing found', prices_one: '{{count}} price', prices_few: '{{count}} prices', prices_many: '{{count}} prices', prices_other: '{{count}} prices', from: 'from', na: 'not available', oem: 'original', copy: 'copy', used: 'used', someone: 'Supplier', hint: 'From the price book', hintNear: { 3: 'this car', 2: 'same model', 1: 'same make', 0: 'another car' } },
+  later: { title: 'Send later', exact: 'Exact time', today: 'Today', tomorrow: 'Tomorrow', in30: 'In 30 min', in60: 'In 1 h', in120: 'In 2 h', evening: 'Today at {{time}}', morning: 'Tomorrow at {{time}}', go: 'Send at {{time}} · {{n}}', pick: 'Pick a time', past: 'That time has passed', queued: 'Goes at {{time}}: {{n}} suppliers', oldServer: 'Update the garage server — it cannot send later yet' },
   newOrder: {
     // v0.81: the VIN in the plate's card.
     scanVin: 'Scan VIN',
@@ -1202,6 +1204,7 @@ export const en: typeof ru = {
     addWork: 'Labour',
     addPart: 'Part',
     addService: 'Service',
+    addLine: 'Add a line',
     total: 'Total',
     vatIn: 'VAT {{vat}}',
     toClient: 'Send',
@@ -1937,6 +1940,7 @@ export const en: typeof ru = {
     openChat: 'Open the chat',
     tags: {
       pick: 'Select',
+      one: 'Status',
       give: 'Status · {{n}}',
       title: 'Status of chats · {{n}}',
       none: 'Not the garage’s',
@@ -2117,6 +2121,7 @@ export const en: typeof ru = {
     addSupplier: 'Add supplier',
     call: 'Call',
     copyNumber: 'Number',
+    picture: 'Contact photo',
     openApp: 'In WhatsApp',
     gate: {
       server: 'The garage server is needed',
@@ -2232,6 +2237,7 @@ export const en: typeof ru = {
       vatGross: 'With VAT',
       queue: 'Sending queue',
       queueEmpty: 'Empty',
+      later: 'goes at {{time}}',
       state: { queued: 'Waiting', sending: 'Sending', sent: 'Sent', failed: 'Not sent', dropped: 'Removed', none: '—' },
       kind: { boss: 'Boss', work: 'Work group', client: "Customer's group", wash: 'Wash', ask: 'Parts request' },
     },

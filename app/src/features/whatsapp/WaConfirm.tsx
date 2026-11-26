@@ -1,4 +1,5 @@
 import { Button, Group, Modal, Stack, Text, Textarea } from '@mantine/core';
+import { dubaiTime } from '../../domain/dates';
 import { IconBrandWhatsapp, IconFileTypePdf, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -92,6 +93,12 @@ function Ask({ ask, busy, onSend, onDrop }: { ask: WaAsk; busy: boolean; onSend:
           <Text fw={600} truncate>
             {item.title || item.chat || item.phone}
           </Text>
+          {/* v0.91.7 (#76): it goes at its time, not now. */}
+          {item.after && item.after > Date.now() && (
+            <Text size="sm" c="orange" fw={600} className="tnum" style={{ whiteSpace: 'nowrap' }} data-wa-ask-later>
+              {t('wa.auto.later', { time: dubaiTime(new Date(item.after).toISOString()) })}
+            </Text>
+          )}
         </Group>
         <button type="button" className="wa-ask-drop" aria-label={t('wa.confirm.drop')} onClick={onDrop}>
           <IconX size={18} />

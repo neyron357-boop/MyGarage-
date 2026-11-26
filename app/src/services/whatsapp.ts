@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { db, uid } from '../db/db';
+import type { ChatFact } from '../domain/types';
 import {
   applyEvent,
   chatIdOf,
@@ -1112,18 +1113,21 @@ export async function loadPeople(): Promise<Map<string, Who>> {
  * What makes a chat the garage's (v0.81, «Только гараж»): the statuses given by hand, and the groups the garage writes to
  * by itself — the work group, the boss, the wash, the customers' own groups.
  */
-export async function loadChatRoles(): Promise<ChatRoles> {
-  const [settings, customers, facts] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray(), db.chatFacts.toArray()]);
+export async function loadChatRoles(given?: { facts?: ChatFact[] }): Promise<ChatRoles> {
+  const [settings, customers, facts] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray(), given?.facts ?? db.chatFacts.toArray()]);
   const auto = waAutoOf(settings.waAuto);
   const groups = new Set([auto.work.to?.chat, auto.boss.to?.chat, auto.wash.to?.chat, ...customers.map((c) => c.waGroup?.chat)].filter((x): x is string => !!x));
   // The AI's word (services/chatStudy.ts) — only to the question of v0.91.2: the earlier ones (v0.86 with the settings, v0.91
   // with the chat) gave chats that are nothing to the garage a status, and are asked again. «Не относится к гаражу» by hand — none.
   const ai: NonNullable<ChatRoles['ai']> = {};
+  const off = new Set<string>();
   for (const f of facts) {
-    if (f.noRole) ai[f.id] = 'other';
-    else if (f.aiRole && (f.aiV ?? 0) >= AI_ROLES_V) ai[f.id] = f.aiRole;
+    if (f.noRole) {
+      ai[f.id] = 'other';
+      off.add(f.id);
+    } else if (f.aiRole && (f.aiV ?? 0) >= AI_ROLES_V) ai[f.id] = f.aiRole;
   }
-  return { tags: settings.waChatTags ?? {}, groups, ai };
+  return { tags: settings.waChatTags ?? {}, groups, ai, off };
 }
 
 /**
@@ -1213,6 +1217,8 @@ export interface OutboxFace {
   key: string;
   state: 'queued' | 'sending' | 'sent' | 'failed' | 'dropped' | 'none';
   at?: number;
+  /** v0.91.7 (#76): kept until then («Отправить позже»). */
+  after?: number;
   title?: string;
   chat?: string;
   error?: string;

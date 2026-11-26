@@ -11,9 +11,11 @@ import { formatPhone } from '../../domain/phone';
 import { aiRoleOf, CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROLES, tabCounts, WA_TAGS, waDigits, whoOf, type ChatTab, type WaChat, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
-import { loadChatRoles, loadChats, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
-import { chatKnow, chatsMakes, loadChatMakes, onStudyProgress, setChatMakes, setChatPin, studyProgress } from '../../services/chatStudy';
-import { loadTop, NO_TOP } from '../../services/supplierRank';
+import { loadChatRoles, loadChats, loadPeople, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
+import { chatKnow, chatsMakes, onStudyProgress, setChatMakes, setChatPin, studyProgress } from '../../services/chatStudy';
+import { loadTop, NO_TOP, TOP_TABLES } from '../../services/supplierRank';
+import { CHAT_INDEX_TABLES, loadChatIndex } from '../../services/chatIndex';
+import { useCalmQuery } from '../../ui/calmQuery';
 import { AiMark } from '../ai/Ai';
 import { haptic } from '../../ui/haptics';
 import { useWaStatus } from '../../ui/waSel';
@@ -31,7 +33,7 @@ import { CustomerModal } from '../customers/forms';
 import { SupplierSheet } from '../parts/Suppliers';
 import { ChatThread } from './ChatThread';
 import type { QuickFor } from './ChatQuick';
-import { ChatHead, LastLine, replyTime, SupplierProfile, useWaPeople, WaAvatar, WhoTag } from './WaParts';
+import { ChatHead, LastLine, replyTime, SupplierProfile, useWaPeople, useWaPictureView, WaAvatar, WhoTag } from './WaParts';
 
 /*
  * «WhatsApp» (v0.78): the garage's chats in the app. A phone: the list, a chat on its own screen. A PC: the list and
@@ -121,7 +123,7 @@ export function WaGate({ s }: { s: WaStore }) {
 
 /* ---------- The list ---------- */
 
-const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; top?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
+const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, active, onOpen, onPicture, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; top?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; onPicture?: (c: WaChat, title: string) => void; picking?: boolean; picked?: boolean }) {
   const { t } = useTranslation();
   const title = c.self ? t('wa.self') : chatTitle(c, who);
   return (
@@ -137,7 +139,22 @@ const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, ac
               {picked ? <IconCircleCheckFilled size={24} color="var(--mantine-color-cobalt-6)" /> : <IconCircle size={24} stroke={1.6} color="var(--app-label-3)" />}
             </span>
           )}
-          <WaAvatar id={c.id} name={title} group={c.group} size={48} />
+          {onPicture && !picking ? (
+            <button
+              type="button"
+              className="wa-avatar-btn"
+              aria-label={t('wa.picture')}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPicture(c, title);
+              }}
+              data-wa-pic={c.id}
+            >
+              <WaAvatar id={c.id} name={title} group={c.group} size={48} />
+            </button>
+          ) : (
+            <WaAvatar id={c.id} name={title} group={c.group} size={48} />
+          )}
         </span>
       }
       title={
@@ -191,7 +208,8 @@ const TAG_ICON: Record<WaTag, Icon> = { customer: IconUser, supplier: IconTruck,
 
 /**
  * The statuses for the chats picked (v0.81, the user's brief: «отметить несколько чатов и одним действием присвоить им общий
- * статус»): one tap — all of them; «Не относится к гаражу» (v0.91.2) takes the hand-given one off and the AI's too, for good (the base's own — a customer's number — stays).
+ * статус»): one tap — all of them, over the base's own (v0.91.7); «Не относится к гаражу» (v0.91.2) takes the hand-given one off
+ * and the AI's too, for good — the base's own too (v0.91.7: the chat shows none; the person stays in the base).
  */
 function TagSheet({ opened, onClose, n, onTag }: { opened: boolean; onClose: () => void; n: number; onTag: (tag: WaTag | null) => void }) {
   const { t } = useTranslation();
@@ -272,7 +290,7 @@ function ChatKnowBlock({ id, phone, name }: { id: string; phone: string; name: s
   const { t } = useTranslation();
   const { run } = useAction();
   const k = useScreenLiveQuery(() => chatKnow(id, phone), [id, phone]);
-  const top = useScreenLiveQuery(loadTop, []) ?? NO_TOP;
+  const top = useCalmQuery(TOP_TABLES, loadTop, []) ?? NO_TOP;
   const isTop = top.chats.has(id);
   if (!k && !isTop) return null;
   const s = k?.seen;
@@ -342,6 +360,8 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const { t } = useTranslation();
   const when = useWhen();
   const desk = useDesk();
+  // A contact's picture on the whole screen (v0.91.7): its picture tapped in the list — on a phone, as WhatsApp does.
+  const [openPicture, pictureView] = useWaPictureView();
   const screen = useScreen();
   const { run } = useAction();
   const [tab, setTabState] = useState<ChatTab>(view.tab);
@@ -351,12 +371,13 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const setTab = (v: ChatTab) => setTabState((view.tab = v));
   const setQuery = (v: string) => setQueryState((view.query = v));
   const setGarageOnly = (v: boolean) => setGarageOnlyState((view.garageOnly = v));
-  const roles = useScreenLiveQuery(loadChatRoles, []) ?? NO_ROLES;
-  // Who the chats are and what their requests came to — studied by services/chatStudy.ts as the app runs (v0.91).
-  const makes = useScreenLiveQuery(loadChatMakes, []);
+  // Who the chats are, what their requests came to (studied by services/chatStudy.ts as the app runs, v0.91), the garage's
+  // main suppliers (v0.91.6) — one read, kept calm (v0.91.7: three reads on each chat studied made the list stutter).
+  const index = useCalmQuery(CHAT_INDEX_TABLES, loadChatIndex, []);
+  const roles = index?.roles ?? NO_ROLES;
+  const makes = index?.makes;
+  const top = index?.top ?? NO_TOP;
   const study = useSyncExternalStore(onStudyProgress, studyProgress);
-  // The garage's main suppliers (v0.91.6): on top of every tab, pinned by the app.
-  const top = useScreenLiveQuery(loadTop, []) ?? NO_TOP;
   const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly, top: top.chats }), [s.chats, tab, query, people, roles, garageOnly, top]);
   // A search with «Только гараж» on: how many more the whole list has (one tap shows them).
   const elsewhere = useMemo(
@@ -583,6 +604,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
                 when={when(c.t)}
                 active={!picking && c.id === active}
                 onOpen={tap}
+                onPicture={desk ? undefined : openPicture}
                 picking={picking}
                 picked={picked.has(c.id)}
               />
@@ -627,6 +649,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
           />
         )}
       </LazySheet>
+      {pictureView}
     </>
   );
 }
@@ -696,6 +719,25 @@ function NewChatSheet({ opened, onClose, people, onOpen }: { opened: boolean; on
 function ChatInfoSheet({ c, who, title, opened, onClose }: { c: Pick<WaChat, 'id' | 'phone' | 'group' | 'name'>; who?: Who; title: string; opened: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { run } = useAction();
+  const [openPicture, pictureView] = useWaPictureView();
+  // What the chat is to the garage — the status given by hand first (v0.91.7), as the list says it.
+  const role = useCalmQuery(
+    ['chatFacts', 'settings', 'customers', 'suppliers', 'employees'],
+    async () => {
+      const [people, roles] = await Promise.all([loadPeople(), loadChatRoles()]);
+      return chatRole(c, people, roles) ?? null;
+    },
+    [c.id, c.phone, c.group],
+  );
+  const [tagging, setTagging] = useState(false);
+  const tagOne = (to: WaTag | null) =>
+    void run(async () => {
+      await tagChats([c.id], to);
+      haptic('success');
+      setTagging(false);
+      notifications.show({ color: 'green', message: to ? t('wa.tags.updated', { count: 1 }) : t('wa.tags.cleared', { n: 1 }) });
+    });
   const phone = c.phone ? `+${c.phone}` : '';
   // Someone the garage does not know yet: into its customers or its suppliers, the number and the name filled in.
   const [adding, setAdding] = useState<'customer' | 'supplier' | null>(null);
@@ -718,9 +760,11 @@ function ChatInfoSheet({ c, who, title, opened, onClose }: { c: Pick<WaChat, 'id
   return (
     <Modal opened={opened} onClose={onClose} title={title}>
       <Stack gap="md" align="center">
-        <WaAvatar id={c.id} name={title} group={c.group} size={84} />
+        <button type="button" className="wa-avatar-btn" aria-label={t('wa.picture')} onClick={() => openPicture(c, title)} data-wa-card-pic>
+          <WaAvatar id={c.id} name={title} group={c.group} size={84} />
+        </button>
         <Stack gap={2} align="center">
-          {who && <WhoTag kind={who.kind} />}
+          {role ? <WhoTag kind={role} /> : who && role === undefined && <WhoTag kind={who.kind} />}
           {phone && (
             <Text className="tnum selectable" c="dimmed">
               {formatPhone(phone)}
@@ -738,6 +782,7 @@ function ChatInfoSheet({ c, who, title, opened, onClose }: { c: Pick<WaChat, 'id
           {who?.kind === 'supplier' && tile('supplier', IconTruck, 'cyan', t('wa.who.supplier'), () => go('/parts?tab=suppliers'))}
           {!who && phone && tile('addCustomer', IconUserPlus, 'blue', t('wa.addCustomer'), () => setAdding('customer'))}
           {!who && phone && tile('addSupplier', IconTruck, 'cyan', t('wa.addSupplier'), () => setAdding('supplier'))}
+          {!c.group && tile('status', IconTag, 'indigo', t('wa.tags.one'), () => setTagging(true))}
           {phone && tile('call', IconPhone, 'green', t('wa.call'), () => (window.location.href = `tel:${phone}`))}
           {phone &&
             tile('copy', IconCopy, 'gray', t('wa.copyNumber'), () => {
@@ -749,6 +794,8 @@ function ChatInfoSheet({ c, who, title, opened, onClose }: { c: Pick<WaChat, 'id
       </Stack>
       <CustomerModal opened={adding === 'customer'} onClose={() => setAdding(null)} initial={{ name: shownName, phone, whatsapp: phone }} onSaved={(saved) => go(`/customers/${saved.id}`)} onPick={(found) => go(`/customers/${found.id}`)} />
       <SupplierSheet opened={adding === 'supplier'} supplier={adding === 'supplier' ? ({ name: shownName, phone } as Partial<Supplier>) : null} onClose={() => setAdding(null)} onSaved={() => setAdding(null)} onExisting={() => setAdding(null)} />
+      <LazySheet opened={tagging}>{(o) => <TagSheet opened={o} onClose={() => setTagging(false)} n={1} onTag={tagOne} />}</LazySheet>
+      {pictureView}
     </Modal>
   );
 }

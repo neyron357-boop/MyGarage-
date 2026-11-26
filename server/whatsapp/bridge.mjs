@@ -984,21 +984,38 @@ async function deleteMessage(body) {
   const m = await within(c.getMessageById(id), 20_000, 'message');
   if (!m) throw httpError(404, 'no message');
   if (!m.fromMe) throw httpError(403, 'not ours');
+  // v0.91.7 (the owner: «удалить у всех по факту не удаляет»): WhatsApp Web 2.3000.105… has no Store.MsgActionChecks — the
+  // check said «cannot check» and nothing was ever deleted. Its own module now (the library's way), the old one if there.
   const can = await within(
-    c.pupPage.evaluate((mid) => {
-      const msg = window.Store?.Msg?.get?.(mid);
-      const checks = window.Store?.MsgActionChecks;
-      if (!msg || !checks) return null;
-      return !!(checks.canSenderRevokeMsg?.(msg) || checks.canAdminRevokeMsg?.(msg));
+    c.pupPage.evaluate(async (mid) => {
+      const req = (n) => {
+        try {
+          return window.require(n);
+        } catch {
+          return null;
+        }
+      };
+      const coll = req('WAWebCollections')?.Msg ?? window.Store?.Msg;
+      const msg = coll?.get?.(mid) ?? (await coll?.getMessagesById?.([mid]))?.messages?.[0];
+      const checks = req('WAWebMsgActionCapability') ?? window.Store?.MsgActionChecks;
+      if (!msg || typeof checks?.canSenderRevokeMsg !== 'function') return null;
+      return !!(checks.canSenderRevokeMsg(msg) || checks.canAdminRevokeMsg?.(msg));
     }, id),
     15_000,
     'check',
   );
-  if (can === null) throw httpError(409, 'cannot check');
+  if (can === null) throw httpError(502, 'cannot check');
   if (!can) throw httpError(409, 'too late');
   allow();
   await within(m.delete(true), 30_000, 'delete');
-  const after = await within(c.getMessageById(id), 20_000, 'message').catch(() => null);
+  // Deleted for everyone only when WhatsApp says so — the message became «revoked»; else said, not pretended.
+  let after = null;
+  for (let k = 0; k < 10; k++) {
+    after = await within(c.getMessageById(id), 20_000, 'message').catch(() => null);
+    if (after?._data?.type === 'revoked' || !after) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (after && after._data?.type !== 'revoked') throw httpError(502, 'not deleted');
   return { ok: true, msg: messageRow((after ?? m)?._data, { me: meId }) };
 }
 

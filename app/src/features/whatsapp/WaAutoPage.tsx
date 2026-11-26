@@ -247,7 +247,7 @@ export function WaAutoPage() {
                       </span>
                     }
                     title={<span data-wa-queue={q.state}>{q.title || t(`wa.auto.kind.${q.key.split(':')[0]}`, { defaultValue: q.key.split(':')[0] })}</span>}
-                    subtitle={[t(`wa.auto.state.${q.state}`), q.at ? dubaiTime(new Date(q.at).toISOString()) : '', q.error ?? ''].filter(Boolean).join(' · ')}
+                    subtitle={[q.state === 'queued' && q.after && q.after > Date.now() ? t('wa.auto.later', { time: dubaiTime(new Date(q.after).toISOString()) }) : t(`wa.auto.state.${q.state}`), q.at ? dubaiTime(new Date(q.at).toISOString()) : '', q.error ?? ''].filter(Boolean).join(' · ')}
                     right={
                       q.state === 'failed' || q.state === 'queued' ? (
                         <span className="wa-queue-actions">

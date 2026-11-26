@@ -13,6 +13,10 @@ import type { OrderBundle } from '../../services/orders';
 import { suppliersForJob } from '../../services/supplierRank';
 import { askSuppliers, recordLinkAsk } from '../../services/waAsk';
 import { waReady } from '../../services/whatsapp';
+import { dubaiTime } from '../../domain/dates';
+import { LazySheet } from '../../ui/lazy';
+import { useLongPress } from '../../ui/longPress';
+import { SendLaterSheet } from './SendLater';
 import { copyText } from '../../ui/clipboard';
 import { PersonAvatar, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
@@ -102,18 +106,23 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
     haptic('selection');
     return n;
   };
-  const send = () =>
+  const send = (after?: number) =>
     run(async () => {
       const r = await askSuppliers(
         b.order.id,
         [...who].map((supplierId) => ({ supplierId })),
-        { items: asked, sheets: [], usedFiles: [] },
+        { items: asked, sheets: [], usedFiles: [], after },
       );
       haptic('success');
       if (r.noNumber.length) notifications.show({ color: 'orange', message: t('ask.noNumber', { names: r.noNumber.join(', ') }) });
-      notifications.show({ color: 'green', message: t('ask.sent', { n: r.asked }) });
+      notifications.show({ color: 'green', message: after ? t('later.queued', { n: r.asked, time: dubaiTime(new Date(after).toISOString()) }) : t('ask.sent', { n: r.asked }) });
+      setLater(false);
       onClose();
     });
+  // v0.91.7 (#76): held — «Отправить позже», the time picked; a right click on a PC.
+  const [later, setLater] = useState(false);
+  const ready = canSend && who.size > 0 && asked.length > 0;
+  const hold = useLongPress(() => ready && setLater(true));
   const copy = () =>
     void run(async () => {
       if (!(await copyText(partNamesText(asked, b.order.docLanguage, b.vehicle)))) throw new Error('copy');
@@ -167,11 +176,25 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
             <ActionIcon size={48} radius="xl" variant="light" aria-label={t('job.copyLines')} disabled={!asked.length} onClick={copy} data-ask-copy>
               <IconCopy size={20} />
             </ActionIcon>
-            <Button size="lg" style={{ flex: 1 }} leftSection={<IconSend size={18} />} loading={busy} disabled={!canSend || !who.size || !asked.length} onClick={() => void send()} data-ask-send>
+            <Button
+              size="lg"
+              style={{ flex: 1 }}
+              className="hold-button"
+              leftSection={<IconSend size={18} />}
+              loading={busy}
+              disabled={!ready}
+              {...hold.handlers}
+              onClick={() => {
+                if (hold.consumeClick()) return;
+                void send();
+              }}
+              data-ask-send
+            >
               {canSend ? t('ask.send', { n: who.size }) : t('ask.noWa')}
             </Button>
           </Group>
         </div>
+        <LazySheet opened={later}>{(o) => <SendLaterSheet opened={o} onClose={() => setLater(false)} n={who.size} onPick={(at) => void send(at)} />}</LazySheet>
       </Stack>
     </Modal>
   );

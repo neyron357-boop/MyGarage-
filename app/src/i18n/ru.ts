@@ -47,7 +47,7 @@ export const ru = {
     tabs: 'Вкладки',
     newTab: 'Новая вкладка',
     openInTab: 'Открыть в новой вкладке',
-    keyLines: 'Работа · Запчасть · Услуга в заказе',
+    keyLines: 'Добавить позицию · Запчасть · Работа · Услуга в заказе',
     keyClose: 'Закрыть окно',
     actions: 'Действия',
     // Search from anywhere on a PC (v0.42): Ctrl+K.
@@ -473,11 +473,15 @@ export const ru = {
     mileageHistory: 'Пробег по визитам',
   },
   // v0.81: быстрый лист «＋» заказа и «+ Цена».
-  qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить' },
+  qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить', auto: 'Авто', autoPlaceholder: 'Запчасть, работа или услуга', fixed: 'исправлено' },
   price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
   // v0.82: скидка строки; лист «Поставщики» заказа.
   lineOff: { title: 'Скидка', amount: 'Сумма', amountLabel: 'Скидка, AED' },
   ask: { title: 'Поставщики', parts: 'Детали', who: 'Кому', search: 'Найти поставщика', noParts: 'Нет запчастей', noSuppliers: 'Никого не нашлось', send: 'Отправить · {{n}}', noWa: 'WhatsApp не подключён', sent: 'Отправлено поставщикам: {{n}}', noNumber: 'Без номера: {{names}}', used: 'б/у', answersFor: '{{make}} · ответил {{n}}', replies: 'отвечает за ~{{time}}', top: 'Главный' },
+  // v0.91.7: прайс-лист — цены из ответов поставщиков.
+  priceBook: { tab: 'Цены', search: 'Деталь, марка, модель, VIN, бренд', allMakes: 'Все марки', empty: 'Цен пока нет', emptyHint: 'Цены появятся сами — из ответов поставщиков в WhatsApp и из цен на строках заказов.', none: 'Ничего не нашлось', prices_one: '{{count}} цена', prices_few: '{{count}} цены', prices_many: '{{count}} цен', prices_other: '{{count}} цены', from: 'от', na: 'нет в наличии', oem: 'оригинал', copy: 'копия', used: 'б/у', someone: 'Поставщик', hint: 'Из прайса', hintNear: { 3: 'эта машина', 2: 'та же модель', 1: 'та же марка', 0: 'другая машина' } },
+  // v0.91.7 (#76): «Отправить позже» — удержание «Отправить».
+  later: { title: 'Отправить позже', exact: 'Точное время', today: 'Сегодня', tomorrow: 'Завтра', in30: 'Через 30 мин', in60: 'Через 1 ч', in120: 'Через 2 ч', evening: 'Сегодня в {{time}}', morning: 'Завтра в {{time}}', go: 'Отправить в {{time}} · {{n}}', pick: 'Выберите время', past: 'Это время уже прошло', queued: 'Уйдёт в {{time}}: поставщиков {{n}}', oldServer: 'Обновите сервер мастерской — он пока не умеет отправлять позже' },
   newOrder: {
     // v0.81: VIN в карточке номера.
     scanVin: 'Сканировать VIN',
@@ -1204,6 +1208,8 @@ export const ru = {
     addWork: 'Работа',
     addPart: 'Запчасть',
     addService: 'Услуга',
+    // v0.91.7: одна кнопка — тип позиции определяется сам.
+    addLine: 'Добавить позицию',
     total: 'Итого',
     vatIn: 'VAT {{vat}}',
     toClient: 'Клиенту',
@@ -1939,6 +1945,7 @@ export const ru = {
     openChat: 'Открыть чат',
     tags: {
       pick: 'Выбрать',
+      one: 'Статус',
       give: 'Статус · {{n}}',
       title: 'Статус чатов · {{n}}',
       none: 'Не относится к гаражу',
@@ -2132,6 +2139,7 @@ export const ru = {
     addSupplier: 'В поставщики',
     call: 'Позвонить',
     copyNumber: 'Номер',
+    picture: 'Фото контакта',
     openApp: 'В WhatsApp',
     gate: {
       server: 'Нужен сервер мастерской',
@@ -2247,6 +2255,7 @@ export const ru = {
       vatGross: 'С VAT',
       queue: 'Очередь отправки',
       queueEmpty: 'Пусто',
+      later: 'уйдёт в {{time}}',
       state: { queued: 'Ждёт', sending: 'Отправляется', sent: 'Ушло', failed: 'Не ушло', dropped: 'Убрано', none: '—' },
       kind: { boss: 'Босс', work: 'Рабочая группа', client: 'Группа клиента', wash: 'Мойка', ask: 'Заявка поставщику' },
     },

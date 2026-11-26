@@ -826,6 +826,11 @@ export interface OrderItem {
    */
   autoLabour?: true;
   /**
+   * Its kind was the app's guess, not sure (v0.91.7, one «Добавить» for every kind — domain/quickAdd.ts `guessKind`): the
+   * AI looks at it with its name (services/ai.ts `aiFixPartName`) and puts the kind right; then it goes.
+   */
+  autoKind?: true;
+  /**
    * Its price as the garage's history said it (v0.90, #70 — domain/labourPrice.ts): `fils` the net, `gross` when typed with
    * VAT, `jobs` how many earlier jobs said it, `basis` — the same work before, or the parts' labour one by one. While the
    * line's price is this one, it follows the parts; a price typed by hand stays.
@@ -902,6 +907,42 @@ export interface OrderItem {
 }
 
 /** One offer for a part: what kind, from whom, at what cost (net, per unit), how soon. */
+/**
+ * A price a supplier said for a part, kept for good (v0.91.7, the owner: «автосбор цен и автоформирование прайс-листов исходя из
+ * ответов поставщиков — ИИ должен мониторить ответы и записывать цены каждой детали с маркой и моделью авто и с VIN и так
+ * наращивать знания»): each offer of a job's line (read off a WhatsApp answer by the rules or the AI, or typed on the line),
+ * with the car it was for. Stays when the job or its line goes. Written only by services/priceBook.ts.
+ */
+export interface PricePoint {
+  /** The offer's own id (one record each). */
+  id: string;
+  /** The part as asked (capitals; English when there is one). */
+  part: string;
+  partRu?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  vin?: string;
+  supplierId?: string;
+  /** Its cost (without VAT), one piece; none — said «not available». */
+  costFils?: number;
+  kind: 'oem' | 'aftermarket' | 'used';
+  brand?: string;
+  na?: true;
+  /** The kind was not said. */
+  unsure?: true;
+  /** Read by the AI. */
+  ai?: true;
+  /** From a WhatsApp answer (its message), or typed on the line. */
+  via: 'wa' | 'hand';
+  /** When it was said. */
+  at: string;
+  orderId: string;
+  itemId: string;
+  updatedAt: string;
+  _t?: number;
+}
+
 export interface PartOffer {
   id: string;
   kind: 'oem' | 'aftermarket' | 'used';

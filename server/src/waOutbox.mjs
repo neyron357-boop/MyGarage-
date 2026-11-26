@@ -15,6 +15,10 @@ import path from 'node:path';
  *
  * Unhurried, as a person would send (an unofficial client that floods is what WhatsApp bans): a pause after every
  * message, a longer one between chats (`gap`, the manager's setting for suppliers), never two items at once.
+ *
+ * Later (v0.91.7, task #76, the owner: «если нажать и удержать — окно с установкой таймера отправки, чтобы вставить время,
+ * когда сообщение должно отправиться автоматически»): `after` — not before this moment (ms; up to a week ahead); the item
+ * waits here, the app may be closed by then. Its three days to go count from that moment.
  */
 
 const DAY = 24 * 60 * 60_000;
@@ -55,7 +59,9 @@ export function cleanItem(x) {
   if (size > MAX_ITEM) throw httpError(413, 'item too large');
   const gap = Math.min(120, Math.max(0, Number(x.gap) || 0));
   const title = typeof x.title === 'string' ? x.title.slice(0, 120) : '';
-  return { key, chat, phone, parts, gap, title };
+  const after = Number(x.after) || 0;
+  if (after && (!Number.isFinite(after) || after > Date.now() + 7 * DAY)) throw httpError(400, 'bad time');
+  return { key, chat, phone, parts, gap, title, ...(after > Date.now() ? { after } : {}) };
 }
 
 export function createOutbox({ dir, store, bridge, ready, tell = () => {}, log = () => {}, now = () => Date.now(), pace = { message: [1200, 2200], chats: [4000, 8000] }, waitMedia = 2 * 60 * 60_000 }) {
@@ -89,17 +95,17 @@ export function createOutbox({ dir, store, bridge, ready, tell = () => {}, log =
       .sort((a, b) => a.at - b.at);
 
   /** What an item is now, for the app (no message's words beyond its title). */
-  const face = (it) => ({ key: it.key, state: it.state, at: it.at, title: it.title, chat: it.chat || undefined, error: it.error || undefined, tries: it.tries || 0, parts: it.parts.length, done: it.done || 0 });
+  const face = (it) => ({ key: it.key, state: it.state, at: it.at, after: it.after || undefined, title: it.title, chat: it.chat || undefined, error: it.error || undefined, tries: it.tries || 0, parts: it.parts.length, done: it.done || 0 });
 
   function put(raw, by) {
     const x = cleanItem(raw);
     if (sent[x.key]) return { key: x.key, state: 'sent', at: sent[x.key].at };
     const have = read(fileOf(x.key));
     if (have) return { key: x.key, state: have.state, at: have.at };
-    const item = { ...x, at: now(), state: 'queued', tries: 0, done: 0, next: 0, by: by || '' };
+    const item = { ...x, at: now(), state: 'queued', tries: 0, done: 0, next: x.after || 0, by: by || '' };
     save(item);
     tell({ t: 'outbox', item: face(item) });
-    return { key: item.key, state: 'queued', at: item.at };
+    return { key: item.key, state: 'queued', at: item.at, ...(item.after ? { after: item.after } : {}) };
   }
 
   function list(keys) {
@@ -118,7 +124,7 @@ export function createOutbox({ dir, store, bridge, ready, tell = () => {}, log =
   function retry(key) {
     const it = read(fileOf(String(key)));
     if (!it) throw httpError(404, 'no such item');
-    Object.assign(it, { state: 'queued', tries: 0, next: 0, error: '' });
+    Object.assign(it, { state: 'queued', tries: 0, next: it.after && it.after > now() ? it.after : 0, error: '' });
     save(it);
     tell({ t: 'outbox', item: face(it) });
     return face(it);
@@ -195,7 +201,7 @@ export function createOutbox({ dir, store, bridge, ready, tell = () => {}, log =
     if (busy || !ready() || now() < calm) return;
     const due = items().filter((it) => it.state === 'queued' && (it.next || 0) <= now());
     // Waited three days and still not gone (WhatsApp unlinked meanwhile): said so, not sent late.
-    for (const it of due) if (now() - it.at > 3 * DAY) fail(it, 'expired', { final: true });
+    for (const it of due) if (now() - Math.max(it.at, it.after || 0) > 3 * DAY) fail(it, 'expired', { final: true });
     const it = due.find((x) => x.state === 'queued');
     if (!it) return;
     busy = true;

@@ -66,7 +66,7 @@ ${texts.map((t) => `- "${t.slice(0, 400)}"`).join('\n')}
 isRequest: someone asks the garage to repair, service, fit or price parts or work on a car (not a supplier offering parts, not small talk). car: make, model, year (0 if not said), plate (as written or as on the registration card in the picture: emirate — DXB, AUH, SHJ, AJM, UAQ, RAK, FUJ or ""; code — the letters or digits before the number; number; "" for what is not seen), vin (the 17 characters if shown, else ""). items: each part or work asked, as an English invoice line ("ENGINE MOUNT", "FRONT BRAKE PADS", "AC SERVICE"), kind "part" or "work", both: true when they ask the price of the original and of a copy (duplicate, aftermarket). owner: the car owner's name if said, else "". confidence 0..1 that it is a request. Only what the messages and the picture show.`,
   name: (name, car) =>
     `A line of a car repair job typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}" — a spare part, a service or work. It may have typos; it may be English, Russian, or Russian in Latin letters.
-fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; confidence 0..1 for fixed.`,
+fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; kind: "part" (a spare part, fluid or material that is bought — "CHECK VALVE", "SERVICE KIT", "ENGINE OIL"), "labour" (the labour charge itself), "service" (work done on the car — repair, replacement, fitting, alignment, wash, AC service, towing); kindSure 0..1 for kind; confidence 0..1 for fixed.`,
   // v0.86: the labour line said by the job's parts and work, as a garage writes it on an invoice.
   labour: (parts, work) =>
     `Garage invoice, UAE. Parts on the job: ${parts.join('; ')}.${work.length ? ` Other work on it: ${work.join('; ')}.` : ''}
@@ -616,11 +616,12 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       name = String(name ?? '').trim().slice(0, 160);
       if (!name) throw httpError(400, 'no name');
       const car = carLine({ make, model, year });
-      return cached(`name:${name.toLowerCase()}|${car.toLowerCase()}`, 'name', async () => {
+      // v0.91.7: the kind too (one «Добавить» for every kind — the app's guess not sure): asked anew (`name:2:`).
+      return cached(`name:2:${name.toLowerCase()}|${car.toLowerCase()}`, 'name', async () => {
         const { value } = await json(P.name(name, car), {
           type: 'object',
-          properties: { fixed: { type: 'string' }, english: { type: 'string' }, isPart: { type: 'boolean' }, confidence: { type: 'number' } },
-          required: ['fixed', 'english', 'isPart', 'confidence'],
+          properties: { fixed: { type: 'string' }, english: { type: 'string' }, isPart: { type: 'boolean' }, kind: { type: 'string', enum: ['part', 'labour', 'service'] }, kindSure: { type: 'number' }, confidence: { type: 'number' } },
+          required: ['fixed', 'english', 'isPart', 'kind', 'kindSure', 'confidence'],
         }, { kind: 'name', thinking: 'minimal' });
         return { name, ...value };
       });

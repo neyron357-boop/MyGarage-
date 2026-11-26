@@ -147,6 +147,26 @@ describe('the AI looks at a part', () => {
     expect(asked).toHaveLength(1);
   });
 
+  it('v0.91.7: a kind the app only guessed — the AI puts it right (sure); its mark goes; a kind given by hand is not asked', async () => {
+    const o = await car('Toyota', 'Corolla');
+    // «AC CHECK» added as a service, not sure: the AI says it is work — it stays work; the mark goes.
+    answers['part-name'] = { fixed: 'AC CHECK', english: 'AC CHECK', isPart: true, kind: 'service', kindSure: 0.9, confidence: 0.9 };
+    const w = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'AC CHECK', qty: 1, unitPriceFils: 0, autoKind: true });
+    await aiFixPartName(w.id);
+    const wi = (await db.items.get(w.id))!;
+    expect([wi.kind, wi.autoKind, asked.at(-1)?.path]).toEqual(['labor', undefined, 'part-name']);
+    // «CHECK VALVE» guessed as work: the AI says a part — a part now.
+    answers['part-name'] = { fixed: 'CHECK VALVE', english: 'CHECK VALVE', isPart: true, kind: 'part', kindSure: 0.92, confidence: 0.9 };
+    const v = await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'CHECK VALVE', qty: 1, unitPriceFils: 0, autoKind: true });
+    await aiFixPartName(v.id);
+    expect((await db.items.get(v.id))!.kind).toBe('part');
+    // Not sure — the guess stays.
+    answers['part-name'] = { fixed: 'XYZ PIPE', english: 'XYZ PIPE', isPart: true, kind: 'service', kindSure: 0.5, confidence: 0.9 };
+    const x = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'XYZ PIPE', qty: 1, unitPriceFils: 0, autoKind: true });
+    await aiFixPartName(x.id);
+    expect((await db.items.get(x.id))!.kind).toBe('part');
+  });
+
   it('a line sent to the customer keeps its words', async () => {
     const o = await car();
     const it1 = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'alternater', qty: 1, unitPriceFils: 0 });

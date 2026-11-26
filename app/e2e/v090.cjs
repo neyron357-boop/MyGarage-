@@ -68,13 +68,14 @@ async function launch() {
     return o.id;
   });
   await page.goto(BASE + `#/orders/${jobId}`);
-  await top('.add-btn').first().waitFor();
+  await top('[data-add-line]').first().waitFor();
   await settle(800);
 
   // #73: «-- 450» — the sale price at once.
-  await top('.add-btn').filter({ hasText: 'Запчасть' }).first().click();
+  await top('[data-add-line]').first().click();
   const qa = page.locator('.mantine-Modal-content').filter({ has: page.locator('.qa-field') });
   await qa.waitFor();
+  await qa.getByRole('radio', { name: 'Запчасть' }).click();
   await qa.locator('.qa-field input').fill('ENGINE MOUNT ORIGINAL -- 504');
   await qa.locator('[data-typed-price]').first().waitFor();
   check((await qa.locator('.qa-new [data-typed-price]').innerText()).includes('504'), '#73: «-- 504» — the price shown on the line to add');

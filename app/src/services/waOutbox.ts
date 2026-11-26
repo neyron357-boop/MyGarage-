@@ -40,6 +40,8 @@ export interface OutItem {
   title?: string;
   /** Seconds to pause before this chat (suppliers one after another). */
   gap?: number;
+  /** v0.91.7 (#76): not before this moment (ms) — the server keeps it until then. */
+  after?: number;
 }
 
 const PENDING = 'mygarage.wa.outbox';

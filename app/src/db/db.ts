@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type {
   Addendum,
   ChatFact,
+  PricePoint,
   CashClosing,
   CashMovement,
   Claim,
@@ -100,6 +101,8 @@ export class GarageDB extends Dexie {
   reminders!: Table<Reminder, string>;
   /** What the garage knows of its WhatsApp chats (v0.91): requests and answers, makes, the AI's word. */
   chatFacts!: Table<ChatFact, string>;
+  /** v0.91.7: every price a supplier said, with its car (services/priceBook.ts). */
+  priceBook!: Table<PricePoint, string>;
   /** Invoices given before this app, read off their PDFs (v0.45): the customer's reports read them, money here does not. */
   historyInvoices!: Table<HistoryInvoice, string>;
   /** The rows of the monthly summaries that came with them (v0.45): the garage's own check. */
@@ -236,6 +239,10 @@ export class GarageDB extends Dexie {
     // v12 (v0.91): what the garage knows of its WhatsApp chats — a new table only (a supplier of the base by `phone`).
     this.version(12).stores({
       chatFacts: 'id, phone, _t',
+    });
+    // v0.91.7: the price book — what the suppliers said, part by part, car by car.
+    this.version(13).stores({
+      priceBook: 'id, part, make, supplierId, at, itemId, _t',
     });
     installGuards(this);
     installSyncHooks(this);

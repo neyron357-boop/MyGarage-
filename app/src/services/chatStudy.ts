@@ -66,7 +66,7 @@ function tell(p: StudyProgress) {
 
 /** A person's chat that is, or may be, a supplier: worth reading for what its requests came to. */
 export function worthStudy(chat: Pick<WaChat, 'id' | 'phone' | 'group' | 'self'>, people: Map<string, Who>, roles: ChatRoles): boolean {
-  if (chat.group || chat.self) return false;
+  if (chat.group || chat.self || roles.off?.has(chat.id)) return false;
   const role = chatRole(chat, people, roles);
   return !role || role === 'supplier' || role === 'service';
 }
@@ -507,8 +507,8 @@ export async function chatsMakes(chats: Pick<WaChat, 'id' | 'phone' | 'group'>[]
 }
 
 /** The makes the chats are known for, by the chat and by the number (a supplier of the base: its card's first). */
-export async function loadChatMakes(): Promise<{ byChat: Map<string, KnownMake[]>; byPhone: Map<string, KnownMake[]> }> {
-  const [facts, sups] = await Promise.all([db.chatFacts.toArray(), db.suppliers.toArray()]);
+export async function loadChatMakes(given?: { facts?: ChatFact[]; suppliers?: Supplier[] }): Promise<{ byChat: Map<string, KnownMake[]>; byPhone: Map<string, KnownMake[]> }> {
+  const [facts, sups] = await Promise.all([given?.facts ?? db.chatFacts.toArray(), given?.suppliers ?? db.suppliers.toArray()]);
   const now = nowIso();
   const byChat = new Map<string, KnownMake[]>();
   const byPhone = new Map<string, KnownMake[]>();

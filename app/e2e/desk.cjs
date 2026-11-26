@@ -354,7 +354,7 @@ async function launchBrowser() {
           await p.mouse.move(5, 5);
         }
       }
-      await p.getByRole('button', { name: 'Запчасть', exact: true }).first().click();
+      await p.locator('[data-add-line]').first().click();
       await settle(700);
       await shot('03c-job-part');
       await p.keyboard.press('Escape');

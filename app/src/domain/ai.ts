@@ -28,7 +28,19 @@ export interface AiName {
   fixed?: string;
   english?: string;
   isPart?: boolean;
+  /** v0.91.7: a part, the labour charge, or work done to the car (a service); `kindSure` 0..1. */
+  kind?: 'part' | 'labour' | 'service';
+  kindSure?: number;
   confidence?: number;
+}
+
+/**
+ * The kind the AI says for a line whose kind was the app's guess (v0.91.7): a part or work (the labour charge and a service
+ * are both work lines) — only when it is sure (0.75); else the guess stays.
+ */
+export function aiKindOf(ai: AiName | undefined): 'part' | 'labor' | undefined {
+  if (!ai?.kind || (ai.kindSure ?? 0) < 0.75) return undefined;
+  return ai.kind === 'part' ? 'part' : 'labor';
 }
 
 type CarFields = Pick<Vehicle, 'make' | 'model' | 'year' | 'engine' | 'type'>;

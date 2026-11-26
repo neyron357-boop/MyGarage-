@@ -1,4 +1,5 @@
 import { isToSend } from '../domain/flow';
+import { notePrices } from './priceBook';
 import { db, uid } from '../db/db';
 import { addDays, nowIso } from '../domain/dates';
 import {
@@ -121,6 +122,8 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
   if ('costPriceFils' in patch && !('costAi' in patch) && item.costAi && patch.costPriceFils !== item.costPriceFils) next.costAi = undefined;
   await db.items.update(id, next);
   await syncLabourNames(item.orderId);
+  // A part's offers (a supplier's answer read, a price typed on it): into the price book (v0.91.7).
+  if ('offers' in patch) await notePrices(id);
 }
 
 /** Work and parts are named in capitals (a discount keeps its words): the titles of `patch`, as they will be stored. */

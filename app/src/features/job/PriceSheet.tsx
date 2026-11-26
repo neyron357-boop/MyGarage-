@@ -9,6 +9,8 @@ import { updateItem } from '../../services/estimate';
 import { syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { FormRow, Money, MoneyInput } from '../../ui/components';
+import { priceHintsFor } from '../../services/priceBook';
+import { useScreenLiveQuery } from '../../ui/hooks';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang } from '../../ui/hooks';
 import { forgetSuggestions } from './LineSheet';
@@ -40,6 +42,8 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
   const part = i?.kind === 'part';
   const costs = part || service;
   const fromCost = (c: number | undefined) => (c === undefined ? undefined : enteredPrice({ unitPriceFils: withMarkup(c, b.settings.defaultMarkupBp) }, taxRate, mode));
+  // v0.91.7: what the suppliers said before for this part — this car, its model, its make first (the price book); a tap — the cost.
+  const hints = useScreenLiveQuery(() => (opened && i && part ? priceHintsFor(i.id) : undefined), [opened, i?.id, part]);
   useEffect(() => {
     if (!opened || !i) return;
     setCost(i.costPriceFils);
@@ -101,6 +105,31 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
           </FormRow>
           <LineOffRow value={off} onChange={setOff} />
         </div>
+        {!!hints?.hints.length && (
+          <div className="price-hints" data-price-hints>
+            <span className="price-hints-title">{t('priceBook.hint')}</span>
+            <div className="chip-row wrap">
+              {hints.hints.map(({ point: p, near }) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="chip price-hint"
+                  data-active={cost === p.costFils || undefined}
+                  onClick={() => {
+                    haptic('selection');
+                    if (!price || price === fromCost(cost)) setPrice(fromCost(p.costFils));
+                    setCost(p.costFils);
+                  }}
+                  data-price-hint={p.id}
+                >
+                  <span className="price-hint-who">{hints.suppliers.get(p.supplierId ?? '')?.name ?? t('priceBook.someone')}</span>
+                  <Money fils={p.costFils!} />
+                  <span className="chip-note">{[t(p.kind === 'oem' ? 'priceBook.oem' : p.kind === 'used' ? 'priceBook.used' : 'priceBook.copy'), p.brand, t(`priceBook.hintNear.${near}`)].filter(Boolean).join(' · ')}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {cells.length > 0 && (
           <div className="line-sum" role="group" data-cells={cells.length}>
             {cells.map((c) => (

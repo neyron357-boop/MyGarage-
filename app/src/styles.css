@@ -8385,7 +8385,7 @@ html.desk .mark-layer-body {
 }
 .qa-kinds {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 .qa-kind {
@@ -10498,4 +10498,132 @@ html.desk .wa-pane-foot {
 }
 .supplier-name .wa-row-top {
   margin-right: 2px;
+}
+
+/* ---------- A contact's picture, tapped (v0.91.7) ---------- */
+/* The picture in a chat's row (a phone) and on its card opens on the whole screen: a button that looks like the picture. */
+.wa-avatar-btn {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: zoom-in;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--dur-1) var(--spring);
+}
+.wa-avatar-btn:active {
+  transform: scale(0.92);
+}
+
+/* ---------- A button held for more (v0.91.7, #76: «Отправить» held — «Отправить позже») ---------- */
+/* The iPhone's own long press (text selection, the callout) stays off it: the hold is the app's. */
+.hold-button {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ---------- One «Добавить» for every kind (v0.91.7) ---------- */
+/* Under the job's lines one wide tile: its symbol and words side by side; the extras beside it (a PC) or under it (a phone). */
+.add-row > .add-btn.add-one {
+  flex: 1 1 auto;
+  flex-direction: row;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  font-size: 17px;
+}
+.add-row.add-one-row + .add-row.add-extras {
+  margin-top: 8px;
+}
+/* In the quick sheet: a line's kind at its end, in its colour; a guess not sure — dimmer, dashed. */
+.qa-kind-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  color: var(--c);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.qa-kind-mark[data-unsure] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
+}
+.qa-fixed {
+  flex: none;
+  color: var(--mantine-color-green-6);
+  font-size: 12px;
+  font-weight: 600;
+}
+.qa-added-name[data-kind='part'] {
+  --c: var(--mantine-color-orange-6);
+}
+.qa-added-name[data-kind='labor'] {
+  --c: var(--mantine-color-blue-6);
+}
+.qa-added-name[data-kind='service'] {
+  --c: var(--mantine-color-violet-6);
+}
+.qa-kinds .qa-kind {
+  font-size: 14px;
+  gap: 4px;
+  padding: 0 4px;
+}
+.qa-added-name[data-kind]::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+/* ---------- The price book (v0.91.7) ---------- */
+.price-book-best {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+.price-book-from {
+  color: var(--app-label-2);
+  font-size: 13px;
+}
+.price-book-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* In «+ Цена»: the prices said before for this part — a tap puts the cost. */
+.price-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.price-hints-title {
+  padding: 0 4px;
+  color: var(--app-label-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.chip.price-hint {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+}
+.price-hint-who {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

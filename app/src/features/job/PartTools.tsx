@@ -8,7 +8,8 @@ import { canonicalMake } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import { looksLikePhone, supplierMatches } from '../../domain/suppliers';
 import { starsOf } from '../../domain/supplierRank';
-import { loadTop } from '../../services/supplierRank';
+import { loadTop, TOP_TABLES } from '../../services/supplierRank';
+import { useCalmQuery } from '../../ui/calmQuery';
 import type { Employee, OrderItem, Supplier, Vehicle } from '../../domain/types';
 import { mediaBlob } from '../../services/media';
 import { partRequestText, whatsappUrl } from '../../services/messages';
@@ -29,7 +30,7 @@ export function useSuppliers(make?: string, service?: boolean): Supplier[] {
     return m;
   }, []);
   // The garage's main suppliers (v0.91.6): first of the chips, in their order.
-  const top = useLiveQuery(() => loadTop().then((x) => x.suppliers), []);
+  const top = useCalmQuery(TOP_TABLES, () => loadTop().then((x) => x.suppliers), []);
   return useMemo(() => {
     const m = make ? canonicalMake(make).toLowerCase() : '';
     const score = (s: Supplier) => (service !== undefined && !!s.service === service ? 0 : 2) + (m && s.makes?.some((x) => x.toLowerCase() === m) ? 0 : 1);

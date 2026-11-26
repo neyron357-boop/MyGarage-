@@ -1,4 +1,5 @@
 import { Box, Button, Group, Stack, Text, ThemeIcon } from '@mantine/core';
+import { PriceBookTab } from './PriceBook';
 import {
   IconArrowBackUp,
   IconCheck,
@@ -51,7 +52,7 @@ async function loadParts() {
   return { items, byId, vById, suppliers, returns, returnItems };
 }
 
-const PARTS_TABS = ['needed', 'ordered', 'pickup', 'returns', 'suppliers'];
+const PARTS_TABS = ['needed', 'ordered', 'pickup', 'returns', 'suppliers', 'prices'];
 
 export function PartsPage() {
   const { t } = useTranslation();
@@ -229,6 +230,8 @@ export function PartsPage() {
           { value: 'pickup', label: t('parts.tabPickup'), count: pickup.length },
           { value: 'returns', label: t('parts.tabReturns'), count: returns.length },
           { value: 'suppliers', label: t('nav.suppliers'), count: suppliers.filter((s) => !s.archivedAt).length },
+          // v0.91.7: every price the suppliers said, part by part.
+          { value: 'prices', label: t('priceBook.tab') },
         ]}
       />
       <div key={tab} ref={sw.panel} className="tab-panel">
@@ -313,6 +316,7 @@ export function PartsPage() {
           </List>
         ))}
       {tab === 'suppliers' && <SuppliersTab />}
+      {tab === 'prices' && <PriceBookTab />}
       </div>
       <ProcurementModal item={proc} onClose={() => setProc(null)} />
     </>

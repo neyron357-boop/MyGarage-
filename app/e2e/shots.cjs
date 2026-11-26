@@ -164,7 +164,7 @@ async function launchBrowser() {
     await settle(700);
     await shot(`${prefix}-02d-job-line`);
     await closeSheet();
-    await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Запчасть', exact: true }).click();
+    await page.locator('.screen[data-role="top"] [data-add-line]').click();
     await settle(700);
     await shot(`${prefix}-02e-job-part`);
     await closeSheet();

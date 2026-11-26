@@ -108,15 +108,16 @@ async function launchBrowser() {
     await settled();
     await page.screenshot({ path: `${SP}/shots/${n}.png`, fullPage: full });
   };
-  // v0.81: a new line — the quick sheet (its tile: work, a part, a service): the name typed, the keyboard's key adds it, the
-  // sheet closed; a price — the row's «+ Цена» (the cost and the price). `keep` — the sheet stays open for the next.
+  // v0.81: a new line — the quick sheet: the name typed, the keyboard's key adds it, the sheet closed; a price — the row's
+  // «+ Цена» (the cost and the price). `keep` — the sheet stays open for the next. v0.91.7: one «Добавить позицию» opens it
+  // («Авто» — the kind found by itself); the scenario says the kind above the keyboard, as a person may.
   const TILE = { labor: 'Работа', part: 'Запчасть', service: 'Услуга' };
   const addLine = async (kind, name, { price, cost, keep } = {}) => {
     const open = await page.locator('.mantine-Modal-content .qa-field').filter({ visible: true }).count();
-    if (!open) await front('.add-btn').filter({ hasText: TILE[kind] }).first().click();
+    if (!open) await front('[data-add-line]').first().click();
     const dlg = page.locator('.mantine-Modal-content').filter({ has: page.locator('.qa-field') });
     await dlg.waitFor();
-    if (open) await dlg.getByRole('radio', { name: TILE[kind] }).click();
+    await dlg.getByRole('radio', { name: TILE[kind] }).click();
     const was = await dlg.locator('.qa-added-name').count();
     await dlg.locator('.qa-field input').fill(name);
     await dlg.locator('.qa-field input').press('Enter');
@@ -180,7 +181,7 @@ async function launchBrowser() {
     await shot('03-new-order', true);
     // One button: the car is accepted and its job opens — findings, prices and answers happen there.
     await page.getByRole('button', { name: 'Принять' }).click();
-    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     await page.getByText('Смотрим').first().waitFor();
     await shot('03b-job-accepted');
   });
@@ -523,7 +524,7 @@ async function launchBrowser() {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('27182');
     await page.getByRole('button', { name: 'Принять' }).click();
-    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     const orderHash = await page.evaluate(() => location.hash);
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
     await page.getByRole('dialog').getByRole('button', { name: 'Удалить' }).click();
@@ -1208,7 +1209,7 @@ async function launchBrowser() {
     await page.getByRole('button', { name: 'Возобновить' }).click();
     await page.getByText('Заказ возобновлён').first().waitFor();
     await page.getByRole('button', { name: 'Возобновить' }).waitFor({ state: 'detached' });
-    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     await shot('33c-job-reopened');
   });
   await step('closed without payment and without a debt', async () => {
@@ -1291,7 +1292,7 @@ async function launchBrowser() {
     await page.goto(BASE + '#/orders/new');
     await page.getByLabel('Номер').fill('14142');
     await page.getByRole('button', { name: 'Принять', exact: true }).click();
-    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     const id = page.url().split('/orders/')[1].split(/[/?]/)[0];
     const dlg = page.getByRole('dialog');
     await addLine('labor', 'Front brake pads replacement', { price: '120' });
@@ -1482,14 +1483,14 @@ async function launchBrowser() {
       }, dir);
     await jobSwipe(1);
     await page.waitForFunction(() => !location.hash.includes('tab=notes'));
-    await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     await page.waitForTimeout(450);
     await jobSwipe(-1);
     await page.waitForFunction(() => location.hash.includes('tab=notes'));
     await front('.note-text').filter({ hasText: 'Front pads at 2 mm' }).waitFor();
     await page.waitForTimeout(450);
     await front('.scroll-tabs > button').filter({ hasText: 'Основная' }).click();
-    await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     // A part with its number and two offers: the first one goes on the line (cost + markup).
     await addLine('part', 'Headlight LH');
     // v0.90 (#70): the job's first part, no work of its own — the labour charge came by itself, named by the part, last of
@@ -2175,7 +2176,7 @@ async function launchBrowser() {
     });
     try {
       await page.goto(BASE + '#/orders/' + job.id);
-      await page.getByRole('button', { name: 'Запчасть', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
       // A VIN put in the car's card (its own service): the AI reads it — model, year, engine, body; the make typed stays.
       await page.evaluate(async (id) => (await import('/src/services/customers.ts')).updateVehicle(id, { vin: 'JTDBR42E39J016456' }), job.vehicleId);
       // At work: a ring of the AI's colours round the VIN chip; then its card — the car's values as pills.
@@ -3494,7 +3495,7 @@ async function launchBrowser() {
     if (earlier) await front('button.day-pill-input').filter({ hasText: 'Вчера' }).waitFor();
     await shot('46a-new-order-day');
     await page.getByRole('button', { name: 'Принять' }).click();
-    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     const made = await page.evaluate(async () => {
       const o = await (await import('/src/db/db.ts')).db.orders.get(location.hash.split('/')[2].split('?')[0]);
       return { id: o.id, vehicleId: o.vehicleId, backdated: o.backdated, day: o.arrivedAt };
@@ -3524,7 +3525,7 @@ async function launchBrowser() {
     await page.getByText(/Уже в работе: заказ №/).waitFor();
     await shot('46c-second-job');
     await page.getByRole('button', { name: 'Принять' }).click();
-    await page.getByRole('button', { name: 'Работа', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     const two = await page.evaluate(async (v) => (await (await import('/src/db/db.ts')).db.orders.where('vehicleId').equals(v).toArray()).length, made.vehicleId);
     if (two !== 2) throw new Error('a second job for the car in work: ' + two);
     // Out of the scenario's way: both jobs gone.

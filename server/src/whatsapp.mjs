@@ -275,6 +275,8 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       ...(last ?? off),
       // What waits to go by itself, what did not go (v0.79).
       outbox: outbox.counts(),
+      // v0.91.7: an item may wait for its time (`after`) — the app offers «send later» only to a server that keeps it.
+      later: true,
       // Started and not heard yet: starting, not off.
       ...(!last && (child || given) && turnedOn() ? { phase: 'starting' } : {}),
     };

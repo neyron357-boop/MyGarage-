@@ -16,7 +16,7 @@ import { saveWaAuto, sendAsked, sendClientReport, sendExpenseToBoss, sendWorkRep
 import { updateExpense } from './ledger';
 import type { OutItem } from './waOutbox';
 import { resetWaAsks, waAsks } from './waConfirm';
-import { loadChats, refreshWa, setWaTransport, type WaCallInit } from './whatsapp';
+import { loadChats, refreshWa, setWaTransport, waStore, type WaCallInit } from './whatsapp';
 import type { WaMessage } from '../domain/whatsapp';
 
 /*
@@ -242,6 +242,20 @@ describe('suppliers', () => {
     expect(ask.parts[0].text).toContain('1. BRAKE PADS FRONT\n2. OIL FILTER × 2');
     expect(ask.parts[1]).toMatchObject({ name: 'diagrams-1.jpg', mime: 'image/jpeg' });
     expect((await db.orders.get(o.id))!.asks).toMatchObject([{ supplierId: a.id, phone: '971507776655', items: [pads.id, filter.id], via: 'server' }]);
+  });
+
+  it('v0.91.7 (#76): later — the server keeps it until then; the request counts from then; an old server — refused', async () => {
+    const { o } = await job();
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+    const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+    const after = Date.now() + 3_600_000;
+    // The server of before (no «later» in its status) would send it now: not handed over.
+    await expect(askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [], after })).rejects.toThrow('later.oldServer');
+    waStore().status = { ...waStore().status!, later: true };
+    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [], after })).toEqual({ asked: 1, noNumber: [] });
+    await tap();
+    expect(keyed('ask:')[0].after).toBe(after);
+    expect(Date.parse((await db.orders.get(o.id))!.asks![0].at)).toBe(after);
   });
 
   it('the answer read: its prices are the lines’ offers; as set, the cost and the customer’s price', async () => {

@@ -148,7 +148,7 @@ export function DeskKeys() {
     ],
     [
       <>
-        <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>3</Kbd>
+        <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>3</Kbd> <Kbd>4</Kbd>
       </>,
       t('desk.keyLines'),
     ],

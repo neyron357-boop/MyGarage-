@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Suggestion, Suggestions } from './linePrices';
-import { exactTitle, quickMatches, sideless, sideOf, typedPrice } from './quickAdd';
+import { autoMatches, exactTitle, guessKind, quickMatches, sideless, sideOf, typedPrice } from './quickAdd';
 
 const s = (titleEn: string, extra: Partial<Suggestion> = {}): [string, Suggestion] => [titleEn, { titleEn, titleRu: '', price: 0, uses: 1, from: 'any', ...extra }];
 const set = (...list: [string, Suggestion][]): Suggestions => ({ list: new Map(list), top: list.filter(([, x]) => x.price > 0).map(([k]) => k) });
@@ -63,5 +63,46 @@ describe('typedPrice (v0.90, «два дефиса и сумма»)', () => {
     expect(typedPrice('GEAR OIL --')).toEqual({ name: 'GEAR OIL --' });
     expect(typedPrice('-- 450')).toEqual({ name: '-- 450' });
     expect(typedPrice('GEAR OIL -- 0')).toEqual({ name: 'GEAR OIL -- 0' });
+  });
+});
+
+describe('one «Добавить» for every kind (v0.91.7)', () => {
+  const s = (titleEn: string, price = 0, uses = 1): [string, Suggestion] => [titleEn, { titleRu: '', titleEn, price, uses, from: price ? 'any' : 'list' }];
+  const sets = {
+    part: set(s('FRONT BRAKE PADS', 18000, 5), s('HEADLIGHT LH', 90000, 2), s('HEADLIGHT RH', 90000, 2), s('OIL FILTER', 2500, 9)),
+    work: set(s('LABOR CHARGE', 20000, 7), s('WHEEL ALIGNMENT', 12000, 4), s('BRAKE PADS REPLACEMENT', 15000, 3)),
+    service: set(s('WHEEL ALIGNMENT', 12000, 4)),
+  };
+
+  it('the kind of what is typed: its history first, then its words, then the dictionary; else a part, not sure', () => {
+    expect(guessKind('front brake pads', sets)).toEqual({ kind: 'part', sure: true });
+    expect(guessKind('WHEEL ALIGNMENT', sets)).toEqual({ kind: 'service', sure: true });
+    expect(guessKind('LABOR CHARGE', sets)).toEqual({ kind: 'labor', sure: true });
+    expect(guessKind('labour', undefined)).toEqual({ kind: 'labor', sure: true });
+    expect(guessKind('AC GAS RECHARGE')).toEqual({ kind: 'service', sure: true });
+    expect(guessKind('замена масла')).toEqual({ kind: 'service', sure: true });
+    expect(guessKind('CAR WASH')).toEqual({ kind: 'service', sure: true });
+    // A washer and a repair kit are parts.
+    expect(guessKind('WASHER PUMP', undefined, true)).toEqual({ kind: 'part', sure: true });
+    expect(guessKind('CLUTCH REPAIR KIT')).toEqual({ kind: 'part', sure: true });
+    // Work words that begin parts' names: not sure — the AI looks.
+    expect(guessKind('CHECK VALVE', undefined, true)).toEqual({ kind: 'part', sure: false });
+    expect(guessKind('AC CHECK')).toEqual({ kind: 'service', sure: false });
+    // Nothing known: a part, not sure.
+    expect(guessKind('XYZ 123')).toEqual({ kind: 'part', sure: false });
+  });
+
+  it('suggestions of every kind together, each with its kind; a part’s sides together; the spelling put right looked for too', () => {
+    // As typed from the start first.
+    expect(autoMatches(sets, 'brake')).toEqual([
+      { title: 'BRAKE PADS REPLACEMENT', kind: 'service' },
+      { title: 'FRONT BRAKE PADS', kind: 'part' },
+    ]);
+    expect(autoMatches(sets, 'head').map((x) => x.title)).toEqual(['HEADLIGHT LH', 'HEADLIGHT RH']);
+    expect(autoMatches(sets, 'labor')).toEqual([{ title: 'LABOR CHARGE', kind: 'labor' }]);
+    // Nothing typed: the most used of both.
+    expect(autoMatches(sets, '', 3).map((x) => x.title)).toEqual(['OIL FILTER', 'LABOR CHARGE', 'FRONT BRAKE PADS']);
+    // «BRAKS» found nothing; «BRAKE» (put right) did.
+    expect(autoMatches(sets, 'braks', 8, 'BRAKE').map((x) => x.title)).toContain('FRONT BRAKE PADS');
   });
 });

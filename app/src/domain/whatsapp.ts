@@ -33,6 +33,8 @@ export interface WaStatus {
   error: string;
   chats: number;
   unread: number;
+  /** v0.91.7: the server keeps a message until its time («Отправить позже»). */
+  later?: boolean;
 }
 
 export interface WaLast {
@@ -183,6 +185,8 @@ export interface ChatRoles {
   groups: Set<string>;
   /** Said by the AI (v0.86, `Settings.waChatAi`; v0.91 — `ChatFact.aiRole`): under the person's own status; «other» — asked, none. */
   ai?: Record<string, 'customer' | 'supplier' | 'other'>;
+  /** «Не относится к гаражу» given by hand (`ChatFact.noRole`, v0.91.7): no status, whoever the number is in the base. */
+  off?: Set<string>;
 }
 export const NO_ROLES: ChatRoles = { tags: {}, groups: new Set() };
 
@@ -206,7 +210,12 @@ export function unknownChats(chats: WaChat[], people: Map<string, Who>, roles: C
  * the statuses the base gives by itself), else the status given by hand, else a group the garage writes to («work»).
  */
 export function chatRole(chat: Pick<WaChat, 'id' | 'phone' | 'group'>, people: Map<string, Who>, roles: ChatRoles): WhoKind | WaTag | undefined {
-  return whoOf(chat, people)?.kind ?? roles.tags[chat.id] ?? (roles.groups.has(chat.id) ? 'work' : undefined) ?? aiRoleOf(chat, people, roles);
+  // v0.91.7 (the owner: «смена статуса вручную не работает — выбираю чат, меняю статус, а оно не меняется»): the status given by
+  // hand first — before the base's own (a number the app itself made a customer of a request, or a supplier of an ask).
+  const hand = roles.tags[chat.id];
+  if (hand) return hand;
+  if (roles.off?.has(chat.id)) return undefined;
+  return whoOf(chat, people)?.kind ?? (roles.groups.has(chat.id) ? 'work' : undefined) ?? aiRoleOf(chat, people, roles);
 }
 
 /* ---------- The list ---------- */

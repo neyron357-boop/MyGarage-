@@ -59,8 +59,11 @@ export async function supplierOfChat(chatId: string): Promise<string | undefined
   return s.id;
 }
 
-export async function askSuppliers(orderId: string, picks: AskPick[], x: { items: OrderItem[]; sheets: File[]; usedFiles: File[] }): Promise<{ asked: number; noNumber: string[] }> {
+export async function askSuppliers(orderId: string, picks: AskPick[], x: { items: OrderItem[]; sheets: File[]; usedFiles: File[]; /** v0.91.7 (#76): sent then, not now (ms). */ after?: number }): Promise<{ asked: number; noNumber: string[] }> {
   const s = waAutoOf((await getSettings()).waAuto);
+  const later = x.after && x.after > Date.now() + 30_000 ? x.after : undefined;
+  // A server that does not keep a message until its time would send it now.
+  if (later && !waStore().status?.later) throw new AppError('later.oldServer');
   if (!picks.length) return { asked: 0, noNumber: [] };
   if (picks.length > s.ask.max) throw new AppError('wa.err.tooManySuppliers', { n: s.ask.max });
   if (!x.items.length) throw new AppError('wa.err.noParts');
@@ -89,8 +92,9 @@ export async function askSuppliers(orderId: string, picks: AskPick[], x: { items
     const files = isUsed ? used : sheets;
     const text = partsRequestText(vehicle as Vehicle, x.items, { diagrams: !isUsed && sheets.length > 0, used: isUsed });
     const key = `ask:${orderId}:${batch}:${sup.id}`;
-    items.push({ key, phone, gap: s.ask.gapSec, title: `#${order.number} · ${sup.name}`, parts: [{ text }, ...files] });
-    asks.push({ id: `${batch}:${sup.id}`, supplierId: sup.id, phone, at: nowIso(), items: x.items.map((i) => i.id), text, via: 'server', key, used: isUsed || undefined });
+    items.push({ key, phone, gap: s.ask.gapSec, title: `#${order.number} · ${sup.name}`, parts: [{ text }, ...files], ...(later ? { after: later } : {}) });
+    // Asked when it goes: an answer is looked for after it.
+    asks.push({ id: `${batch}:${sup.id}`, supplierId: sup.id, phone, at: later ? new Date(later).toISOString() : nowIso(), items: x.items.map((i) => i.id), text, via: 'server', key, used: isUsed || undefined });
   }
   if (!items.length) return { asked: 0, noNumber };
   await queueWa(items);

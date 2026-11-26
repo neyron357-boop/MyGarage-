@@ -112,3 +112,116 @@ export function typedPrice(text: string): { name: string; priceFils?: number } {
   const fils = Math.round(Number(n) * 100);
   return fils > 0 ? { name: m[1], priceFils: fils } : { name: text };
 }
+
+/* ---------- One «Добавить» for every kind (v0.91.7) ---------- */
+
+/*
+ * The owner: «при добавлении позиции в карточке заказа оставить одну сплошную кнопку с автоопределением типа позиции
+ * моментально на ходу и с автоисправлением названия с ИИ, если написал с ошибками… добавляю вперемешку запчасть, труд
+ * или услугу — система с ИИ сама определяет тип… подсказки умные, даже умнее, чем прежде… молниеносно». Here, at once and
+ * without the AI: the kind of what is typed (its history first, then its words, then the parts' dictionary), and the
+ * suggestions of every kind together; the AI looks again only at a kind not sure (services/ai.ts `aiFixPartName`).
+ */
+
+export type AutoKind = 'part' | 'labor' | 'service';
+export interface KindGuess {
+  kind: AutoKind;
+  /** Known — by the history, a labour word, a service word, the parts' dictionary; not — a part by default. */
+  sure: boolean;
+}
+
+/** A kit, a set, an assembly — a part, whatever work word is in it («REPAIR KIT», «SERVICE KIT»). */
+const PART_WORDS = /(?:^|[^A-ZА-ЯЁ])(KIT|SET|ASSY|ASSEMBLY|КОМПЛЕКТ|РЕМКОМПЛЕКТ|НАБОР)(?![A-ZА-ЯЁ])/;
+/** What is done to a car (a service — v0.68: everything done to it but the labour charge). */
+const SERVICE_WORDS =
+  /(?:^|[^A-ZА-ЯЁ])(REPAIR(?:ING)?|REPLACE(?:MENT)?|R\s*&\s*R|INSTALL(?:ATION|ING)?|FIX(?:ING)?|CHECKING|CHECKUP|INSPECTION|DIAGNOS[A-ZА-ЯЁ]*|TESTING|SCANNING|PROGRAMM[A-ZА-ЯЁ]*|CODING|CALIBRAT[A-ZА-ЯЁ]*|ADJUST[A-ZА-ЯЁ]*|OVERHAUL(?:ING)?|REMOV(?:E|AL)|REFIT[A-ZА-ЯЁ]*|RESURFAC[A-ZА-ЯЁ]*|SKIMMING|WELD[A-ZА-ЯЁ]*|DENT[A-ZА-ЯЁ]*|STRAIGHTEN[A-ZА-ЯЁ]*|ALIGNMENT|BALANCING|FLUSH(?:ING)?|REFILL[A-ZА-ЯЁ]*|RECHARG[A-ZА-ЯЁ]*|REGAS|TOP ?UP|CLEANING|POLISH(?:ING)?|PAINT(?:ING)?|SPRAY[A-ZА-ЯЁ]*|TINT(?:ING)?|WRAP(?:PING)?|DETAILING|WASH(?:ING)?|TOW(?:ING)?|RECOVERY|SERVICING|MAINTENANCE|РЕМОНТ[A-ZА-ЯЁ]*|ЗАМЕН[A-ZА-ЯЁ]*|УСТАНОВК[A-ZА-ЯЁ]*|СНЯТИ[A-ZА-ЯЁ]*|ДИАГНОСТ[A-ZА-ЯЁ]*|ПРОВЕРК[A-ZА-ЯЁ]*|РЕГУЛИРОВК[A-ZА-ЯЁ]*|ПРОГРАММИР[A-ZА-ЯЁ]*|КАЛИБРОВК[A-ZА-ЯЁ]*|ПЕРЕБОРК[A-ZА-ЯЁ]*|КАПРЕМОНТ[A-ZА-ЯЁ]*|СВАРК[A-ZА-ЯЁ]*|РИХТОВК[A-ZА-ЯЁ]*|РАЗВАЛ[A-ZА-ЯЁ]*|СХОД[A-ZА-ЯЁ]*|БАЛАНСИРОВК[A-ZА-ЯЁ]*|ПРОМЫВК[A-ZА-ЯЁ]*|ЗАПРАВК[A-ZА-ЯЁ]*|ЧИСТК[A-ZА-ЯЁ]*|ПОЛИРОВК[A-ZА-ЯЁ]*|ПОКРАСК[A-ZА-ЯЁ]*|ТОНИРОВК[A-ZА-ЯЁ]*|МОЙК[A-ZА-ЯЁ]*|ЭВАКУАТОР[A-ZА-ЯЁ]*|ОБСЛУЖИВАНИ[A-ZА-ЯЁ]*)(?![A-ZА-ЯЁ])/;
+/**
+ * Work words that also begin parts' names («CHECK VALVE», «SERVICE KIT», «TEST LIGHT»): a service, not sure — the AI looks.
+ * (A WASHER is a part: whole words only, as domain/waAuto.ts `isWash`.)
+ */
+const SERVICE_MAYBE = /(?:^|[^A-ZА-ЯЁ])(CHECK|TEST|SCAN|RESET|CLEAN|SERVICE|CHANGE)(?![A-ZА-ЯЁ])/;
+
+/**
+ * What kind a line typed is. `sets` — the job's suggestions: a title of the history is what it was. `known` — the parts'
+ * dictionary knows every word of it as a part (domain/partsVocab.ts `matchPartName`, given by the caller).
+ */
+export function guessKind(title: string, sets?: { part: Suggestions; work: Suggestions; service: Suggestions }, known = false): KindGuess {
+  const t = lineName(title.trim());
+  if (sets?.part.list.has(t)) return { kind: 'part', sure: true };
+  if (sets?.work.list.has(t)) return { kind: sets.service.list.has(t) || !LABOUR.test(t) ? 'service' : 'labor', sure: true };
+  if (LABOUR.test(t)) return { kind: 'labor', sure: true };
+  if (PART_WORDS.test(t)) return { kind: 'part', sure: true };
+  if (SERVICE_WORDS.test(t)) return { kind: 'service', sure: true };
+  if (SERVICE_MAYBE.test(t)) return known ? { kind: 'part', sure: false } : { kind: 'service', sure: false };
+  return { kind: 'part', sure: known };
+}
+const LABOUR = /^(LABOU?R|LABOUER|LABOUT|WORKMANSHIP|MAN ?HOURS?|ОПЛАТА ТРУДА|РАБОТА|РАБОТЫ|ТРУД)(?![A-ZА-ЯЁ0-9])/;
+
+export interface AutoMatch {
+  title: string;
+  kind: AutoKind;
+}
+
+/**
+ * The titles offered for `query` among every kind (the parts and the work together), best first: as typed from the start,
+ * then nearer prices, then the most used. Nothing typed — the most used of both. `alt` — the same typed with its spelling
+ * put right (the parts' dictionary): looked for too when it finds more.
+ */
+export function autoMatches(sets: { part: Suggestions; work: Suggestions; service: Suggestions } | undefined, query: string, limit = 8, alt?: string): AutoMatch[] {
+  if (!sets) return [];
+  const kindOf = (title: string, from: 'part' | 'work'): AutoKind => (from === 'part' ? 'part' : sets.service.list.has(title) || !LABOUR.test(title) ? 'service' : 'labor');
+  const q = query.trim();
+  if (!q) {
+    const all = [
+      ...sets.part.top.map((title) => ({ title, from: 'part' as const, uses: sets.part.list.get(title)?.uses ?? 0 })),
+      ...sets.work.top.map((title) => ({ title, from: 'work' as const, uses: sets.work.list.get(title)?.uses ?? 0 })),
+    ];
+    all.sort((a, b) => b.uses - a.uses || a.title.localeCompare(b.title));
+    return uniq(all.map((x) => ({ title: x.title, kind: kindOf(x.title, x.from) }))).slice(0, limit);
+  }
+  const scored = [...scoreMatches(sets.part, q).map((x) => ({ ...x, from: 'part' as const })), ...scoreMatches(sets.work, q).map((x) => ({ ...x, from: 'work' as const }))];
+  const fixed = alt && lineName(alt) !== lineName(q) ? [...scoreMatches(sets.part, alt).map((x) => ({ ...x, from: 'part' as const })), ...scoreMatches(sets.work, alt).map((x) => ({ ...x, from: 'work' as const }))] : [];
+  scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+  fixed.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+  const ranked = [...scored, ...fixed];
+  const out: AutoMatch[] = [];
+  const seen = new Set<string>();
+  const put = (title: string, kind: AutoKind) => {
+    if (seen.has(title)) return;
+    seen.add(title);
+    out.push({ title, kind });
+  };
+  for (const x of ranked) {
+    if (out.length >= limit) break;
+    if (seen.has(x.title)) continue;
+    if (x.from === 'part' && sideOf(x.title)) {
+      // A part's two sides next to each other, the left first (as before).
+      const k = sideless(x.title);
+      const pair = ranked.filter((y) => y.from === 'part' && sideOf(y.title) && sideless(y.title) === k).map((y) => y.title);
+      for (const t of [...new Set(pair)].sort((a, b) => (sideOf(a) === 'L' ? 0 : 1) - (sideOf(b) === 'L' ? 0 : 1))) put(t, 'part');
+    } else put(x.title, x.from === 'part' ? 'part' : kindOf(x.title, 'work'));
+  }
+  return out.slice(0, limit);
+}
+
+const uniq = (list: AutoMatch[]) => {
+  const seen = new Set<string>();
+  return list.filter((x) => !seen.has(x.title) && (seen.add(x.title), true));
+};
+
+/** Each title of a set that holds every word typed, with its score (as `quickMatches` ranks them). */
+function scoreMatches(set: Suggestions, query: string): { title: string; score: number }[] {
+  const tokens = tokenize(query);
+  if (!tokens.length) return [];
+  const terms = tokens.map((tk) => ({ tk, terms: expandToken(tk) }));
+  const typed = normalizeText(query);
+  const out: { title: string; score: number }[] = [];
+  for (const [title, s] of set.list) {
+    const x = indexText(`${title} ${s.titleEn ?? ''} ${s.titleRu ?? ''}`);
+    if (!terms.every(({ tk, terms }) => matchToken(tk, terms, x))) continue;
+    const own = normalizeText(title);
+    const begins = own.startsWith(typed) || normalizeText(s.titleEn ?? '').startsWith(typed) || normalizeText(s.titleRu ?? '').startsWith(typed) ? 2 : own.includes(typed) ? 1 : 0;
+    out.push({ title, score: begins * 1_000_000 + (s.price > 0 ? NEAR[s.from] * 10_000 : 0) + Math.min(s.uses, 9_999) });
+  }
+  return out;
+}

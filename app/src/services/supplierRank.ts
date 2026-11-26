@@ -4,7 +4,7 @@ import { byPosition, itemTitle, lineName } from '../domain/items';
 import { rateSeen, seenOf } from '../domain/chatStudy';
 import { knowOf, pickTop, rankForJob, rankSuppliers, relevance, supplierUse, useOf, type BoughtLine, type Ranked, type SupplierKnow, type SupplierUse, type TopCandidate } from '../domain/supplierRank';
 import type { ChatFact, Lang, OrderItem, Supplier, Vehicle } from '../domain/types';
-import { chatIdOf, chatRole, waDigits, type WaChat } from '../domain/whatsapp';
+import { chatIdOf, chatRole, waDigits, type ChatRoles, type WaChat, type Who } from '../domain/whatsapp';
 import { AppError } from './errors';
 import { loadChatRoles, loadPeople, waStore } from './whatsapp';
 
@@ -91,13 +91,13 @@ export const NO_TOP: TopSuppliers = { chats: new Map(), suppliers: new Map() };
  * weighed by `relevance` (requests answered, with a price, jobs bought, how it answers); pinned by hand — always, taken off by
  * hand — never (`ChatFact.pin`); domain/supplierRank.ts `pickTop`.
  */
-export async function loadTop(given?: { facts: ChatFact[]; suppliers: Supplier[]; use: Map<string, SupplierUse> }): Promise<TopSuppliers> {
+export async function loadTop(given?: { facts: ChatFact[]; suppliers: Supplier[]; use: Map<string, SupplierUse>; people?: Map<string, Who>; roles?: ChatRoles }): Promise<TopSuppliers> {
   const [facts, sups, use, people, roles] = await Promise.all([
     given?.facts ?? db.chatFacts.toArray(),
     given?.suppliers ?? db.suppliers.filter((s) => !s.archivedAt).toArray(),
     given?.use ?? Promise.all([boughtLines(), db.supplierReturns.toArray()]).then(([l, r]) => supplierUse(l, r)),
-    loadPeople(),
-    loadChatRoles(),
+    given?.people ?? loadPeople(),
+    given?.roles ?? loadChatRoles(given?.facts ? { facts: given.facts } : undefined),
   ]);
   const now = Date.now();
   const byPhone = new Map(sups.filter((s) => waDigits(s.phone)).map((s) => [waDigits(s.phone), s]));
@@ -129,6 +129,9 @@ export async function loadTop(given?: { facts: ChatFact[]; suppliers: Supplier[]
   });
   return top;
 }
+
+/** The tables the main suppliers are read from (`useCalmQuery`). */
+export const TOP_TABLES = ['chatFacts', 'suppliers', 'items', 'supplierReturns', 'settings', 'customers', 'employees'];
 
 /** Every supplier in the base with what was bought from it — the main ones first (v0.91.6), then most used and best rated. */
 export async function suppliersRanked(): Promise<{ list: Supplier[]; use: Map<string, SupplierUse>; know: Map<string, SupplierKnow>; top: TopSuppliers }> {

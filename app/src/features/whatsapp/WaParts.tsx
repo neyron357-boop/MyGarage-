@@ -1,11 +1,12 @@
 import { IconAlertCircle, IconBan, IconChartBar, IconCheck, IconChecks, IconClock, IconFile, IconMapPin, IconMicrophone, IconMusic, IconPhone, IconPhoto, IconSticker, IconUser, IconVideo, type Icon } from '@tabler/icons-react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sharesOf, type ChatSeen } from '../../domain/chatStudy';
 import { formatDate } from '../../domain/dates';
 import { marks, previewOf, ticksOf, type WaKind, type WaLast, type WaMessage, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import { loadPeople, waNoPicture, waPicture, waPictureNow } from '../../services/whatsapp';
 import { PersonAvatar } from '../../ui/components';
+import { PhotoViewer } from '../../ui/PhotoViewer';
 import { useScreenLiveQuery } from '../../ui/hooks';
 
 /*
@@ -18,6 +19,23 @@ export function useWaPeople(): Map<string, Who> {
   return useScreenLiveQuery(loadPeople, []) ?? EMPTY_PEOPLE;
 }
 const EMPTY_PEOPLE = new Map<string, Who>();
+
+/**
+ * A chat's picture on the whole screen (v0.91.7, the owner: «при касании на лого контакта открылась на полный экран лого
+ * ватсапа»): the one WhatsApp shows (kept here, else from the server) in the app's photo viewer — pinch, share, save.
+ * None — nothing opens.
+ */
+export function useWaPictureView(): [(chat: { id: string }, title: string) => void, ReactNode] {
+  const [pic, setPic] = useState<{ id: string; url: string; title: string } | null>(null);
+  const open = useCallback((chat: { id: string }, title: string) => {
+    if (noPicture.has(chat.id)) return;
+    const now = waPictureNow(chat.id);
+    if (now) return setPic({ id: chat.id, url: now, title });
+    void waPicture(chat.id).then((url) => url && setPic({ id: chat.id, url, title }));
+  }, []);
+  const view = pic ? <PhotoViewer items={[{ id: `wa-pic-${pic.id}`, title: pic.title, src: pic.url }]} index={0} onIndex={() => undefined} onClose={() => setPic(null)} /> : null;
+  return [open, view];
+}
 
 /** Pictures that did not load (no picture set, hidden from strangers): not asked again while the app is open. */
 const noPicture = new Set<string>();

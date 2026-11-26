@@ -8,7 +8,6 @@ import { IconHelpCircle,
   IconPlus,
   IconBuildingCommunity,
   IconUsersGroup,
-  IconBuildingStore,
   IconAlarm,
   IconBell,
   IconBellOff,
@@ -36,7 +35,6 @@ import { IconHelpCircle,
   IconListCheck,
   IconMenu2,
   IconMessage2,
-  IconPackage,
   IconPencil,
   IconPhone,
   IconPhoto,
@@ -46,7 +44,6 @@ import { IconHelpCircle,
   IconSend,
   IconSignature,
   IconSteeringWheel,
-  IconTool,
   IconTrash,
   IconArrowBackUp,
   IconUser,
@@ -106,7 +103,7 @@ import { useJobQuick, type JobQuick } from '../../ui/jobQuick';
 import { LazySheet, SheetFor } from '../../ui/lazy';
 import { holdKeyboard } from '../../ui/keyboard';
 import { markJobOpened } from '../../ui/recentJobs';
-import { QuickAddSheet } from './QuickAdd';
+import { QuickAddSheet, type QuickKind } from './QuickAdd';
 import { offLabel } from './LineOff';
 import { SupplierAskSheet } from './SupplierAsk';
 import { PriceSheet } from './PriceSheet';
@@ -211,57 +208,44 @@ const TILE_COLOR: Record<string, string> = {
   owner: 'green',
 };
 
-/** What can be added under a job's lines, each in its own colour: work, a part, a service (done by others). */
-const ADD_KINDS: { kind: LineKind; icon: Icon; color: string; label: string }[] = [
-  { kind: 'labor', icon: IconTool, color: 'blue', label: 'job.addWork' },
-  { kind: 'part', icon: IconPackage, color: 'orange', label: 'job.addPart' },
-  { kind: 'service', icon: IconBuildingStore, color: 'violet', label: 'job.addService' },
-];
+
 
 /**
  * Under the job's lines: work, a part, a service as tiles — the symbol on its colour, the word under it, as the
  * "…" tiles — then the extras (the discount, the copy, a change after the invoice) as narrow tiles beside them.
  */
-function AddBar({ onAdd, flush, children }: { onAdd: (kind: LineKind) => void; flush?: boolean; children?: ReactNode }) {
+function AddBar({ onAdd, flush, children }: { onAdd: (kind: QuickKind) => void; flush?: boolean; children?: ReactNode }) {
   const { t } = useTranslation();
-  // On a PC each says its key (1 · 2 · 3 — useDeskHotkeys below).
   const desk = useDesk();
-  // Three extras or more on a phone (v0.53 — the AI's tile made four): a row of their own under the three, or the
-  // three's words broke in the middle («Запч асть»).
   const extras = Children.toArray(children).filter(Boolean).length;
-  const split = !desk && extras >= 3;
-  const adds = ADD_KINDS.map(({ kind, icon: I, color, label }) => (
-    <button key={kind} type="button" className="action-tile add-btn" onClick={() => onAdd(kind)}>
-      <span className="tile-icon" style={{ '--c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}>
-        <I size={18} stroke={2.1} aria-hidden />
+  // v0.91.7 (the owner: «оставить одну сплошную кнопку с автоопределением типа позиции… добавляю вперемешку запчасть, труд
+  // или услугу»): one wide tile — the kind of each line is found as it is typed (QuickAdd.tsx, «Авто»).
+  const one = (
+    <button type="button" className="action-tile add-btn add-one" onClick={() => onAdd('auto')} data-add-line>
+      <span className="tile-icon" style={{ '--c': 'var(--mantine-color-cobalt-6)' } as React.CSSProperties}>
+        <IconPlus size={19} stroke={2.4} aria-hidden />
       </span>
-      <span>{t(label)}</span>
+      <span>{t('job.addLine')}</span>
+      {desk && (
+        <Kbd className="add-kbd" aria-hidden>
+          1
+        </Kbd>
+      )}
     </button>
-  ));
-  if (split)
+  );
+  // A phone: the extras in a row of their own under it (their words fit there).
+  if (!desk && extras)
     return (
       <>
-        <div className="add-row" data-flush={flush || undefined}>
-          {adds}
+        <div className="add-row add-one-row" data-flush={flush || undefined}>
+          {one}
         </div>
         <div className="add-row add-extras">{children}</div>
       </>
     );
   return (
     <div className="add-row" data-flush={flush || undefined}>
-      {ADD_KINDS.map(({ kind, icon: I, color, label }, n) => (
-        <button key={kind} type="button" className="action-tile add-btn" onClick={() => onAdd(kind)}>
-          <span className="tile-icon" style={{ '--c': `var(--mantine-color-${color}-6)` } as React.CSSProperties}>
-            <I size={18} stroke={2.1} aria-hidden />
-          </span>
-          <span>{t(label)}</span>
-          {desk && (
-            <Kbd className="add-kbd" aria-hidden>
-              {n + 1}
-            </Kbd>
-          )}
-        </button>
-      ))}
+      {one}
       {children}
     </div>
   );
@@ -627,10 +611,10 @@ export function JobPage() {
   if (sheet) lastSheet.current = sheet;
   // New lines (v0.81): the quick sheet — search, one tap adds, the keyboard stays (QuickAdd.tsx); a tile's tap holds the
   // keyboard up for its field (ui/keyboard.ts).
-  const [quickKind, setQuick] = useState<LineKind | null>(null);
-  const lastQuick = useRef<LineKind>('part');
+  const [quickKind, setQuick] = useState<QuickKind | null>(null);
+  const lastQuick = useRef<QuickKind>('auto');
   if (quickKind) lastQuick.current = quickKind;
-  const openQuick = (k: LineKind) => {
+  const openQuick = (k: QuickKind) => {
     holdKeyboard();
     setQuick(k);
   };
@@ -708,14 +692,16 @@ export function JobPage() {
   const sortGrip = useSortable(sortIds, (ids) => {
     if (orderId) void run(async () => (await reorderLines(orderId, ids), haptic('light')));
   });
-  // On a PC (v0.41): the job in two columns, and 1 · 2 · 3 add work, a part, a service — the tiles under the lines.
+  // On a PC (v0.41): the job in two columns; 1 — «Добавить позицию», its kind found (v0.91.7); 2 · 3 · 4 — a part, work, a
+  // service by hand.
   const phone = usePhone();
   const addable = !!b && !!phase && !['closed', 'cancelled', 'booked'].includes(phase) && !activeInvoice(b.invoices);
   useDeskHotkeys(
     [
-      ['1', () => setQuick('labor')],
+      ['1', () => setQuick('auto')],
       ['2', () => setQuick('part')],
-      ['3', () => setQuick('service')],
+      ['3', () => setQuick('labor')],
+      ['4', () => setQuick('service')],
     ],
     !phone && addable && tab === 'main',
   );

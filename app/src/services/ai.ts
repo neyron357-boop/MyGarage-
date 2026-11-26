@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { type AiName, type AiVin, nameFix, vinFill } from '../domain/ai';
+import { aiKindOf, type AiName, type AiVin, nameFix, vinFill } from '../domain/ai';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { matchPartName } from '../domain/partsVocab';
@@ -12,6 +12,7 @@ import { stemCar, vinStem } from '../domain/vinDecode';
 import { callJson } from './sync/api';
 import { syncConfig } from './sync/config';
 import { syncLabourNames } from './labourName';
+import { ensureLabourLine } from './estimate';
 import { liveLines } from '../domain/flow';
 import { namedByParts, partNames, partsKey } from '../domain/labourName';
 
@@ -249,9 +250,11 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
     const russian = !!item.titleRu;
     const was = lineName(typed.trim());
     let fix: { title?: string; english?: string } | undefined;
+    // v0.91.7: a kind the app only guessed (one «Добавить» for every kind) — the AI is asked whatever the dictionary knows.
+    let kind: 'part' | 'labor' | undefined;
     // 1. The dictionary: every word known — put right and named in English without asking anyone.
     const m = matchPartName(typed);
-    if (m.known) {
+    if (m.known && !item.autoKind) {
       fix = {};
       if (m.changed && m.fixed !== was) fix.title = m.fixed;
       if (russian && !item.titleEn && m.english) fix.english = m.english;
@@ -271,15 +274,23 @@ export function aiFixPartName(itemId: string, { quiet = false }: { quiet?: boole
       const car = await carOf(item);
       const r = await askAi<AiName>('part-name', { name: typed, make: car?.make ?? '', model: car?.model ?? '', year: car?.year ?? '' }, `name:${itemId}`);
       fix = nameFix(typed, r, !!item.titleEn);
+      kind = aiKindOf(r);
     }
     const now = await db.items.get(itemId);
     if (!now || now.approvalState !== 'draft' || (now.titleRu || now.titleEn) !== typed) return false;
     const patch: Partial<OrderItem> = { aiName: { from: typed, to: fix.title ?? typed, at: nowIso() } };
+    // The kind put right (a guess of the app; not changed since): a part or work; the guess's mark goes either way.
+    if (now.autoKind) {
+      patch.autoKind = undefined;
+      if (kind && kind !== now.kind) patch.kind = kind;
+    }
     if (fix.title) patch[russian ? 'titleRu' : 'titleEn'] = fix.title;
     if (fix.english) patch.titleEn = fix.english;
     await db.items.update(itemId, patch);
-    // The part's name put right — the labour charge says it so (v0.80).
-    if (fix.title || fix.english) await syncLabourNames(now.orderId);
+    // The part's name put right — the labour charge says it so (v0.80). A part that is work after all (v0.91.7) — the
+    // labour line follows the parts (it comes with the first part, a line of its own without any goes).
+    if (patch.kind === 'part') await ensureLabourLine(now.orderId);
+    if (fix.title || fix.english || patch.kind) await syncLabourNames(now.orderId);
     if ((fix.title || fix.english) && !quiet) {
       const before = { titleRu: now.titleRu, titleEn: now.titleEn };
       // Said as the line now shows it: in the job's documents' language (an English name, once there is one).

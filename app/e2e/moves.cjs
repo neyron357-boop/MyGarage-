@@ -137,7 +137,7 @@ async function run(dir) {
     await top('.list-row').first().waitFor();
   });
   await measure('line sheet up', async () => {
-    await page.getByRole('button', { name: 'Работа', exact: true }).click();
+    await page.getByRole('button', { name: 'Добавить позицию', exact: true }).click();
     await page.getByRole('dialog').waitFor();
   });
   await measure('line sheet down', async () => {

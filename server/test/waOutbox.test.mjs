@@ -52,6 +52,28 @@ describe('whatsapp outbox', () => {
     assert.deepEqual(cleanItem({ key: 'boss:1', phone: '+971 50 000 0001', parts: [{ text: ' hi ' }], extra: 1 }), { key: 'boss:1', chat: '', phone: '971500000001', parts: [{ text: 'hi' }], gap: 0, title: '' });
   });
 
+  it('v0.91.7 (#76): later — kept until its time, then sent; a time over a week ahead refused', async () => {
+    assert.throws(() => cleanItem({ key: 'ask:1', chat: '971500000001@c.us', parts: [{ text: 'hi' }], after: Date.now() + 8 * 24 * 3600_000 }), /bad time/);
+    // A time already past — at once, as an item without one.
+    assert.equal(cleanItem({ key: 'ask:1', chat: '971500000001@c.us', parts: [{ text: 'hi' }], after: Date.now() - 1000 }).after, undefined);
+    const t = setup();
+    try {
+      const at = Date.now() + 3600_000;
+      const r = t.box.put({ key: 'ask:job1:b1:s1', phone: '971500000001', parts: [{ text: '1. FRONT BUMPER' }], after: at });
+      assert.equal(r.state, 'queued');
+      assert.equal(r.after, at);
+      await t.box.tick();
+      assert.deepEqual(t.said, []);
+      assert.equal(t.box.list(['ask:job1:b1:s1'])[0].after, at);
+      // Its time came: sent.
+      t.due();
+      await t.box.tick();
+      assert.deepEqual(t.said.map((x) => x.p), ['/number?phone=971500000001', '/send']);
+    } finally {
+      t.done();
+    }
+  });
+
   it('sent once, in order, and never again under the same key — over a restart too', async () => {
     const t = setup();
     try {
