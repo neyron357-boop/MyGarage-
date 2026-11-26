@@ -122,6 +122,9 @@ describe('v0.91.6: the garage\'s main suppliers', () => {
     );
     expect(top).toEqual(['mine', 'a', 'b']);
     expect(pickTop([{ key: 'a', score: 30 }, { key: 'b', score: 20 }], 1)).toEqual(['a']);
+    // v0.91.7: many pinned by hand — the ones the work found are main too.
+    const many = ['p1', 'p2', 'p3', 'p4'].map((key) => ({ key, score: 1, pin: 'on' as const }));
+    expect(pickTop([...many, { key: 'a', score: 30 }, { key: 'b', score: 20 }], 2)).toEqual(['p1', 'p2', 'p3', 'p4', 'a', 'b']);
   });
   it('first in the list and for a job (the main ones in their order, then the rest)', () => {
     const list = [sup('x', { reliability: 5 }), sup('main'), sup('y')];

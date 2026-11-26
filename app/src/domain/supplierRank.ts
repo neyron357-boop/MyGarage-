@@ -118,14 +118,15 @@ export interface TopCandidate {
   bad?: boolean;
 }
 
-/** The main suppliers, in their order: pinned by hand first, then the most worked with, up to `max`. */
+/** The main suppliers, in their order: pinned by hand (all of them) first, then up to `max` most worked with. */
 export function pickTop(list: TopCandidate[], max = TOP_MAX): string[] {
   const by = (a: TopCandidate, b: TopCandidate) => b.score - a.score || a.key.localeCompare(b.key);
   const on = list.filter((x) => x.pin === 'on').sort(by);
   const auto = list
     .filter((x) => !x.pin && !x.bad && x.score >= TOP_MIN)
     .sort(by)
-    .slice(0, Math.max(0, max - on.length));
+    // Their own room (v0.91.7): the ones pinned by hand do not push out the ones the work found — 42 pinned by hand left none.
+    .slice(0, max);
   return [...on, ...auto].map((x) => x.key);
 }
 

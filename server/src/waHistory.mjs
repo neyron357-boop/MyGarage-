@@ -17,7 +17,10 @@ import path from 'node:path';
  *  - the phone that answers without giving them (`end` 2 stays) — this device has no access: the pass stops, said so;
  *  - three chats running without an answer — the phone is not answering (WhatsApp closed on it): the pass stops;
  *  - a pass every 15 minutes, a minute after WhatsApp is ready, and a few seconds after the garage writes from the phone
- *    (then WhatsApp is open on it) — at most once in 3 minutes; «Загрузить сейчас» in the app — at once.
+ *    (then WhatsApp is open on it) — at most once in 3 minutes; «Загрузить сейчас» in the app — at once;
+ *  - v0.91.7 (the owner: «на ватсапе уведомления не прекращаются… начата синх, потом финиш синх, и так постоянно»): every ask
+ *    is a «sync started / sync finished» on the phone, given or not. By itself the phone is asked only while its last word
+ *    is that it gives them (`gives`); a phone that was silent, gave nothing or was never asked — only by «Загрузить сейчас».
  * What is kept (`Служебное/whatsapp/history.json`): per chat its `end` and the asks' answers — never a message.
  */
 
@@ -75,9 +78,13 @@ export function createHistoryLoader({ file, bridge, ready, tell = () => {}, log 
     };
   }
 
+  /** May the phone be asked without the person (v0.91.7): only while its last word is that it gives older messages. */
+  const byItself = () => summary().phone === 'gives';
+
   /** One pass over the chats with more on the phone (`hand` — asked by the person, or the phone just woke: each is asked). */
   function pass(why = 'time') {
     if (running) return running;
+    if (why !== 'hand' && !byItself()) return Promise.resolve(summary());
     running = (async () => {
       try {
         if (!ready()) return summary();

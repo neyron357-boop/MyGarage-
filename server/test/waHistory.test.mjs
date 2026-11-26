@@ -66,14 +66,60 @@ describe('the older messages fetched from the phone by the server (v0.91.3)', ()
     assert.equal(s.noAccess, 2);
   });
 
-  it('three chats without an answer — the phone is not answering: the pass stops; by itself not asked again for a while', async () => {
+  it('three chats without an answer — the phone is not answering: the pass stops; by itself never asked again (v0.91.7)', async () => {
     const chats = ['21', '22', '23', '24', '25'].map((n) => ({ id: `9715000000${n}@c.us`, end: 0 }));
     const { loader, asked } = setup(chats, {});
-    const s = await loader.pass('time');
+    const s = await loader.pass('hand');
     assert.equal(asked.length, 3);
     assert.equal(s.phone, 'silent');
-    // A pass by itself a moment later: the three asked lately wait, the two not asked yet are asked.
+    // Each ask is «sync started / finished» on the phone: by itself — every 15 minutes, after a message from the phone —
+    // nothing is asked of a phone that does not give them.
     await loader.pass('time');
-    assert.deepEqual(asked.slice(3).sort(), ['971500000024@c.us', '971500000025@c.us']);
+    await loader.pass('phone');
+    assert.equal(asked.length, 3);
+    // By hand — asked again: the three asked lately wait, the two not asked yet are asked.
+    await loader.pass('hand');
+    assert.ok(asked.length > 3);
+  });
+
+  it('v0.91.7: a phone never asked, or one that gave nothing — not asked by itself; one that gives — asked by itself', async () => {
+    const chats = [
+      { id: '971500000031@c.us', end: 0 },
+      { id: '971500000032@c.us', end: 0 },
+      { id: '971500000033@c.us', end: 2 },
+    ];
+    const { loader, asked } = setup(chats, {
+      '971500000031@c.us': [{ result: 'ok', older: true, endNow: 1 }],
+      '971500000033@c.us': [{ result: 'ok', older: false }],
+    });
+    // Never asked: by itself — nothing.
+    assert.equal((await loader.pass('time')).phone, 'unknown');
+    assert.equal(asked.length, 0);
+    // By hand: the first gives (then nothing more on the phone), the second does not answer.
+    await loader.pass('hand');
+    assert.deepEqual(asked, ['971500000031@c.us', '971500000032@c.us', '971500000033@c.us']);
+    // The third answered without giving (no access): its last word — by itself nothing more.
+    assert.equal(loader.summary().phone, 'noAccess');
+    await loader.pass('time');
+    assert.equal(asked.length, 3);
+  });
+
+  it('v0.91.7: the phone gave older messages lately — asked by itself, as before', async () => {
+    const chats = [
+      { id: '971500000041@c.us', end: 0 },
+      { id: '971500000042@c.us', end: 0 },
+    ];
+    const { loader, asked } = setup(chats, {
+      '971500000041@c.us': [{ result: 'ok', older: true, endNow: 1 }],
+      '971500000042@c.us': [{ result: 'ok', older: true, endNow: 1 }],
+    });
+    // The person asked once for one chat's worth: the phone gave.
+    chats[1].end = 1;
+    await loader.pass('hand');
+    assert.equal(loader.summary().phone, 'gives');
+    // More came on the phone for the second (as WhatsApp says): by itself — asked.
+    chats[1].end = 0;
+    await loader.pass('time');
+    assert.deepEqual(asked, ['971500000041@c.us', '971500000042@c.us']);
   });
 });
