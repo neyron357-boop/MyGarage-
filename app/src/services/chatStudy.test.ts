@@ -13,7 +13,7 @@ import { saveSupplier } from './parts';
 import { ensureSeed } from './seed';
 import { suppliersForJob } from './supplierRank';
 import { askSuppliers } from './waAsk';
-import { loadChatRoles, loadChats, loadPeople, refreshWa, setWaTransport, type WaCallInit } from './whatsapp';
+import { loadChatRoles, loadChats, loadPeople, refreshWa, setWaTransport, tagChats, type WaCallInit } from './whatsapp';
 
 /*
  * The garage's WhatsApp studied (v0.91), with the server and the AI played here — made-up chats and words only: what the
@@ -51,7 +51,11 @@ let phoneSays: Record<string, 'ok' | 'none' | 'failed'> = {};
 let phoneAsked: string[] = [];
 /** A server from before v0.91.1: no `/history`. */
 let oldServer = false;
-const talkOf = (id: string) => (id === FAST.id ? fastTalk : id === SILENT.id ? silentTalk : id === NEW_ONE.id ? newTalk : []);
+/** More chats of a test of its own, their talk, and what the AI says of a chat (else «supplier», 0.9). */
+let extra: WaChat[] = [];
+let extraTalk: Record<string, WaMessage[]> = {};
+let aiSays: Record<string, { role: string; confidence: number }> = {};
+const talkOf = (id: string) => (id === FAST.id ? fastTalk : id === SILENT.id ? silentTalk : id === NEW_ONE.id ? newTalk : (extraTalk[id] ?? []));
 
 beforeEach(async () => {
   db.close();
@@ -66,9 +70,12 @@ beforeEach(async () => {
   phoneSays = {};
   phoneAsked = [];
   oldServer = false;
+  extra = [];
+  extraTalk = {};
+  aiSays = {};
   setWaTransport(async (path: string, init: WaCallInit) => {
     if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 5, unread: 0 };
-    if (path === 'chats') return { chats: [FAST, SILENT, NEW_ONE, CUSTOMER, GROUP], total: 5, unread: 0 };
+    if (path === 'chats') return { chats: [FAST, SILENT, NEW_ONE, CUSTOMER, GROUP, ...extra], total: 5 + extra.length, unread: 0 };
     if (path === 'messages') {
       const id = init.query!.chat;
       expect(init.query!.lite).toBe('1');
@@ -97,7 +104,7 @@ beforeEach(async () => {
     if (p !== 'roles') throw new Error('not played');
     const chats = (body as { chats: { id: string; known?: string; texts: string[] }[] }).chats;
     asked.push(...chats);
-    return { chats: chats.map((c) => ({ id: c.id, role: 'supplier', makes: c.id === NEW_ONE.id ? ['Lexus', 'Toyota'] : c.id === FAST.id ? ['Toyota'] : [], confidence: 0.9 })) };
+    return { chats: chats.map((c) => ({ id: c.id, role: aiSays[c.id]?.role ?? 'supplier', makes: c.id === NEW_ONE.id ? ['Lexus', 'Toyota'] : c.id === FAST.id ? ['Toyota'] : [], confidence: aiSays[c.id]?.confidence ?? 0.9 })) };
   });
   await refreshWa();
   await loadChats(true);
@@ -141,6 +148,38 @@ describe('studying the chats (v0.91)', () => {
     // WhatsApp's word on what stayed on the phone is kept.
     expect((await db.chatFacts.get(FAST.id))?.end).toBe(0);
     expect(await phoneHistoryChats()).toBe(2);
+  });
+
+  it('v0.91.2: a friend the AI calls «customer» — no car talked about, no status; an earlier answer counts for nothing; «Без статуса» sticks', async () => {
+    const FRIEND = chat('971501110005@c.us', 'Hamad', '971501110005');
+    extra = [FRIEND];
+    extraTalk[FRIEND.id] = [msg(FRIEND, 0, false, 'how are you bro'), msg(FRIEND, 1, true, 'fine, you?')];
+    aiSays[FRIEND.id] = { role: 'customer', confidence: 0.95 };
+    // What the AI said before v0.91.2 counts for nothing.
+    await db.chatFacts.put({ id: FRIEND.id, phone: FRIEND.phone, aiRole: 'customer', aiAt: '2026-11-26T08:00:00.000Z', updatedAt: '2026-11-26T08:00:00.000Z' });
+    const people = await loadPeople();
+    expect(chatRole(FRIEND, people, await loadChatRoles())).toBeUndefined();
+    await loadChats(true);
+    await studyChats();
+    // Shown who wrote what; said «customer» — but nothing of a car: «other».
+    expect(asked.find((a) => a.id === FRIEND.id)?.texts).toEqual(['T: how are you bro', 'G: fine, you?']);
+    const f = await db.chatFacts.get(FRIEND.id);
+    expect(f).toMatchObject({ aiRole: 'other', aiV: 3 });
+    let roles = await loadChatRoles();
+    expect(chatRole(FRIEND, people, roles)).toBeUndefined();
+    // The supplier only in WhatsApp — the owner says «Без статуса»: gone, never asked again.
+    expect(chatRole(NEW_ONE, people, roles)).toBe('supplier');
+    await tagChats([NEW_ONE.id], null);
+    roles = await loadChatRoles();
+    expect(chatRole(NEW_ONE, people, roles)).toBeUndefined();
+    resetChatStudy(0);
+    asked = [];
+    await db.chatFacts.update(NEW_ONE.id, { studiedAt: undefined, through: 0 });
+    await studyChats();
+    expect(asked.some((a) => a.id === NEW_ONE.id)).toBe(false);
+    // A status by hand again — the mark goes.
+    await tagChats([NEW_ONE.id], 'supplier');
+    expect((await db.chatFacts.get(NEW_ONE.id))?.noRole).toBeUndefined();
   });
 
   it('v0.91.1: a server without /history — the last messages, as before', async () => {

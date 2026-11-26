@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatMakes, hasPrice, makesInText, mergeTurns, rateSeen, saysNotAvailable, seenOf, turnsOf, type Turn } from './chatStudy';
+import { backedRole, chatMakes, chatSigns, hasPrice, makesInText, mergeSigns, mergeTurns, rateSeen, saysNotAvailable, seenOf, signsKey, turnsOf, wordsForAi, type Turn } from './chatStudy';
 
 /* Made-up chats: the garage («me») and a supplier. */
 const MIN = 60_000;
@@ -98,5 +98,28 @@ describe('seenOf, rateSeen, chatMakes', () => {
   it('kept requests stay when the chat is read again', () => {
     const kept: Turn[] = [{ t: T0 }, { t: T0 + DAY }];
     expect(mergeTurns(kept, [{ t: T0 + DAY, r: 60 }, { t: T0 + 2 * DAY }], T0 + DAY - MIN)).toEqual([{ t: T0 }, { t: T0 + DAY, r: 60 }, { t: T0 + 2 * DAY }]);
+  });
+});
+
+describe('v0.91.2: who a chat is — only as far as its own words show', () => {
+  it('signs: a car talked about; parts priced or a request answered with a price', () => {
+    expect(chatSigns([me(0, 'Did you eat?'), they(1, 'yes mom')])).toEqual({});
+    expect(chatSigns([they(0, 'My Nissan Patrol making noise, can I bring tomorrow?')])).toEqual({ car: 1 });
+    expect(chatSigns([they(0, 'org 950 dup 400 for the bumper')])).toEqual({ car: 1, parts: 1 });
+    expect(chatSigns([they(0, 'can you send me 500 dirham')])).toEqual({});
+    expect(chatSigns([], [{ t: T0, r: 60, p: 1 }])).toEqual({ parts: 1 });
+  });
+  it('the AI said customer or supplier — kept only when the words back it', () => {
+    expect(backedRole('customer', {}, 'Hamad')).toBe('other');
+    expect(backedRole('customer', { car: 1 }, 'Khalid')).toBe('customer');
+    expect(backedRole('supplier', { car: 1 }, 'Max Garage Al Quoz')).toBe('other');
+    expect(backedRole('supplier', {}, 'Al Noor Auto Spare Parts')).toBe('supplier');
+    expect(backedRole('supplier', { parts: 1 }, 'Mohammed')).toBe('supplier');
+    expect(mergeSigns({ car: 1 }, { parts: 1 })).toEqual({ car: 1, parts: 1 });
+    expect(signsKey({ parts: 1 })).toBe('p');
+  });
+  it('the AI is shown who wrote each line, the telling ones first, in their order', () => {
+    const words = wordsForAi([me(0, 'salam'), they(1, 'walaikum salam'), me(2, 'Camry 2018 bumper price?'), they(3, '950'), they(4, 'ok'), me(5, 'thanks')]);
+    expect(words).toEqual(['G: Camry 2018 bumper price?', 'T: 950', 'T: ok', 'G: thanks']);
   });
 });

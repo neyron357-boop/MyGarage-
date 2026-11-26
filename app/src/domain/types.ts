@@ -1,6 +1,6 @@
 import type { WaAuto, WaTarget } from './waAuto';
 import type { NotifySettings } from './notify';
-import type { Turn } from './chatStudy';
+import type { ChatSigns, Turn } from './chatStudy';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
 // Money is always integer fils (1 AED = 100 fils). VAT rates are basis points (500 = 5%).
 
@@ -534,6 +534,15 @@ export interface ChatFact {
   aiRole?: 'customer' | 'supplier' | 'other';
   aiMakes?: string[];
   aiAt?: string;
+  /**
+   * v0.91.2 (the owner: «ИИ очень плохо анализировал чаты»): the question the AI answered (`AI_ROLES_V`; an older answer
+   * counts for nothing and is asked again); what the chat's words showed then (`signsKey`); what they show now — a car, parts
+   * (`chatSigns`, never the words). `noRole` — «Не относится к гаражу» (v0.91.2; «Без статуса» before) given by hand: nothing to the garage, the AI never asked again.
+   */
+  aiV?: number;
+  aiSigns?: string;
+  signs?: ChatSigns;
+  noRole?: true;
   updatedAt: string;
   _t?: number;
 }

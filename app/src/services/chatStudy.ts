@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { canonicalMake } from '../domain/carCatalog';
-import { mergeTurns, turnsOf, type KnownMake } from '../domain/chatStudy';
+import { AI_ROLES_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
 import { knowOf, type SupplierKnow } from '../domain/supplierRank';
 import { nowIso } from '../domain/dates';
 import type { ChatFact, Supplier } from '../domain/types';
@@ -72,25 +72,20 @@ export function worthStudy(chat: Pick<WaChat, 'id' | 'phone' | 'group' | 'self'>
 }
 
 /**
- * Worth asking the AI about: a chat nobody said who it is (not asked yet in v0.91 — an «other» of v0.86 is asked again with
- * more of its words), or a supplier whose makes nobody gave (by hand, on its card).
+ * Worth asking the AI about: a chat nobody said who it is (asked by the question before v0.91.2 — asked again: those answers
+ * gave unrelated chats a status), one it said «other» whose words have since shown a car or parts, or a supplier whose makes
+ * nobody gave (by hand, on its card). Never a chat said «Не относится к гаражу» by hand.
  */
 function aiWanted(chat: WaChat, fact: ChatFact | undefined, people: Map<string, Who>, roles: ChatRoles, suppliers: Map<string, Supplier>): 'supplier' | 'unknown' | undefined {
-  if (chat.group || chat.self || fact?.aiAt) return undefined;
+  if (chat.group || chat.self || fact?.noRole) return undefined;
+  const asked = (fact?.aiV ?? 0) >= AI_ROLES_V;
   const who = whoOf(chat, people);
-  if (who) return who.kind === 'supplier' && !suppliers.get(who.id)?.makes?.length && !fact?.makes?.length ? 'supplier' : undefined;
+  if (who) return who.kind === 'supplier' && !asked && !suppliers.get(who.id)?.makes?.length && !fact?.makes?.length ? 'supplier' : undefined;
   const tag = roles.tags[chat.id];
-  if (tag) return (tag === 'supplier' || tag === 'service') && !fact?.makes?.length ? 'supplier' : undefined;
+  if (tag) return (tag === 'supplier' || tag === 'service') && !asked && !fact?.makes?.length ? 'supplier' : undefined;
   if (roles.groups.has(chat.id)) return undefined;
-  // v0.86 said «customer» already: that stays.
-  return roles.ai?.[chat.id] === 'customer' ? undefined : 'unknown';
-}
-
-/** A few of a chat's words for the AI: the supplier's own (the latest), and the garage's last request. */
-function wordsFor(messages: Pick<WaMessage, 'me' | 'text'>[]): string[] {
-  const theirs = messages.filter((m) => !m.me && (m.text ?? '').trim().length >= 3).slice(-3);
-  const mine = messages.filter((m) => m.me && (m.text ?? '').trim().length >= 6).slice(-1);
-  return [...mine, ...theirs].map((m) => m.text.replace(/\s+/g, ' ').trim().slice(0, 200));
+  if (!asked) return 'unknown';
+  return fact?.aiRole === 'other' && signsKey(fact.signs).length > (fact.aiSigns ?? '').length ? 'unknown' : undefined;
 }
 
 /* ---------- One chat ---------- */
@@ -132,6 +127,7 @@ export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'
   } else messages = await fetchChatMessages(chat.id, READ, { lite: true });
   const times = messages.map((m) => m.t).filter((t) => t > 0);
   const turns = times.length ? mergeTurns(was?.turns, turnsOf(messages), Math.min(...times)) : was?.turns;
+  const signs = mergeSigns(was?.signs, chatSigns(messages, turns));
   const fact = await keep(chat.id, {
     phone: chat.phone || was?.phone || '',
     name: chat.name || was?.name,
@@ -140,20 +136,44 @@ export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'
     studiedAt: nowIso(),
     ...(deepAt ? { deepAt } : {}),
     ...(end !== undefined ? { end } : {}),
+    ...(signsKey(signs) ? { signs } : {}),
   });
-  return { fact, words: wordsFor(messages) };
+  return { fact, words: wordsForAi(messages.map((m, k) => ({ ...m, t: m.t || k }))) };
 }
 
-/** The AI's word on a few chats, kept with each: who it is; a supplier's makes (none said — none). */
-async function askAiAbout(list: { chat: WaChat; words: string[]; known?: 'supplier' }[]): Promise<number> {
+/**
+ * The words the AI is shown of a chat not read just now (nothing new came): its last messages, light — and what they show
+ * kept with the chat.
+ */
+async function wordsOf(chat: Pick<WaChat, 'id'>): Promise<{ words: string[]; signs?: ChatSigns }> {
+  try {
+    const messages = await fetchChatMessages(chat.id, 60, { lite: true });
+    const was = await db.chatFacts.get(chat.id);
+    const signs = mergeSigns(was?.signs, chatSigns(messages, was?.turns));
+    if (signsKey(signs) !== signsKey(was?.signs)) await keep(chat.id, { signs });
+    return { words: wordsForAi(messages), signs };
+  } catch {
+    return { words: [] };
+  }
+}
+
+/** How sure the AI must be of «customer» or «supplier» (v0.91.2: was 0.6). */
+const SURE = 0.8;
+
+/**
+ * The AI's word on a few chats, kept with each: who it is — only as sure as `SURE` and only as far as the chat's own words
+ * back it (`backedRole`: no car talked about — no customer; no parts priced or asked and answered — no supplier, unless
+ * its name says so); a supplier's makes (none said — none).
+ */
+async function askAiAbout(list: { chat: WaChat; words: string[]; known?: 'supplier'; signs?: ChatSigns }[]): Promise<number> {
   if (!list.length || !aiOn()) return 0;
-  const said = await aiChatRoles(list.map(({ chat, words, known }) => ({ id: chat.id, name: chat.name, texts: words.length ? words : chat.last?.text && !chat.last.me ? [chat.last.text] : [], ...(known ? { known } : {}) })));
+  const said = await aiChatRoles(list.map(({ chat, words, known }) => ({ id: chat.id, name: chat.name, texts: words.length ? words : chat.last?.text ? [`${chat.last.me ? 'G' : 'T'}: ${chat.last.text}`] : [], ...(known ? { known } : {}) })));
   let suppliers = 0;
   for (const r of said) {
     const one = list.find((x) => x.chat.id === r.id);
     if (!one) continue;
-    const sure = r.confidence >= 0.6;
-    const role = sure ? r.role : 'other';
+    const signs = one.signs ?? (await db.chatFacts.get(r.id))?.signs;
+    const role = r.confidence >= SURE ? backedRole(r.role, signs, one.chat.name) : 'other';
     // A server from before v0.91 says no makes: the role is kept, the chat is asked again once it says them.
     const makes = (r.makes ?? []).map((m) => canonicalMake(m)).filter(Boolean);
     await keep(r.id, {
@@ -162,7 +182,7 @@ async function askAiAbout(list: { chat: WaChat; words: string[]; known?: 'suppli
       ...(one.chat.name ? { name: one.chat.name } : {}),
       ...(one.known ? {} : { aiRole: role }),
       ...(r.makes && (role === 'supplier' || one.known) ? { aiMakes: makes.length ? makes : undefined } : {}),
-      ...(r.makes ? { aiAt: nowIso() } : {}),
+      ...(r.makes ? { aiAt: nowIso(), aiV: AI_ROLES_V, aiSigns: signsKey(signs) } : {}),
     });
     if (!one.known && role === 'supplier') suppliers++;
   }
@@ -188,7 +208,7 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
       const supplierOf = new Map(sups.map((s) => [s.id, s]));
       const list = orderChats(chats).filter((c) => worthStudy(c, people, roles));
       tell({ running: true, done: 0, total: list.length, kind: 'study' });
-      const queue: { chat: WaChat; words: string[]; known?: 'supplier' }[] = [];
+      const queue: { chat: WaChat; words: string[]; known?: 'supplier'; signs?: ChatSigns }[] = [];
       for (const [k, chat] of list.entries()) {
         if (!waReady()) break;
         let words: string[] = [];
@@ -205,7 +225,9 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
         const want = aiWanted(chat, factOf.get(chat.id), people, roles, supplierOf);
         if (want && !asked.has(chat.id)) {
           asked.add(chat.id);
-          queue.push({ chat, words, ...(want === 'supplier' ? { known: 'supplier' as const } : {}) });
+          // Not read just now (nothing new): its last words read for the AI.
+          const seen = words.length ? { words, signs: factOf.get(chat.id)?.signs } : await wordsOf(chat);
+          queue.push({ chat, words: seen.words, signs: seen.signs, ...(want === 'supplier' ? { known: 'supplier' as const } : {}) });
         }
         if (queue.length >= AI_BATCH) suppliers += await askAiAbout(queue.splice(0)).catch(() => 0);
         tell({ running: true, done: k + 1, total: list.length, kind: 'study' });
@@ -335,7 +357,7 @@ async function studyNow(chat: WaChat) {
   const want = aiWanted(chat, fact, people, roles, new Map(sup ? [[sup.id, sup]] : []));
   if (!want || asked.has(chat.id)) return;
   asked.add(chat.id);
-  await askAiAbout([{ chat, words: r?.words ?? [], ...(want === 'supplier' ? { known: 'supplier' as const } : {}) }]);
+  await askAiAbout([{ chat, words: r?.words ?? [], signs: fact?.signs, ...(want === 'supplier' ? { known: 'supplier' as const } : {}) }]);
 }
 
 let started = false;

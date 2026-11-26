@@ -20,6 +20,8 @@ import {
   type WaTag,
   type Who,
 } from '../domain/whatsapp';
+import { AI_ROLES_V } from '../domain/chatStudy';
+import { nowIso } from '../domain/dates';
 import { waAutoOf } from '../domain/waAuto';
 import { AppError } from './errors';
 import { getSettings, saveSettings } from './settings';
@@ -1106,13 +1108,21 @@ export async function loadChatRoles(): Promise<ChatRoles> {
   const [settings, customers, facts] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray(), db.chatFacts.toArray()]);
   const auto = waAutoOf(settings.waAuto);
   const groups = new Set([auto.work.to?.chat, auto.boss.to?.chat, auto.wash.to?.chat, ...customers.map((c) => c.waGroup?.chat)].filter((x): x is string => !!x));
-  // The AI's word: v0.86 kept it with the settings, v0.91 with the chat (services/chatStudy.ts) — the later one counts.
-  const ai: NonNullable<ChatRoles['ai']> = { ...(settings.waChatAi ?? {}) };
-  for (const f of facts) if (f.aiRole) ai[f.id] = f.aiRole;
+  // The AI's word (services/chatStudy.ts) — only to the question of v0.91.2: the earlier ones (v0.86 with the settings, v0.91
+  // with the chat) gave chats that are nothing to the garage a status, and are asked again. «Не относится к гаражу» by hand — none.
+  const ai: NonNullable<ChatRoles['ai']> = {};
+  for (const f of facts) {
+    if (f.noRole) ai[f.id] = 'other';
+    else if (f.aiRole && (f.aiV ?? 0) >= AI_ROLES_V) ai[f.id] = f.aiRole;
+  }
   return { tags: settings.waChatTags ?? {}, groups, ai };
 }
 
-/** Chats picked in the list given one status (or theirs taken off — null): kept with the garage's settings. */
+/**
+ * Chats picked in the list given one status (or theirs taken off — null): kept with the garage's settings. v0.91.2: taken off
+ * means «nothing to the garage» — the AI's status goes too and the AI is not asked about it again (`ChatFact.noRole`); a
+ * status given — that mark goes.
+ */
 export async function tagChats(ids: string[], tag: WaTag | null): Promise<void> {
   const tags = { ...((await getSettings()).waChatTags ?? {}) };
   for (const id of ids) {
@@ -1120,6 +1130,15 @@ export async function tagChats(ids: string[], tag: WaTag | null): Promise<void> 
     else delete tags[id];
   }
   await saveSettings({ waChatTags: tags });
+  await db.transaction('rw', db.chatFacts, async () => {
+    for (const id of ids) {
+      const was = await db.chatFacts.get(id);
+      if (tag && !was?.noRole) continue;
+      const phone = was?.phone || store.chats.find((c) => c.id === id)?.phone || '';
+      const { noRole: _no, ...rest } = was ?? { id, phone };
+      await db.chatFacts.put({ ...rest, id, phone, ...(tag ? {} : { noRole: true as const }), updatedAt: nowIso() });
+    }
+  });
 }
 
 /** The same, read once and kept (a lookup from a place that only needs a name now and then). */

@@ -282,4 +282,30 @@ describe('v0.86: the labour line, a supplier’s answer, who chats are — light
     assert.match(asked, /known supplier/);
     assert.match(asked, /makes/);
   });
+
+  it('v0.91.2: a chat is a short key in the question (not its long number), the answer goes back to it; who wrote each line is said', async () => {
+    let asked = '';
+    const { f } = fake([
+      [
+        /generateContent/,
+        (url, init) => {
+          asked = String(init.body);
+          return answer({ chats: [{ id: 'c2', role: 'supplier', makes: [], confidence: 0.9 }, { id: 'c1', role: 'other', makes: [], confidence: 0.95 }, { id: '971500000001@c.us', role: 'customer', makes: [], confidence: 1 }] });
+        },
+      ],
+    ]);
+    const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-k-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
+    const r = await ai.roles({
+      chats: [
+        { id: '971500000001@c.us', name: 'Mama', texts: ['T: Did you eat?', 'G: Yes'] },
+        { id: '971500000002@c.us', name: 'Mohammed', texts: ['G: Patrol 2016 gearbox mounting available?', 'T: available 350'] },
+      ],
+    });
+    assert.deepEqual(r.chats, [
+      { id: '971500000002@c.us', role: 'supplier', makes: [], confidence: 0.9 },
+      { id: '971500000001@c.us', role: 'other', makes: [], confidence: 0.95 },
+    ]);
+    assert.doesNotMatch(asked, /971500000001/);
+    assert.match(asked, /written by the garage/);
+  });
 });

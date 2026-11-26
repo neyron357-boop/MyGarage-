@@ -189,7 +189,7 @@ const TAG_ICON: Record<WaTag, Icon> = { customer: IconUser, supplier: IconTruck,
 
 /**
  * The statuses for the chats picked (v0.81, the user's brief: «отметить несколько чатов и одним действием присвоить им общий
- * статус»): one tap — all of them; «Без статуса» takes the hand-given one off (the base's own — a customer's number — stays).
+ * статус»): one tap — all of them; «Не относится к гаражу» (v0.91.2) takes the hand-given one off and the AI's too, for good (the base's own — a customer's number — stays).
  */
 function TagSheet({ opened, onClose, n, onTag }: { opened: boolean; onClose: () => void; n: number; onTag: (tag: WaTag | null) => void }) {
   const { t } = useTranslation();

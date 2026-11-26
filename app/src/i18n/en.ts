@@ -1939,7 +1939,7 @@ export const en: typeof ru = {
       pick: 'Select',
       give: 'Status · {{n}}',
       title: 'Status of chats · {{n}}',
-      none: 'No status',
+      none: 'Not the garage’s',
       done: 'Status «{{tag}}» — chats: {{n}}',
       cleared: 'Status removed — chats: {{n}}',
       assign: 'Set status',

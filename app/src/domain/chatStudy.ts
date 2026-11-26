@@ -323,3 +323,69 @@ export function chatMakes(x: { hand?: string[]; seen?: ChatSeen; ai?: string[] }
   }
   return out;
 }
+
+/* ---------- Who a chat is: what its own words show (v0.91.2) ---------- */
+
+/**
+ * The owner (27/11): «ИИ очень плохо анализировал чаты — те, что ни к чему и не к гаражу, он присвоил статус клиента или
+ * поставщика». The AI's word on a chat counts only when the chat's own words back it (`backedRole`): a customer — a car or
+ * work on one talked about (a make or a model, repair, service, invoice, «ready»…); a supplier — a request of the garage
+ * answered with a price or «not available», their price for a part or a car, or a parts / towing / tyres business by its
+ * name. What was read of a chat is kept as these two marks only (`ChatSigns`) — never its words.
+ */
+export interface ChatSigns {
+  /** A car or work on one is talked about. */
+  car?: 1;
+  /** Parts are priced, offered or asked of them and answered. */
+  parts?: 1;
+}
+
+const WORK =
+  /\b(car|cars|vehicle|repair|repairs|fix|service|servicing|check|checking|noise|engine|brakes?|a\/?c|gear ?box|suspension|tyres?|tires?|battery|oil change|accident|bumper|garage|workshop|invoice|quotation|estimate|bill|pick ?up|collect|mulkiya|registration)\b|سيار|تصليح|فاتورة|ورشة|كراج/i;
+const PART_WORDS =
+  /\b(org|orig|original|genuine|dup|dupl|duplicate|copy|used|available|avail|pcs|piece|stock|bumper|head ?light|tail ?light|filter|pads?|discs?|shock|mount(?:ing)?|radiator|compressor|sensor|bearing|belt|pump|gasket|clutch|alternator|starter|mirror|grill|fender|bonnet|lamp)\b|قطع|غيار/i;
+/** A business that sells parts or works on cars for others, by its name. */
+const PARTS_NAME =
+  /\b(spare|spares|parts?|tyres?|tires?|batter(?:y|ies)|lubricants?|oils?|towing|recovery|radiators?|gear ?box(?:es)?|scrap|paint|denting|upholstery|machining|tinting)\b|قطع|غيار/i;
+
+/** What a chat's messages show (and its requests: one answered with a price or «not available» — parts). */
+export function chatSigns(messages: Pick<WaMessage, 'me' | 'text'>[], turns?: Turn[]): ChatSigns {
+  const out: ChatSigns = {};
+  for (const m of messages) {
+    const text = m.text ?? '';
+    if (!text.trim()) continue;
+    const makes = makesInText(text).length > 0;
+    if (!out.car && (WORK.test(text) || makes)) out.car = 1;
+    if (!out.parts && !m.me && hasPrice(text) && (makes || PART_WORDS.test(text))) out.parts = 1;
+    if (out.car && out.parts) break;
+  }
+  if (!out.parts && turns?.some((x) => x.r !== undefined && (x.p || x.na))) out.parts = 1;
+  return out;
+}
+
+/** Both read: what either showed. */
+export const mergeSigns = (a: ChatSigns | undefined, b: ChatSigns | undefined): ChatSigns => ({ ...(a?.car || b?.car ? { car: 1 } : {}), ...(a?.parts || b?.parts ? { parts: 1 } : {}) });
+/** The marks as a word ('', 'c', 'p', 'cp') — to see they grew since the AI was asked. */
+export const signsKey = (s: ChatSigns | undefined): string => `${s?.car ? 'c' : ''}${s?.parts ? 'p' : ''}`;
+
+/** The AI's word, as far as the chat's own words back it — else «other». */
+export function backedRole(role: 'customer' | 'supplier' | 'other', signs: ChatSigns | undefined, name: string): 'customer' | 'supplier' | 'other' {
+  if (role === 'supplier') return signs?.parts || PARTS_NAME.test(name) ? 'supplier' : 'other';
+  if (role === 'customer') return signs?.car ? 'customer' : 'other';
+  return 'other';
+}
+
+/**
+ * A chat's words for the AI: who wrote each line («G:» — the garage, «T:» — them), the lines that tell (a car, work, a price)
+ * first, then the last ones; eight at most, in their order, each a short line.
+ */
+export function wordsForAi(messages: Pick<WaMessage, 'me' | 'text' | 't'>[], max = 8): string[] {
+  const lines = messages.filter((m) => (m.text ?? '').trim().length >= 2);
+  const telling = lines.filter((m) => WORK.test(m.text) || hasPrice(m.text) || makesInText(m.text).length > 0).slice(-5);
+  const last = lines.slice(-3);
+  const picked = [...new Set([...telling, ...last])].sort((a, b) => a.t - b.t).slice(-max);
+  return picked.map((m) => `${m.me ? 'G' : 'T'}: ${m.text.replace(/\s+/g, ' ').trim().slice(0, 160)}`);
+}
+
+/** The AI's question about who chats are, as asked now (v0.91.2) — an older answer is asked again. */
+export const AI_ROLES_V = 3;
