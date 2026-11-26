@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { canonicalMake } from '../domain/carCatalog';
-import { AI_ROLES_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, spliceTurns, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
+import { AI_ROLES_V, STUDY_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, spliceTurns, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
 import { knowOf, type SupplierKnow } from '../domain/supplierRank';
 import { nowIso } from '../domain/dates';
 import type { ChatFact, Supplier } from '../domain/types';
@@ -107,18 +107,22 @@ async function keep(id: string, patch: Partial<ChatFact>): Promise<ChatFact> {
 export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'>, opts: { force?: boolean; deep?: boolean } = {}): Promise<{ fact: ChatFact; words: string[] } | undefined> {
   const was = await db.chatFacts.get(chat.id);
   if (!opts.force && was?.studiedAt && Date.now() - Date.parse(was.studiedAt) < FRESH_MS) return undefined;
-  // Read deep once (v0.91.1); after that only when something came since.
-  const deep = opts.deep || !was?.deepAt;
+  // Read deep once (v0.91.1); after that only when something came since — or when its requests were read the old way
+  // (v0.91.6: their kinds of parts and what was offered not known yet).
+  const stale = !!was?.turns?.length && (was.studyV ?? 0) < STUDY_V;
+  const deep = opts.deep || !was?.deepAt || stale;
   if (!opts.force && !deep && was?.through && chat.t && was.through >= chat.t) return undefined;
   let messages: Pick<WaMessage, 't' | 'me' | 'type' | 'text'>[];
   let end = was?.end;
   let deepAt = was?.deepAt;
+  let whole = !stale;
   if (deep) {
     try {
       const h = await fetchChatHistory(chat.id, DEEP);
       messages = h.messages;
       end = h.end;
       deepAt = nowIso();
+      whole = true;
     } catch (e) {
       // A server from before v0.91.1: the last messages, as before.
       if (!(e instanceof SyncError) || e.status !== 404) throw e;
@@ -137,6 +141,7 @@ export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'
     ...(deepAt ? { deepAt } : {}),
     ...(end !== undefined ? { end } : {}),
     ...(signsKey(signs) ? { signs } : {}),
+    ...(whole ? { studyV: STUDY_V } : {}),
   });
   return { fact, words: wordsForAi(messages.map((m, k) => ({ ...m, t: m.t || k }))) };
 }
@@ -527,4 +532,19 @@ export async function chatKnow(chatId: string, phone: string): Promise<SupplierK
   const who = phone ? people.get(phone) : undefined;
   const hand = who?.kind === 'supplier' ? (await db.suppliers.get(who.id))?.makes : undefined;
   return knowOf(fact, nowIso(), hand);
+}
+
+/* ---------- The main suppliers by hand (v0.91.6) ---------- */
+
+/**
+ * Chats pinned on top by hand — main suppliers whatever their counts (`on`), or taken off the top (`off`): kept with each chat
+ * (`ChatFact.pin`), the same on every device.
+ */
+export async function setChatPin(chats: Pick<WaChat, 'id' | 'phone' | 'name'>[], pin: 'on' | 'off'): Promise<number> {
+  let n = 0;
+  for (const c of chats) {
+    await keep(c.id, { ...(c.phone ? { phone: c.phone } : {}), ...(c.name ? { name: c.name } : {}), pin });
+    n++;
+  }
+  return n;
 }

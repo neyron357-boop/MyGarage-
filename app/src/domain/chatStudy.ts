@@ -1,4 +1,5 @@
 import { CAR_CATALOG, CAR_MAKES, canonicalMake } from './carCatalog';
+import { PART_KINDS } from './supplierTidy';
 import { vinCarLocal } from './vinDecode';
 import { vinsInText } from './vin';
 import { kindOf, type WaMessage } from './whatsapp';
@@ -32,6 +33,10 @@ export interface Turn {
   na?: 1;
   /** The makes the request named (the catalogue's spelling). */
   mk?: string[];
+  /** v0.91.6: the kinds of parts it asked (domain/supplierTidy.ts `PART_KINDS`: body, lights, suspension…). */
+  k?: string[];
+  /** v0.91.6: what the answer offered — «o» original, «a» a copy (aftermarket), «u» used — each once («oa»). */
+  o?: string;
 }
 
 const MIN = 60_000;
@@ -43,6 +48,11 @@ const ANSWER = 48 * 60 * MIN;
 const WINDOW = 24 * 60 * MIN;
 /** The requests kept of a chat (the newest) — v0.91.5: enough for a chat's whole history, from the phone's export too. */
 export const KEEP_TURNS = 1000;
+/**
+ * How a chat's requests are read (`ChatFact.studyV`). v0.91.6 (2): each request knows its kinds of parts and what was offered
+ * (`Turn.k`, `Turn.o`) — a chat studied before is read once more, whole, so its older requests know them too.
+ */
+export const STUDY_V = 2;
 
 /* ---------- Makes in words ---------- */
 
@@ -162,6 +172,11 @@ const NO_ONLY = /^\s*(no|nope|nahi|nai|na|لا|нет)\s*[.!]*\s*$/i;
 /** «Not available», «no have», a plain «no». */
 export const saysNotAvailable = (text: string): boolean => !!text && (NA_WORDS.test(text) || NO_ONLY.test(text));
 
+/** What a supplier offered: an original, a copy, a used part (v0.91.6). */
+const ORIGINAL = /\b(org|orig|orginal|original|genuine|oem|oe)\b|اصلي|أصلي|وكالة|оригинал/i;
+const COPY = /\b(dup|dupl|duplicate|copy|aftermarket|taiwan|china|chinese|commercial|replacement|compatible)\b|تجاري|تقليد|копия|аналог|дубликат/i;
+const USED_OFFER = /\b(used|second ?hand|scrap|2nd)\b|مستعمل|б\/у/i;
+
 /* ---------- Requests ---------- */
 
 const ASKING = /\b(price|prices|available|availability|have|need|rate|how much|original|duplicate|genuine|used|org|dup)\b|سعر|متوفر|موجود|عندك/i;
@@ -199,6 +214,12 @@ export function turnsOf(messages: Pick<WaMessage, 't' | 'me' | 'type' | 'text'>[
     else if (said.some((m) => saysNotAvailable(m.text ?? ''))) turn.na = 1;
     const mk = [...new Set(cur.mine.flatMap((m) => makesInText(m.text ?? '')))];
     if (mk.length) turn.mk = mk;
+    const asked = cur.mine.map((m) => m.text ?? '').join('\n');
+    const k = PART_KINDS.filter((x) => x.key !== 'used' && x.key !== 'genuine' && x.re.test(asked)).map((x) => x.key);
+    if (k.length) turn.k = k;
+    const offered = said.map((m) => m.text ?? '').join('\n');
+    const o = `${ORIGINAL.test(offered) ? 'o' : ''}${COPY.test(offered) ? 'a' : ''}${USED_OFFER.test(offered) ? 'u' : ''}`;
+    if (o) turn.o = o;
     out.push(turn);
   };
   for (const m of list) {
@@ -248,15 +269,20 @@ export interface ChatSeen {
   replyMin?: number;
   /** Requests answered, by the make they named. */
   makes: Record<string, number>;
-  /** The last request (ms). */
+  /** v0.91.6: requests answered, by the kind of part asked; answers by what they offered (original, copy, used). */
+  kinds: Record<string, number>;
+  offers: { o: number; a: number; u: number };
+  /** The first and the last request (ms). */
+  firstAt?: number;
   lastAt?: number;
 }
 
 export function seenOf(turns: Turn[] | undefined, now: number): ChatSeen {
-  const out: ChatSeen = { turns: 0, answered: 0, priced: 0, na: 0, open: 0, makes: {} };
+  const out: ChatSeen = { turns: 0, answered: 0, priced: 0, na: 0, open: 0, makes: {}, kinds: {}, offers: { o: 0, a: 0, u: 0 } };
   const times: number[] = [];
   for (const x of turns ?? []) {
     out.lastAt = Math.max(out.lastAt ?? 0, x.t);
+    out.firstAt = Math.min(out.firstAt ?? x.t, x.t);
     if (x.r === undefined && now - x.t < ANSWER) {
       out.open++;
       continue;
@@ -268,6 +294,10 @@ export function seenOf(turns: Turn[] | undefined, now: number): ChatSeen {
     if (x.p) out.priced++;
     else if (x.na) out.na++;
     for (const m of x.mk ?? []) out.makes[m] = (out.makes[m] ?? 0) + 1;
+    for (const k of x.k ?? []) out.kinds[k] = (out.kinds[k] ?? 0) + 1;
+    if (x.o?.includes('o')) out.offers.o++;
+    if (x.o?.includes('a')) out.offers.a++;
+    if (x.o?.includes('u')) out.offers.u++;
   }
   if (times.length) {
     times.sort((a, b) => a - b);
@@ -394,6 +424,26 @@ export function wordsForAi(messages: Pick<WaMessage, 'me' | 'text' | 't'>[], max
   const last = lines.slice(-3);
   const picked = [...new Set([...telling, ...last])].sort((a, b) => a.t - b.t).slice(-max);
   return picked.map((m) => `${m.me ? 'G' : 'T'}: ${m.text.replace(/\s+/g, ' ').trim().slice(0, 160)}`);
+}
+
+/* ---------- What a supplier is, in shares (v0.91.6) ---------- */
+
+export interface Share {
+  key: string;
+  n: number;
+  /** Of all the answered requests that named one (0–100). */
+  pct: number;
+}
+
+/** A count's biggest parts as shares (the first `max`, each at least 5 %). */
+export function sharesOf(count: Record<string, number>, max = 4): Share[] {
+  const total = Object.values(count).reduce((a, b) => a + b, 0);
+  if (!total) return [];
+  return Object.entries(count)
+    .map(([key, n]) => ({ key, n, pct: Math.round((100 * n) / total) }))
+    .filter((s) => s.pct >= 5)
+    .sort((a, b) => b.n - a.n || a.key.localeCompare(b.key))
+    .slice(0, max);
 }
 
 /** The AI's question about who chats are, as asked now (v0.91.2) — an older answer is asked again. */

@@ -92,6 +92,43 @@ export function knowOf(fact: Pick<ChatFact, 'turns' | 'makes' | 'aiMakes'> | und
   return { seen, rating: rateSeen(seen), makes: chatMakes({ hand: hand?.length ? hand : fact?.makes, seen, ai: fact?.aiMakes }) };
 }
 
+/* ---------- The garage's main suppliers (v0.91.6) ---------- */
+
+/**
+ * The owner (27/11): «после загрузки всех их — сопоставить самых релевантных, с которыми чаще работал, чаще отвечали…
+ * закреплять всегда на первые позиции… везде в приложении самыми первыми». How much the garage works with a supplier: the
+ * requests it answered, those with a price (worth more), the jobs bought from it (worth most) — weighed by how it answers
+ * (a silent one or one of «not available» — less, a fast one with prices — more).
+ */
+export function relevance(seen: Pick<ChatSeen, 'answered' | 'priced'> | undefined, jobs = 0, rating?: ChatRating): number {
+  const work = (seen?.answered ?? 0) + 1.5 * (seen?.priced ?? 0) + 3 * jobs;
+  const q = rating ? Math.max(0.5, Math.min(1.5, 1 + rating.score / 60)) : 1;
+  return Math.round(work * q * 10) / 10;
+}
+/** Main from this much work on (six answered requests, or two jobs); at most so many by themselves. */
+export const TOP_MIN = 6;
+export const TOP_MAX = 15;
+
+export interface TopCandidate {
+  key: string;
+  score: number;
+  /** Pinned by hand on top, or taken off by hand. */
+  pin?: 'on' | 'off';
+  /** Answers badly (silent, «not available» again and again): not main by itself. */
+  bad?: boolean;
+}
+
+/** The main suppliers, in their order: pinned by hand first, then the most worked with, up to `max`. */
+export function pickTop(list: TopCandidate[], max = TOP_MAX): string[] {
+  const by = (a: TopCandidate, b: TopCandidate) => b.score - a.score || a.key.localeCompare(b.key);
+  const on = list.filter((x) => x.pin === 'on').sort(by);
+  const auto = list
+    .filter((x) => !x.pin && !x.bad && x.score >= TOP_MIN)
+    .sort(by)
+    .slice(0, Math.max(0, max - on.length));
+  return [...on, ...auto].map((x) => x.key);
+}
+
 /** The stars a supplier shows: the manager's own, else the ones its answers earned (`auto`). */
 export function shownStars(s: Pick<Supplier, 'reliability'>, k?: SupplierKnow): { n: number; auto?: true } | undefined {
   const own = starsOf(s);
@@ -121,10 +158,11 @@ function standing(s: Supplier, u: SupplierUse, now: string, k?: SupplierKnow): n
   return score;
 }
 
-/** The suppliers list (Запчасти → Поставщики): most used and best rated first, then by name. */
-export function rankSuppliers(list: Supplier[], use: Map<string, SupplierUse>, now: string, know?: Map<string, SupplierKnow>): Supplier[] {
+/** The suppliers list (Запчасти → Поставщики): the main ones first in their order (v0.91.6), then most used and best rated, then by name. */
+export function rankSuppliers(list: Supplier[], use: Map<string, SupplierUse>, now: string, know?: Map<string, SupplierKnow>, top?: Map<string, number>): Supplier[] {
   const score = new Map(list.map((s) => [s.id, standing(s, useOf(use, s.id), now, know?.get(s.id))]));
-  return [...list].sort((a, b) => score.get(b.id)! - score.get(a.id)! || a.name.localeCompare(b.name));
+  const rank = (s: Supplier) => top?.get(s.id) ?? Infinity;
+  return [...list].sort((a, b) => rank(a) - rank(b) || score.get(b.id)! - score.get(a.id)! || a.name.localeCompare(b.name));
 }
 
 /** Why a supplier fits this job — shown under its name. */
@@ -139,7 +177,9 @@ export type Why =
   | { kind: 'silent' }
   /** v0.91: its WhatsApp answered requests for this make so many times; the AI says it deals with it. */
   | { kind: 'answers'; make: string; n: number }
-  | { kind: 'aiMake'; make: string };
+  | { kind: 'aiMake'; make: string }
+  /** v0.91.6: one of the garage's main suppliers. */
+  | { kind: 'top' };
 
 export interface Ranked {
   supplier: Supplier;
@@ -178,7 +218,7 @@ function speaksOf(part: ReturnType<typeof partTerms>, x: Indexed): boolean {
  * The suppliers for a job, the best fit first — every one of them (v0.91, the owner's note #74: «при отправке не все
  * поставщики отображаются, но нужно чтобы все, при поиске особенно»); `fitOf` says which have a reason.
  */
-export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, history: BoughtLine[], job: JobNeeds, now: string, know?: Map<string, SupplierKnow>): Ranked[] {
+export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, history: BoughtLine[], job: JobNeeds, now: string, know?: Map<string, SupplierKnow>, top?: Map<string, number>): Ranked[] {
   const make = makeKey(job.make);
   const parts = job.parts.map((p) => ({ name: p.name, terms: partTerms(p.title) })).filter((p) => p.terms.length);
   // What each supplier sold before, prepared once.
@@ -201,6 +241,11 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
     } else if (s.mark === 'silent') {
       score -= 1000;
       why.push({ kind: 'silent' });
+    }
+    // The garage's main suppliers (v0.91.6): first, as the manager's own good ones — among them, the best fit for this job.
+    if (top?.has(s.id) && s.mark !== 'silent') {
+      score += 1000;
+      why.push({ kind: 'top' });
     }
     if (job.onJob.has(s.id)) {
       score += 100;

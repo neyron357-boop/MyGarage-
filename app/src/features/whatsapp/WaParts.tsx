@@ -1,6 +1,8 @@
 import { IconAlertCircle, IconBan, IconChartBar, IconCheck, IconChecks, IconClock, IconFile, IconMapPin, IconMicrophone, IconMusic, IconPhone, IconPhoto, IconSticker, IconUser, IconVideo, type Icon } from '@tabler/icons-react';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { sharesOf, type ChatSeen } from '../../domain/chatStudy';
+import { formatDate } from '../../domain/dates';
 import { marks, previewOf, ticksOf, type WaKind, type WaLast, type WaMessage, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import { loadPeople, waNoPicture, waPicture, waPictureNow } from '../../services/whatsapp';
 import { PersonAvatar } from '../../ui/components';
@@ -171,4 +173,44 @@ export function replyTime(t: (k: string, o?: Record<string, unknown>) => string,
   if (min < 60) return t('wa.know.min', { n: min });
   if (min < 48 * 60) return t('wa.know.hours', { n: Math.round(min / 60) });
   return t('wa.know.days', { n: Math.round(min / 1440) });
+}
+
+/** «03/2024» — a month of a supplier's history. */
+const monthOf = (ms: number) => formatDate(new Date(ms).toISOString()).slice(3);
+const DAY_MS = 86_400_000;
+
+/**
+ * What a supplier is, by its whole history with the garage (v0.91.6, the owner: «тщательно анализировать, для какого авто
+ * они продают в основном и т. д.»): the makes it answered for, the kinds of parts asked of it, what it offers (original, copy,
+ * used) — each in shares; since when and when last («давно» — over two months). The app's own count, every request.
+ */
+export function SupplierProfile({ seen }: { seen: ChatSeen }) {
+  const { t } = useTranslation();
+  const makes = sharesOf(seen.makes);
+  const kinds = sharesOf(seen.kinds, 3);
+  const offers = sharesOf({ original: seen.offers.o, copy: seen.offers.a, used: seen.offers.u }, 3);
+  const long = !!seen.lastAt && Date.now() - seen.lastAt > 60 * DAY_MS;
+  if (!makes.length && !kinds.length && !offers.length && !seen.firstAt) return null;
+  const row = (key: string, label: string, value: string, warn?: boolean) => (
+    <span className="wa-profile-row" data-wa-profile={key}>
+      <span className="wa-profile-label">{label}</span>
+      <span className="wa-profile-value tnum" data-warn={warn || undefined}>
+        {value}
+      </span>
+    </span>
+  );
+  return (
+    <span className="wa-profile">
+      {makes.length > 0 && row('makes', t('wa.profile.makes'), makes.map((s) => `${s.key} ${s.pct} %`).join(' · '))}
+      {kinds.length > 0 && row('parts', t('wa.profile.parts'), kinds.map((s) => `${t(`suppliers.kinds.${s.key}`)} ${s.pct} %`).join(' · '))}
+      {offers.length > 0 && row('offers', t('wa.profile.offers'), offers.map((s) => `${t(`wa.profile.${s.key}`)} ${s.pct} %`).join(' · '))}
+      {!!seen.firstAt &&
+        row(
+          'when',
+          t('wa.profile.when'),
+          [t('wa.profile.since', { date: monthOf(seen.firstAt) }), seen.lastAt ? t(long ? 'wa.profile.long' : 'wa.profile.last', { date: monthOf(seen.lastAt) }) : ''].filter(Boolean).join(' · '),
+          long,
+        )}
+    </span>
+  );
 }

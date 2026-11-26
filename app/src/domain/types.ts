@@ -546,6 +546,10 @@ export interface ChatFact {
   /** v0.91.5: its export from the phone was read (the whole history): when, and the time of its first message (ms). */
   exportAt?: string;
   exportFrom?: number;
+  /** v0.91.6: pinned on top by hand (a main supplier whatever its counts), or taken off the top by hand. */
+  pin?: 'on' | 'off';
+  /** v0.91.6: how its requests were read (`STUDY_V`); older — the chat is read once more, whole. */
+  studyV?: number;
   updatedAt: string;
   _t?: number;
 }

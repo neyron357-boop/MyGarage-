@@ -477,7 +477,7 @@ export const ru = {
   price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
   // v0.82: скидка строки; лист «Поставщики» заказа.
   lineOff: { title: 'Скидка', amount: 'Сумма', amountLabel: 'Скидка, AED' },
-  ask: { title: 'Поставщики', parts: 'Детали', who: 'Кому', search: 'Найти поставщика', noParts: 'Нет запчастей', noSuppliers: 'Никого не нашлось', send: 'Отправить · {{n}}', noWa: 'WhatsApp не подключён', sent: 'Отправлено поставщикам: {{n}}', noNumber: 'Без номера: {{names}}', used: 'б/у', answersFor: '{{make}} · ответил {{n}}', replies: 'отвечает за ~{{time}}' },
+  ask: { title: 'Поставщики', parts: 'Детали', who: 'Кому', search: 'Найти поставщика', noParts: 'Нет запчастей', noSuppliers: 'Никого не нашлось', send: 'Отправить · {{n}}', noWa: 'WhatsApp не подключён', sent: 'Отправлено поставщикам: {{n}}', noNumber: 'Без номера: {{names}}', used: 'б/у', answersFor: '{{make}} · ответил {{n}}', replies: 'отвечает за ~{{time}}', top: 'Главный' },
   newOrder: {
     // v0.81: VIN в карточке номера.
     scanVin: 'Сканировать VIN',
@@ -1964,6 +1964,23 @@ export const ru = {
       done_other: 'Марки обновлены для {{count}} чатов',
     },
     study: { going: 'ИИ изучает чаты · {{done}} из {{total}}', phone: 'История с телефона · {{done}} из {{total}}' },
+    // v0.91.6: главные поставщики — закреплены наверху и первые везде.
+    top: {
+      label: 'Главный поставщик',
+      pin: 'Закрепить наверху',
+      unpin: 'Открепить',
+      pinShort: 'Закрепить',
+      unpinShort: 'Открепить',
+      pinned_one: 'Закреплён наверху: {{count}} чат',
+      pinned_few: 'Закреплено наверху: {{count}} чата',
+      pinned_many: 'Закреплено наверху: {{count}} чатов',
+      pinned_other: 'Закреплено наверху: {{count}} чата',
+      unpinned_one: 'Откреплён: {{count}} чат',
+      unpinned_few: 'Откреплено: {{count}} чата',
+      unpinned_many: 'Откреплено: {{count}} чатов',
+      unpinned_other: 'Откреплено: {{count}} чата',
+    },
+    profile: { makes: 'Марки', parts: 'Детали', offers: 'Предлагает', original: 'оригинал', copy: 'копия', used: 'б/у', when: 'Работаете', since: 'с {{date}}', last: 'последний раз {{date}}', long: 'давно не писали — {{date}}' },
     // v0.91.1: старые сообщения, оставшиеся на телефоне.
     history: {
       title: 'История с телефона',

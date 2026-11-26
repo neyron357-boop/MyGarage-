@@ -8,6 +8,7 @@ import { canonicalMake } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import { looksLikePhone, supplierMatches } from '../../domain/suppliers';
 import { starsOf } from '../../domain/supplierRank';
+import { loadTop } from '../../services/supplierRank';
 import type { Employee, OrderItem, Supplier, Vehicle } from '../../domain/types';
 import { mediaBlob } from '../../services/media';
 import { partRequestText, whatsappUrl } from '../../services/messages';
@@ -27,12 +28,15 @@ export function useSuppliers(make?: string, service?: boolean): Supplier[] {
     for (const k of await db.items.where('supplierId').above('').keys()) m.set(String(k), (m.get(String(k)) ?? 0) + 1);
     return m;
   }, []);
+  // The garage's main suppliers (v0.91.6): first of the chips, in their order.
+  const top = useLiveQuery(() => loadTop().then((x) => x.suppliers), []);
   return useMemo(() => {
     const m = make ? canonicalMake(make).toLowerCase() : '';
     const score = (s: Supplier) => (service !== undefined && !!s.service === service ? 0 : 2) + (m && s.makes?.some((x) => x.toLowerCase() === m) ? 0 : 1);
     const used = (s: Supplier) => (starsOf(s) ?? 3) * 1000 + Math.min(999, bought?.get(s.id) ?? 0);
-    return [...all].sort((a, b) => score(a) - score(b) || used(b) - used(a) || a.name.localeCompare(b.name));
-  }, [all, bought, make, service]);
+    const rank = (s: Supplier) => top?.get(s.id) ?? Infinity;
+    return [...all].sort((a, b) => rank(a) - rank(b) || score(a) - score(b) || used(b) - used(a) || a.name.localeCompare(b.name));
+  }, [all, bought, make, service, top]);
 }
 
 const CHIPS = 6;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitOf, knowOf, rankForJob, rankSuppliers, shownStars, supplierUse, useOf, type BoughtLine } from './supplierRank';
+import { fitOf, knowOf, pickTop, rankForJob, rankSuppliers, relevance, shownStars, supplierUse, useOf, type BoughtLine } from './supplierRank';
 import type { Supplier } from './types';
 
 const NOW = '2026-11-17T08:00:00.000Z';
@@ -98,5 +98,36 @@ describe('the manager’s marks (v0.71)', () => {
   });
   it('in the whole list: a good one up, one that does not answer down', () => {
     expect(rankSuppliers([sup('b'), sup('a', { mark: 'silent' }), sup('c', { mark: 'good' })], supplierUse([]), NOW).map((s) => s.id)).toEqual(['c', 'b', 'a']);
+  });
+});
+
+describe('v0.91.6: the garage\'s main suppliers', () => {
+  it('relevance: answered, with prices, jobs — weighed by how it answers', () => {
+    expect(relevance({ answered: 4, priced: 4 }, 0)).toBe(10);
+    expect(relevance(undefined, 2)).toBe(6);
+    expect(relevance({ answered: 4, priced: 4 }, 0, { score: 30, stars: 5 })).toBe(15);
+    expect(relevance({ answered: 4, priced: 4 }, 0, { score: -30, stars: 1 })).toBe(5);
+  });
+  it('pinned by hand first, then the most worked with; taken off by hand, the bad and the small — not', () => {
+    const top = pickTop(
+      [
+        { key: 'a', score: 30 },
+        { key: 'b', score: 8 },
+        { key: 'small', score: 3 },
+        { key: 'bad', score: 50, bad: true },
+        { key: 'off', score: 99, pin: 'off' },
+        { key: 'mine', score: 0, pin: 'on' },
+      ],
+      3,
+    );
+    expect(top).toEqual(['mine', 'a', 'b']);
+    expect(pickTop([{ key: 'a', score: 30 }, { key: 'b', score: 20 }], 1)).toEqual(['a']);
+  });
+  it('first in the list and for a job (the main ones in their order, then the rest)', () => {
+    const list = [sup('x', { reliability: 5 }), sup('main'), sup('y')];
+    expect(rankSuppliers(list, supplierUse([]), NOW, undefined, new Map([['main', 0]])).map((s) => s.id)[0]).toBe('main');
+    const r = rankForJob(list, supplierUse([]), [], { make: 'Toyota', parts: [], onJob: new Set(['x']) }, NOW, undefined, new Map([['main', 0]]));
+    expect(r[0].supplier.id).toBe('main');
+    expect(r[0].why[0]).toEqual({ kind: 'top' });
   });
 });

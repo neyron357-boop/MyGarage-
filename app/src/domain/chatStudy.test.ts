@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backedRole, chatMakes, chatSigns, hasPrice, makesInText, mergeSigns, mergeTurns, rateSeen, saysNotAvailable, seenOf, signsKey, turnsOf, wordsForAi, type Turn } from './chatStudy';
+import { backedRole, chatMakes, chatSigns, hasPrice, makesInText, mergeSigns, mergeTurns, rateSeen, saysNotAvailable, seenOf, sharesOf, signsKey, turnsOf, wordsForAi, type Turn } from './chatStudy';
 
 /* Made-up chats: the garage («me») and a supplier. */
 const MIN = 60_000;
@@ -43,18 +43,19 @@ describe('saysNotAvailable', () => {
 describe('turnsOf', () => {
   it('a request, its answer, its time, its price and its car', () => {
     const turns = turnsOf([me(0, '*Toyota Camry 2018*\n1. FRONT BUMPER'), they(12, 'org 950 dup 400'), me(15, 'ok send'), they(16, 'ok')]);
-    expect(turns).toEqual([{ t: T0, r: 12 * 60, p: 1, mk: ['Toyota'] }]);
+    // v0.91.6: the kind of part asked (body) and what was offered (an original and a copy).
+    expect(turns).toEqual([{ t: T0, r: 12 * 60, p: 1, mk: ['Toyota'], k: ['body'], o: 'oa' }]);
   });
   it('«not available» and no answer at all', () => {
     const turns = turnsOf([me(0, 'Nissan Patrol 2016 gearbox mounting price?'), they(5, 'NA'), me(3 * DAY / MIN, 'Patrol 2016 engine mounting available?')]);
     expect(turns).toEqual([
-      { t: T0, r: 300, na: 1, mk: ['Nissan'] },
-      { t: T0 + 3 * DAY, mk: ['Nissan'] },
+      { t: T0, r: 300, na: 1, mk: ['Nissan'], k: ['gearbox'] },
+      { t: T0 + 3 * DAY, mk: ['Nissan'], k: ['engine'] },
     ]);
   });
   it('a greeting is no request; what follows is', () => {
     const turns = turnsOf([me(0, 'Salam'), they(1, 'Walaikum salam'), me(2, 'Lexus LX570 brake pads available?'), they(30, '280')]);
-    expect(turns).toEqual([{ t: T0 + 2 * MIN, r: 28 * 60, p: 1, mk: ['Lexus'] }]);
+    expect(turns).toEqual([{ t: T0 + 2 * MIN, r: 28 * 60, p: 1, mk: ['Lexus'], k: ['suspension'] }]);
   });
   it('a photo is a request; «thanks» is not', () => {
     expect(turnsOf([me(0, '', 'image'), they(60, 'available 120')])).toEqual([{ t: T0, r: 3600, p: 1 }]);
@@ -62,7 +63,7 @@ describe('turnsOf', () => {
   });
   it('a second message of the garage before any answer is the same request', () => {
     const turns = turnsOf([me(0, 'Hilux 2020 shock absorber'), me(90, '??'), they(100, '350')]);
-    expect(turns).toEqual([{ t: T0, r: 100 * 60, p: 1, mk: ['Toyota'] }]);
+    expect(turns).toEqual([{ t: T0, r: 100 * 60, p: 1, mk: ['Toyota'], k: ['suspension'] }]);
   });
 });
 
@@ -121,5 +122,26 @@ describe('v0.91.2: who a chat is — only as far as its own words show', () => {
   it('the AI is shown who wrote each line, the telling ones first, in their order', () => {
     const words = wordsForAi([me(0, 'salam'), they(1, 'walaikum salam'), me(2, 'Camry 2018 bumper price?'), they(3, '950'), they(4, 'ok'), me(5, 'thanks')]);
     expect(words).toEqual(['G: Camry 2018 bumper price?', 'T: 950', 'T: ok', 'G: thanks']);
+  });
+});
+
+describe('v0.91.6: what a supplier is, in shares', () => {
+  it('the makes, the kinds of parts, what it offers — since when', () => {
+    const turns = turnsOf([
+      me(0, 'Camry 2018 front bumper'),
+      they(10, 'org 950 dup 400'),
+      me(1440, 'Camry 2019 headlight left'),
+      they(1450, 'used 300'),
+      me(2880, 'Patrol 2016 shock absorber'),
+      they(2890, 'dup 220'),
+    ]);
+    const s = seenOf(turns, T0 + 10 * DAY);
+    expect(s.firstAt).toBe(T0);
+    expect(sharesOf(s.makes)).toEqual([
+      { key: 'Toyota', n: 2, pct: 67 },
+      { key: 'Nissan', n: 1, pct: 33 },
+    ]);
+    expect(sharesOf(s.kinds).map((x) => x.key).sort()).toEqual(['body', 'lights', 'suspension']);
+    expect(s.offers).toEqual({ o: 1, a: 2, u: 1 });
   });
 });

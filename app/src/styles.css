@@ -10447,3 +10447,55 @@ html.desk .wa-pane-foot {
   font-size: 13px;
   color: var(--app-label-2);
 }
+
+/* ---------- v0.91.6: the garage's main suppliers — pinned on top, their profile ---------- */
+.wa-row-top {
+  flex: none;
+  color: var(--mantine-color-cobalt-6);
+}
+.wa-top-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mantine-color-cobalt-filled);
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 14%, transparent);
+}
+.wa-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: stretch;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: var(--app-card);
+  text-align: left;
+}
+[data-mantine-color-scheme='dark'] .wa-profile {
+  background: var(--app-soft);
+}
+.wa-profile-row {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.wa-profile-label {
+  flex: none;
+  width: 84px;
+  color: var(--app-label-2);
+}
+.wa-profile-value {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+.wa-profile-value[data-warn] {
+  color: var(--mantine-color-orange-filled);
+}
+.supplier-name .wa-row-top {
+  margin-right: 2px;
+}

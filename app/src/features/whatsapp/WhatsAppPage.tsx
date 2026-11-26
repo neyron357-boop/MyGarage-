@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Group, Loader, Modal, Stack, Switch, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconBriefcase, IconCar, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconStarFilled, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconBriefcase, IconCar, IconPinFilled, IconPinnedOff, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconStarFilled, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -12,7 +12,8 @@ import { aiRoleOf, CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROL
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
 import { loadChatRoles, loadChats, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
-import { chatKnow, chatsMakes, loadChatMakes, onStudyProgress, setChatMakes, studyProgress } from '../../services/chatStudy';
+import { chatKnow, chatsMakes, loadChatMakes, onStudyProgress, setChatMakes, setChatPin, studyProgress } from '../../services/chatStudy';
+import { loadTop, NO_TOP } from '../../services/supplierRank';
 import { AiMark } from '../ai/Ai';
 import { haptic } from '../../ui/haptics';
 import { useWaStatus } from '../../ui/waSel';
@@ -30,7 +31,7 @@ import { CustomerModal } from '../customers/forms';
 import { SupplierSheet } from '../parts/Suppliers';
 import { ChatThread } from './ChatThread';
 import type { QuickFor } from './ChatQuick';
-import { ChatHead, LastLine, replyTime, useWaPeople, WaAvatar, WhoTag } from './WaParts';
+import { ChatHead, LastLine, replyTime, SupplierProfile, useWaPeople, WaAvatar, WhoTag } from './WaParts';
 
 /*
  * «WhatsApp» (v0.78): the garage's chats in the app. A phone: the list, a chat on its own screen. A PC: the list and
@@ -120,7 +121,7 @@ export function WaGate({ s }: { s: WaStore }) {
 
 /* ---------- The list ---------- */
 
-const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
+const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; top?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
   const { t } = useTranslation();
   const title = c.self ? t('wa.self') : chatTitle(c, who);
   return (
@@ -171,7 +172,8 @@ const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, when, active,
           </span>
           <span className="wa-row-marks">
             {c.muted && <IconVolumeOff size={15} stroke={2} aria-hidden />}
-            {c.pinned && <IconPin size={15} stroke={2} aria-hidden />}
+            {/* v0.91.6: a main supplier — pinned on top by the app (whatever WhatsApp says). */}
+            {top ? <IconPinFilled size={15} className="wa-row-top" aria-label={t('wa.top.label')} data-wa-top /> : c.pinned && <IconPin size={15} stroke={2} aria-hidden />}
             {c.unread > 0 && (
               <span className="wa-badge" data-muted={c.muted || undefined}>
                 {c.unread > 99 ? '99+' : c.unread}
@@ -266,20 +268,37 @@ function MakeSheet({ opened, onClose, onDone, chats }: { opened: boolean; onClos
 }
 
 /** What a chat taught the garage (v0.91), on its card: the stars its answers earned, how it answers, its makes. */
-function ChatKnowBlock({ id, phone }: { id: string; phone: string }) {
+function ChatKnowBlock({ id, phone, name }: { id: string; phone: string; name: string }) {
   const { t } = useTranslation();
+  const { run } = useAction();
   const k = useScreenLiveQuery(() => chatKnow(id, phone), [id, phone]);
-  if (!k || (!k.seen.turns && !k.seen.open && !k.makes.length)) return null;
-  const s = k.seen;
+  const top = useScreenLiveQuery(loadTop, []) ?? NO_TOP;
+  const isTop = top.chats.has(id);
+  if (!k && !isTop) return null;
+  const s = k?.seen;
+  const counts = !!s && s.turns + s.open > 0;
+  const pin = () =>
+    void run(async () => {
+      await setChatPin([{ id, phone, name }], isTop ? 'off' : 'on');
+      haptic('success');
+      notifications.show({ color: 'green', message: t(isTop ? 'wa.top.unpinned' : 'wa.top.pinned', { count: 1 }) });
+    });
   return (
     <div className="wa-know" data-wa-know>
-      {k.rating && (
+      {/* v0.91.6: one of the garage's main suppliers — on top of WhatsApp and of every list. */}
+      {isTop && (
+        <span className="wa-top-badge" data-wa-top-badge>
+          <IconPinFilled size={13} aria-hidden />
+          {t('wa.top.label')}
+        </span>
+      )}
+      {k?.rating && (
         <span className="stars-pill tnum" data-auto aria-label={`★ ${k.rating.stars}`}>
           <IconStarFilled size={12} aria-hidden />
           {k.rating.stars}
         </span>
       )}
-      {s.turns + s.open > 0 && (
+      {counts && s && (
         <span className="wa-know-line">
           {[
             t('wa.know.asked', { count: s.turns + s.open }),
@@ -292,7 +311,7 @@ function ChatKnowBlock({ id, phone }: { id: string; phone: string }) {
             .join(' · ')}
         </span>
       )}
-      {k.makes.length > 0 && (
+      {!!k?.makes.length && (
         <span className="wa-know-makes">
           {k.makes.map((m) => (
             <span key={m.make} className="wa-know-make" data-by={m.by}>
@@ -303,6 +322,11 @@ function ChatKnowBlock({ id, phone }: { id: string; phone: string }) {
           ))}
         </span>
       )}
+      {/* What it is by its whole history (v0.91.6): makes, parts, original / copy / used, since when. */}
+      {s && <SupplierProfile seen={s} />}
+      <Button size="compact-md" variant={isTop ? 'subtle' : 'light'} leftSection={isTop ? <IconPinnedOff size={16} /> : <IconPinFilled size={16} />} onClick={pin} data-wa-pin-one>
+        {t(isTop ? 'wa.top.unpin' : 'wa.top.pin')}
+      </Button>
     </div>
   );
 }
@@ -331,7 +355,9 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   // Who the chats are and what their requests came to — studied by services/chatStudy.ts as the app runs (v0.91).
   const makes = useScreenLiveQuery(loadChatMakes, []);
   const study = useSyncExternalStore(onStudyProgress, studyProgress);
-  const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly }), [s.chats, tab, query, people, roles, garageOnly]);
+  // The garage's main suppliers (v0.91.6): on top of every tab, pinned by the app.
+  const top = useScreenLiveQuery(loadTop, []) ?? NO_TOP;
+  const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly, top: top.chats }), [s.chats, tab, query, people, roles, garageOnly, top]);
   // A search with «Только гараж» on: how many more the whole list has (one tap shows them).
   const elsewhere = useMemo(
     () => (garageOnly && query.trim() ? filterChats(s.chats, { tab, query, people, roles, garageOnly: false }).length - rows.length : 0),
@@ -370,6 +396,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const [tagging, setTagging] = useState(false);
   const [making, setMaking] = useState(false);
   const pickedChats = useMemo(() => s.chats.filter((c) => picked.has(c.id)), [s.chats, picked]);
+  const allTop = pickedChats.length > 0 && pickedChats.filter((c) => !c.group).every((c) => top.chats.has(c.id));
   const endPick = () => {
     setPicking(false);
     setPicked(new Set());
@@ -387,6 +414,16 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
     },
     [picking, onOpen],
   );
+  const pinPicked = () =>
+    void run(async () => {
+      const n = await setChatPin(
+        pickedChats.filter((c) => !c.group),
+        allTop ? 'off' : 'on',
+      );
+      haptic('success');
+      endPick();
+      notifications.show({ color: 'green', message: t(allTop ? 'wa.top.unpinned' : 'wa.top.pinned', { count: n }) });
+    });
   const tag = (to: WaTag | null) =>
     void run(async () => {
       const n = picked.size;
@@ -542,6 +579,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
                 role={chatRole(c, people, roles)}
                 byAi={!!aiRoleOf(c, people, roles)}
                 makes={rowMakes(c)}
+                top={top.chats.has(c.id)}
                 when={when(c.t)}
                 active={!picking && c.id === active}
                 onOpen={tap}
@@ -560,13 +598,17 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       )}
       {picking && (
         <StickyBar>
-          <Group gap={8} wrap="nowrap" grow>
-            <Button disabled={!picked.size} leftSection={<IconTag size={18} />} onClick={() => setTagging(true)} data-wa-tag-picked>
+          <Group gap={6} wrap="nowrap" grow>
+            <Button px={8} disabled={!picked.size} leftSection={<IconTag size={16} />} onClick={() => setTagging(true)} data-wa-tag-picked>
               {t('wa.tags.short')}
             </Button>
             {/* v0.91: makes to all of them («поставщики Тойота — марку Тойота»). */}
-            <Button variant="light" disabled={!pickedChats.some((c) => !c.group)} leftSection={<IconCar size={18} />} onClick={() => setMaking(true)} data-wa-make-picked>
+            <Button px={8} variant="light" disabled={!pickedChats.some((c) => !c.group)} leftSection={<IconCar size={16} />} onClick={() => setMaking(true)} data-wa-make-picked>
               {t('wa.makes.assign')}
+            </Button>
+            {/* v0.91.6: pinned on top by the app — main suppliers whatever their counts (or taken off). */}
+            <Button px={8} variant="light" disabled={!pickedChats.some((c) => !c.group)} leftSection={allTop ? <IconPinnedOff size={16} /> : <IconPinFilled size={16} />} onClick={pinPicked} data-wa-pin-picked>
+              {t(allTop ? 'wa.top.unpinShort' : 'wa.top.pinShort')}
             </Button>
           </Group>
         </StickyBar>
@@ -690,7 +732,7 @@ function ChatInfoSheet({ c, who, title, opened, onClose }: { c: Pick<WaChat, 'id
             </Text>
           )}
         </Stack>
-        {!c.group && <ChatKnowBlock id={c.id} phone={c.phone} />}
+        {!c.group && <ChatKnowBlock id={c.id} phone={c.phone} name={c.name} />}
         <div className="action-tiles" style={{ alignSelf: 'stretch' }}>
           {who?.kind === 'customer' && tile('customer', IconUser, 'blue', t('wa.who.customer'), () => go(`/customers/${who.id}`))}
           {who?.kind === 'supplier' && tile('supplier', IconTruck, 'cyan', t('wa.who.supplier'), () => go('/parts?tab=suppliers'))}

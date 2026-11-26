@@ -1,9 +1,10 @@
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { byPosition, itemTitle, lineName } from '../domain/items';
-import { knowOf, rankForJob, rankSuppliers, supplierUse, type BoughtLine, type Ranked, type SupplierKnow, type SupplierUse } from '../domain/supplierRank';
+import { rateSeen, seenOf } from '../domain/chatStudy';
+import { knowOf, pickTop, rankForJob, rankSuppliers, relevance, supplierUse, useOf, type BoughtLine, type Ranked, type SupplierKnow, type SupplierUse, type TopCandidate } from '../domain/supplierRank';
 import type { ChatFact, Lang, OrderItem, Supplier, Vehicle } from '../domain/types';
-import { chatRole, waDigits, type WaChat } from '../domain/whatsapp';
+import { chatIdOf, chatRole, waDigits, type WaChat } from '../domain/whatsapp';
 import { AppError } from './errors';
 import { loadChatRoles, loadPeople, waStore } from './whatsapp';
 
@@ -76,13 +77,67 @@ export async function chatSuppliers(facts?: ChatFact[]): Promise<{ supplier: Sup
   return out;
 }
 
-/** Every supplier in the base with what was bought from it, most used and best rated first. */
-export async function suppliersRanked(): Promise<{ list: Supplier[]; use: Map<string, SupplierUse>; know: Map<string, SupplierKnow> }> {
+/** The garage's main suppliers, in their order (v0.91.6): by their chat and by the supplier of the base. */
+export interface TopSuppliers {
+  chats: Map<string, number>;
+  suppliers: Map<string, number>;
+}
+export const NO_TOP: TopSuppliers = { chats: new Map(), suppliers: new Map() };
+
+/**
+ * The main suppliers (v0.91.6, the owner: «сопоставить самых релевантных, тех с которыми чаще работал, чаще отвечали…
+ * закреплять всегда на первые позиции… везде в приложении самыми первыми»): every chat that is a supplier (of the base by its
+ * number, given «Поставщик» or «Услуги» by hand or by the AI) and every supplier of the base parts were bought from —
+ * weighed by `relevance` (requests answered, with a price, jobs bought, how it answers); pinned by hand — always, taken off by
+ * hand — never (`ChatFact.pin`); domain/supplierRank.ts `pickTop`.
+ */
+export async function loadTop(given?: { facts: ChatFact[]; suppliers: Supplier[]; use: Map<string, SupplierUse> }): Promise<TopSuppliers> {
+  const [facts, sups, use, people, roles] = await Promise.all([
+    given?.facts ?? db.chatFacts.toArray(),
+    given?.suppliers ?? db.suppliers.filter((s) => !s.archivedAt).toArray(),
+    given?.use ?? Promise.all([boughtLines(), db.supplierReturns.toArray()]).then(([l, r]) => supplierUse(l, r)),
+    loadPeople(),
+    loadChatRoles(),
+  ]);
+  const now = Date.now();
+  const byPhone = new Map(sups.filter((s) => waDigits(s.phone)).map((s) => [waDigits(s.phone), s]));
+  const list: TopCandidate[] = [];
+  const of = new Map<string, { chat?: string; supplier?: string }>();
+  const counted = new Set<string>();
+  for (const f of facts) {
+    const sup = f.phone ? byPhone.get(f.phone) : undefined;
+    const role = chatRole({ id: f.id, phone: f.phone, group: false }, people, roles);
+    if (!sup && role !== 'supplier' && role !== 'service' && f.pin !== 'on') continue;
+    const seen = seenOf(f.turns, now);
+    const rating = rateSeen(seen);
+    list.push({ key: f.id, score: relevance(seen, sup ? useOf(use, sup.id).jobs : 0, rating), pin: f.pin, bad: !!rating && rating.score < -10 });
+    of.set(f.id, { chat: f.id, supplier: sup?.id });
+    if (sup) counted.add(sup.id);
+  }
+  for (const s of sups) {
+    const jobs = useOf(use, s.id).jobs;
+    if (counted.has(s.id) || !jobs) continue;
+    const key = chatIdOf(s.phone) || `s:${s.id}`;
+    list.push({ key, score: relevance(undefined, jobs) });
+    of.set(key, { chat: chatIdOf(s.phone) || undefined, supplier: s.id });
+  }
+  const top: TopSuppliers = { chats: new Map(), suppliers: new Map() };
+  pickTop(list).forEach((key, i) => {
+    const x = of.get(key);
+    if (x?.chat) top.chats.set(x.chat, i);
+    if (x?.supplier) top.suppliers.set(x.supplier, i);
+  });
+  return top;
+}
+
+/** Every supplier in the base with what was bought from it — the main ones first (v0.91.6), then most used and best rated. */
+export async function suppliersRanked(): Promise<{ list: Supplier[]; use: Map<string, SupplierUse>; know: Map<string, SupplierKnow>; top: TopSuppliers }> {
   const [all, lines, returns, facts] = await Promise.all([db.suppliers.filter((s) => !s.archivedAt).toArray(), boughtLines(), db.supplierReturns.toArray(), db.chatFacts.toArray()]);
   const use = supplierUse(lines, returns);
   const now = nowIso();
   const know = supplierKnow(all, facts, now);
-  return { list: rankSuppliers(all, use, now, know), use, know };
+  const top = await loadTop({ facts, suppliers: all, use });
+  return { list: rankSuppliers(all, use, now, know, top.suppliers), use, know, top };
 }
 
 /** The suppliers for a job (its parts sellers; its contractors when it has work done outside), best fit first. */
@@ -115,12 +170,16 @@ export async function suppliersForJob(orderId: string, lang: Lang): Promise<{ pa
   const history = lines.filter((l) => l.orderId !== orderId);
   const chatOf = new Map(fromChats.map((x) => [x.supplier.id, x.chat]));
   const withChats = [...all, ...fromChats.map((x) => x.supplier)];
+  // The main suppliers first (v0.91.6) — those only in WhatsApp by their chat.
+  const tops = await loadTop({ facts, suppliers: all, use });
+  const topOf = new Map(tops.suppliers);
+  for (const [id, chat] of chatOf) if (tops.chats.has(chat)) topOf.set(id, tops.chats.get(chat)!);
   const sellers = withChats.filter((s) => !s.service);
   const doers = withChats.filter((s) => !!s.service);
   const marked = (list: Ranked[]) => list.map((r) => (chatOf.has(r.supplier.id) ? { ...r, chat: chatOf.get(r.supplier.id) } : r));
   return {
-    parts: marked(rankForJob(sellers, use, history, { make: vehicle?.make, parts: partLines.map(named), onJob }, now, know)),
-    contractors: handed.length ? marked(rankForJob(doers, use, history, { make: vehicle?.make, parts: handed.map(named), onJob }, now, know)) : [],
+    parts: marked(rankForJob(sellers, use, history, { make: vehicle?.make, parts: partLines.map(named), onJob }, now, know, topOf)),
+    contractors: handed.length ? marked(rankForJob(doers, use, history, { make: vehicle?.make, parts: handed.map(named), onJob }, now, know, topOf)) : [],
     // Taken off the list by the manager (v0.71): folded under it, to bring back.
     off: all.filter((s) => s.mark === 'off').sort((a, b) => a.name.localeCompare(b.name)),
     partLines,

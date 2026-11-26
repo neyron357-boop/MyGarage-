@@ -204,6 +204,21 @@ async function playServer(page) {
   });
   check(JSON.stringify(after.silent) === '["Toyota"]' && JSON.stringify(after.desert) === '["Toyota"]', '«Марка»: Toyota on the supplier’s card and on the chat’s record: ' + JSON.stringify(after));
 
+  // v0.91.6: the main supplier (the fast one, by its work) — first in the list, pinned by the app; «Закрепить» — Desert too.
+  await top('[data-wa-chat]').first().waitFor();
+  const firstRow = await top('.list-row').first().innerText();
+  check(firstRow.includes('Fast Toyota Parts') && (await top('.list-row').first().locator('[data-wa-top]').count()) === 1, 'v0.91.6: the main supplier first, pinned by the app: ' + firstRow.split('\n')[0]);
+  await top('[data-wa-pick]').click();
+  await settle(300);
+  await top('.list-row:has([data-wa-chat="971501110003@c.us"])').click();
+  await settle(300);
+  await page.locator('[data-wa-pin-picked]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.screen[data-role="top"] [data-wa-top]').length === 2, null, { timeout: 8000 });
+  const pinnedOrder = await top('[data-wa-chat]').evaluateAll((els) => els.slice(0, 2).map((e) => e.getAttribute('data-wa-chat')));
+  check(pinnedOrder.includes('971501110003@c.us') && pinnedOrder.includes('971501110001@c.us'), 'v0.91.6: «Закрепить» — Desert pinned on top too: ' + JSON.stringify(pinnedOrder));
+  await settle(400);
+  await shot('phone-03b-main-suppliers');
+
   // 3. The chat's card: how it answers.
   await top('.list-row:has([data-wa-chat="971501110001@c.us"])').click();
   await page.locator('[data-wa-head]').first().click();
@@ -212,6 +227,10 @@ async function playServer(page) {
   const cardText = await card.innerText();
   check(/Заявок 4/.test(cardText) && /ответил 4/.test(cardText) && /с ценой 4/.test(cardText) && /Toyota/.test(cardText), 'the chat’s card: asked 4, answered 4, with a price 4, Toyota: ' + cardText.replace(/\n/g, ' '));
   check(await card.locator('.stars-pill[data-auto]').isVisible(), 'the chat’s card: the stars its answers earned');
+  // v0.91.6: main, and what it is by its history — Toyota, body parts, original and copy, since when.
+  check(await card.locator('[data-wa-top-badge]').isVisible(), 'v0.91.6: the chat’s card — «Главный поставщик»');
+  const profile = await card.locator('.wa-profile').innerText();
+  check(/Toyota 100 %/.test(profile) && /Кузов 100 %/.test(profile) && /оригинал 50 %/.test(profile) && /копия 50 %/.test(profile) && /с \d\d\/\d{4}/.test(profile), 'v0.91.6: its profile — makes, parts, what it offers, since when: ' + profile.replace(/\n/g, ' '));
   await settle(700);
   await shot('phone-04-chat-card');
   await page.keyboard.press('Escape');

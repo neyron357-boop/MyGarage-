@@ -214,9 +214,13 @@ export function chatRole(chat: Pick<WaChat, 'id' | 'phone' | 'group'>, people: M
 export type ChatTab = 'all' | 'unread' | 'customers' | 'suppliers' | 'groups';
 export const CHAT_TABS: ChatTab[] = ['all', 'unread', 'customers', 'suppliers', 'groups'];
 
-/** Pinned on top, then the newest first. */
-export function orderChats<T extends Pick<WaChat, 'pinned' | 't' | 'id'>>(chats: T[]): T[] {
-  return [...chats].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.t - a.t || (a.id < b.id ? -1 : 1));
+/**
+ * Pinned on top, then the newest first. v0.91.6 (the owner: «главных поставщиков в интегрированном ватсапе закреплять всегда на
+ * первые позиции… даже если в настоящем WhatsApp не закреплены»): the garage's main suppliers (`top` — their order) above all.
+ */
+export function orderChats<T extends Pick<WaChat, 'pinned' | 't' | 'id'>>(chats: T[], top?: Map<string, number>): T[] {
+  const rank = (c: T) => top?.get(c.id) ?? Infinity;
+  return [...chats].sort((a, b) => rank(a) - rank(b) || Number(b.pinned) - Number(a.pinned) || b.t - a.t || (a.id < b.id ? -1 : 1));
 }
 
 const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е').trim();
@@ -226,7 +230,7 @@ const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е').trim();
  * finds them. A search goes by the garage's name, WhatsApp's name and the number however it is typed («050 123-45-67»,
  * «+971…», «00971…»).
  */
-export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who>; roles?: ChatRoles; garageOnly?: boolean }): WaChat[] {
+export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who>; roles?: ChatRoles; garageOnly?: boolean; top?: Map<string, number> }): WaChat[] {
   const q = fold(opts.query ?? '');
   // Letters in it — a name, not a number («Ali 2» is not «2»).
   const qDigits = /\p{L}/u.test(q) ? '' : searchDigits(q);
@@ -249,7 +253,7 @@ export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: strin
     if (opts.tab === 'groups') return c.group;
     return true;
   });
-  return orderChats(out);
+  return orderChats(out, opts.top);
 }
 
 /** How many chats of each tab wait to be read (the tab's number). */

@@ -192,6 +192,8 @@ function PartPick({ i, lang, on, onTap }: { i: OrderItem; lang: 'en' | 'ru'; on:
 function whyWords(r: Ranked, t: (k: string, o?: Record<string, unknown>) => string): string {
   const s = r.supplier;
   const out: string[] = [];
+  // v0.91.6: one of the garage's main suppliers — said first.
+  if (r.why.some((w) => w.kind === 'top')) out.push(t('ask.top'));
   if (r.why.some((w) => w.kind === 'onJob')) out.push(t('suppliers.why.onJob'));
   const make = r.why.find((w): w is Extract<Why, { kind: 'make' | 'answers' | 'aiMake' | 'boughtFor' }> => w.kind === 'make' || w.kind === 'answers' || w.kind === 'aiMake' || w.kind === 'boughtFor');
   if (make) out.push(make.kind === 'answers' ? t('ask.answersFor', { make: make.make, n: make.n }) : make.make);
@@ -199,7 +201,7 @@ function whyWords(r: Ranked, t: (k: string, o?: Record<string, unknown>) => stri
   if (seen?.replyMin !== undefined && seen.answered >= 2) out.push(t('ask.replies', { time: replyTime(t, seen.replyMin) }));
   if (partsType(s) === 'used') out.push(t('ask.used'));
   if (r.use.jobs && out.length < 3) out.push(t('suppliers.jobs', { count: r.use.jobs }));
-  return out.slice(0, 3).join(' · ');
+  return out.slice(0, 4).join(' · ');
 }
 
 /**
@@ -213,7 +215,7 @@ function SupplierPick({ r, on, onTap, link }: { r: Ranked; on: boolean; onTap: (
   const chat = r.chat ?? chatIdOf(s.phone);
   return (
     <div className="ask-row-wrap">
-      <button type="button" className="ask-row" aria-pressed={on} onClick={onTap} data-ask-supplier={s.id} data-ask-chat-only={r.chat ? true : undefined}>
+      <button type="button" className="ask-row" aria-pressed={on} onClick={onTap} data-ask-supplier={s.id} data-ask-chat-only={r.chat ? true : undefined} data-ask-top={r.why.some((w) => w.kind === 'top') || undefined}>
         {on ? <IconCircleCheckFilled size={22} className="ask-check" data-on aria-hidden /> : <IconCircle size={22} stroke={1.6} className="ask-check" aria-hidden />}
         {chat ? <WaAvatar id={chat} name={s.name} size={36} /> : <PersonAvatar name={s.name} size={36} />}
         <span className="ask-row-main">

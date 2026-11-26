@@ -1,17 +1,17 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
-import { chatRole } from '../domain/whatsapp';
+import { chatRole, filterChats } from '../domain/whatsapp';
 import type { WaChat, WaMessage } from '../domain/whatsapp';
 import { setAiTransport } from './ai';
-import { chatsMakes, loadChatMakes, olderFromPhone, phoneHistoryChats, resetChatStudy, setChatMakes, studyChats } from './chatStudy';
+import { chatsMakes, loadChatMakes, olderFromPhone, phoneHistoryChats, resetChatStudy, setChatMakes, setChatPin, studyChats } from './chatStudy';
 import { SyncError } from './sync/api';
 import { createCustomer } from './customers';
 import { addItem } from './estimate';
 import { checkIn } from './orders';
 import { saveSupplier } from './parts';
 import { ensureSeed } from './seed';
-import { suppliersForJob } from './supplierRank';
+import { loadTop, suppliersForJob, suppliersRanked } from './supplierRank';
 import { askSuppliers } from './waAsk';
 import { loadChatRoles, loadChats, loadPeople, refreshWa, setWaTransport, tagChats, type WaCallInit } from './whatsapp';
 
@@ -233,6 +233,30 @@ describe('studying the chats (v0.91)', () => {
     expect(again.parts.filter((r) => r.supplier.name === 'Desert Auto Spare Parts')).toHaveLength(1);
   });
 
+  it('v0.91.6: a chat studied before — read once more, whole: its older requests know their parts and what was offered', async () => {
+    await studyChats();
+    // As v0.91.5 kept it: the requests without kinds and offers, no `studyV`.
+    const was = (await db.chatFacts.get(FAST.id))!;
+    expect(was.studyV).toBe(2);
+    expect(was.turns?.[0].k).toEqual(['body']);
+    await db.chatFacts.put({ ...was, turns: was.turns!.map(({ k: _k, o: _o, ...x }) => x), studyV: undefined, studiedAt: new Date(NOW - DAY).toISOString() });
+    resetChatStudy(0);
+    deepRead = [];
+    await studyChats();
+    expect(deepRead).toContain(FAST.id);
+    const now = (await db.chatFacts.get(FAST.id))!;
+    expect(now.studyV).toBe(2);
+    expect(now.turns).toHaveLength(4);
+    expect(now.turns?.every((x) => x.k?.[0] === 'body' && x.o === 'oa')).toBe(true);
+    // Once: nothing new — nothing read again (read long ago, not a moment ago).
+    await db.chatFacts.update(FAST.id, { studiedAt: new Date(NOW - DAY).toISOString() });
+    resetChatStudy(0);
+    deepRead = [];
+    read = [];
+    await studyChats();
+    expect(deepRead).toEqual([]);
+    expect(read).toEqual([]);
+  });
   it('makes by hand to several chats: a supplier of the base on its card, another chat on its record; one taken off', async () => {
     await studyChats();
     expect(await setChatMakes([FAST, NEW_ONE], ['Toyota', 'Lexus'], [])).toBe(2);
@@ -248,5 +272,23 @@ describe('studying the chats (v0.91)', () => {
     expect(makes.byChat.get(NEW_ONE.id)).toEqual([{ make: 'Toyota', by: 'hand' }]);
     // Silent Spares: what it was asked for and answered once («NA» counts as an answer) — Nissan.
     expect(makes.byPhone.get('971501110002')?.[0]).toMatchObject({ make: 'Nissan', by: 'seen' });
+  });
+  it('v0.91.6: the main suppliers — by their work, pinned and taken off by hand; on top of WhatsApp, first in the lists', async () => {
+    await studyChats();
+    // The fast one by its work (four requests answered with prices); the silent one and the new one (one answer) — not by themselves.
+    let top = await loadTop();
+    expect([...top.chats.keys()]).toEqual([FAST.id]);
+    // Pinned by hand: first, whatever its counts.
+    await setChatPin([NEW_ONE], 'on');
+    top = await loadTop();
+    expect([...top.chats.keys()]).toEqual([NEW_ONE.id, FAST.id]);
+    const [people, roles] = await Promise.all([loadPeople(), loadChatRoles()]);
+    const rows = filterChats([CUSTOMER, SILENT, FAST, NEW_ONE, GROUP], { tab: 'all', people, roles, top: top.chats });
+    expect(rows.slice(0, 2).map((c) => c.id)).toEqual([NEW_ONE.id, FAST.id]);
+    const ranked = await suppliersRanked();
+    expect(ranked.list[0].name).toBe('Fast Toyota Parts');
+    // Taken off by hand: no longer main.
+    await setChatPin([FAST], 'off');
+    expect((await loadTop()).chats.has(FAST.id)).toBe(false);
   });
 });

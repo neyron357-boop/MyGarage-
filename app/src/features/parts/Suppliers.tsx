@@ -1,5 +1,5 @@
 import { ActionIcon, Button, Group, Loader, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPinFilled, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { alreadyInBase, cardName, phonesInText, supplierMatches } from '../../do
 import { starsOf, useOf, type SupplierKnow } from '../../domain/supplierRank';
 import { dayShort } from '../../domain/dates';
 import { suppliersRanked } from '../../services/supplierRank';
-import { replyTime } from '../whatsapp/WaParts';
+import { replyTime, SupplierProfile } from '../whatsapp/WaParts';
 import { StarsPill } from '../job/SupplierAsk';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
@@ -164,6 +164,8 @@ export function SupplierSheet({
             )}
           </div>
         )}
+        {/* What it is by its whole history (v0.91.6): makes, parts, original / copy / used, since when. */}
+        {know && <SupplierProfile seen={know.seen} />}
         <div className="ios-group">
           <div className="ios-row left line-name">
             <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" data-autofocus={(!v.id && !v.phone) || undefined} />
@@ -316,13 +318,14 @@ export function SupplierSheet({
  * A supplier's row on the phone (v0.60.1): drawn again only when its supplier, area or jobs change — a list of a thousand
  * drawn as it is scrolled does not draw the rows above again each time it grows.
  */
-const SupplierRow = memo(function SupplierRow({ s, area, jobs, know, onOpen }: { s: Supplier; area?: string; jobs: number; know?: SupplierKnow; onOpen: (s: Supplier) => void }) {
+const SupplierRow = memo(function SupplierRow({ s, area, jobs, know, top, onOpen }: { s: Supplier; area?: string; jobs: number; know?: SupplierKnow; top?: boolean; onOpen: (s: Supplier) => void }) {
   const { t } = useTranslation();
   return (
     <ListRow
       onClick={() => onOpen(s)}
       title={
         <span className="supplier-name">
+          {top && <IconPinFilled size={14} className="wa-row-top" aria-label={t('wa.top.label')} data-supplier-top />}
           <span className="supplier-name-text">{s.name}</span>
           <StarsPill s={s} know={know} />
         </span>
@@ -430,6 +433,7 @@ export function SuppliersTab() {
       sort: (s) => s.name.toLowerCase(),
       cell: (s) => (
         <span className="supplier-name">
+          {ranked?.top.suppliers.has(s.id) && <IconPinFilled size={14} className="wa-row-top" aria-label={t('wa.top.label')} data-supplier-top />}
           <span className="supplier-name-text dt-main">{s.name}</span>
           <StarsPill s={s} know={ranked?.know.get(s.id)} />
         </span>
@@ -485,7 +489,7 @@ export function SuppliersTab() {
             </div>
         <List>
           {g.rows.map((s) => (
-            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} know={ranked!.know.get(s.id)} onOpen={setEdit} />
+            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} know={ranked!.know.get(s.id)} top={ranked!.top.suppliers.has(s.id)} onOpen={setEdit} />
           ))}
         </List>
           </div>

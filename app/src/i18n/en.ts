@@ -475,7 +475,7 @@ export const en: typeof ru = {
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
-  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}' },
+  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}', top: 'Main' },
   newOrder: {
     // v0.81: the VIN in the plate's card.
     scanVin: 'Scan VIN',
@@ -1959,6 +1959,22 @@ export const en: typeof ru = {
       done_other: 'Makes updated for {{count}} chats',
     },
     study: { going: 'The AI is going through the chats · {{done}} of {{total}}', phone: 'History from the phone · {{done}} of {{total}}' },
+    top: {
+      label: 'Main supplier',
+      pin: 'Pin on top',
+      unpin: 'Unpin',
+      pinShort: 'Pin',
+      unpinShort: 'Unpin',
+      pinned_one: 'Pinned on top: {{count}} chat',
+      pinned_few: 'Pinned on top: {{count}} chats',
+      pinned_many: 'Pinned on top: {{count}} chats',
+      pinned_other: 'Pinned on top: {{count}} chats',
+      unpinned_one: 'Unpinned: {{count}} chat',
+      unpinned_few: 'Unpinned: {{count}} chats',
+      unpinned_many: 'Unpinned: {{count}} chats',
+      unpinned_other: 'Unpinned: {{count}} chats',
+    },
+    profile: { makes: 'Makes', parts: 'Parts', offers: 'Offers', original: 'original', copy: 'copy', used: 'used', when: 'Working', since: 'since {{date}}', last: 'last {{date}}', long: 'quiet since {{date}}' },
     history: {
       title: 'History from the phone',
       note: 'Here — the chats since this device was linked. The older messages are on the phone: it gives them when asked, with WhatsApp open on it.',
