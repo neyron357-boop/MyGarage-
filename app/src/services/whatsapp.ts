@@ -328,8 +328,9 @@ function failure(e: unknown): Error {
 export const waCall = <T,>(path: string, init: WaCallInit = {}): Promise<T> => call<T>(path, init);
 
 /** A chat's last messages, read and handed over — not kept in the lists (a supplier's answers read, v0.79). */
-export async function fetchChatMessages(chat: string, limit = 60): Promise<WaMessage[]> {
-  const r = await call<{ messages: WaMessage[] }>('messages', { query: { chat, limit: String(limit) }, timeout: 100_000 });
+export async function fetchChatMessages(chat: string, limit = 60, opts: { lite?: boolean } = {}): Promise<WaMessage[]> {
+  // `lite` (v0.91): who, when, the kind and the words only — a chat studied (services/chatStudy.ts), a few kilobytes.
+  const r = await call<{ messages: WaMessage[] }>('messages', { query: { chat, limit: String(limit), ...(opts.lite ? { lite: '1' } : {}) }, timeout: 100_000 });
   return r.messages ?? [];
 }
 
@@ -1073,10 +1074,13 @@ export async function loadPeople(): Promise<Map<string, Who>> {
  * by itself — the work group, the boss, the wash, the customers' own groups.
  */
 export async function loadChatRoles(): Promise<ChatRoles> {
-  const [settings, customers] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray()]);
+  const [settings, customers, facts] = await Promise.all([getSettings(), db.customers.filter((c) => !!c.waGroup).toArray(), db.chatFacts.toArray()]);
   const auto = waAutoOf(settings.waAuto);
   const groups = new Set([auto.work.to?.chat, auto.boss.to?.chat, auto.wash.to?.chat, ...customers.map((c) => c.waGroup?.chat)].filter((x): x is string => !!x));
-  return { tags: settings.waChatTags ?? {}, groups, ai: settings.waChatAi ?? {} };
+  // The AI's word: v0.86 kept it with the settings, v0.91 with the chat (services/chatStudy.ts) — the later one counts.
+  const ai: NonNullable<ChatRoles['ai']> = { ...(settings.waChatAi ?? {}) };
+  for (const f of facts) if (f.aiRole) ai[f.id] = f.aiRole;
+  return { tags: settings.waChatTags ?? {}, groups, ai };
 }
 
 /** Chats picked in the list given one status (or theirs taken off — null): kept with the garage's settings. */

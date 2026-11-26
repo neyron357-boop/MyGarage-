@@ -165,3 +165,10 @@ export function WhoTag({ kind }: { kind: WhoKind | WaTag }) {
     </span>
   );
 }
+
+/** «12 мин», «3 ч», «2 д» — how long a supplier takes to answer. */
+export function replyTime(t: (k: string, o?: Record<string, unknown>) => string, min: number): string {
+  if (min < 60) return t('wa.know.min', { n: min });
+  if (min < 48 * 60) return t('wa.know.hours', { n: Math.round(min / 60) });
+  return t('wa.know.days', { n: Math.round(min / 1440) });
+}

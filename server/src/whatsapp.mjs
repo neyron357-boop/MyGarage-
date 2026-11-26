@@ -5,6 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findBrowser } from '../whatsapp/browser.mjs';
+import { liteRow } from '../whatsapp/rows.mjs';
 import { DIRS, httpError } from './store.mjs';
 import { createOutbox } from './waOutbox.mjs';
 
@@ -383,7 +384,12 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       return true;
     }
     if (get && what === 'chats') return send(res, 200, await call(`/chats${query(url, ['limit'])}`)), true;
-    if (get && what === 'messages') return send(res, 200, await call(`/messages${query(url, ['chat', 'limit'])}`)), true;
+    if (get && what === 'messages') {
+      const got = await call(`/messages${query(url, ['chat', 'limit'])}`);
+      // `lite` (v0.91): only who, when, the kind and the words — a chat studied by the app (services/chatStudy.ts).
+      if (url.searchParams.get('lite') === '1' && Array.isArray(got?.messages)) got.messages = got.messages.map(liteRow).filter(Boolean);
+      return send(res, 200, got), true;
+    }
     if (get && what === 'number') return send(res, 200, await call(`/number${query(url, ['phone'])}`, { timeout: 40_000 })), true;
     if (req.method === 'POST' && what === 'send') {
       const body = await readJson(req, 256 * 1024);

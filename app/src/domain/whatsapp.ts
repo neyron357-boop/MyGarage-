@@ -181,7 +181,7 @@ export interface ChatRoles {
   tags: Record<string, WaTag>;
   /** The work group, the boss, the wash, the customers' own groups (domain/waAuto.ts, `Customer.waGroup`). */
   groups: Set<string>;
-  /** Said by the AI (v0.86, `Settings.waChatAi`): under the person's own status; «other» — asked, none. */
+  /** Said by the AI (v0.86, `Settings.waChatAi`; v0.91 — `ChatFact.aiRole`): under the person's own status; «other» — asked, none. */
   ai?: Record<string, 'customer' | 'supplier' | 'other'>;
 }
 export const NO_ROLES: ChatRoles = { tags: {}, groups: new Set() };

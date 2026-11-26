@@ -369,11 +369,20 @@ export async function aiReadReply(text: string, quote: string, asks: { id: strin
   }
 }
 
-/** Who these chats are to the garage, as the AI says by their names and words (v0.86). */
-export async function aiChatRoles(chats: { id: string; name: string; texts: string[] }[]): Promise<{ id: string; role: 'customer' | 'supplier' | 'other'; confidence: number }[]> {
+/**
+ * Who these chats are to the garage, as the AI says by their names and words (v0.86); v0.91 — a supplier's makes too
+ * (`makes` — a server from before v0.91 does not say them). `known` — what the garage knows the chat to be already.
+ */
+export interface AiChatRole {
+  id: string;
+  role: 'customer' | 'supplier' | 'other';
+  makes?: string[];
+  confidence: number;
+}
+export async function aiChatRoles(chats: { id: string; name: string; texts: string[]; known?: 'customer' | 'supplier' }[]): Promise<AiChatRole[]> {
   if (!aiOn() || !chats.length) return [];
   try {
-    return (await askAi<{ chats: { id: string; role: 'customer' | 'supplier' | 'other'; confidence: number }[] }>('roles', { chats }, 'roles', 40_000)).chats ?? [];
+    return (await askAi<{ chats: AiChatRole[] }>('roles', { chats }, 'roles', 40_000)).chats ?? [];
   } catch {
     return [];
   }

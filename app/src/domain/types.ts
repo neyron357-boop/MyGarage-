@@ -1,5 +1,6 @@
 import type { WaAuto, WaTarget } from './waAuto';
 import type { NotifySettings } from './notify';
+import type { Turn } from './chatStudy';
 // Domain types. Field names follow docs/04-data-model.md (camelCase in code).
 // Money is always integer fils (1 AED = 100 fils). VAT rates are basis points (500 = 5%).
 
@@ -501,6 +502,35 @@ export interface Driver {
  * a supplier (or a bill) for the garage, all of it or a part, and is to be paid back. Not a supplier: the supplier base
  * stays the shops. One record however many times he paid (`Expense.lenderId`).
  */
+/**
+ * What the garage knows of a WhatsApp chat (v0.91, the owner: «ИИ должен быстро обрабатывать новые чаты или уже
+ * существующие, определять их, присваивать им статусы… на какие марки авто она часто отвечает… накапливать знание»): the
+ * garage's requests in it and what came of them (`domain/chatStudy.ts`, read by the app's own rules — never the messages
+ * themselves), the makes given by hand to a chat not of the base, the AI's word on who it is and its makes. One record a
+ * chat, synced: every device ranks the suppliers alike. Written only by `services/chatStudy.ts`.
+ */
+export interface ChatFact {
+  /** The chat's id (`…@c.us`, `…@lid`). */
+  id: string;
+  /** Its number, digits only ('' — not known): a supplier of the base is found by it. */
+  phone: string;
+  /** WhatsApp's name for it when last read: a supplier only in WhatsApp is listed by it. */
+  name?: string;
+  /** The garage's requests in it and their answers (the newest 80), kept as they come. */
+  turns?: Turn[];
+  /** Its messages were read up to this one's time (ms). */
+  through?: number;
+  studiedAt?: string;
+  /** Makes given by hand («Выбрать» → «Марка») — a chat that is no supplier of the base (one of the base keeps them on its card). */
+  makes?: string[];
+  /** The AI's word (v0.91: by its name and its words): who it is, and the makes a supplier deals with. */
+  aiRole?: 'customer' | 'supplier' | 'other';
+  aiMakes?: string[];
+  aiAt?: string;
+  updatedAt: string;
+  _t?: number;
+}
+
 /**
  * A reminder the manager set for himself (v0.74, the user: «добавить также напоминалки»): its words, when — and, set from
  * a job, that job. It shows in «Сегодня» from its day and comes to the phone as a notification at its time, until it is

@@ -6073,7 +6073,9 @@ html.kb .viewer[data-typing] {
 .sheet-footer {
   position: sticky;
   bottom: 0;
-  z-index: 2;
+  /* Over the rows' own tap labels (z-index 3, «.haptic-hit»): with 2 an iPhone's finger on «Отправить» landed on the row
+     scrolled under it — the buttons worked only at the very end of the list (v0.91, the owner's note #75). */
+  z-index: 4;
   margin-top: -4px;
   padding: 12px 0 2px;
   background: linear-gradient(to top, var(--sheet-bg, var(--app-canvas)) 72%, transparent);
@@ -10328,4 +10330,84 @@ html.desk .wa-pane-foot {
   font-weight: 500;
   color: var(--app-label-2);
   vertical-align: middle;
+}
+
+/* ---------- v0.91: what the chats teach — makes, the AI going through them, how a supplier answers ---------- */
+/* The makes a supplier is known for, before its last words in the chats' list (said by the AI only — paler). */
+.wa-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.wa-row-sub > .wa-last {
+  flex: 1;
+}
+.wa-row-makes {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--mantine-color-cyan-filled);
+}
+.wa-row-makes[data-ai] {
+  color: var(--app-label-3);
+}
+/* «ИИ изучает чаты · 34 из 180» under the search, while it goes. */
+.wa-study {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 4px 0;
+  font-size: 13px;
+  color: var(--app-label-2);
+}
+/* A make only some of the picked chats have: outlined, left as it is unless tapped. */
+.chip[data-some] {
+  box-shadow: inset 0 0 0 1.5px var(--mantine-color-cobalt-6);
+}
+/* The stars a supplier's answers earned (not the manager's own): paler. */
+.stars-pill[data-auto] {
+  color: var(--app-label-2);
+  background: var(--app-soft, color-mix(in srgb, var(--mantine-color-gray-6) 14%, transparent));
+}
+/* A chat's card: what its requests came to, its makes. */
+.wa-know {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.wa-know-line {
+  font-size: 13px;
+  color: var(--app-label-2);
+}
+.wa-know-makes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.wa-know-make {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--app-soft, color-mix(in srgb, var(--mantine-color-gray-6) 14%, transparent));
+}
+.wa-know-make[data-by='hand'] {
+  color: var(--mantine-color-cobalt-filled);
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 14%, transparent);
+}
+/* «Поставщики» of a job: the supplier's WhatsApp picture by its name («лого… сразу узнаю»). */
+.ask-row .wa-avatar,
+.ask-row .person-avatar {
+  flex: none;
 }

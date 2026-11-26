@@ -130,6 +130,16 @@ export function messageRow(d, { me = '' } = {}) {
   return row;
 }
 
+/**
+ * A message as the app studies a chat (v0.91, `/api/wa/messages?lite=1`): who, when, its kind and its words — no preview
+ * picture, no quote, no file (the garage's requests and the supplier's answers are read off a chat's last messages in a
+ * few kilobytes, through the tunnel too).
+ */
+export function liteRow(row) {
+  if (!row) return null;
+  return { id: row.id, t: row.t, me: !!row.me, type: row.type, text: clip(row.text ?? '', 600) };
+}
+
 /** A message in a line of the chats' list: no preview picture, a few words. */
 export function lastRow(row) {
   if (!row) return null;

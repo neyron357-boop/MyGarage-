@@ -11,9 +11,10 @@ import { waDigits } from '../domain/whatsapp';
 import { AppError } from './errors';
 import { updateItem } from './estimate';
 import { partsRequestText } from './messages';
+import { saveSupplier } from './parts';
 import { getSettings } from './settings';
 import { blobBase64, queueWa } from './waOutbox';
-import { chatOfPhone, fetchChatMessages, numberOnWa, onWaEvent, waReady, waStore } from './whatsapp';
+import { chatOfPhone, fetchChatMessages, loadChatRoles, numberOnWa, onWaEvent, waReady, waStore } from './whatsapp';
 
 /*
  * Parts asked of suppliers through the garage's WhatsApp, and their answers read (v0.79, the user: «автоотправка
@@ -42,11 +43,32 @@ export interface AskPick {
  * The request to each supplier picked, sent by the garage's server (`files` — the diagrams' sheets; `usedFiles` — the
  * car's and the parts' photos for a used-parts seller). What could not be asked (no number) is said back.
  */
+/**
+ * A supplier only in WhatsApp, asked (v0.91, the owner's note #74): made one of the base — its chat's name and number, the
+ * makes given to the chat by hand (`wa:<chat>` in the sheet; services/supplierRank.ts `chatSuppliers`). One of the base
+ * with the same number already — that one.
+ */
+export async function supplierOfChat(chatId: string): Promise<string | undefined> {
+  const [fact, roles] = await Promise.all([db.chatFacts.get(chatId), loadChatRoles()]);
+  const chat = waStore().chats.find((c) => c.id === chatId);
+  const phone = chat?.phone || fact?.phone;
+  if (!phone) return undefined;
+  const have = (await db.suppliers.toArray()).find((s) => waDigits(s.phone) === phone);
+  if (have) return have.id;
+  const s = await saveSupplier({ name: (chat?.name || fact?.name || '').trim() || `+${phone}`, phone: `+${phone}`, makes: fact?.makes?.length ? fact.makes : undefined, service: roles.tags[chatId] === 'service' || undefined });
+  return s.id;
+}
+
 export async function askSuppliers(orderId: string, picks: AskPick[], x: { items: OrderItem[]; sheets: File[]; usedFiles: File[] }): Promise<{ asked: number; noNumber: string[] }> {
   const s = waAutoOf((await getSettings()).waAuto);
   if (!picks.length) return { asked: 0, noNumber: [] };
   if (picks.length > s.ask.max) throw new AppError('wa.err.tooManySuppliers', { n: s.ask.max });
   if (!x.items.length) throw new AppError('wa.err.noParts');
+  // Suppliers only in WhatsApp (v0.91): of the base now — the request is kept on the job under them.
+  if (picks.some((p) => p.supplierId.startsWith('wa:'))) {
+    const ids = await Promise.all(picks.map(async (p) => (p.supplierId.startsWith('wa:') ? ((await supplierOfChat(p.supplierId.slice(3))) ?? p.supplierId) : p.supplierId)));
+    picks = picks.map((p, k) => ({ ...p, supplierId: ids[k] }));
+  }
   const order = await db.orders.get(orderId);
   const vehicle = order ? await db.vehicles.get(order.vehicleId) : undefined;
   if (!order || !vehicle) throw new AppError('err.notFound');

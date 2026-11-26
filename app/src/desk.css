@@ -2507,6 +2507,23 @@ html.desk .desk-tab-chip {
 html.desk .desk-tab-chip:hover {
   background: var(--app-press);
 }
+/* Dragged along the strip (v0.91, #29): the others slide out of its way, it follows the mouse over them. */
+html.desk .desk-tab-chip {
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+html.desk .desk-tabs[data-dragging] {
+  cursor: grabbing;
+}
+html.desk .desk-tab-chip[data-drag] {
+  position: relative;
+  z-index: 1;
+  cursor: grabbing;
+  transition: none;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.14);
+}
 html.desk .desk-tab-chip[data-active] {
   margin-bottom: -1px;
   height: 35px;

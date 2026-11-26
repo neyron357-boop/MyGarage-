@@ -4,19 +4,22 @@ import { IconBrandWhatsapp, IconCircle, IconCircleCheckFilled, IconCopy, IconSen
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { itemTitle } from '../../domain/items';
-import { starsOf, type Ranked } from '../../domain/supplierRank';
+import { shownStars, type Ranked, type SupplierKnow, type Why } from '../../domain/supplierRank';
 import { partsType } from '../../domain/supplierTidy';
 import type { OrderItem, Supplier } from '../../domain/types';
+import { chatIdOf, searchDigits } from '../../domain/whatsapp';
 import { partNamesText, partsRequestText, whatsappUrl } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { suppliersForJob } from '../../services/supplierRank';
 import { askSuppliers, recordLinkAsk } from '../../services/waAsk';
 import { waReady } from '../../services/whatsapp';
 import { copyText } from '../../ui/clipboard';
-import { SearchField } from '../../ui/components';
+import { PersonAvatar, SearchField } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useErrorText, useLang, useScreenLiveQuery } from '../../ui/hooks';
+import { useMoreRows } from '../../ui/moreRows';
 import { useWaSel } from '../../ui/waSel';
+import { replyTime, WaAvatar } from '../whatsapp/WaParts';
 
 /*
  * «Поставщики» under a job's lines (v0.82, the owner's notes 24/11: «убрать полностью эту капсулу и весь его модуль»; «кнопку
@@ -30,18 +33,23 @@ import { useWaSel } from '../../ui/waSel';
  *    (services/waAsk.ts `askSuppliers`: their answers are read into the lines' offers as before). The pick and the tap are
  *    the person's own sending — nothing goes by itself. Without the garage's WhatsApp: each one's chat by a link with
  *    the list, and «Скопировать».
+ * v0.91 (the owner's notes #74–#75 and his words): every supplier — the base's and those only in WhatsApp (a chat with the
+ * status «Поставщик») — the best first (how they answer the garage's requests on WhatsApp, the makes they answered for),
+ * drawn as the list is scrolled; the search goes through all of them (name, number, makes); each with its WhatsApp picture
+ * («лого поставщиков, так часто сразу узнаю»); «Отправить» stays above the rows.
  */
 
-const SHOWN = 12;
-
-/** The manager's stars of a supplier, as a pill (the suppliers' list and this sheet). */
-export function StarsPill({ s }: { s: Pick<Supplier, 'reliability'> }) {
-  const n = starsOf(s);
-  if (!n) return null;
+/**
+ * A supplier's stars, as a pill (the suppliers' list and this sheet): the manager's own; v0.91 — else those its WhatsApp
+ * answers earned (`know`), paler.
+ */
+export function StarsPill({ s, know }: { s: Pick<Supplier, 'reliability'>; know?: SupplierKnow }) {
+  const stars = shownStars(s, know);
+  if (!stars) return null;
   return (
-    <span className="stars-pill tnum" aria-label={`★ ${n}`}>
+    <span className="stars-pill tnum" data-auto={stars.auto || undefined} aria-label={`★ ${stars.n}`}>
       <IconStarFilled size={12} aria-hidden />
-      {n}
+      {stars.n}
     </span>
   );
 }
@@ -67,10 +75,23 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
   const toBuy = lines.filter((i) => !i.procurementStatus || i.procurementStatus === 'needed');
   const picked = parts ?? new Set((toBuy.length ? toBuy : lines).map((i) => i.id));
   const asked = lines.filter((i) => picked.has(i.id));
-  // Sellers of parts, the manager's «off» ones left out; the search finds any of them.
+  // Sellers of parts, the manager's «off» ones left out — all of them, the best first; the search finds any of them.
   const sellers = useMemo(() => (data?.parts ?? []).filter((r) => r.supplier.mark !== 'off'), [data]);
   const q = query.trim().toLowerCase();
-  const shown = q ? sellers.filter((r) => `${r.supplier.name} ${r.supplier.nameAr ?? ''} ${r.supplier.phone ?? ''}`.toLowerCase().includes(q)).slice(0, 30) : sellers.slice(0, SHOWN);
+  const qDigits = /\p{L}/u.test(q) ? '' : searchDigits(q);
+  const found = useMemo(
+    () =>
+      q
+        ? sellers.filter((r) => {
+            const s = r.supplier;
+            const words = `${s.name} ${s.nameAr ?? ''} ${(s.makes ?? []).join(' ')} ${(r.know?.makes ?? []).map((m) => m.make).join(' ')}`.toLowerCase();
+            return words.includes(q) || (!!qDigits && (s.phone ?? '').replace(/\D/g, '').includes(qDigits));
+          })
+        : sellers,
+    [sellers, q, qDigits],
+  );
+  const { limit, more } = useMoreRows(found.length, `${q}|${opened}`);
+  const shown = found.slice(0, limit);
   // The picked ones stay in sight whatever is searched.
   const pickedRows = sellers.filter((r) => who.has(r.supplier.id) && !shown.includes(r));
   const text = b.vehicle && asked.length ? partsRequestText(b.vehicle, asked) : '';
@@ -133,6 +154,7 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
           <div className="ios-group" style={{ marginTop: 8 }}>
             {pickedRows.map(row)}
             {shown.map(row)}
+            {more()}
             {!shown.length && !pickedRows.length && (
               <Text c="dimmed" p="md" size="sm">
                 {t('ask.noSuppliers')}
@@ -166,27 +188,39 @@ function PartPick({ i, lang, on, onTap }: { i: OrderItem; lang: 'en' | 'ru'; on:
   );
 }
 
-/** A supplier to ask: a tap — picked; why it fits under its name; without the garage's WhatsApp — its chat by a link. */
+/** Why a supplier is where it is, in a few words: on this job, its make (answered for, said by the AI), how fast it answers. */
+function whyWords(r: Ranked, t: (k: string, o?: Record<string, unknown>) => string): string {
+  const s = r.supplier;
+  const out: string[] = [];
+  if (r.why.some((w) => w.kind === 'onJob')) out.push(t('suppliers.why.onJob'));
+  const make = r.why.find((w): w is Extract<Why, { kind: 'make' | 'answers' | 'aiMake' | 'boughtFor' }> => w.kind === 'make' || w.kind === 'answers' || w.kind === 'aiMake' || w.kind === 'boughtFor');
+  if (make) out.push(make.kind === 'answers' ? t('ask.answersFor', { make: make.make, n: make.n }) : make.make);
+  const seen = r.know?.seen;
+  if (seen?.replyMin !== undefined && seen.answered >= 2) out.push(t('ask.replies', { time: replyTime(t, seen.replyMin) }));
+  if (partsType(s) === 'used') out.push(t('ask.used'));
+  if (r.use.jobs && out.length < 3) out.push(t('suppliers.jobs', { count: r.use.jobs }));
+  return out.slice(0, 3).join(' · ');
+}
+
+/**
+ * A supplier to ask: its WhatsApp picture (v0.91), a tap — picked; why it fits under its name; the stars (the manager's,
+ * else those its answers earned — paler); without the garage's WhatsApp — its chat by a link.
+ */
 function SupplierPick({ r, on, onTap, link }: { r: Ranked; on: boolean; onTap: () => void; link?: { text: string; orderId: string; items: OrderItem[] } }) {
   const { t } = useTranslation();
   const s: Supplier = r.supplier;
-  const stars = starsOf(s) ?? 0;
-  const used = partsType(s) === 'used';
-  const why = [r.why.some((w) => w.kind === 'onJob') ? t('suppliers.why.onJob') : '', used ? t('ask.used') : '', r.use.jobs ? t('suppliers.jobs', { count: r.use.jobs }) : ''].filter(Boolean).join(' · ');
+  const why = whyWords(r, t);
+  const chat = r.chat ?? chatIdOf(s.phone);
   return (
     <div className="ask-row-wrap">
-      <button type="button" className="ask-row" aria-pressed={on} onClick={onTap} data-ask-supplier={s.id}>
+      <button type="button" className="ask-row" aria-pressed={on} onClick={onTap} data-ask-supplier={s.id} data-ask-chat-only={r.chat ? true : undefined}>
         {on ? <IconCircleCheckFilled size={22} className="ask-check" data-on aria-hidden /> : <IconCircle size={22} stroke={1.6} className="ask-check" aria-hidden />}
+        {chat ? <WaAvatar id={chat} name={s.name} size={36} /> : <PersonAvatar name={s.name} size={36} />}
         <span className="ask-row-main">
           <span className="ask-row-name supplier-name-text">{s.name}</span>
           {why && <span className="ask-row-why">{why}</span>}
         </span>
-        {stars > 0 && (
-          <span className="stars-pill tnum" aria-label={`★ ${stars}`}>
-            <IconStarFilled size={12} aria-hidden />
-            {stars}
-          </span>
-        )}
+        <StarsPill s={s} know={r.know} />
       </button>
       {link && s.phone && (
         <ActionIcon

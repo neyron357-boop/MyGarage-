@@ -1,16 +1,18 @@
 import { ActionIcon, Button, Group, Loader, Modal, Stack, Switch, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconBriefcase, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { IconBrandWhatsapp, IconBriefcase, IconCar, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconStarFilled, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { dayShort, dubaiDate, dubaiTime } from '../../domain/dates';
+import { CAR_MAKES, POPULAR_MAKES } from '../../domain/carCatalog';
+import type { KnownMake } from '../../domain/chatStudy';
 import { formatPhone } from '../../domain/phone';
 import { aiRoleOf, CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROLES, tabCounts, WA_TAGS, waDigits, whoOf, type ChatTab, type WaChat, type WaTag, type Who, type WhoKind } from '../../domain/whatsapp';
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
 import { loadChatRoles, loadChats, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
-import { tagUnknownChats } from '../../services/waRoles';
+import { chatKnow, chatsMakes, loadChatMakes, onStudyProgress, setChatMakes, studyProgress } from '../../services/chatStudy';
 import { AiMark } from '../ai/Ai';
 import { haptic } from '../../ui/haptics';
 import { useWaStatus } from '../../ui/waSel';
@@ -28,7 +30,7 @@ import { CustomerModal } from '../customers/forms';
 import { SupplierSheet } from '../parts/Suppliers';
 import { ChatThread } from './ChatThread';
 import type { QuickFor } from './ChatQuick';
-import { ChatHead, LastLine, useWaPeople, WaAvatar, WhoTag } from './WaParts';
+import { ChatHead, LastLine, replyTime, useWaPeople, WaAvatar, WhoTag } from './WaParts';
 
 /*
  * «WhatsApp» (v0.78): the garage's chats in the app. A phone: the list, a chat on its own screen. A PC: the list and
@@ -118,7 +120,7 @@ export function WaGate({ s }: { s: WaStore }) {
 
 /* ---------- The list ---------- */
 
-const ChatRow = memo(function ChatRow({ c, who, role, byAi, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
+const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, when, active, onOpen, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; when: string; active: boolean; onOpen: (c: WaChat) => void; picking?: boolean; picked?: boolean }) {
   const { t } = useTranslation();
   const title = c.self ? t('wa.self') : chatTitle(c, who);
   return (
@@ -145,7 +147,23 @@ const ChatRow = memo(function ChatRow({ c, who, role, byAi, when, active, onOpen
           {byAi && <AiMark size={13} label={t('ai.chatByAi')} />}
         </span>
       }
-      subtitle={c.last ? <LastLine last={c.last} group={c.group} /> : undefined}
+      subtitle={
+        // v0.91: the makes a supplier is known for (by hand, answered for; said by the AI — dimmer), before its last words.
+        makes?.length ? (
+          <span className="wa-row-sub">
+            <span className="wa-row-makes" data-ai={makes.every((m) => m.by === 'ai') || undefined} data-wa-makes>
+              {makes
+                .slice(0, 3)
+                .map((m) => m.make)
+                .join(' · ')}
+              {makes.length > 3 && ` +${makes.length - 3}`}
+            </span>
+            {c.last && <LastLine last={c.last} group={c.group} />}
+          </span>
+        ) : c.last ? (
+          <LastLine last={c.last} group={c.group} />
+        ) : undefined
+      }
       right={
         <span className="wa-row-side">
           <span className="wa-row-when tnum" data-unread={c.unread > 0 || undefined}>
@@ -191,6 +209,105 @@ function TagSheet({ opened, onClose, n, onTag }: { opened: boolean; onClose: () 
 }
 
 /**
+ * Makes for the chats picked (v0.91, the owner: «выбрать несколько чатов, например поставщики Тойота, и присвоить им марку
+ * Тойота, чтобы при поиске деталей первыми отображались»): the makes they all have are on; one only some of them have is
+ * marked so (it stays as it is unless tapped); a tap — on or off; «Сохранить» — to each (services/chatStudy.ts).
+ */
+function MakeSheet({ opened, onClose, onDone, chats }: { opened: boolean; onClose: () => void; onDone: () => void; chats: WaChat[] }) {
+  const { t } = useTranslation();
+  const { run, busy } = useAction({ exclusive: true });
+  const had = useScreenLiveQuery(() => (opened ? chatsMakes(chats) : undefined), [opened, chats]);
+  const [on, setOn] = useState<Set<string> | null>(null);
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (!opened) return;
+    setOn(null);
+    setQuery('');
+  }, [opened]);
+  const chosen = on ?? new Set(had?.common ?? []);
+  const some = new Set((had?.all ?? []).filter((m) => !(had?.common ?? []).includes(m)));
+  const q = query.trim().toLowerCase();
+  const list = q ? CAR_MAKES.filter((m) => m.toLowerCase().includes(q)) : [...new Set([...(had?.all ?? []), ...POPULAR_MAKES, ...CAR_MAKES])];
+  const toggle = (m: string) => {
+    haptic('selection');
+    setOn(() => {
+      const n = new Set(chosen);
+      if (n.has(m)) n.delete(m);
+      else n.add(m);
+      return n;
+    });
+  };
+  const save = () =>
+    void run(async () => {
+      const n = await setChatMakes(chats, [...chosen], had?.common ?? []);
+      haptic('success');
+      notifications.show({ color: 'green', message: t('wa.makes.done', { count: n }) });
+      onDone();
+    });
+  return (
+    <Modal opened={opened} onClose={onClose} title={t('wa.makes.title', { n: chats.filter((c) => !c.group).length })} classNames={{ content: 'sheet-grouped' }}>
+      <Stack gap="md">
+        <SearchField value={query} onChange={setQuery} placeholder={t('wa.makes.search')} />
+        <div className="chip-row wrap" data-wa-make-list>
+          {list.map((m) => (
+            <button key={m} type="button" className="chip" data-active={chosen.has(m) ? 'true' : undefined} data-some={!chosen.has(m) && some.has(m) ? true : undefined} aria-pressed={chosen.has(m)} onClick={() => toggle(m)} data-wa-make={m}>
+              {m}
+            </button>
+          ))}
+        </div>
+        <div className="sheet-footer">
+          <Button fullWidth size="lg" loading={busy} disabled={!had} onClick={save} data-wa-make-save>
+            {t('common.save')}
+          </Button>
+        </div>
+      </Stack>
+    </Modal>
+  );
+}
+
+/** What a chat taught the garage (v0.91), on its card: the stars its answers earned, how it answers, its makes. */
+function ChatKnowBlock({ id, phone }: { id: string; phone: string }) {
+  const { t } = useTranslation();
+  const k = useScreenLiveQuery(() => chatKnow(id, phone), [id, phone]);
+  if (!k || (!k.seen.turns && !k.seen.open && !k.makes.length)) return null;
+  const s = k.seen;
+  return (
+    <div className="wa-know" data-wa-know>
+      {k.rating && (
+        <span className="stars-pill tnum" data-auto aria-label={`★ ${k.rating.stars}`}>
+          <IconStarFilled size={12} aria-hidden />
+          {k.rating.stars}
+        </span>
+      )}
+      {s.turns + s.open > 0 && (
+        <span className="wa-know-line">
+          {[
+            t('wa.know.asked', { count: s.turns + s.open }),
+            t('wa.know.answered', { n: s.answered }),
+            s.priced ? t('wa.know.priced', { n: s.priced }) : '',
+            s.na ? t('wa.know.na', { n: s.na }) : '',
+            s.replyMin !== undefined ? t('wa.know.reply', { time: replyTime(t, s.replyMin) }) : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>
+      )}
+      {k.makes.length > 0 && (
+        <span className="wa-know-makes">
+          {k.makes.map((m) => (
+            <span key={m.make} className="wa-know-make" data-by={m.by}>
+              {m.make}
+              {m.by === 'seen' && m.n ? <span className="tnum"> · {m.n}</span> : null}
+              {m.by === 'ai' && <AiMark size={11} label={t('wa.know.byAi')} />}
+            </span>
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
  * The list as it was left (v0.84, the brief: «при возврате из чата сохраняй поиск, фильтр и позицию в списке в рамках
  * текущей сессии… при следующем запуске снова включай рабочий фильтр»): the tab, the search, «Только гараж», how far it was
  * scrolled and how many rows were drawn — kept while the app is open; «Только гараж» is on again at each start.
@@ -211,12 +328,9 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const setQuery = (v: string) => setQueryState((view.query = v));
   const setGarageOnly = (v: boolean) => setGarageOnlyState((view.garageOnly = v));
   const roles = useScreenLiveQuery(loadChatRoles, []) ?? NO_ROLES;
-  // Chats the garage does not know: who they are, asked of the AI a few at a time (v0.86, services/waRoles.ts).
-  useEffect(() => {
-    if (!s.chats.length) return;
-    const t = setTimeout(() => void tagUnknownChats(s.chats).catch(() => undefined), 3000);
-    return () => clearTimeout(t);
-  }, [s.chats.length]);
+  // Who the chats are and what their requests came to — studied by services/chatStudy.ts as the app runs (v0.91).
+  const makes = useScreenLiveQuery(loadChatMakes, []);
+  const study = useSyncExternalStore(onStudyProgress, studyProgress);
   const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly }), [s.chats, tab, query, people, roles, garageOnly]);
   // A search with «Только гараж» on: how many more the whole list has (one tap shows them).
   const elsewhere = useMemo(
@@ -254,6 +368,8 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [tagging, setTagging] = useState(false);
+  const [making, setMaking] = useState(false);
+  const pickedChats = useMemo(() => s.chats.filter((c) => picked.has(c.id)), [s.chats, picked]);
   const endPick = () => {
     setPicking(false);
     setPicked(new Set());
@@ -280,6 +396,21 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       endPick();
       notifications.show({ color: 'green', message: to ? t('wa.tags.updated', { count: n }) : t('wa.tags.cleared', { n }) });
     });
+  // A supplier's makes (its card's first, else what its chat taught) — the same array while they say the same, so a row
+  // (memo) is not drawn again each time a chat is studied.
+  const kept = useRef(new Map<string, { key: string; makes: KnownMake[] }>());
+  const rowMakes = (c: WaChat): KnownMake[] | undefined => {
+    if (c.group || !makes) return undefined;
+    const role = chatRole(c, people, roles);
+    if (role !== 'supplier' && role !== 'service') return undefined;
+    const now = makes.byPhone.get(c.phone) ?? makes.byChat.get(c.id);
+    if (!now) return undefined;
+    const key = now.map((m) => `${m.make}:${m.by}`).join('|');
+    const was = kept.current.get(c.id);
+    if (was?.key === key) return was.makes;
+    kept.current.set(c.id, { key, makes: now });
+    return now;
+  };
   const failed = !!s.chatsFailed && !s.chatsLoading;
   const head = (
     <>
@@ -313,6 +444,13 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
         )}
       </div>
       <SearchField value={query} onChange={setQuery} placeholder={t('wa.search')} />
+      {/* The AI going through the chats (v0.91): how far — once at the start, then a chat at a time, unseen. */}
+      {study.running && study.total > 0 && (
+        <div className="wa-study" role="status" data-wa-study>
+          <AiMark size={14} />
+          <span>{t('wa.study.going', { done: study.done, total: study.total })}</span>
+        </div>
+      )}
       <div className="wa-filters" role="tablist" data-own-swipe>
         {CHAT_TABS.map((k) => (
           <button
@@ -397,7 +535,19 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
         <>
           <List className="wa-chats">
             {rows.slice(0, limit).map((c) => (
-              <ChatRow key={c.id} c={c} who={whoOf(c, people)} role={chatRole(c, people, roles)} byAi={!!aiRoleOf(c, people, roles)} when={when(c.t)} active={!picking && c.id === active} onOpen={tap} picking={picking} picked={picked.has(c.id)} />
+              <ChatRow
+                key={c.id}
+                c={c}
+                who={whoOf(c, people)}
+                role={chatRole(c, people, roles)}
+                byAi={!!aiRoleOf(c, people, roles)}
+                makes={rowMakes(c)}
+                when={when(c.t)}
+                active={!picking && c.id === active}
+                onOpen={tap}
+                picking={picking}
+                picked={picked.has(c.id)}
+              />
             ))}
             {more()}
           </List>
@@ -410,12 +560,31 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       )}
       {picking && (
         <StickyBar>
-          <Button fullWidth disabled={!picked.size} leftSection={<IconTag size={18} />} onClick={() => setTagging(true)} data-wa-tag-picked>
-            {t('wa.tags.assign')}
-          </Button>
+          <Group gap={8} wrap="nowrap" grow>
+            <Button disabled={!picked.size} leftSection={<IconTag size={18} />} onClick={() => setTagging(true)} data-wa-tag-picked>
+              {t('wa.tags.short')}
+            </Button>
+            {/* v0.91: makes to all of them («поставщики Тойота — марку Тойота»). */}
+            <Button variant="light" disabled={!pickedChats.some((c) => !c.group)} leftSection={<IconCar size={18} />} onClick={() => setMaking(true)} data-wa-make-picked>
+              {t('wa.makes.assign')}
+            </Button>
+          </Group>
         </StickyBar>
       )}
       <LazySheet opened={tagging}>{(o) => <TagSheet opened={o} onClose={() => setTagging(false)} n={picked.size} onTag={tag} />}</LazySheet>
+      <LazySheet opened={making}>
+        {(o) => (
+          <MakeSheet
+            opened={o}
+            chats={pickedChats}
+            onClose={() => setMaking(false)}
+            onDone={() => {
+              setMaking(false);
+              endPick();
+            }}
+          />
+        )}
+      </LazySheet>
     </>
   );
 }
@@ -521,6 +690,7 @@ function ChatInfoSheet({ c, who, title, opened, onClose }: { c: Pick<WaChat, 'id
             </Text>
           )}
         </Stack>
+        {!c.group && <ChatKnowBlock id={c.id} phone={c.phone} />}
         <div className="action-tiles" style={{ alignSelf: 'stretch' }}>
           {who?.kind === 'customer' && tile('customer', IconUser, 'blue', t('wa.who.customer'), () => go(`/customers/${who.id}`))}
           {who?.kind === 'supplier' && tile('supplier', IconTruck, 'cyan', t('wa.who.supplier'), () => go('/parts?tab=suppliers'))}

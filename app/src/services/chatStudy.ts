@@ -1,0 +1,352 @@
+import { db } from '../db/db';
+import { canonicalMake } from '../domain/carCatalog';
+import { mergeTurns, turnsOf, type KnownMake } from '../domain/chatStudy';
+import { knowOf, type SupplierKnow } from '../domain/supplierRank';
+import { nowIso } from '../domain/dates';
+import type { ChatFact, Supplier } from '../domain/types';
+import { chatRole, orderChats, waDigits, whoOf, type ChatRoles, type WaChat, type WaEvent, type WaMessage, type Who } from '../domain/whatsapp';
+import { aiChatRoles, aiOn } from './ai';
+import { fetchChatMessages, knownPeople, loadChatRoles, loadPeople, onWaEvent, subscribeWa, waCall, waReady, waStore } from './whatsapp';
+
+/*
+ * The garage's WhatsApp studied (v0.91, the owner: «ИИ должен быстро обрабатывать новые чаты или уже существующие,
+ * определять их, присваивать им статусы… на какие марки авто она часто отвечает… в начале ИИ должен пройтись по всем
+ * чатам и сделать то что сказал, потом дальше в таком духе при новых чатах»; «в реальном времени изучать переписки и учить
+ * приложение и накапливать знание»):
+ *  - every person's chat that is, or may be, a supplier (not a customer, a mechanic, a driver, a group) is read — its last
+ *    80 messages, light (who, when, the kind, the words), and only when something new came since — and what the garage's
+ *    requests in it came to is kept (`ChatFact.turns`, domain/chatStudy.ts): the app's own rules, no AI;
+ *  - a chat the garage does not know, or a supplier whose makes nobody gave, is shown to the AI by its name and a few of its
+ *    words — who it is and the makes it deals with (`aiRole`, `aiMakes`; a light model, a dozen at once, kept on the server);
+ *  - all of it once when the app opens (again after six hours), then each chat a minute after its last message.
+ * The messages themselves are never kept — only what they came to. Any device with the garage's WhatsApp does it; a chat
+ * read on one device in the last ten minutes is not read again on another. Nothing is sent.
+ */
+
+/** Read this many of a chat's last messages. */
+const READ = 80;
+/** A chat studied (here or on another device) this recently is not read again. */
+const FRESH_MS = 10 * 60_000;
+/** The whole list again after this long. */
+const SWEEP_EVERY = 6 * 60 * 60_000;
+const SWEPT_KEY = 'mygarage.chatStudy.at';
+const AI_BATCH = 12;
+
+/* ---------- What is going on (the WhatsApp list shows it) ---------- */
+
+export interface StudyProgress {
+  running: boolean;
+  done: number;
+  total: number;
+}
+let progress: StudyProgress = { running: false, done: 0, total: 0 };
+const subs = new Set<() => void>();
+export const studyProgress = (): StudyProgress => progress;
+export function onStudyProgress(f: () => void): () => void {
+  subs.add(f);
+  return () => void subs.delete(f);
+}
+function tell(p: StudyProgress) {
+  progress = p;
+  subs.forEach((f) => f());
+}
+
+/* ---------- Which chats ---------- */
+
+/** A person's chat that is, or may be, a supplier: worth reading for what its requests came to. */
+export function worthStudy(chat: Pick<WaChat, 'id' | 'phone' | 'group' | 'self'>, people: Map<string, Who>, roles: ChatRoles): boolean {
+  if (chat.group || chat.self) return false;
+  const role = chatRole(chat, people, roles);
+  return !role || role === 'supplier' || role === 'service';
+}
+
+/**
+ * Worth asking the AI about: a chat nobody said who it is (not asked yet in v0.91 — an «other» of v0.86 is asked again with
+ * more of its words), or a supplier whose makes nobody gave (by hand, on its card).
+ */
+function aiWanted(chat: WaChat, fact: ChatFact | undefined, people: Map<string, Who>, roles: ChatRoles, suppliers: Map<string, Supplier>): 'supplier' | 'unknown' | undefined {
+  if (chat.group || chat.self || fact?.aiAt) return undefined;
+  const who = whoOf(chat, people);
+  if (who) return who.kind === 'supplier' && !suppliers.get(who.id)?.makes?.length && !fact?.makes?.length ? 'supplier' : undefined;
+  const tag = roles.tags[chat.id];
+  if (tag) return (tag === 'supplier' || tag === 'service') && !fact?.makes?.length ? 'supplier' : undefined;
+  if (roles.groups.has(chat.id)) return undefined;
+  // v0.86 said «customer» already: that stays.
+  return roles.ai?.[chat.id] === 'customer' ? undefined : 'unknown';
+}
+
+/** A few of a chat's words for the AI: the supplier's own (the latest), and the garage's last request. */
+function wordsFor(messages: Pick<WaMessage, 'me' | 'text'>[]): string[] {
+  const theirs = messages.filter((m) => !m.me && (m.text ?? '').trim().length >= 3).slice(-3);
+  const mine = messages.filter((m) => m.me && (m.text ?? '').trim().length >= 6).slice(-1);
+  return [...mine, ...theirs].map((m) => m.text.replace(/\s+/g, ' ').trim().slice(0, 200));
+}
+
+/* ---------- One chat ---------- */
+
+/** Its kept record, changed by `patch` (read and written at once — another device's makes by hand are not lost). */
+async function keep(id: string, patch: Partial<ChatFact>): Promise<ChatFact> {
+  return db.transaction('rw', db.chatFacts, async () => {
+    const was = await db.chatFacts.get(id);
+    const next: ChatFact = { ...(was ?? { id, phone: '' }), ...patch, id, updatedAt: nowIso() };
+    await db.chatFacts.put(next);
+    return next;
+  });
+}
+
+/**
+ * A chat read and what its requests came to kept. Not read when nothing came since it was (`force` — read anyway), or when
+ * it was read a moment ago here or on another device. Returns the record and a few of its words (for the AI), or nothing.
+ */
+export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'>, opts: { force?: boolean } = {}): Promise<{ fact: ChatFact; words: string[] } | undefined> {
+  const was = await db.chatFacts.get(chat.id);
+  if (!opts.force && was?.studiedAt && Date.now() - Date.parse(was.studiedAt) < FRESH_MS) return undefined;
+  if (!opts.force && was?.through && chat.t && was.through >= chat.t) return undefined;
+  const messages = await fetchChatMessages(chat.id, READ, { lite: true });
+  const times = messages.map((m) => m.t).filter((t) => t > 0);
+  const turns = times.length ? mergeTurns(was?.turns, turnsOf(messages), Math.min(...times)) : was?.turns;
+  const fact = await keep(chat.id, {
+    phone: chat.phone || was?.phone || '',
+    name: chat.name || was?.name,
+    turns: turns?.length ? turns : undefined,
+    through: Math.max(was?.through ?? 0, ...times, chat.t || 0),
+    studiedAt: nowIso(),
+  });
+  return { fact, words: wordsFor(messages) };
+}
+
+/** The AI's word on a few chats, kept with each: who it is; a supplier's makes (none said — none). */
+async function askAiAbout(list: { chat: WaChat; words: string[]; known?: 'supplier' }[]): Promise<number> {
+  if (!list.length || !aiOn()) return 0;
+  const said = await aiChatRoles(list.map(({ chat, words, known }) => ({ id: chat.id, name: chat.name, texts: words.length ? words : chat.last?.text && !chat.last.me ? [chat.last.text] : [], ...(known ? { known } : {}) })));
+  let suppliers = 0;
+  for (const r of said) {
+    const one = list.find((x) => x.chat.id === r.id);
+    if (!one) continue;
+    const sure = r.confidence >= 0.6;
+    const role = sure ? r.role : 'other';
+    // A server from before v0.91 says no makes: the role is kept, the chat is asked again once it says them.
+    const makes = (r.makes ?? []).map((m) => canonicalMake(m)).filter(Boolean);
+    await keep(r.id, {
+      // (a chat whose number WhatsApp hides — none to put over the kept one)
+      ...(one.chat.phone ? { phone: one.chat.phone } : {}),
+      ...(one.chat.name ? { name: one.chat.name } : {}),
+      ...(one.known ? {} : { aiRole: role }),
+      ...(r.makes && (role === 'supplier' || one.known) ? { aiMakes: makes.length ? makes : undefined } : {}),
+      ...(r.makes ? { aiAt: nowIso() } : {}),
+    });
+    if (!one.known && role === 'supplier') suppliers++;
+  }
+  return suppliers;
+}
+
+/* ---------- All of them ---------- */
+
+let sweeping: Promise<{ studied: number; suppliers: number }> | undefined;
+
+/**
+ * Every chat worth it, one after another (a short pause between): read when something new came, the AI asked about those
+ * nobody knows (a dozen at once). The list as the app has it, else read from the server. Stops when WhatsApp goes away.
+ */
+export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: number; suppliers: number }> {
+  sweeping ??= (async () => {
+    let studied = 0;
+    let suppliers = 0;
+    try {
+      const chats = opts.chats?.length ? opts.chats : waStore().chats.length ? waStore().chats : ((await waCall<{ chats: WaChat[] }>('chats', { query: { limit: '1000' }, timeout: 60_000 })).chats ?? []);
+      const [people, roles, facts, sups] = await Promise.all([loadPeople(), loadChatRoles(), db.chatFacts.toArray(), db.suppliers.toArray()]);
+      const factOf = new Map(facts.map((f) => [f.id, f]));
+      const supplierOf = new Map(sups.map((s) => [s.id, s]));
+      const list = orderChats(chats).filter((c) => worthStudy(c, people, roles));
+      tell({ running: true, done: 0, total: list.length });
+      const queue: { chat: WaChat; words: string[]; known?: 'supplier' }[] = [];
+      for (const [k, chat] of list.entries()) {
+        if (!waReady()) break;
+        let words: string[] = [];
+        try {
+          const r = await studyChat(chat);
+          if (r) {
+            studied++;
+            words = r.words;
+            factOf.set(chat.id, r.fact);
+          }
+        } catch {
+          // this one another time
+        }
+        const want = aiWanted(chat, factOf.get(chat.id), people, roles, supplierOf);
+        if (want && !asked.has(chat.id)) {
+          asked.add(chat.id);
+          queue.push({ chat, words, ...(want === 'supplier' ? { known: 'supplier' as const } : {}) });
+        }
+        if (queue.length >= AI_BATCH) suppliers += await askAiAbout(queue.splice(0)).catch(() => 0);
+        tell({ running: true, done: k + 1, total: list.length });
+        await new Promise((r) => setTimeout(r, PAUSE));
+      }
+      suppliers += await askAiAbout(queue).catch(() => 0);
+      try {
+        localStorage.setItem(SWEPT_KEY, String(Date.now()));
+      } catch {
+        // not kept
+      }
+    } finally {
+      tell({ running: false, done: 0, total: 0 });
+      sweeping = undefined;
+    }
+    return { studied, suppliers };
+  })();
+  return sweeping;
+}
+
+/** Asked of the AI while the app is open (a chat it could not say is not asked again until the app opens again). */
+const asked = new Set<string>();
+let PAUSE = 250;
+/** The tests: no pause between chats, nobody asked yet. */
+export function resetChatStudy(pause = 0) {
+  PAUSE = pause;
+  asked.clear();
+}
+
+/* ---------- As messages come ---------- */
+
+const waiting = new Map<string, ReturnType<typeof setTimeout>>();
+/** A chat a minute after its last message (a conversation is read once it rests). */
+const QUIET_MS = 60_000;
+
+async function studyNow(chat: WaChat) {
+  // The garage's people as read once (a busy account speaks often: the whole base is not read for each message).
+  const [people, roles] = await Promise.all([knownPeople(), loadChatRoles()]);
+  if (!worthStudy(chat, people, roles)) return;
+  const r = await studyChat(chat, { force: true });
+  const who = whoOf(chat, people);
+  const [fact, sup] = await Promise.all([db.chatFacts.get(chat.id), who?.kind === 'supplier' ? db.suppliers.get(who.id) : undefined]);
+  const want = aiWanted(chat, fact, people, roles, new Map(sup ? [[sup.id, sup]] : []));
+  if (!want || asked.has(chat.id)) return;
+  asked.add(chat.id);
+  await askAiAbout([{ chat, words: r?.words ?? [], ...(want === 'supplier' ? { known: 'supplier' as const } : {}) }]);
+}
+
+let started = false;
+/** Once, at the app's start: the whole list when WhatsApp is ready (not studied for six hours), then each chat as it speaks. */
+export function startChatStudy() {
+  if (started || typeof window === 'undefined') return;
+  started = true;
+  onWaEvent((ev) => {
+    const e = ev as WaEvent;
+    if (e.t !== 'msg' || !e.chat || e.chat.group || e.chat.self) return;
+    const chat = e.chat;
+    clearTimeout(waiting.get(chat.id));
+    waiting.set(
+      chat.id,
+      setTimeout(() => {
+        waiting.delete(chat.id);
+        void studyNow(chat).catch(() => undefined);
+      }, QUIET_MS),
+    );
+  });
+  let planned = false;
+  // When the list was last gone through (kept on this device); read once — the store speaks at every event.
+  let sweptAt = -1;
+  const maybeSweep = () => {
+    if (planned || !waReady()) return;
+    if (sweptAt < 0) {
+      try {
+        sweptAt = Number(localStorage.getItem(SWEPT_KEY)) || 0;
+      } catch {
+        sweptAt = 0;
+      }
+    }
+    if (Date.now() - sweptAt < SWEEP_EVERY) return;
+    sweptAt = Date.now();
+    planned = true;
+    // A little after the app came up (its own reads first).
+    setTimeout(() => {
+      planned = false;
+      void studyChats().catch(() => undefined);
+    }, 20_000);
+  };
+  subscribeWa(maybeSweep);
+  maybeSweep();
+  setInterval(maybeSweep, 30 * 60_000);
+}
+
+/* ---------- Makes by hand ---------- */
+
+/**
+ * Chats picked in the WhatsApp list given makes (v0.91, the owner: «выбрать несколько чатов, например поставщики Тойота, и
+ * присвоить им марку Тойота, чтобы при поиске деталей первыми отображались»): `makes` — what the person left on; `common` —
+ * what all the picked ones had when the sheet opened (one taken off there is taken off each); a make one of them had alone
+ * stays. A supplier of the base keeps them on its card, any other chat on its record. Returns how many chats.
+ */
+export async function setChatMakes(chats: Pick<WaChat, 'id' | 'phone' | 'name' | 'group'>[], makes: string[], common: string[]): Promise<number> {
+  const people = await loadPeople();
+  const on = [...new Set(makes.map(canonicalMake).filter(Boolean))];
+  const off = new Set(common.map(canonicalMake).filter((m) => !on.includes(m)).map((m) => m.toLowerCase()));
+  const next = (had: string[] | undefined) => {
+    const left = (had ?? []).map(canonicalMake).filter((m) => !off.has(m.toLowerCase()));
+    for (const m of on) if (!left.some((x) => x.toLowerCase() === m.toLowerCase())) left.push(m);
+    return left;
+  };
+  let n = 0;
+  await db.transaction('rw', db.suppliers, db.chatFacts, async () => {
+    for (const chat of chats) {
+      if (chat.group) continue;
+      const who = whoOf(chat, people);
+      if (who?.kind === 'supplier') {
+        const s = await db.suppliers.get(who.id);
+        if (!s) continue;
+        const makes = next(s.makes);
+        // Given by hand now: no longer the app's guess (v0.60).
+        await db.suppliers.update(s.id, { makes: makes.length ? makes : undefined, guessed: s.guessed?.filter((g) => g !== 'makes').length ? s.guessed.filter((g) => g !== 'makes') : undefined });
+      } else {
+        const was = await db.chatFacts.get(chat.id);
+        const makes = next(was?.makes);
+        await db.chatFacts.put({ ...(was ?? { id: chat.id, phone: chat.phone }), phone: chat.phone || was?.phone || '', name: chat.name || was?.name, makes: makes.length ? makes : undefined, updatedAt: nowIso() });
+      }
+      n++;
+    }
+  });
+  return n;
+}
+
+/** The makes the picked chats have now — by hand (the card's for a supplier of the base): all of them, and those they share. */
+export async function chatsMakes(chats: Pick<WaChat, 'id' | 'phone' | 'group'>[]): Promise<{ all: string[]; common: string[] }> {
+  const people = await loadPeople();
+  const lists: string[][] = [];
+  for (const chat of chats) {
+    if (chat.group) continue;
+    const who = whoOf(chat, people);
+    const had = who?.kind === 'supplier' ? (await db.suppliers.get(who.id))?.makes : (await db.chatFacts.get(chat.id))?.makes;
+    lists.push((had ?? []).map(canonicalMake));
+  }
+  const all = [...new Set(lists.flat())];
+  const common = all.filter((m) => lists.length > 0 && lists.every((l) => l.includes(m)));
+  return { all, common };
+}
+
+/** The makes the chats are known for, by the chat and by the number (a supplier of the base: its card's first). */
+export async function loadChatMakes(): Promise<{ byChat: Map<string, KnownMake[]>; byPhone: Map<string, KnownMake[]> }> {
+  const [facts, sups] = await Promise.all([db.chatFacts.toArray(), db.suppliers.toArray()]);
+  const now = nowIso();
+  const byChat = new Map<string, KnownMake[]>();
+  const byPhone = new Map<string, KnownMake[]>();
+  const factOf = new Map(facts.filter((f) => f.phone).map((f) => [f.phone, f]));
+  for (const f of facts) {
+    const k = knowOf(f, now);
+    if (k?.makes.length) byChat.set(f.id, k.makes);
+  }
+  for (const s of sups) {
+    const d = waDigits(s.phone);
+    if (!d) continue;
+    const k = knowOf(factOf.get(d), now, s.makes);
+    if (k?.makes.length) byPhone.set(d, k.makes);
+  }
+  return { byChat, byPhone };
+}
+
+/** What a chat taught the garage (its card): a supplier of the base — with the makes on its card. */
+export async function chatKnow(chatId: string, phone: string): Promise<SupplierKnow | undefined> {
+  const [fact, people] = await Promise.all([db.chatFacts.get(chatId), loadPeople()]);
+  const who = phone ? people.get(phone) : undefined;
+  const hand = who?.kind === 'supplier' ? (await db.suppliers.get(who.id))?.makes : undefined;
+  return knowOf(fact, nowIso(), hand);
+}

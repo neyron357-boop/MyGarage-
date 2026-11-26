@@ -1,6 +1,7 @@
 import { canonicalMake } from './carCatalog';
+import { chatMakes, rateSeen, seenOf, type ChatRating, type ChatSeen, type KnownMake } from './chatStudy';
 import { expandToken, indexText, matchToken, tokenize, type Indexed } from './search';
-import type { Supplier } from './types';
+import type { ChatFact, Supplier } from './types';
 
 /*
  * Suppliers by what the garage did with them (v0.38): how many jobs and parts, for which makes, how lately, how many
@@ -8,6 +9,10 @@ import type { Supplier } from './types';
  * first: already on its lines, bought from for this make, sold such a part before, declared the make or the part —
  * then the stars, the habit (jobs), how lately; a part given back counts against. Pure — the lines are read by
  * `services/supplierRank.ts`.
+ * v0.91 (the owner: «те кто долго или часто пишут нету в наличии или не отвечает — снизить рейтинг; кто чаще всего
+ * отвечает, быстро и часто даёт цены — повысить и при поиске деталей показывать самыми первыми»; «на какие марки авто она
+ * часто отвечает — учесть»): what its WhatsApp chat taught (`SupplierKnow`, domain/chatStudy.ts) — how it answers the
+ * garage's requests counts in every list, the makes it answered for (and those given by hand or said by the AI) for a job.
  */
 
 /** A line bought from a supplier, or handed to a contractor — as the ranking reads it. */
@@ -72,15 +77,38 @@ export function supplierUse(lines: BoughtLine[], returns: { supplierId?: string 
 
 export const useOf = (use: Map<string, SupplierUse>, id: string): SupplierUse => use.get(id) ?? NONE;
 
+/** What a supplier's WhatsApp chat taught the garage (v0.91). */
+export interface SupplierKnow {
+  seen: ChatSeen;
+  rating?: ChatRating;
+  /** Makes it is known for (by hand on a chat not of the base, answered for, said by the AI). */
+  makes: KnownMake[];
+}
+
+/** A chat's record as the ranking reads it; `hand` — the makes on the supplier's card (they come first). */
+export function knowOf(fact: Pick<ChatFact, 'turns' | 'makes' | 'aiMakes'> | undefined, now: string, hand?: string[]): SupplierKnow | undefined {
+  if (!fact && !hand?.length) return undefined;
+  const seen = seenOf(fact?.turns, Date.parse(now));
+  return { seen, rating: rateSeen(seen), makes: chatMakes({ hand: hand?.length ? hand : fact?.makes, seen, ai: fact?.aiMakes }) };
+}
+
+/** The stars a supplier shows: the manager's own, else the ones its answers earned (`auto`). */
+export function shownStars(s: Pick<Supplier, 'reliability'>, k?: SupplierKnow): { n: number; auto?: true } | undefined {
+  const own = starsOf(s);
+  if (own) return { n: own };
+  return k?.rating ? { n: k.rating.stars, auto: true } : undefined;
+}
+
 /** The manager's stars, 1–5 (none — not rated). */
 export const starsOf = (s: Pick<Supplier, 'reliability'>): number | undefined => (s.reliability && s.reliability >= 1 ? Math.min(5, Math.round(s.reliability)) : undefined);
 
 const DAY = 86_400_000;
 
-/** What counts for any job: the stars, the habit, how lately, the parts given back. */
-function standing(s: Supplier, u: SupplierUse, now: string): number {
+/** What counts for any job: the stars, the habit, how lately, the parts given back, how it answers on WhatsApp. */
+function standing(s: Supplier, u: SupplierUse, now: string, k?: SupplierKnow): number {
   const stars = starsOf(s);
   let score = stars ? (stars - 3) * 10 : 0;
+  score += k?.rating?.score ?? 0;
   score += Math.min(20, 6 * Math.log2(1 + u.jobs));
   if (u.lastAt) {
     const days = (Date.parse(now) - Date.parse(u.lastAt)) / DAY;
@@ -94,8 +122,8 @@ function standing(s: Supplier, u: SupplierUse, now: string): number {
 }
 
 /** The suppliers list (Запчасти → Поставщики): most used and best rated first, then by name. */
-export function rankSuppliers(list: Supplier[], use: Map<string, SupplierUse>, now: string): Supplier[] {
-  const score = new Map(list.map((s) => [s.id, standing(s, useOf(use, s.id), now)]));
+export function rankSuppliers(list: Supplier[], use: Map<string, SupplierUse>, now: string, know?: Map<string, SupplierKnow>): Supplier[] {
+  const score = new Map(list.map((s) => [s.id, standing(s, useOf(use, s.id), now, know?.get(s.id))]));
   return [...list].sort((a, b) => score.get(b.id)! - score.get(a.id)! || a.name.localeCompare(b.name));
 }
 
@@ -108,13 +136,20 @@ export type Why =
   | { kind: 'sells'; part: string }
   /** The manager's mark (v0.71): good — first, silent — does not answer, last. */
   | { kind: 'good' }
-  | { kind: 'silent' };
+  | { kind: 'silent' }
+  /** v0.91: its WhatsApp answered requests for this make so many times; the AI says it deals with it. */
+  | { kind: 'answers'; make: string; n: number }
+  | { kind: 'aiMake'; make: string };
 
 export interface Ranked {
   supplier: Supplier;
   score: number;
   use: SupplierUse;
   why: Why[];
+  /** What its chat taught (v0.91). */
+  know?: SupplierKnow;
+  /** A supplier only in WhatsApp (v0.91): its chat — it becomes one of the base when it is asked. */
+  chat?: string;
 }
 
 export interface JobNeeds {
@@ -140,10 +175,10 @@ function speaksOf(part: ReturnType<typeof partTerms>, x: Indexed): boolean {
 }
 
 /**
- * The suppliers for a job, the best fit first. Only those with a reason are returned (none fits — the most used and
- * best rated, so the screen is never empty).
+ * The suppliers for a job, the best fit first — every one of them (v0.91, the owner's note #74: «при отправке не все
+ * поставщики отображаются, но нужно чтобы все, при поиске особенно»); `fitOf` says which have a reason.
  */
-export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, history: BoughtLine[], job: JobNeeds, now: string): Ranked[] {
+export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, history: BoughtLine[], job: JobNeeds, now: string, know?: Map<string, SupplierKnow>): Ranked[] {
   const make = makeKey(job.make);
   const parts = job.parts.map((p) => ({ name: p.name, terms: partTerms(p.title) })).filter((p) => p.terms.length);
   // What each supplier sold before, prepared once.
@@ -156,8 +191,9 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
   // Taken off by the manager (v0.71): not in a job's list (`offOf` — folded under it).
   const ranked = list.filter((s) => s.mark !== 'off').map((s): Ranked => {
     const u = useOf(use, s.id);
+    const k = know?.get(s.id);
     const why: Why[] = [];
-    let score = standing(s, u, now);
+    let score = standing(s, u, now, k);
     // Marked good — first, whatever else; marked silent — last (v0.71, «самые хорошие наверху»).
     if (s.mark === 'good') {
       score += 1000;
@@ -190,10 +226,18 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
       why.push(firstSold);
     }
     const declared = make && s.makes?.some((m) => makeKey(m) === make);
-    if (declared) {
+    // What its chat says of the make (v0.91): given by hand to a chat, answered for again and again, said by the AI.
+    const known = make && !declared ? k?.makes.find((m) => makeKey(m.make) === make) : undefined;
+    if (declared || known?.by === 'hand') {
       score += 30;
       if (!forMake) why.push({ kind: 'make', make: canonicalMake(job.make!) });
-    } else if (make && s.makes?.length) score -= 10;
+    } else if (known?.by === 'seen') {
+      score += Math.min(30, 8 * (known.n ?? 1));
+      if (!forMake) why.push({ kind: 'answers', make: known.make, n: known.n ?? 1 });
+    } else if (known?.by === 'ai') {
+      score += 12;
+      if (!forMake) why.push({ kind: 'aiMake', make: known.make });
+    } else if (make && (s.makes?.length || k?.makes.some((m) => m.by !== 'ai'))) score -= 10;
     if (s.parts) {
       const x = indexText(s.parts);
       const p = parts.find((q) => speaksOf(q.terms, x));
@@ -202,9 +246,11 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
         if (!firstSold) why.push({ kind: 'sells', part: p.name });
       }
     }
-    return { supplier: s, score, use: u, why };
+    return { supplier: s, score, use: u, why, ...(k ? { know: k } : {}) };
   });
   ranked.sort((a, b) => b.score - a.score || b.use.jobs - a.use.jobs || a.supplier.name.localeCompare(b.supplier.name));
-  const fit = ranked.filter((r) => r.why.length);
-  return fit.length ? fit : ranked.filter((r) => r.use.jobs || starsOf(r.supplier));
+  return ranked;
 }
+
+/** A supplier with a reason to be asked for this job (on it, its make, its part, its stars, how it answers). */
+export const fitOf = (r: Ranked): boolean => r.why.length > 0 || r.use.jobs > 0 || !!starsOf(r.supplier) || !!r.know?.rating;

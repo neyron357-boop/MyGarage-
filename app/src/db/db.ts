@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type {
   Addendum,
+  ChatFact,
   CashClosing,
   CashMovement,
   Claim,
@@ -97,6 +98,8 @@ export class GarageDB extends Dexie {
   /** Whom the garage owes because they paid for it (v0.61): an expense on credit's `lenderId`. */
   lenders!: Table<Lender, string>;
   reminders!: Table<Reminder, string>;
+  /** What the garage knows of its WhatsApp chats (v0.91): requests and answers, makes, the AI's word. */
+  chatFacts!: Table<ChatFact, string>;
   /** Invoices given before this app, read off their PDFs (v0.45): the customer's reports read them, money here does not. */
   historyInvoices!: Table<HistoryInvoice, string>;
   /** The rows of the monthly summaries that came with them (v0.45): the garage's own check. */
@@ -229,6 +232,10 @@ export class GarageDB extends Dexie {
     // v11 (v0.74): the manager's own reminders — a new table only.
     this.version(11).stores({
       reminders: 'id, at, orderId, _t',
+    });
+    // v12 (v0.91): what the garage knows of its WhatsApp chats — a new table only (a supplier of the base by `phone`).
+    this.version(12).stores({
+      chatFacts: 'id, phone, _t',
     });
     installGuards(this);
     installSyncHooks(this);

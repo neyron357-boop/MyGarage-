@@ -365,36 +365,3 @@ describe('nothing goes by itself (v0.85)', () => {
     expect(waAsks().filter((a) => a.item.key.startsWith('work:'))).toEqual([]);
   });
 });
-
-describe('who a chat is — said by the AI (v0.86)', () => {
-  it('a chat the garage does not know: the AI says «supplier»; a status by hand wins; asked once', async () => {
-    const { tagUnknownChats } = await import('./waRoles');
-    const { loadChatRoles, loadPeople, waStore, tagChats } = await import('./whatsapp');
-    const { chatRole, aiRoleOf } = await import('../domain/whatsapp');
-    let asks = 0;
-    setAiTransport(async (p, body) => {
-      if (p !== 'roles') throw new Error('not played');
-      asks++;
-      const chats = (body as { chats: { id: string }[] }).chats;
-      return { chats: chats.map((c) => ({ id: c.id, role: 'supplier', confidence: 0.9 })) };
-    });
-    try {
-      await loadChats(true);
-      const chat = waStore().chats.find((c) => c.id === '55512345678901@lid')!;
-      expect(await tagUnknownChats()).toBe(1);
-      const [people, roles] = await Promise.all([loadPeople(), loadChatRoles()]);
-      expect(chatRole(chat, people, roles)).toBe('supplier');
-      expect(aiRoleOf(chat, people, roles)).toBe('supplier');
-      // Asked once.
-      expect(await tagUnknownChats()).toBe(0);
-      expect(asks).toBe(1);
-      // A status given by hand takes its place.
-      await tagChats([chat.id], 'customer');
-      const after = await loadChatRoles();
-      expect(chatRole(chat, people, after)).toBe('customer');
-      expect(aiRoleOf(chat, people, after)).toBeUndefined();
-    } finally {
-      setAiTransport(undefined);
-    }
-  });
-});

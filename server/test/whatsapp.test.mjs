@@ -10,7 +10,7 @@ import { createEvents } from '../src/events.mjs';
 import { openStore } from '../src/store.mjs';
 import { createWhatsApp } from '../src/whatsapp.mjs';
 import { applyHunks, applyPatches, parseDiff, patchName } from '../whatsapp/patch.mjs';
-import { chatRow, lastRow, messageRow, phoneOf, sortChats } from '../whatsapp/rows.mjs';
+import { chatRow, lastRow, liteRow, messageRow, phoneOf, sortChats } from '../whatsapp/rows.mjs';
 
 /* ---------- What the bridge says of chats and messages ---------- */
 
@@ -107,6 +107,13 @@ describe('whatsapp rows', () => {
     assert.deepEqual(rows.map((r) => r.id), ['b@c.us', 'c@c.us', 'a@c.us']);
     assert.equal(phoneOf('120363000000000001@g.us'), '');
     assert.equal(lastRow(null), null);
+  });
+
+  it('v0.91: a message as a chat is studied — who, when, the kind and the words only', () => {
+    const row = { id: 'true_1@c.us_A', t: 5000, me: true, type: 'image', text: 'x'.repeat(900), ack: 3, file: { thumb: 'AAAA', here: true }, quote: { type: 'chat', text: 'q', me: false, thumb: 'BB' } };
+    assert.deepEqual(Object.keys(liteRow(row)), ['id', 't', 'me', 'type', 'text']);
+    assert.ok(liteRow(row).text.length <= 601);
+    assert.equal(liteRow(null), null);
   });
 });
 

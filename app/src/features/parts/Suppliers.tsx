@@ -8,9 +8,10 @@ import { db, uid } from '../../db/db';
 import { CAR_MAKES, canonicalMake, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import { alreadyInBase, cardName, phonesInText, supplierMatches } from '../../domain/suppliers';
-import { starsOf, useOf } from '../../domain/supplierRank';
+import { starsOf, useOf, type SupplierKnow } from '../../domain/supplierRank';
 import { dayShort } from '../../domain/dates';
 import { suppliersRanked } from '../../services/supplierRank';
+import { replyTime } from '../whatsapp/WaParts';
 import { StarsPill } from '../job/SupplierAsk';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
@@ -61,6 +62,7 @@ export function SupplierSheet({
   // What was bought from it (v0.38): its jobs, parts, returns, the last time — on its card.
   const ranked = useLiveQuery(() => (supplier?.id ? suppliersRanked() : undefined), [supplier?.id]);
   const use = supplier?.id && ranked ? useOf(ranked.use, supplier.id) : undefined;
+  const know = supplier?.id ? ranked?.know.get(supplier.id) : undefined;
   useEffect(() => {
     // Its number as it is read out: «+971 50 765 4321» (kept as E.164).
     setV(supplier?.phone ? { ...supplier, phone: formatPhone(normalizePhone(supplier.phone) ?? supplier.phone) } : supplier ?? {});
@@ -131,6 +133,33 @@ export function SupplierSheet({
             {use.lastAt && (
               <span>
                 <b>{dayShort(use.lastAt).word ? t(`common.${dayShort(use.lastAt).word}`) : dayShort(use.lastAt).text}</b>
+              </span>
+            )}
+          </div>
+        )}
+        {/* What its WhatsApp chat taught (v0.91): how it answers the garage's requests. */}
+        {know && know.seen.turns + know.seen.open > 0 && (
+          <div className="supplier-stats" data-supplier-wa>
+            <StarsPill s={{}} know={know} />
+            <span>
+              <b className="tnum">{know.seen.turns + know.seen.open}</b> {t('suppliers.statAsked')}
+            </span>
+            <span>
+              <b className="tnum">{know.seen.answered}</b> {t('suppliers.statAnswered')}
+            </span>
+            {know.seen.priced > 0 && (
+              <span>
+                <b className="tnum">{know.seen.priced}</b> {t('suppliers.statPriced')}
+              </span>
+            )}
+            {know.seen.na > 0 && (
+              <span>
+                <b className="tnum">{know.seen.na}</b> {t('suppliers.statNa')}
+              </span>
+            )}
+            {know.seen.replyMin !== undefined && (
+              <span>
+                ~<b className="tnum">{replyTime(t, know.seen.replyMin)}</b>
               </span>
             )}
           </div>
@@ -287,7 +316,7 @@ export function SupplierSheet({
  * A supplier's row on the phone (v0.60.1): drawn again only when its supplier, area or jobs change — a list of a thousand
  * drawn as it is scrolled does not draw the rows above again each time it grows.
  */
-const SupplierRow = memo(function SupplierRow({ s, area, jobs, onOpen }: { s: Supplier; area?: string; jobs: number; onOpen: (s: Supplier) => void }) {
+const SupplierRow = memo(function SupplierRow({ s, area, jobs, know, onOpen }: { s: Supplier; area?: string; jobs: number; know?: SupplierKnow; onOpen: (s: Supplier) => void }) {
   const { t } = useTranslation();
   return (
     <ListRow
@@ -295,7 +324,7 @@ const SupplierRow = memo(function SupplierRow({ s, area, jobs, onOpen }: { s: Su
       title={
         <span className="supplier-name">
           <span className="supplier-name-text">{s.name}</span>
-          <StarsPill s={s} />
+          <StarsPill s={s} know={know} />
         </span>
       }
       subtitle={
@@ -402,7 +431,7 @@ export function SuppliersTab() {
       cell: (s) => (
         <span className="supplier-name">
           <span className="supplier-name-text dt-main">{s.name}</span>
-          <StarsPill s={s} />
+          <StarsPill s={s} know={ranked?.know.get(s.id)} />
         </span>
       ),
     },
@@ -456,7 +485,7 @@ export function SuppliersTab() {
             </div>
         <List>
           {g.rows.map((s) => (
-            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} onOpen={setEdit} />
+            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} know={ranked!.know.get(s.id)} onOpen={setEdit} />
           ))}
         </List>
           </div>

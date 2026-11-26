@@ -6,6 +6,8 @@ import { createContext, useContext, useSyncExternalStore } from 'react';
  * The first tab is the window's own address (`main`); every other has its own history of screens (a router in memory —
  * App.tsx `TabPane`) and stays as it was while another is in front: its scroll, what is typed in it. Which tabs are open
  * and where — on this computer (`mygarage.deskTabs`), not the garage's data; they come back when the app is opened again.
+ * Their order is the person's (v0.91, the owner's note #29: «добавить возможность перетаскивать вкладки, менять местами»):
+ * a tab dragged along the strip, or Ctrl+Shift+← → on it (`moveTab`) — the window's own tab too.
  */
 
 export interface DeskTab {
@@ -117,6 +119,18 @@ export function closeTab(id: string): { mainTo?: string } {
   const active = state.active === id ? (tabs[at] ?? tabs[at - 1]).id : state.active;
   set({ tabs, active });
   return {};
+}
+
+/** A tab put at another place of the strip (dragged there; Ctrl+Shift+← →). Its screen is not touched. */
+export function moveTab(id: string, to: number) {
+  const at = state.tabs.findIndex((t) => t.id === id);
+  if (at < 0) return;
+  const place = Math.max(0, Math.min(state.tabs.length - 1, to));
+  if (place === at) return;
+  const tabs = [...state.tabs];
+  const [tab] = tabs.splice(at, 1);
+  tabs.splice(place, 0, tab);
+  set({ ...state, tabs });
 }
 
 /** A tab's address and title as its screen goes (its router and its bar say them). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rankForJob, rankSuppliers, supplierUse, useOf, type BoughtLine } from './supplierRank';
+import { fitOf, knowOf, rankForJob, rankSuppliers, shownStars, supplierUse, useOf, type BoughtLine } from './supplierRank';
 import type { Supplier } from './types';
 
 const NOW = '2026-11-17T08:00:00.000Z';
@@ -35,7 +35,9 @@ describe('suppliers by what was bought from them (v0.38)', () => {
     const list = [sup('pads'), sup('declared', { makes: ['Toyota'] }), sup('other', { makes: ['Nissan'] }), sup('picked'), sup('none')];
     const job = { make: 'toyota', parts: [{ name: 'КОЛОДКИ ПЕРЕДНИЕ', title: 'Колодки передние' }], onJob: new Set(['picked']) };
     const r = rankForJob(list, use, history, job, NOW);
-    expect(r.map((x) => x.supplier.id)).toEqual(['picked', 'pads', 'declared']);
+    // Every one of them (v0.91, #74), those that fit first.
+    expect(r.map((x) => x.supplier.id).slice(0, 3)).toEqual(['picked', 'pads', 'declared']);
+    expect(r).toHaveLength(5);
     // Russian «колодки» found the English «pads» they sold; two jobs for this make.
     expect(r[1].why).toEqual([
       { kind: 'boughtFor', make: 'Toyota', jobs: 2 },
@@ -55,10 +57,34 @@ describe('suppliers by what was bought from them (v0.38)', () => {
     expect(r[0].why).toEqual([{ kind: 'sells', part: 'HEADLIGHT LH' }]);
   });
 
-  it('none fits — the used and rated ones, never an empty screen of strangers', () => {
+  it('none fits — the used and rated ones first, and everybody after them', () => {
     const use = supplierUse([line('used', 'o1', 'X', 'Ford')]);
     const r = rankForJob([sup('used'), sup('rated', { reliability: 4 }), sup('nobody')], use, [], { make: 'Kia', parts: [], onJob: new Set() }, NOW);
-    expect(r.map((x) => x.supplier.id).sort()).toEqual(['rated', 'used']);
+    expect(r.filter(fitOf).map((x) => x.supplier.id).sort()).toEqual(['rated', 'used']);
+    expect(r.at(-1)!.supplier.id).toBe('nobody');
+  });
+
+  it('v0.91: how its WhatsApp answers counts; the makes it answered for, given by hand, said by the AI', () => {
+    const t0 = Date.parse(NOW) - 30 * 86_400_000;
+    const turns = (n: number, answer: boolean, make: string) => Array.from({ length: n }, (_, k) => ({ t: t0 + k * 86_400_000, ...(answer ? { r: 600, p: 1 as const } : {}), mk: [make] }));
+    const know = new Map([
+      ['fast', knowOf({ turns: turns(6, true, 'Toyota') }, NOW)!],
+      ['mute', knowOf({ turns: turns(6, false, 'Toyota') }, NOW)!],
+      ['ai', knowOf({ aiMakes: ['Toyota'] }, NOW)!],
+      ['hand', knowOf({ makes: ['Toyota'] }, NOW)!],
+    ]);
+    const list = [sup('mute'), sup('plain'), sup('ai'), sup('hand'), sup('fast')];
+    const r = rankForJob(list, supplierUse([]), [], { make: 'Toyota', parts: [], onJob: new Set() }, NOW, know);
+    expect(r.map((x) => x.supplier.id)).toEqual(['fast', 'hand', 'ai', 'plain', 'mute']);
+    expect(r[0].why).toEqual([{ kind: 'answers', make: 'Toyota', n: 6 }]);
+    expect(r[1].why).toEqual([{ kind: 'make', make: 'Toyota' }]);
+    expect(r[2].why).toEqual([{ kind: 'aiMake', make: 'Toyota' }]);
+    // The stars its answers earned, when the manager gave none; the manager's own win.
+    expect(shownStars(sup('fast'), know.get('fast'))).toEqual({ n: 5, auto: true });
+    expect(shownStars(sup('fast', { reliability: 2 }), know.get('fast'))).toEqual({ n: 2 });
+    expect(shownStars(sup('mute'), know.get('mute'))!.n).toBeLessThanOrEqual(2);
+    // In the whole list too.
+    expect(rankSuppliers(list, supplierUse([]), NOW, know).map((s) => s.id)[0]).toBe('fast');
   });
 });
 

@@ -475,7 +475,7 @@ export const en: typeof ru = {
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
-  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', noNumber: 'No number: {{names}}', used: 'used' },
+  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}' },
   newOrder: {
     // v0.81: the VIN in the plate's card.
     scanVin: 'Scan VIN',
@@ -1947,6 +1947,28 @@ export const en: typeof ru = {
       updated_few: 'Status updated for {{count}} chats',
       updated_many: 'Status updated for {{count}} chats',
       updated_other: 'Status updated for {{count}} chats',
+      short: 'Status',
+    },
+    makes: {
+      assign: 'Make',
+      title: 'Make · {{n}}',
+      search: 'Find a make',
+      done_one: 'Makes updated for {{count}} chat',
+      done_few: 'Makes updated for {{count}} chats',
+      done_many: 'Makes updated for {{count}} chats',
+      done_other: 'Makes updated for {{count}} chats',
+    },
+    study: { going: 'The AI is going through the chats · {{done}} of {{total}}' },
+    know: {
+      asked: 'Asked {{count}}',
+      answered: 'answered {{n}}',
+      priced: 'with a price {{n}}',
+      na: 'not available {{n}}',
+      reply: 'answers in ~{{time}}',
+      min: '{{n}} min',
+      hours: '{{n}} h',
+      days: '{{n}} d',
+      byAi: 'Make said by the AI',
     },
     voice: {
       mic: 'Voice message',
@@ -2429,6 +2451,10 @@ export const en: typeof ru = {
     statReturns_few: 'returns',
     statReturns_many: 'returns',
     statReturns_other: 'returns',
+    statAsked: 'asked on WhatsApp',
+    statAnswered: 'answered',
+    statPriced: 'with a price',
+    statNa: 'not available',
     why: {
       onJob: 'On this job',
       boughtFor: '{{make}} ×{{n}}',

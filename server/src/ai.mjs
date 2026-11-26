@@ -78,10 +78,11 @@ ${asks.map((a, k) => `${String.fromCharCode(65 + k)}) ${a.car || 'car'}: ${a.lin
 The supplier's message${quote ? ` (a reply to: "${quote.slice(0, 300)}")` : ''}:
 """${text.slice(0, 2000)}"""
 ask: the letter of the request it answers ("" if it gives no prices or answers none). lines: each line it answers — n (line number), offers: each price it says for it — price (AED, one piece, as written), kind ("oem" original/genuine, "aftermarket" copy/duplicate/brand, "used", "" if not said), brand ("" if none), na (true: not available). vat: "incl" if the prices include VAT, "excl" if VAT is on top, "" if not said. Only what the message says.`,
-  // v0.86: who a chat is to the garage, by its name and its last words.
+  // v0.86: who a chat is to the garage, by its name and its last words. v0.91 (the owner: «на какие марки авто она часто
+  // отвечает»): and the car makes a supplier deals with.
   roles: (chats) =>
-    `WhatsApp chats of a car repair garage in the UAE. For each, who is it to the garage: "customer" (a car owner, a company bringing cars), "supplier" (sells parts, oils, tyres, or does outside work: paint, tow, machining), "other". By the name and the messages; "other" when unsure.
-${chats.map((c) => `${c.id} — "${c.name}": ${c.texts.map((t) => `"${t.slice(0, 160)}"`).join(' / ')}`).join('\n')}`,
+    `WhatsApp chats of a car repair garage in the UAE. For each, who is it to the garage: "customer" (a car owner, a company bringing cars), "supplier" (sells parts, oils, tyres, or does outside work: paint, tow, machining), "other". By the name and the messages; "other" when unsure. makes: for a supplier, the car makes it sells parts for when its name or its words say so (e.g. ["Toyota","Lexus"]; "American" — ["Ford","Chevrolet","GMC","Dodge","Jeep"]); [] when they do not say.
+${chats.map((c) => `${c.id}${c.known ? ` (known ${c.known})` : ''} — "${c.name}": ${c.texts.map((t) => `"${t.slice(0, 200)}"`).join(' / ')}`).join('\n')}`,
   receipt: () =>
     `A photo of a supplier's invoice or receipt in the UAE (amounts in AED; VAT 5 %). The garage is the buyer; read the seller's paper exactly as printed.
 Return: isReceipt (an invoice/receipt/bill at all); vendor (the seller's name as printed, not the buyer's); vendorTrn; vendorPhone (a mobile first, "" if none); vendorAddress (a few words, "" if none); kind — "parts" (car parts, accessories, oils, consumables), "service" (a workshop's or contractor's bill for work: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo;
@@ -551,20 +552,37 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       });
     },
 
-    /** v0.86: who chats are to the garage — a few at once, kept by their words. */
+    /**
+     * v0.86: who chats are to the garage — a few at once, kept by their words. v0.91: a supplier's makes too (`makes` in
+     * every answer: the app knows this server says them); `known` — what the garage already knows the chat to be.
+     */
     async roles({ chats = [] } = {}) {
       const list = (Array.isArray(chats) ? chats : [])
         .slice(0, 12)
-        .map((c) => ({ id: String(c?.id ?? '').slice(0, 80), name: String(c?.name ?? '').slice(0, 80), texts: (Array.isArray(c?.texts) ? c.texts : []).slice(0, 3).map((t) => String(t)) }))
+        .map((c) => ({
+          id: String(c?.id ?? '').slice(0, 80),
+          name: String(c?.name ?? '').slice(0, 80),
+          texts: (Array.isArray(c?.texts) ? c.texts : []).slice(0, 4).map((t) => String(t)),
+          known: ['customer', 'supplier'].includes(c?.known) ? c.known : '',
+        }))
         .filter((c) => c.id && (c.name || c.texts.length));
       if (!list.length) return { chats: [] };
       const key = createHash('sha1').update(JSON.stringify(list)).digest('hex');
-      return cached(`roles:${key}`, 'roles', async () => {
+      return cached(`roles:2:${key}`, 'roles', async () => {
         const { value } = await json(
           P.roles(list),
           {
             type: 'object',
-            properties: { chats: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, role: { type: 'string' }, confidence: { type: 'number' } }, required: ['id', 'role', 'confidence'] } } },
+            properties: {
+              chats: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { id: { type: 'string' }, role: { type: 'string' }, makes: { type: 'array', items: { type: 'string' } }, confidence: { type: 'number' } },
+                  required: ['id', 'role', 'makes', 'confidence'],
+                },
+              },
+            },
             required: ['chats'],
           },
           { kind: 'roles', thinking: 'minimal' },
@@ -573,7 +591,12 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         return {
           chats: (Array.isArray(value.chats) ? value.chats : [])
             .filter((c) => ids.has(c?.id) && ['customer', 'supplier', 'other'].includes(c?.role))
-            .map((c) => ({ id: c.id, role: c.role, confidence: Number(c.confidence) || 0 })),
+            .map((c) => ({
+              id: c.id,
+              role: c.role,
+              makes: (Array.isArray(c.makes) ? c.makes : []).map((m) => String(m).trim().slice(0, 30)).filter(Boolean).slice(0, 8),
+              confidence: Number(c.confidence) || 0,
+            })),
         };
       });
     },

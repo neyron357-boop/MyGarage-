@@ -477,7 +477,7 @@ export const ru = {
   price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
   // v0.82: скидка строки; лист «Поставщики» заказа.
   lineOff: { title: 'Скидка', amount: 'Сумма', amountLabel: 'Скидка, AED' },
-  ask: { title: 'Поставщики', parts: 'Детали', who: 'Кому', search: 'Найти поставщика', noParts: 'Нет запчастей', noSuppliers: 'Никого не нашлось', send: 'Отправить · {{n}}', noWa: 'WhatsApp не подключён', sent: 'Отправлено поставщикам: {{n}}', noNumber: 'Без номера: {{names}}', used: 'б/у' },
+  ask: { title: 'Поставщики', parts: 'Детали', who: 'Кому', search: 'Найти поставщика', noParts: 'Нет запчастей', noSuppliers: 'Никого не нашлось', send: 'Отправить · {{n}}', noWa: 'WhatsApp не подключён', sent: 'Отправлено поставщикам: {{n}}', noNumber: 'Без номера: {{names}}', used: 'б/у', answersFor: '{{make}} · ответил {{n}}', replies: 'отвечает за ~{{time}}' },
   newOrder: {
     // v0.81: VIN в карточке номера.
     scanVin: 'Сканировать VIN',
@@ -1950,6 +1950,31 @@ export const ru = {
       updated_few: 'Статус обновлён для {{count}} чатов',
       updated_many: 'Статус обновлён для {{count}} чатов',
       updated_other: 'Статус обновлён для {{count}} чатов',
+      // v0.91: две кнопки при выборе — «Статус» и «Марка».
+      short: 'Статус',
+    },
+    // v0.91: марки чатов поставщиков — руками несколько сразу, по переписке, от ИИ.
+    makes: {
+      assign: 'Марка',
+      title: 'Марка · {{n}}',
+      search: 'Найти марку',
+      done_one: 'Марки обновлены для {{count}} чата',
+      done_few: 'Марки обновлены для {{count}} чатов',
+      done_many: 'Марки обновлены для {{count}} чатов',
+      done_other: 'Марки обновлены для {{count}} чатов',
+    },
+    study: { going: 'ИИ изучает чаты · {{done}} из {{total}}' },
+    // v0.91: что переписка с поставщиком сказала (карточка чата).
+    know: {
+      asked: 'Заявок {{count}}',
+      answered: 'ответил {{n}}',
+      priced: 'с ценой {{n}}',
+      na: 'нет в наличии {{n}}',
+      reply: 'отвечает за ~{{time}}',
+      min: '{{n}} мин',
+      hours: '{{n}} ч',
+      days: '{{n}} д',
+      byAi: 'Марку назвал ИИ',
     },
     voice: {
       mic: 'Голосовое',
@@ -2437,6 +2462,11 @@ export const ru = {
     statReturns_few: 'возврата',
     statReturns_many: 'возвратов',
     statReturns_other: 'возврата',
+    // v0.91: как отвечает в WhatsApp.
+    statAsked: 'заявок в WhatsApp',
+    statAnswered: 'ответил',
+    statPriced: 'с ценой',
+    statNa: 'нет в наличии',
     why: {
       onJob: 'На этом заказе',
       boughtFor: '{{make}} ×{{n}}',

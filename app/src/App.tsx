@@ -24,7 +24,7 @@ import {
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ContextType } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HashRouter, Link, MemoryRouter, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation, useNavigate, useNavigationType, type Location } from 'react-router-dom';
 import { ClaimPage } from './features/claims/ClaimPage';
@@ -63,7 +63,7 @@ import { useSheetSwipe } from './ui/sheetSwipe';
 import { PhoneStack, useScreenTitle, useViewportSync } from './ui/stack';
 import { DeskContext, DeskKeys, DeskMenu, DeskPaneContext, MOD_KEY, deskPage, deskScreenKey, setActivePane, sheetOpen, useDeskShell, useDeskWheel, type DeskPaneInfo } from './ui/desk';
 import { DeskTips } from './ui/deskTips';
-import { closeTab, DeskTabContext, focusTab, MAIN_TAB, noteTab, openTab, scrollOfTab, useDeskTab, useDeskTabs, type DeskTab } from './ui/deskTabs';
+import { closeTab, DeskTabContext, focusTab, MAIN_TAB, moveTab, noteTab, openTab, scrollOfTab, useDeskTab, useDeskTabs, type DeskTab } from './ui/deskTabs';
 import { useWaSideHidden } from './ui/deskSide';
 import { closeTwin, keepTwinPath, openTwin, useTwin } from './ui/deskTwin';
 import { DeskPalette } from './features/search/DeskPalette';
@@ -484,18 +484,99 @@ function TabRoutes({ id, front, slot }: { id: string; front: boolean; slot: HTML
   );
 }
 
-/** The tabs over the screens (v0.89), when there are two or more: a click — that tab; × or the wheel — closed; ＋ — a new one. */
+interface TabDrag {
+  id: string;
+  pointer: number;
+  x0: number;
+  /** Moved far enough to be a drag (not a click). */
+  on: boolean;
+  /** Where every tab stood when it began. */
+  slots: { left: number; width: number }[];
+  at: number;
+  to: number;
+}
+
+/**
+ * The tabs over the screens (v0.89), when there are two or more: a click — that tab; × or the wheel — closed; ＋ — a new one.
+ * Dragged along the strip — put elsewhere, the others making way (v0.91, the owner's note #29: «добавить возможность
+ * перетаскивать вкладки, менять местами»); Ctrl+Shift+← → moves the tab in focus.
+ */
 function DeskTabStrip({ onMainTo }: { onMainTo: (path: string) => void }) {
   const { t } = useTranslation();
   const tabs = useDeskTabs();
   const titleOf = useScreenTitle();
+  const strip = useRef<HTMLDivElement>(null);
+  const drag = useRef<TabDrag | null>(null);
   const close = (id: string) => {
     const { mainTo } = closeTab(id);
     if (mainTo) onMainTo(mainTo);
   };
+  const chips = () => Array.from(strip.current?.querySelectorAll<HTMLElement>('[data-tab-chip]') ?? []);
+  const onDown = (e: React.PointerEvent<HTMLDivElement>, id: string) => {
+    if (e.button !== 0 || (e.target as Element).closest('.desk-tab-x')) return;
+    const list = chips();
+    const at = list.findIndex((el) => el.dataset.tabChip === id);
+    if (at < 0) return;
+    const slots = list.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, width: r.width };
+    });
+    drag.current = { id, pointer: e.pointerId, x0: e.clientX, on: false, slots, at, to: at };
+  };
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || e.pointerId !== d.pointer) return;
+    const dx = e.clientX - d.x0;
+    if (!d.on) {
+      if (Math.abs(dx) < 6) return;
+      d.on = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      strip.current?.setAttribute('data-dragging', '');
+      e.currentTarget.setAttribute('data-drag', '');
+    }
+    const me = d.slots[d.at];
+    const first = d.slots[0];
+    const last = d.slots[d.slots.length - 1];
+    // Along the strip only, never past its first and last tab.
+    const x = Math.max(first.left - me.left, Math.min(last.left + last.width - (me.left + me.width), dx));
+    // Its leading edge past a neighbour's middle — they change places (as a browser's tabs do).
+    const left = me.left + x;
+    const right = left + me.width;
+    const center = (k: number) => d.slots[k].left + d.slots[k].width / 2;
+    let to = d.at;
+    for (let k = d.at + 1; k < d.slots.length; k++) if (right > center(k)) to = k;
+    for (let k = d.at - 1; k >= 0; k--) if (left < center(k)) to = k;
+    d.to = to;
+    // The others make way: by the dragged one's width and the gap between tabs.
+    const step = me.width + (d.slots.length > 1 ? Math.max(0, d.slots[1].left - (d.slots[0].left + d.slots[0].width)) : 0);
+    chips().forEach((el, k) => {
+      if (k === d.at) el.style.transform = `translateX(${x}px)`;
+      else el.style.transform = k > d.at && k <= to ? `translateX(${-step}px)` : k < d.at && k >= to ? `translateX(${step}px)` : '';
+    });
+  };
+  const onUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || e.pointerId !== d.pointer) return;
+    drag.current = null;
+    if (!d.on) return;
+    const el = e.currentTarget;
+    const was = el.getBoundingClientRect().left;
+    // The new order now, then the tab glides from where it was let go to its place.
+    flushSync(() => moveTab(d.id, d.to));
+    strip.current?.removeAttribute('data-dragging');
+    el.removeAttribute('data-drag');
+    for (const c of chips()) c.style.transform = '';
+    const now = el.getBoundingClientRect().left;
+    if (Math.abs(was - now) < 1) return;
+    el.style.transition = 'none';
+    el.style.transform = `translateX(${was - now}px)`;
+    void el.offsetWidth;
+    el.style.transition = '';
+    el.style.transform = '';
+  };
   return (
-    <div className="desk-tabs" role="tablist" aria-label={t('desk.tabs')}>
-      {tabs.tabs.map((tab) => {
+    <div ref={strip} className="desk-tabs" role="tablist" aria-label={t('desk.tabs')}>
+      {tabs.tabs.map((tab, k) => {
         const on = tab.id === tabs.active;
         const name = tab.title || String(titleOf(tab.path.split('?')[0]) || 'MyGarage');
         return (
@@ -508,7 +589,19 @@ function DeskTabStrip({ onMainTo }: { onMainTo: (path: string) => void }) {
             data-active={on || undefined}
             data-tab-chip={tab.id}
             onClick={() => focusTab(tab.id)}
-            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), focusTab(tab.id))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                focusTab(tab.id);
+              } else if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                e.preventDefault();
+                moveTab(tab.id, k + (e.key === 'ArrowLeft' ? -1 : 1));
+              }
+            }}
+            onPointerDown={(e) => onDown(e, tab.id)}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
             onMouseDown={(e) => e.button === 1 && e.preventDefault()}
             onAuxClick={(e) => e.button === 1 && (e.preventDefault(), close(tab.id))}
           >
@@ -676,7 +769,8 @@ function DesktopShell() {
         <nav className="app-nav desk-side" aria-label={t('nav.menu')} ref={setSlot} />
         <main className="desk-main">
           {many && <DeskTabStrip onMainTo={(path) => navigate(path)} />}
-          {tabs.tabs.map((tab) => {
+          {/* The screens in the order they were opened — moving a tab on the strip does not move its screen (v0.91). */}
+          {[...tabs.tabs].sort((a, b) => (a.id === b.id ? 0 : a.id === MAIN_TAB ? -1 : b.id === MAIN_TAB ? 1 : a.id < b.id ? -1 : 1)).map((tab) => {
             const on = tab.id === tabs.active;
             return (
               <div key={tab.id} className="desk-tab" data-tab={tab.id} style={on ? undefined : { display: 'none' }}>

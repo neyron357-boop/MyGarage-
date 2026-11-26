@@ -262,6 +262,24 @@ describe('v0.86: the labour line, a supplier’s answer, who chats are — light
     const { f } = fake([[/generateContent/, () => answer({ chats: [{ id: 'c1', role: 'supplier', confidence: 0.9 }, { id: 'zz', role: 'customer', confidence: 1 }, { id: 'c2', role: 'boss', confidence: 1 }] })]]);
     const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-c-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
     const r = await ai.roles({ chats: [{ id: 'c1', name: 'Al Noor Auto Parts', texts: ['price 120'] }, { id: 'c2', name: 'Ahmed', texts: ['my car ready?'] }] });
-    assert.deepEqual(r.chats, [{ id: 'c1', role: 'supplier', confidence: 0.9 }]);
+    assert.deepEqual(r.chats, [{ id: 'c1', role: 'supplier', makes: [], confidence: 0.9 }]);
+  });
+
+  it("v0.91: a supplier makes with its role; what the garage knows goes in the question", async () => {
+    let asked = '';
+    const { f } = fake([
+      [
+        /generateContent/,
+        (url, init) => {
+          asked = String(init.body);
+          return answer({ chats: [{ id: 'c1', role: 'supplier', makes: ['Toyota', ' Lexus ', ''], confidence: 0.8 }] });
+        },
+      ],
+    ]);
+    const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-m-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
+    const r = await ai.roles({ chats: [{ id: 'c1', name: 'Toyota Lexus Parts', texts: ['Prado 2015 bumper?', '950'], known: 'supplier' }] });
+    assert.deepEqual(r.chats, [{ id: 'c1', role: 'supplier', makes: ['Toyota', 'Lexus'], confidence: 0.8 }]);
+    assert.match(asked, /known supplier/);
+    assert.match(asked, /makes/);
   });
 });
