@@ -6,7 +6,8 @@ import { nowIso } from '../domain/dates';
 import type { ChatFact, Supplier } from '../domain/types';
 import { chatRole, orderChats, waDigits, whoOf, type ChatRoles, type WaChat, type WaEvent, type WaMessage, type Who } from '../domain/whatsapp';
 import { aiChatRoles, aiOn } from './ai';
-import { fetchChatMessages, knownPeople, loadChatRoles, loadPeople, onWaEvent, subscribeWa, waCall, waReady, waStore } from './whatsapp';
+import { SyncError } from './sync/api';
+import { askPhoneHistory, fetchChatHistory, fetchChatMessages, knownPeople, loadChatRoles, loadPeople, onWaEvent, subscribeWa, waCall, waReady, waStore } from './whatsapp';
 
 /*
  * The garage's WhatsApp studied (v0.91, the owner: «ИИ должен быстро обрабатывать новые чаты или уже существующие,
@@ -19,17 +20,25 @@ import { fetchChatMessages, knownPeople, loadChatRoles, loadPeople, onWaEvent, s
  *  - a chat the garage does not know, or a supplier whose makes nobody gave, is shown to the AI by its name and a few of its
  *    words — who it is and the makes it deals with (`aiRole`, `aiMakes`; a light model, a dozen at once, kept on the server);
  *  - all of it once when the app opens (again after six hours), then each chat a minute after its last message.
+ * v0.91.1 (the owner: «много чатов, более ранние истории которых не загружаются — что сделать, чтобы ИИ посмотрел абсолютно
+ * все истории»): a chat is read the first time as deep as WhatsApp Web has it (`/api/wa/history`, up to 3000 messages; then
+ * only what is new); what stayed on the phone — `olderFromPhone`: the phone asked for each chat's older messages
+ * (WhatsApp's own «get older messages from your phone»; it answers only with WhatsApp open on it, and only what the phone
+ * gives this linked device — «All chat history» in its Linked devices), and the chat read deep again when they came.
  * The messages themselves are never kept — only what they came to. Any device with the garage's WhatsApp does it; a chat
  * read on one device in the last ten minutes is not read again on another. Nothing is sent.
  */
 
-/** Read this many of a chat's last messages. */
+/** Read this many of a chat's last messages (what is new since it was read). */
 const READ = 80;
+/** The first read of a chat — as deep as WhatsApp Web has it. */
+const DEEP = 3000;
 /** A chat studied (here or on another device) this recently is not read again. */
 const FRESH_MS = 10 * 60_000;
 /** The whole list again after this long. */
 const SWEEP_EVERY = 6 * 60 * 60_000;
-const SWEPT_KEY = 'mygarage.chatStudy.at';
+// v0.91.1: a key of its own — the chats studied by v0.91 (80 messages each) are read deep at once, not in six hours.
+const SWEPT_KEY = 'mygarage.chatStudy.v2';
 const AI_BATCH = 12;
 
 /* ---------- What is going on (the WhatsApp list shows it) ---------- */
@@ -38,6 +47,8 @@ export interface StudyProgress {
   running: boolean;
   done: number;
   total: number;
+  /** What it is doing: going through the chats, or asking the phone for older messages. */
+  kind?: 'study' | 'phone';
 }
 let progress: StudyProgress = { running: false, done: 0, total: 0 };
 const subs = new Set<() => void>();
@@ -98,11 +109,27 @@ async function keep(id: string, patch: Partial<ChatFact>): Promise<ChatFact> {
  * A chat read and what its requests came to kept. Not read when nothing came since it was (`force` — read anyway), or when
  * it was read a moment ago here or on another device. Returns the record and a few of its words (for the AI), or nothing.
  */
-export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'>, opts: { force?: boolean } = {}): Promise<{ fact: ChatFact; words: string[] } | undefined> {
+export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'>, opts: { force?: boolean; deep?: boolean } = {}): Promise<{ fact: ChatFact; words: string[] } | undefined> {
   const was = await db.chatFacts.get(chat.id);
   if (!opts.force && was?.studiedAt && Date.now() - Date.parse(was.studiedAt) < FRESH_MS) return undefined;
-  if (!opts.force && was?.through && chat.t && was.through >= chat.t) return undefined;
-  const messages = await fetchChatMessages(chat.id, READ, { lite: true });
+  // Read deep once (v0.91.1); after that only when something came since.
+  const deep = opts.deep || !was?.deepAt;
+  if (!opts.force && !deep && was?.through && chat.t && was.through >= chat.t) return undefined;
+  let messages: Pick<WaMessage, 't' | 'me' | 'type' | 'text'>[];
+  let end = was?.end;
+  let deepAt = was?.deepAt;
+  if (deep) {
+    try {
+      const h = await fetchChatHistory(chat.id, DEEP);
+      messages = h.messages;
+      end = h.end;
+      deepAt = nowIso();
+    } catch (e) {
+      // A server from before v0.91.1: the last messages, as before.
+      if (!(e instanceof SyncError) || e.status !== 404) throw e;
+      messages = await fetchChatMessages(chat.id, READ, { lite: true });
+    }
+  } else messages = await fetchChatMessages(chat.id, READ, { lite: true });
   const times = messages.map((m) => m.t).filter((t) => t > 0);
   const turns = times.length ? mergeTurns(was?.turns, turnsOf(messages), Math.min(...times)) : was?.turns;
   const fact = await keep(chat.id, {
@@ -111,6 +138,8 @@ export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'
     turns: turns?.length ? turns : undefined,
     through: Math.max(was?.through ?? 0, ...times, chat.t || 0),
     studiedAt: nowIso(),
+    ...(deepAt ? { deepAt } : {}),
+    ...(end !== undefined ? { end } : {}),
   });
   return { fact, words: wordsFor(messages) };
 }
@@ -158,7 +187,7 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
       const factOf = new Map(facts.map((f) => [f.id, f]));
       const supplierOf = new Map(sups.map((s) => [s.id, s]));
       const list = orderChats(chats).filter((c) => worthStudy(c, people, roles));
-      tell({ running: true, done: 0, total: list.length });
+      tell({ running: true, done: 0, total: list.length, kind: 'study' });
       const queue: { chat: WaChat; words: string[]; known?: 'supplier' }[] = [];
       for (const [k, chat] of list.entries()) {
         if (!waReady()) break;
@@ -179,7 +208,7 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
           queue.push({ chat, words, ...(want === 'supplier' ? { known: 'supplier' as const } : {}) });
         }
         if (queue.length >= AI_BATCH) suppliers += await askAiAbout(queue.splice(0)).catch(() => 0);
-        tell({ running: true, done: k + 1, total: list.length });
+        tell({ running: true, done: k + 1, total: list.length, kind: 'study' });
         await new Promise((r) => setTimeout(r, PAUSE));
       }
       suppliers += await askAiAbout(queue).catch(() => 0);
@@ -195,6 +224,90 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
     return { studied, suppliers };
   })();
   return sweeping;
+}
+
+/* ---------- What stayed on the phone ---------- */
+
+export interface PhoneHistoryResult {
+  /** Chats with older messages on the phone, as WhatsApp says. */
+  chats: number;
+  /** Asks sent; the phone answered with messages; it said no; it did not answer. */
+  asked: number;
+  ok: number;
+  failed: number;
+  none: number;
+  /** Requests read in the history that came. */
+  turns: number;
+  /** Stopped: the phone did not answer three times running (WhatsApp is not open on it), or WhatsApp paused the asks. */
+  stopped?: 'silent' | 'paused';
+}
+
+/** The chats, worth studying, whose older messages WhatsApp says are on the phone (0 — there; 2 — not given to this device). */
+export async function phoneHistoryChats(): Promise<number> {
+  return (await db.chatFacts.toArray()).filter((f) => f.end === 0 || f.end === 2).length;
+}
+
+let asking: Promise<PhoneHistoryResult> | undefined;
+/** Asks of one chat in a row while the phone keeps sending older messages. */
+const ASKS_A_CHAT = 6;
+
+/**
+ * The phone asked for the older messages of every chat worth studying that has them there (v0.91.1), one chat at a time:
+ * the phone answers — the chat is read deep again, and asked again while more is left (a few times); three chats running
+ * without an answer — WhatsApp is not open on the phone: stop and say so. Nothing is sent to anyone: the ask goes to the
+ * garage's own phone.
+ */
+export function olderFromPhone(): Promise<PhoneHistoryResult> {
+  asking ??= (async () => {
+    const out: PhoneHistoryResult = { chats: 0, asked: 0, ok: 0, failed: 0, none: 0, turns: 0 };
+    try {
+      const chats = waStore().chats.length ? waStore().chats : ((await waCall<{ chats: WaChat[] }>('chats', { query: { limit: '1000' }, timeout: 60_000 })).chats ?? []);
+      const [people, roles, facts] = await Promise.all([loadPeople(), loadChatRoles(), db.chatFacts.toArray()]);
+      const factOf = new Map(facts.map((f) => [f.id, f]));
+      const list = orderChats(chats).filter((c) => worthStudy(c, people, roles) && (factOf.get(c.id)?.end === 0 || factOf.get(c.id)?.end === 2));
+      out.chats = list.length;
+      tell({ running: true, done: 0, total: list.length, kind: 'phone' });
+      let silent = 0;
+      for (const [k, chat] of list.entries()) {
+        if (!waReady()) break;
+        const before = factOf.get(chat.id)?.turns?.length ?? 0;
+        for (let round = 0; round < ASKS_A_CHAT; round++) {
+          const r = await askPhoneHistory(chat.id);
+          if (r.paused) {
+            out.stopped = 'paused';
+            break;
+          }
+          if (!r.asked) break;
+          out.asked++;
+          await keep(chat.id, { phoneAt: nowIso(), phoneAsk: r.result ?? 'unknown', end: r.endNow ?? r.end });
+          if (r.result !== 'ok') {
+            if (r.result === 'failed') out.failed++;
+            else out.none++;
+            silent = r.result === 'failed' ? 0 : silent + 1;
+            break;
+          }
+          out.ok++;
+          silent = 0;
+          const had = (await db.chatFacts.get(chat.id))?.turns?.length ?? 0;
+          const read = await studyChat(chat, { force: true, deep: true });
+          // More left on the phone and more came — again; nothing new, or nothing left — enough for this chat.
+          if (!read || (read.fact.end !== 0 && read.fact.end !== 2) || (read.fact.turns?.length ?? 0) <= had) break;
+        }
+        out.turns += Math.max(0, ((await db.chatFacts.get(chat.id))?.turns?.length ?? 0) - before);
+        tell({ running: true, done: k + 1, total: list.length, kind: 'phone' });
+        if (out.stopped) break;
+        if (silent >= 3) {
+          out.stopped = 'silent';
+          break;
+        }
+      }
+    } finally {
+      tell({ running: false, done: 0, total: 0 });
+      asking = undefined;
+    }
+    return out;
+  })();
+  return asking;
 }
 
 /** Asked of the AI while the app is open (a chat it could not say is not asked again until the app opens again). */

@@ -516,11 +516,18 @@ export interface ChatFact {
   phone: string;
   /** WhatsApp's name for it when last read: a supplier only in WhatsApp is listed by it. */
   name?: string;
-  /** The garage's requests in it and their answers (the newest 80), kept as they come. */
+  /** The garage's requests in it and their answers (the newest 400), kept as they come. */
   turns?: Turn[];
   /** Its messages were read up to this one's time (ms). */
   through?: number;
   studiedAt?: string;
+  /** Read once as deep as WhatsApp Web has it (v0.91.1); after that — what is new. */
+  deepAt?: string;
+  /** WhatsApp's word on its older messages: 0 — more on the phone; 2 — more there, not given to this linked device; 1 — none. */
+  end?: number | null;
+  /** The phone last asked for its older messages, and its answer (v0.91.1). */
+  phoneAt?: string;
+  phoneAsk?: 'ok' | 'failed' | 'none' | 'unknown';
   /** Makes given by hand («Выбрать» → «Марка») — a chat that is no supplier of the base (one of the base keeps them on its card). */
   makes?: string[];
   /** The AI's word (v0.91: by its name and its words): who it is, and the makes a supplier deals with. */

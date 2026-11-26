@@ -4,7 +4,8 @@ import { db, GarageDB, setDb, uid } from '../db/db';
 import { chatRole } from '../domain/whatsapp';
 import type { WaChat, WaMessage } from '../domain/whatsapp';
 import { setAiTransport } from './ai';
-import { chatsMakes, loadChatMakes, resetChatStudy, setChatMakes, studyChats } from './chatStudy';
+import { chatsMakes, loadChatMakes, olderFromPhone, phoneHistoryChats, resetChatStudy, setChatMakes, studyChats } from './chatStudy';
+import { SyncError } from './sync/api';
 import { createCustomer } from './customers';
 import { addItem } from './estimate';
 import { checkIn } from './orders';
@@ -39,7 +40,18 @@ const silentTalk = [0, 1, 2, 3].flatMap((d) => [msg(SILENT, d * 1440, true, 'Nis
 const newTalk = [msg(NEW_ONE, 0, true, 'Lexus LX570 brake pads available?'), msg(NEW_ONE, 20, false, '280')];
 
 let read: string[] = [];
+/** Read deep (v0.91.1): the chats asked of `/history`. */
+let deepRead: string[] = [];
 let asked: { id: string; known?: string; texts: string[] }[] = [];
+/** WhatsApp's word on each chat's older messages (0 — more on the phone, 2 — not given to this device, 1 — none). */
+let ends: Record<string, number> = {};
+/** What the phone sends when asked (older requests of a chat); its answer per chat. */
+let onPhone: Record<string, WaMessage[]> = {};
+let phoneSays: Record<string, 'ok' | 'none' | 'failed'> = {};
+let phoneAsked: string[] = [];
+/** A server from before v0.91.1: no `/history`. */
+let oldServer = false;
+const talkOf = (id: string) => (id === FAST.id ? fastTalk : id === SILENT.id ? silentTalk : id === NEW_ONE.id ? newTalk : []);
 
 beforeEach(async () => {
   db.close();
@@ -47,7 +59,13 @@ beforeEach(async () => {
   await ensureSeed();
   resetChatStudy(0);
   read = [];
+  deepRead = [];
   asked = [];
+  ends = { [FAST.id]: 0, [SILENT.id]: 2, [NEW_ONE.id]: 1 };
+  onPhone = {};
+  phoneSays = {};
+  phoneAsked = [];
+  oldServer = false;
   setWaTransport(async (path: string, init: WaCallInit) => {
     if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 5, unread: 0 };
     if (path === 'chats') return { chats: [FAST, SILENT, NEW_ONE, CUSTOMER, GROUP], total: 5, unread: 0 };
@@ -55,7 +73,22 @@ beforeEach(async () => {
       const id = init.query!.chat;
       expect(init.query!.lite).toBe('1');
       read.push(id);
-      return { messages: id === FAST.id ? fastTalk : id === SILENT.id ? silentTalk : id === NEW_ONE.id ? newTalk : [], more: false };
+      return { messages: talkOf(id), more: false };
+    }
+    if (path === 'history') {
+      if (oldServer) throw new SyncError(404, 'not found');
+      const id = init.query!.chat;
+      deepRead.push(id);
+      return { messages: [...(onPhone[id] ?? []), ...talkOf(id)].map(({ id: mid, t, me, type, text }) => ({ id: mid, t, me, type, text })), more: false, end: ends[id] ?? null };
+    }
+    if (path === 'history-sync') {
+      const id = (init.body as { chat: string }).chat;
+      phoneAsked.push(id);
+      const end = ends[id];
+      if (end !== 0 && end !== 2) return { asked: false, end };
+      const result = phoneSays[id] ?? 'none';
+      if (result === 'ok') ends[id] = 1;
+      return { asked: true, end, result, endNow: ends[id] };
     }
     if (path === 'outbox') return { items: ((init.body as { items: { key: string }[] }).items ?? []).map((x) => ({ key: x.key, state: 'queued' })) };
     throw new Error(`not played: ${path}`);
@@ -77,8 +110,9 @@ beforeEach(async () => {
 describe('studying the chats (v0.91)', () => {
   it('reads every chat that is or may be a supplier, keeps what its requests came to, asks the AI what nobody knows — once', async () => {
     const r = await studyChats();
-    // The customer's chat and the group are not read.
-    expect(read.sort()).toEqual([FAST.id, SILENT.id, NEW_ONE.id].sort());
+    // The customer's chat and the group are not read; the first time — as deep as WhatsApp Web has it (v0.91.1).
+    expect(deepRead.sort()).toEqual([FAST.id, SILENT.id, NEW_ONE.id].sort());
+    expect(read).toEqual([]);
     expect(r.studied).toBe(3);
     const fast = await db.chatFacts.get(FAST.id);
     expect(fast?.turns).toHaveLength(4);
@@ -98,10 +132,39 @@ describe('studying the chats (v0.91)', () => {
     expect(chatRole(NEW_ONE, people, roles)).toBe('supplier');
     // Again: nothing new in the chats — nothing read, nobody asked.
     read = [];
+    deepRead = [];
     const asks = asked.length;
     await studyChats();
     expect(read).toEqual([]);
+    expect(deepRead).toEqual([]);
     expect(asked.length).toBe(asks);
+    // WhatsApp's word on what stayed on the phone is kept.
+    expect((await db.chatFacts.get(FAST.id))?.end).toBe(0);
+    expect(await phoneHistoryChats()).toBe(2);
+  });
+
+  it('v0.91.1: a server without /history — the last messages, as before', async () => {
+    oldServer = true;
+    const r = await studyChats();
+    expect(r.studied).toBe(3);
+    expect(read.sort()).toEqual([FAST.id, SILENT.id, NEW_ONE.id].sort());
+    expect((await db.chatFacts.get(FAST.id))?.deepAt).toBeUndefined();
+  });
+
+  it('v0.91.1: the phone asked for older messages — what it sends is read and counted; a chat it did not answer is kept as such', async () => {
+    await studyChats();
+    expect((await db.chatFacts.get(FAST.id))?.turns).toHaveLength(4);
+    // Three more Toyota requests, a month older, waiting on the phone; the phone answers for that chat only.
+    onPhone[FAST.id] = [-40, -39, -38].flatMap((d) => [msg(FAST, d * 1440, true, '*Toyota Prado 2016*\n1. HEADLIGHT'), msg(FAST, d * 1440 + 15, false, '650')]);
+    phoneSays[FAST.id] = 'ok';
+    const r = await olderFromPhone();
+    expect(phoneAsked.sort()).toEqual([FAST.id, SILENT.id].sort());
+    expect(r).toMatchObject({ chats: 2, ok: 1, none: 1, turns: 3 });
+    const fast = await db.chatFacts.get(FAST.id);
+    expect(fast?.turns).toHaveLength(7);
+    expect(fast?.end).toBe(1);
+    expect((await db.chatFacts.get(SILENT.id))?.phoneAsk).toBe('none');
+    expect(await phoneHistoryChats()).toBe(1);
   });
 
   it('the suppliers of a job: the fast one first, the silent one after; one only in WhatsApp listed and asked', async () => {

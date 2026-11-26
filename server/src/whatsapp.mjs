@@ -19,6 +19,8 @@ import { createOutbox } from './waOutbox.mjs';
  *   POST /api/wa/link · /logout · /restart      — link this computer, unlink it, start WhatsApp Web again
  *   POST /api/wa/code {phone}                   — link by a code typed on the phone
  *   GET  /api/wa/chats · /messages?chat= · /number?phone=
+ *   GET  /api/wa/history?chat=&limit=&before= — a chat's history, light, as deep as WhatsApp Web has it (v0.91.1)
+ *   POST /api/wa/history-sync {chat}         — ask the phone for a chat's older messages (v0.91.1)
  *   POST /api/wa/send {chat, text, quote} · /seen {chat} · /forward {id, to} (v0.80.3) · /delete {id} (v0.83: ours, for
  *        everyone — while WhatsApp allows it)
  *   POST /api/wa/file?chat=&name=&caption=      — a file (the body is its bytes)
@@ -391,6 +393,13 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
       return send(res, 200, got), true;
     }
     if (get && what === 'number') return send(res, 200, await call(`/number${query(url, ['phone'])}`, { timeout: 40_000 })), true;
+    // v0.91.1 (the owner: «чтобы ИИ посмотрел абсолютно все истории»): a chat read deep, and its older messages asked of the phone.
+    if (get && what === 'history') return send(res, 200, await call(`/history${query(url, ['chat', 'limit', 'before'])}`, { timeout: 160_000 })), true;
+    if (req.method === 'POST' && what === 'history-sync') {
+      const body = await readJson(req, 4096);
+      send(res, 200, await call('/history-sync', { method: 'POST', body: { chat: body.chat }, timeout: 90_000 }));
+      return true;
+    }
     if (req.method === 'POST' && what === 'send') {
       const body = await readJson(req, 256 * 1024);
       // `key` (v0.84): the app's own key of this send — sent again under it, it is not sent twice (whatsapp/once.mjs).

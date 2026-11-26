@@ -11,7 +11,9 @@ const { chromium } = require('playwright');
  * - «Поставщики» of a Toyota job: the fast one first («Toyota · ответил 4»), the WhatsApp pictures, every supplier (the list
  *   longer than a screen), the search finds the one only in WhatsApp (#74); «Отправить» works at once, the rows under it
  *   (#75) — and the one only in WhatsApp becomes a supplier of the base;
- * - the PC's tabs dragged along the strip, Ctrl+Shift+→ (#29).
+ * - the PC's tabs dragged along the strip, Ctrl+Shift+→ (#29);
+ * - v0.91.1: each chat read deep the first time; «История с телефона» in WhatsApp's settings — the phone asked, what it
+ *   sends read (three older requests of the fast supplier).
  * Screenshots — test-results/v091/.
  *
  * Usage: start the dev server afresh (npm run dev -- --port 5173), then: node e2e/v091.cjs (BASE_URL to aim elsewhere).
@@ -52,12 +54,32 @@ async function playServer(page) {
       [SILENT.id]: [0, 1, 2, 3].flatMap((d) => [msg(SILENT, d * 1440, true, 'Nissan Patrol 2016 gearbox mounting price?'), ...(d === 0 ? [msg(SILENT, 600, false, 'not available')] : [])]),
       [DESERT.id]: [msg(DESERT, 0, true, 'Lexus LX570 brake pads available?'), msg(DESERT, 20, false, '280')],
     };
-    const world = { out: [], chats: [FAST, SILENT, DESERT, OMAR, TEAM], messages, read: [], ai: [] };
+    // What stayed on the phone (v0.91.1): WhatsApp's word per chat, and three older Toyota requests of the fast one.
+    const ends = { [FAST.id]: 0, [SILENT.id]: 2, [DESERT.id]: 1 };
+    const older = [-40, -39, -38].flatMap((d) => [msg(FAST, d * 1440, true, '*Toyota Prado 2016*\n1. HEADLIGHT'), msg(FAST, d * 1440 + 15, false, '650')]);
+    const world = { out: [], chats: [FAST, SILENT, DESERT, OMAR, TEAM], messages, read: [], ai: [], ends, phone: {}, phoneAsked: [] };
     window.__wa = world;
     setWaTransport(async (p, init) => {
       await new Promise((r) => setTimeout(r, 120));
       if (p === 'status') return { ok: true, available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '2.3000', error: '', chats: world.chats.length, unread: 0 };
       if (p === 'chats') return { chats: world.chats, total: world.chats.length, unread: 0 };
+      if (p === 'history') {
+        const id = init.query.chat;
+        world.read.push(id);
+        return { messages: [...(world.phone[id] ?? []), ...(world.messages[id] ?? [])].map(({ id: mid, t, me, type, text }) => ({ id: mid, t, me, type, text })), more: false, end: world.ends[id] ?? null };
+      }
+      if (p === 'history-sync' && init.method === 'POST') {
+        const id = init.body.chat;
+        const end = world.ends[id];
+        if (end !== 0 && end !== 2) return { asked: false, end };
+        world.phoneAsked.push(id);
+        const ok = id === FAST.id;
+        if (ok) {
+          world.ends[id] = 1;
+          world.phone[id] = older;
+        }
+        return { asked: true, end, result: ok ? 'ok' : 'none', endNow: world.ends[id] };
+      }
       if (p === 'messages') {
         if (init.query.lite === '1') world.read.push(init.query.chat);
         return { messages: world.messages[init.query.chat] ?? [], more: false };
@@ -133,7 +155,7 @@ async function playServer(page) {
   await shot('phone-01-studying');
   const swept = await study;
   const world = await page.evaluate(() => ({ read: window.__wa.read, ai: window.__wa.ai }));
-  check(swept.studied === 3 && world.read.length === 3 && !world.read.includes('971501110004@c.us'), 'the suppliers and the unknown chat read (light), not the customer nor the group: ' + JSON.stringify(world.read));
+  check(swept.studied === 3 && world.read.length === 3 && !world.read.includes('971501110004@c.us'), 'the suppliers and the unknown chat read deep (light), not the customer nor the group: ' + JSON.stringify(world.read));
   check(world.ai.includes('971501110003@c.us'), 'the chat nobody knows shown to the AI');
   await page.locator('[data-wa-tab="suppliers"]').click();
   await top('[data-wa-chat="971501110003@c.us"]').waitFor();
@@ -177,6 +199,23 @@ async function playServer(page) {
   await page.keyboard.press('Escape');
   await settle(400);
 
+  // v0.91.1: «История с телефона» — two chats have more there; the phone answers for one, its older requests are counted.
+  await page.goto(BASE + '#/whatsapp/setup');
+  await top('[data-wa-history-left]').waitFor({ timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] [data-wa-history-left]')?.textContent?.trim() === '2', null, { timeout: 8000 });
+  await top('[data-wa-history-ask]').scrollIntoViewIfNeeded();
+  await shot('phone-04b-phone-history');
+  await top('[data-wa-history-ask]').click();
+  await page.locator('.mantine-Notification-root', { hasText: 'С телефона пришло' }).waitFor({ timeout: 20000 });
+  const after91 = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts');
+    return { asked: window.__wa.phoneAsked, fast: (await db.chatFacts.get('971501110001@c.us'))?.turns?.length };
+  });
+  check(after91.asked.length === 2 && after91.fast === 7, 'v0.91.1: the phone asked for the two chats with more there; the fast one’s three older requests read: ' + JSON.stringify(after91));
+  await page.waitForFunction(() => document.querySelector('.screen[data-role="top"] [data-wa-history-left]')?.textContent?.trim() === '1', null, { timeout: 8000 });
+  await shot('phone-04c-phone-history-done');
+  await settle(400);
+
   // 4. «Поставщики» of the Toyota job.
   await page.goto(BASE + `#/orders/${jobId}`);
   await top('button.add-extra[aria-label="Поставщики"]').waitFor({ timeout: 15000 });
@@ -186,7 +225,7 @@ async function playServer(page) {
   await ask.locator('[data-ask-supplier]').first().waitFor();
   await settle(500);
   const first = await ask.locator('[data-ask-supplier]').first().innerText();
-  check(first.includes('Fast Toyota Parts') && /Toyota · ответил 4/.test(first), 'the fast one first, «Toyota · ответил 4»: ' + first.replace(/\n/g, ' '));
+  check(first.includes('Fast Toyota Parts') && /Toyota · ответил 7/.test(first), 'the fast one first, «Toyota · ответил 7» (four read here, three from the phone): ' + first.replace(/\n/g, ' '));
   const rows = await ask.locator('[data-ask-supplier]').count();
   check(rows > 12, `every supplier, not twelve (#74): ${rows} rows`);
   check((await ask.locator('.ask-row .wa-avatar').count()) >= 10, 'the WhatsApp picture by each supplier with a number');

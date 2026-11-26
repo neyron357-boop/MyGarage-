@@ -41,8 +41,8 @@ const GAP = 30 * MIN;
 const ANSWER = 48 * 60 * MIN;
 /** What the supplier said within a day of the request is its answer (a price, «not available»). */
 const WINDOW = 24 * 60 * MIN;
-/** The requests kept of a chat (the newest). */
-export const KEEP_TURNS = 80;
+/** The requests kept of a chat (the newest) — v0.91.1: enough for a chat's whole history as WhatsApp gives it. */
+export const KEEP_TURNS = 400;
 
 /* ---------- Makes in words ---------- */
 

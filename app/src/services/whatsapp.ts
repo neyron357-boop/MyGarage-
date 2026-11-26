@@ -334,6 +334,35 @@ export async function fetchChatMessages(chat: string, limit = 60, opts: { lite?:
   return r.messages ?? [];
 }
 
+/**
+ * A chat's history as deep as WhatsApp Web has it (v0.91.1, the owner: «чтобы ИИ посмотрел абсолютно все истории»): who,
+ * when, the kind and a few words of each message — no picture, no file. `end` — WhatsApp's word on what is left on the
+ * phone: 0 — more there; 2 — more there, not given to this linked device; 1 — nothing more; null — not said.
+ */
+export interface WaHistory {
+  messages: Pick<WaMessage, 'id' | 't' | 'me' | 'type' | 'text'>[];
+  more: boolean;
+  end: number | null;
+}
+export async function fetchChatHistory(chat: string, limit = 3000): Promise<WaHistory> {
+  const r = await call<{ messages?: WaHistory['messages']; more?: boolean; end?: number | null }>('history', { query: { chat, limit: String(limit) }, timeout: 170_000 });
+  return { messages: r.messages ?? [], more: !!r.more, end: typeof r.end === 'number' ? r.end : null };
+}
+
+/**
+ * The phone asked for a chat's older messages (v0.91.1) — WhatsApp Web's own «get older messages from your phone». The
+ * phone answers only with WhatsApp open on it: `result` — `ok` (they came), `failed`, `none` (no answer in 40 s); `paused` —
+ * WhatsApp stopped such asks for a while after failures.
+ */
+export interface PhoneHistoryAsk {
+  asked: boolean;
+  end: number | null;
+  result?: 'ok' | 'failed' | 'none' | 'unknown';
+  paused?: boolean;
+  endNow?: number | null;
+}
+export const askPhoneHistory = (chat: string): Promise<PhoneHistoryAsk> => call<PhoneHistoryAsk>('history-sync', { method: 'POST', body: { chat }, timeout: 100_000 });
+
 async function call<T>(path: string, init: WaCallInit = {}): Promise<T> {
   if (transport) return (await transport(path, init)) as T;
   const cfg = syncConfig();

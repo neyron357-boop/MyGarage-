@@ -14,6 +14,10 @@
  *   POST /code {phone}                — link by a code typed on the phone instead of the QR
  *   GET  /chats?limit=                — the chats, the newest first
  *   GET  /messages?chat=&limit=       — a chat's last messages
+ *   GET  /history?chat=&limit=&before= — a chat's history as the app studies it (v0.91.1): who, when, the kind and a few
+ *        words of each message, as deep as WhatsApp Web has it; `end` — whether older messages are left on the phone
+ *   POST /history-sync {chat}         — ask the phone for a chat's older messages (WhatsApp's own «get older messages
+ *        from your phone»); one ask every few seconds at most
  *   GET  /media?id=                   — a message's file (in parts when asked: a video plays as it comes)
  *   GET  /avatar?id=                  — a chat's picture
  *   POST /send {chat, text, quote}    — a text
@@ -635,6 +639,108 @@ const PAGE_MESSAGES = async (chatId, limit) => {
   return { more, rows: msgs.map((m) => window.WWebJS.getMessageModel(m)) };
 };
 
+/**
+ * A chat's history as the app studies it (v0.91.1, the owner: «много чатов, более ранние истории которых не загружаются —
+ * что сделать, чтобы ИИ посмотрел абсолютно все истории»): back from `before` (ms; none — from the newest), `limit` deep,
+ * each message as who, when, its kind and a few of its words (a picture's preview never — a photo's `body` is its
+ * preview, its words are its caption). `end` — WhatsApp's own word on what is left on the phone (0 or 2 — more there).
+ */
+const PAGE_HISTORY = async (chatId, limit, before) => {
+  const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+  if (!chat) return null;
+  const ok = (m) => !m.isNotification;
+  const older = (m) => !before || m.t * 1000 < before;
+  let msgs = chat.msgs.getModelsArray().filter(ok);
+  let more = true;
+  let rounds = 0;
+  while (msgs.filter(older).length < limit && rounds++ < 200) {
+    const loaded = await window.require('WAWebChatLoadMessages').loadEarlierMsgs({ chat });
+    if (!loaded || !loaded.length) {
+      more = false;
+      break;
+    }
+    msgs = [...loaded.filter(ok), ...msgs];
+  }
+  msgs = msgs.filter(older).sort((a, b) => a.t - b.t);
+  if (msgs.length > limit) msgs = msgs.slice(msgs.length - limit);
+  const words = (m) => String((m.type === 'chat' ? m.body : m.caption) || '').slice(0, 300);
+  return {
+    more,
+    end: typeof chat.endOfHistoryTransferType === 'number' ? chat.endOfHistoryTransferType : null,
+    rows: msgs.map((m) => ({ id: m.id?._serialized || '', t: (Number(m.t) || 0) * 1000, me: !!m.id?.fromMe, type: m.type || '', text: words(m) })),
+  };
+};
+
+/**
+ * The phone asked for a chat's older messages (v0.91.1) — exactly what WhatsApp Web's own «Click here to get older messages
+ * from your phone» does (WAWebConversationLoadMoreMessagesHistorySync: `sendPeerDataOperationRequest(HISTORY_SYNC_ON_DEMAND,
+ * { chatId })`), only where WhatsApp Web shows that line: `end` 0 — the first transfer left messages on the phone; 2 — they
+ * are there, but this linked device was not given them (the phone: Linked devices → this device → Chat history → «All chat
+ * history»). Its answer is WhatsApp's own event — `ok`, `failed` or none in `waitMs`.
+ */
+const PAGE_HISTORY_SYNC = async (chatId, waitMs) => {
+  const C = window.require('WAWebCollections');
+  const wid = window.require('WAWebWidFactory').createWid(chatId);
+  const chat = C.Chat.get(wid) ?? (await C.Chat.find(wid));
+  if (!chat) return { asked: false, end: null };
+  const end = typeof chat.endOfHistoryTransferType === 'number' ? chat.endOfHistoryTransferType : null;
+  let gate = null;
+  try {
+    gate = !!window.require('WAWebSyncGatingUtils').isHistorySyncOnDemandEnabled();
+  } catch {
+    // not said
+  }
+  let paused = false;
+  try {
+    paused = !!window.require('WAWebNonMessageDataRequestHistorySyncOnDemandUtils').historySyncOnDemandRequestsFailureRecord.disableRequestSending;
+  } catch {
+    // not said
+  }
+  if ((end !== 0 && end !== 2) || paused) return { asked: false, end, gate, paused };
+  const jid = typeof chat.id.toJid === 'function' ? chat.id.toJid() : chat.id._serialized;
+  let events = null;
+  try {
+    events = window.require('WAWebHistorySyncOnDemandEvents').WAWebHistorySyncOnDemandEvents;
+  } catch {
+    // no events: the answer is not known
+  }
+  const OK = 'history_sync_on_demand_events:success_history_sync_od';
+  const BAD = 'history_sync_on_demand_events:error_history_sync_od';
+  const answer = new Promise((resolve) => {
+    if (!events) return resolve('unknown');
+    const on = (events.on ?? events.addListener).bind(events);
+    const off = (events.off ?? events.removeListener ?? (() => {})).bind(events);
+    let timer = 0;
+    const done = (r) => {
+      clearTimeout(timer);
+      off(OK, ok);
+      off(BAD, bad);
+      resolve(r);
+    };
+    const ok = (t) => t === jid && done('ok');
+    const bad = (t) => t === jid && done('failed');
+    on(OK, ok);
+    on(BAD, bad);
+    timer = setTimeout(() => done('none'), waitMs);
+  });
+  await window.require('WAWebSendNonMessageDataRequest').sendPeerDataOperationRequest(3, { chatId: chat.id });
+  const result = await answer;
+  return { asked: true, end, gate, result, endNow: typeof chat.endOfHistoryTransferType === 'number' ? chat.endOfHistoryTransferType : null };
+};
+/** One ask of the phone at a time, a few seconds apart. */
+let historyAsks = Promise.resolve();
+let historyAskedAt = 0;
+function askHistory(c, chat) {
+  const run = historyAsks.then(async () => {
+    const wait = historyAskedAt + 3000 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    historyAskedAt = Date.now();
+    return within(c.pupPage.evaluate(PAGE_HISTORY_SYNC, chat, 40_000), 60_000, 'history sync');
+  });
+  historyAsks = run.catch(() => undefined);
+  return run;
+}
+
 function loadIndex() {
   if (indexing) return indexing;
   const c = client;
@@ -1024,6 +1130,15 @@ const server = http.createServer(async (req, res) => {
         const messages = got.rows.map((d) => messageRow(d, { me: meId })).filter(Boolean);
         return sendJson(res, 200, { messages, more: got.more });
       }
+      if (p === '/history') {
+        const c = need();
+        const chat = chatParam(url.searchParams.get('chat'));
+        const limit = Math.min(3000, Math.max(1, Number(url.searchParams.get('limit')) || 500));
+        const before = Math.max(0, Number(url.searchParams.get('before')) || 0);
+        const got = await within(c.pupPage.evaluate(PAGE_HISTORY, chat, limit, before), 150_000, 'history');
+        if (!got) return sendJson(res, 200, { messages: [], more: false, end: null });
+        return sendJson(res, 200, { messages: got.rows, more: got.more, end: got.end });
+      }
       if (p === '/media') {
         const id = String(url.searchParams.get('id') || '');
         if (!MESSAGE_ID.test(id)) throw httpError(400, 'bad message');
@@ -1097,6 +1212,7 @@ const server = http.createServer(async (req, res) => {
         emit({ t: 'state', state: publicState() });
         return sendJson(res, 200, publicState());
       }
+      if (p === '/history-sync') return sendJson(res, 200, await askHistory(need(), chatParam((await readJson(req)).chat)));
       if (p === '/send') return sendJson(res, 200, await sendText(await readJson(req)));
       if (p === '/forward') return sendJson(res, 200, await forwardMessage(await readJson(req)));
       if (p === '/delete') return sendJson(res, 200, await deleteMessage(await readJson(req)));

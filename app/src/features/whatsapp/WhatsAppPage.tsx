@@ -448,7 +448,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
       {study.running && study.total > 0 && (
         <div className="wa-study" role="status" data-wa-study>
           <AiMark size={14} />
-          <span>{t('wa.study.going', { done: study.done, total: study.total })}</span>
+          <span>{t(study.kind === 'phone' ? 'wa.study.phone' : 'wa.study.going', { done: study.done, total: study.total })}</span>
         </div>
       )}
       <div className="wa-filters" role="tablist" data-own-swipe>

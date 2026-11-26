@@ -1,11 +1,12 @@
 import { Button, Loader, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconCheck, IconCopy, IconLinkOff, IconRefresh, IconRobot } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { IconBrandWhatsapp, IconCheck, IconCopy, IconHistory, IconLinkOff, IconRefresh, IconRobot } from '@tabler/icons-react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { formatPhone } from '../../domain/phone';
 import { waDigits, type WaStatus } from '../../domain/whatsapp';
+import { olderFromPhone, onStudyProgress, phoneHistoryChats, studyProgress } from '../../services/chatStudy';
 import { getSettings } from '../../services/settings';
 import { linkWa, linkWaCode, restartWa, setWaPrefs, unlinkWa, useWaPrefs, waCan } from '../../services/whatsapp';
 import { useWaStatus } from '../../ui/waSel';
@@ -25,6 +26,48 @@ import { WaGate } from './WhatsAppPage';
 const PHASE_COLOR: Record<WaStatus['phase'], string> = { off: 'gray', starting: 'orange', qr: 'orange', loading: 'orange', ready: 'green', offline: 'red' };
 /** The phone the account lives on, as WhatsApp names it. */
 const PLATFORM: Record<string, string> = { iphone: 'iPhone', smbi: 'iPhone · Business', android: 'Android', smba: 'Android · Business' };
+
+/**
+ * «История с телефона» (v0.91.1, the owner: «много чатов, более ранние истории которых не загружаются — что сделать, чтобы
+ * ИИ посмотрел абсолютно все истории»): this computer's WhatsApp Web has a chat's messages since it was linked; the older
+ * ones are on the phone, which gives them when asked — with WhatsApp open on it, and only as far as it lets this linked
+ * device (Linked devices → this device → Chat history → «All chat history»). How many chats have them there, the two steps on
+ * the phone, the button; what came, or that the phone did not answer.
+ */
+function PhoneHistory() {
+  const { t } = useTranslation();
+  const left = useScreenLiveQuery(phoneHistoryChats, []);
+  const going = useSyncExternalStore(onStudyProgress, studyProgress);
+  const [busy, setBusy] = useState(false);
+  const running = busy || (going.running && going.kind === 'phone');
+  const ask = () => {
+    setBusy(true);
+    haptic('light');
+    void olderFromPhone()
+      .then((r) => {
+        if (r.stopped === 'silent' && !r.ok) notifications.show({ color: 'orange', autoClose: 9000, message: t('wa.history.silent') });
+        else if (r.stopped === 'paused') notifications.show({ color: 'orange', message: t('wa.history.paused') });
+        else notifications.show({ color: r.ok ? 'green' : 'gray', message: t('wa.history.done', { chats: r.ok, turns: r.turns }) });
+      })
+      .catch(() => notifications.show({ color: 'red', message: t('wa.history.error') }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <RowGroup title={t('wa.history.title')} note={t('wa.history.note')}>
+      <FormRow label={t('wa.history.left')}>
+        <Text className="tnum" data-wa-history-left>
+          {left ?? '…'}
+        </Text>
+      </FormRow>
+      <Steps lines={[t('wa.history.step1'), t('wa.history.step2')]} />
+      <div style={{ padding: '4px 16px 14px' }}>
+        <Button fullWidth leftSection={<IconHistory size={18} />} loading={running} disabled={!left} onClick={ask} data-wa-history-ask>
+          {running && going.kind === 'phone' && going.total ? t('wa.study.phone', { done: going.done, total: going.total }) : t('wa.history.ask')}
+        </Button>
+      </div>
+    </RowGroup>
+  );
+}
 
 function Steps({ lines }: { lines: string[] }) {
   return (
@@ -168,6 +211,8 @@ export function WaSetupPage() {
           <Switch checked={prefs.seen} onChange={(e) => setWaPrefs({ seen: e.currentTarget.checked })} aria-label={t('wa.optSeen')} data-wa-opt="seen" />
         </FormRow>
       </RowGroup>
+
+      {phase === 'ready' && <PhoneHistory />}
 
       {/* What WhatsApp says by itself (v0.79): reports, the boss, the wash, suppliers. */}
       <div className="notify-group">
