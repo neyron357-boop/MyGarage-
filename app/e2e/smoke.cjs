@@ -31,6 +31,12 @@ async function launchBrowser() {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: false, locale: 'ru-RU' });
   // The developer's feedback pencil (src/devtools/feedback) out of the way of scripted taps.
   await ctx.addInitScript(() => localStorage.getItem('mygarage.feedback') ?? localStorage.setItem('mygarage.feedback', '0'));
+  // A phone has no hover: a banner never pauses (Mantine stops its timer under a mouse) because the script's mouse was left
+  // where a banner then appeared — the next one waited behind it for good (v0.99: banners at the bottom, at the top over a sheet).
+  await ctx.addInitScript(() => {
+    for (const type of ['mouseover', 'mouseout', 'mouseenter', 'mouseleave', 'pointerover', 'pointerout', 'pointerenter', 'pointerleave'])
+      window.addEventListener(type, (e) => [e.target, e.relatedTarget].some((el) => el instanceof Element && el.closest('.mantine-Notification-root')) && e.stopImmediatePropagation(), true);
+  });
   // E2E_HAPTIC_LABELS=1: lay the iPhone's haptic labels over the controls (they must not get in the way).
   // A segment is covered by its haptic switch, as the finger will be: a click that Playwright refuses as
   // "covered" is repeated at the same point (the switch gets it and picks the segment, like a tap).
@@ -140,8 +146,8 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await dlg.waitFor({ state: 'detached' });
   };
-  // ONLY=<words>: the demo and the steps whose name has them (debugging one step; the rest is skipped).
-  const step = async (name, fn) => { if (process.env.ONLY && !['board empty', 'load demo'].includes(name) && !name.includes(process.env.ONLY)) return; try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n').filter((l) => l.trim() && !/^=+/.test(l.trim())).slice(0, 4).join(' | ')); await shot('fail-' + name.replace(/\W+/g, '_').slice(0, 60)); throw e; } };
+  // ONLY=<words>[|<words>…]: the demo and the steps whose name has any of them (debugging one step; the rest is skipped).
+  const step = async (name, fn) => { if (process.env.ONLY && !['board empty', 'load demo'].includes(name) && !process.env.ONLY.split('|').some((w) => name.includes(w))) return; try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n').filter((l) => l.trim() && !/^=+/.test(l.trim())).slice(0, 4).join(' | ')); await shot('fail-' + name.replace(/\W+/g, '_').slice(0, 60)); throw e; } };
 
   await step('board empty', async () => { await page.goto(BASE); await page.getByText('Мастерская', { exact: true }).first().waitFor(); await shot('01-board-empty'); });
   await step('load demo', async () => {
@@ -265,6 +271,9 @@ async function launchBrowser() {
     const sheet = await filters();
     await sheet.locator('.list-row').filter({ hasText: label }).first().click();
     await sheet.waitFor({ state: 'hidden' });
+    // The mouse off where the sheet's row was: a banner coming back to the bottom under it would pause there (a mouse's
+    // hover keeps a Mantine banner up — a phone has none), and the next one wait behind it.
+    await page.mouse.move(2, 2);
   };
   /** The board's lists as «Фильтры» names them, in their order. */
   const filterNames = async () => {

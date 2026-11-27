@@ -58,7 +58,7 @@ import { loadDemoData } from '../../services/demo';
 import { addIncomeCategory, loadIncomeCategories, saveIncomeCategory } from '../../services/incomeCategories';
 import { blobToDataUrl } from '../../services/media';
 import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
-import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar, Tip, PersonAvatar } from '../../ui/components';
+import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, StickyBar, Tip, PersonAvatar } from '../../ui/components';
 import { formatBytes, insecureContext, requestPersistence, useBackupAge, useStorageInfo } from '../../ui/device';
 import { useAction, useLang, usePhone, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
@@ -716,7 +716,15 @@ export function SettingsPage() {
       <PageHeader back={phone ? '/more' : undefined} title={t('nav.settings')} />
       {mobile ? (
         <>
-          <ScrollTabs value={tab} onChange={openTab} items={TABS.map((x) => ({ value: x.key, label: t(`settings.tab.${x.key}`) }))} />
+          {/* All nine at once (v0.99, audit Н39): a strip of pills hid «Данные» past the screen's edge. */}
+          <div className="settings-tabs" role="tablist" aria-label={t('nav.settings')}>
+            {TABS.map((x) => (
+              <button key={x.key} type="button" role="tab" aria-selected={tab === x.key} data-active={tab === x.key || undefined} className="settings-tab" onClick={() => openTab(x.key)}>
+                <x.icon size={18} stroke={1.9} aria-hidden />
+                <span>{t(`settings.tab.${x.key}`)}</span>
+              </button>
+            ))}
+          </div>
           {content}
         </>
       ) : (

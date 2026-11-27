@@ -631,7 +631,8 @@ const check = (name, ok, detail) => {
   await twoTaps(mainBtn('Согласен'), 70);
   await page.waitForTimeout(1200);
   const agree = { sheet: await sheetUp(), ...(await facts()), notes: await notes() };
-  check('double tap on "Agree": agreed once, nothing else opens', !agree.sheet && agree.invoices === 0 && agree.notes.length === 0, agree);
+  // v0.99 (audit З10): «Согласен» says so with «Отменить» — one banner, no error.
+  check('double tap on "Agree": agreed once, nothing else opens', !agree.sheet && agree.invoices === 0 && agree.notes.length <= 1 && agree.notes.every((n) => n.includes('Отменить')), agree);
   if (agree.sheet) await page.keyboard.press('Escape');
   await mainBtn('Готово').click();
   await page.waitForTimeout(900);

@@ -179,6 +179,9 @@ const TAPPABLE = [
   'button.line-media-tile',
   'button.job-card-doc',
   'button.kpi-tab',
+  // v0.99: the settings' sections on a phone; the WhatsApp «Перевести» / «Текст».
+  'button.settings-tab',
+  'button.wa-extra-ask',
   'button.suggest',
   'button.swipe-btn',
   'button.search-cancel',

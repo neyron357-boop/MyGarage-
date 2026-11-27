@@ -4913,6 +4913,16 @@ html.kb .mantine-Notifications-root[data-position^='bottom'] {
 html.desk .mantine-Notifications-root[data-position^='bottom'] {
   bottom: 24px !important;
 }
+/* A sheet is up (its main button is at the bottom): the banner goes to the top — at the bottom it lay over «Выписать инвойс». */
+html:not(.desk) body[data-scroll-locked] .mantine-Notifications-root[data-position^='bottom'] {
+  bottom: auto !important;
+  top: calc(env(safe-area-inset-top, 0px) + 8px) !important;
+  /* … clear of the sheet's «×» on the right (audit З31). */
+  right: 64px !important;
+  left: 8px !important;
+  transform: none !important;
+  width: auto !important;
+}
 /* A banner fades in and out where it stands: sliding up from under the tab bar it lay over «＋» for its 260 ms and took
    the press (a slide onto «Расход» right after «Отменить» opened nothing). */
 .mantine-Notifications-root[data-position^='bottom'] .mantine-Notification-root {
@@ -10928,4 +10938,52 @@ html.desk .wa-pane-foot {
 .opt-btn-sum {
   font-size: 16px;
   font-weight: 700;
+}
+
+/* Settings on a phone (v0.99, audit Н39): every section in sight — three by three, a symbol and its word. */
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.settings-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--app-card);
+  color: var(--mantine-color-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: transform var(--dur-0) var(--spring), background-color var(--dur-1) ease;
+}
+.settings-tab > span {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-tab > svg {
+  flex: none;
+  color: var(--mantine-color-cobalt-6);
+}
+.settings-tab[data-active] {
+  background: var(--mantine-color-cobalt-filled);
+  color: #fff;
+}
+.settings-tab[data-active] > svg {
+  color: #fff;
+}
+.settings-tab:active {
+  transform: scale(0.95);
 }
