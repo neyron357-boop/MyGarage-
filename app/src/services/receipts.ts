@@ -1,4 +1,5 @@
 import { db } from '../db/db';
+import { paperOf } from '../domain/paperLines';
 import { dubaiDate } from '../domain/dates';
 import {
   guessJob,
@@ -117,6 +118,24 @@ async function jobsFor(day: string): Promise<Jobs> {
     };
   });
   return { list, links };
+}
+
+/**
+ * The jobs an expense already written may be for (v0.99, audit Ф26: «Запчасти» with no job, from the report): its paper's
+ * lines ranked as a receipt's are (`rankJobs`), the likeliest three. Nothing is put on any job here.
+ */
+export async function likelyJobsFor(e: Expense): Promise<JobOption[]> {
+  const lines = paperOf(e).lines;
+  if (!lines.length) return [];
+  const jobs = await jobsFor(e.date);
+  const ranked = rankJobs(lines.map((l) => ({ name: l.name })), jobs.list, { date: e.date, supplierId: e.supplierId, paperText: lines.map((l) => l.name).join(' ') });
+  return ranked
+    .filter((r) => r.score > 0)
+    .slice(0, 3)
+    .map((r) => {
+      const l = jobs.links.get(r.orderId)!;
+      return { orderId: r.orderId, vehicleId: l.vehicleId, customerId: l.customerId, number: r.number, car: l.car };
+    });
 }
 
 /** The seller already in the base: the same phone or name (v0.24), or the same name without its company words. */

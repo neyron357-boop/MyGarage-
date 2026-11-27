@@ -66,6 +66,9 @@ import { formatDate, hoursBetween, monthLong, shortDuration } from '../../domain
 import { lockedMonthOf } from '../../domain/monthLock';
 import { discountBase } from '../../domain/discount';
 import { isToSend, isUnconfirmed, jobLines, liveLines, type Phase } from '../../domain/flow';
+import { liveOptions, optionGross, optionName } from '../../domain/quoteOptions';
+import { chooseQuoteOption, putQuoteOptions } from '../../services/quoteOptions';
+import type { QuoteOption } from '../../domain/types';
 import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet, reissueDue, chooseInvoiceType } from '../../domain/invoice';
 import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGross, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
@@ -1122,6 +1125,11 @@ export function JobPage() {
   const hasAgreed = live.some((i) => i.kind !== 'discount' && i.approvalState === 'approved');
   // What «Готово» agrees in person on the way (v0.99, audit С16): said in its sheet.
   const toAgree = live.filter((i) => i.kind !== 'discount' && isToSend(i)).length;
+  // v0.99 (audit С1): the options went and none is chosen yet — «Варианты отправлены», and the bar is «Вариант N · сумма»
+  // (its «Клиенту · сумма» was every line, the original and the copy at once).
+  const allOptions = liveOptions(b.items, b.order.quoteOptions);
+  const sentOptions = phase === 'price' && !allOptions.some((o) => o.chosenAt) ? allOptions.filter((o) => o.sentAt) : [];
+  const optionsSentAt = sentOptions.map((o) => o.sentAt!).sort().pop();
 
   // The '…' tiles keep their places: the ones every job has first (customer, car), then what this step brings,
   // and the destructive ones always last. Not here (v0.21): the mechanics — their chips on the card (a hold: their
@@ -1212,12 +1220,48 @@ export function JobPage() {
       else navigate('/');
     });
 
+  // The customer's choice, told in person or read in WhatsApp: that option's lines, agreed — with «Отменить».
+  const pickOption = (o: QuoteOption, name: string) =>
+    run(async () => {
+      const options = b.order.quoteOptions ?? [];
+      const wasOff = new Set(b.items.filter(isUnconfirmed).map((i) => i.id));
+      await chooseQuoteOption(oid, o.id);
+      const agreed = (await db.items.where('orderId').equals(oid).toArray()).filter((i) => i.kind !== 'discount' && isToSend(i)).map((i) => i.id);
+      await approveAll(oid);
+      haptic('success');
+      undoToast(t('job.optionAgreed', { name }), t('common.undo'), () =>
+        void run(async () => {
+          for (const id of agreed) if ((await db.items.get(id))?.approvalState === 'approved') await reviseLine(id);
+          await putQuoteOptions(oid, options);
+          const drafts = (await db.items.where('orderId').equals(oid).toArray()).filter((i) => i.approvalState === 'draft' && i.kind !== 'discount');
+          await setUnconfirmed(drafts.filter((i) => wasOff.has(i.id) && !i.unconfirmed).map((i) => i.id), true);
+          await setUnconfirmed(drafts.filter((i) => !wasOff.has(i.id) && i.unconfirmed).map((i) => i.id), false);
+          await syncStage(oid);
+        }),
+      );
+    });
+
   let bar: ReactNode = null;
   if (phase === 'booked')
     bar = (
       <Button fullWidth loading={busy} onClick={() => run(() => carArrived(oid))}>
         {t('job.arrived')}
       </Button>
+    );
+  else if (sentOptions.length)
+    bar = (
+      <Group gap={8} wrap="wrap" data-options-bar>
+        {sentOptions.slice(0, 3).map((o, k) => {
+          const name = optionName(o, allOptions.indexOf(o) + 1, lang);
+          return (
+            <Button key={o.id} color="green" variant={k === 0 ? 'filled' : 'light'} loading={busy} onClick={() => void pickOption(o, name)} className="opt-btn" style={{ flex: '1 1 0', minWidth: 0 }} data-pick-option={o.id}>
+              {/* Two lines (its name, its sum): «Вариант 2 · 157,50» did not fit beside another and «＋». */}
+              <span className="opt-btn-name">{name}</span>
+              <span className="opt-btn-sum tnum">{formatAed(optionGross(b.items, o), lang, false)}</span>
+            </Button>
+          );
+        })}
+      </Group>
     );
   else if (phase === 'price')
     bar = (
@@ -1566,7 +1610,7 @@ export function JobPage() {
           <List animate={!picking}>
             {/* A long job comes in two steps (v0.56): its first lines with the screen, the rest a frame later. */}
             {/* Audit 27/11: the customer's WhatsApp answer to the quote, a proposal — one tap records it; first, above the lines, where it is seen. */}
-            {phase === 'wait' && <CustomerAnswerRow orderId={oid} phone={c?.whatsapp || c?.phone} />}
+            {(phase === 'wait' || sentOptions.length > 0) && <CustomerAnswerRow orderId={oid} phone={c?.whatsapp || c?.phone} />}
             {/* v0.98: a request's autopilot — its one next step (ask the suppliers, the quote ready). */}
             {(phase === 'booked' || phase === 'look' || phase === 'price') && b.order.fromChat && <AutopilotRow b={b} onSend={toClient} />}
             <FirstRows rows={lines.map(row)} />
@@ -1575,7 +1619,17 @@ export function JobPage() {
             {/* The quote's state (v0.81, the user's brief: «убрать автоматические уведомления «Нужно отправить цену».
                 Внутри заказа показать состояние отправки сметы и дать отправить её вручную»): not sent — said here, sent by
                 hand; sent — since when, and a reminder to the customer by hand. */}
-            {phase === 'price' && editable && (
+            {optionsSentAt && editable && (
+              <ListRow
+                left={<IconHourglassHigh size={20} stroke={1.9} color="var(--mantine-color-orange-6)" aria-hidden />}
+                title={
+                  <Text span inherit c="orange.7" data-quote-state="options">
+                    {t('job.optionsSentAgo', { n: sentOptions.length, time: shortDuration(hoursBetween(optionsSentAt), lang) })}
+                  </Text>
+                }
+              />
+            )}
+            {phase === 'price' && editable && !optionsSentAt && (
               <ListRow
                 left={<IconSend size={20} stroke={1.9} color="var(--mantine-color-grape-6)" aria-hidden />}
                 title={

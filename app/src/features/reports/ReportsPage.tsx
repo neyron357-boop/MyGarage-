@@ -1,6 +1,11 @@
-import { Box, Button, Group, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core';
-import { IconChartBar, IconDownload, IconFileTypePdf, IconShare } from '@tabler/icons-react';
+import { Box, Button, Group, Modal, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core';
+import { IconAlertTriangle, IconChartBar, IconDownload, IconFileTypePdf, IconShare } from '@tabler/icons-react';
 import { useState } from 'react';
+import { expenseEntry } from '../../domain/ledger';
+import type { Expense, ExpenseCategory } from '../../domain/types';
+import { likelyJobsFor, type JobOption } from '../../services/receipts';
+import { SheetFor } from '../../ui/lazy';
+import { EntryDetails } from '../money/LedgerTab';
 import { useTranslation } from 'react-i18next';
 import { db } from '../../db/db';
 import { owedIndex, owedToOf } from '../../domain/debts';
@@ -95,6 +100,13 @@ function HBars({ rows }: { rows: { key: string; label: string; value: number; hi
   );
 }
 
+/** A «Запчасти» expense with no job: its sheet (the job one tap among its likely ones), read live. */
+function LooseExpense({ id, suggest, cats, label, opened, onClose }: { id: string; suggest: JobOption[]; cats: ExpenseCategory[]; label: string; opened: boolean; onClose: () => void }) {
+  const e = useScreenLiveQuery(() => db.expenses.get(id), [id]);
+  if (!e) return null;
+  return <EntryDetails entry={{ ...expenseEntry(e), cashAfter: 0, cardAfter: 0 }} label={label} cats={cats} opened={opened} onClose={onClose} suggest={e.orderId ? [] : suggest} />;
+}
+
 export function ReportsPage() {
   const { t } = useTranslation();
   const lang = useLang();
@@ -103,6 +115,9 @@ export function ReportsPage() {
   const [from, setFrom] = useState<string>();
   const [to, setTo] = useState<string>();
   const [f, tt] = range(period, from ?? '', to ?? '');
+  // «Запчасти» with no job (v0.99, audit Ф26): their list, then one of them with its likely jobs.
+  const [looseOpen, setLooseOpen] = useState(false);
+  const [loose, setLoose] = useState<{ e: Expense; suggest: JobOption[] } | null>(null);
   const data = useScreenLiveQuery(async () => {
     const [orders, invoices, items, allExpenses, payments, closings, cats, incomes] = await Promise.all([
       db.orders.toArray(),
@@ -214,6 +229,19 @@ export function ReportsPage() {
                 {r.writtenOffGross > 0 && <ListRow title={`− ${t('report.writtenOff')}`} right={<Money fils={r.writtenOffGross} size="sm" />} />}
                 <ListRow title={`− ${t('report.partsCost')}`} right={<Money fils={r.partsCostGross} size="sm" />} />
                 <ListRow title={`− ${t('report.expenses')}`} right={<Money fils={r.expensesGross} size="sm" />} />
+                {r.partsLoose.ids.length > 0 && (
+                  <ListRow
+                    chevron
+                    onClick={() => setLooseOpen(true)}
+                    left={<IconAlertTriangle size={20} color="var(--mantine-color-orange-6)" aria-hidden />}
+                    title={
+                      <Text span inherit c="orange.7" fw={600} data-parts-loose>
+                        {t('report.partsLoose', { n: r.partsLoose.ids.length })}
+                      </Text>
+                    }
+                    right={<Money fils={r.partsLoose.gross} size="sm" c="orange.7" />}
+                  />
+                )}
                 <ListRow title={<Text fw={700} size="sm">{t('report.grossProfit')}</Text>} right={<Money fils={r.grossProfit} size="sm" fw={700} c={r.grossProfit >= 0 ? 'green' : 'red'} />} />
               </List>
             </Section>
@@ -242,6 +270,28 @@ export function ReportsPage() {
           </SimpleGrid>
         </>
       )}
+      <Modal opened={looseOpen} onClose={() => setLooseOpen(false)} title={t('report.partsLooseTitle')}>
+        <Text size="sm" c="dimmed" mb="sm">
+          {t('report.partsLooseHint')}
+        </Text>
+        <List>
+          {data.expenses
+            .filter((e) => r.partsLoose.ids.includes(e.id))
+            .map((e) => (
+              <ListRow
+                key={e.id}
+                chevron
+                onClick={() => void run(async () => setLoose({ e, suggest: await likelyJobsFor(e) }))}
+                title={e.vendor || catName(e.categoryId)}
+                subtitle={[formatDate(e.date), expenseNoteLine(e)].filter(Boolean).join(' · ')}
+                right={<Money fils={e.amountFils} size="sm" />}
+              />
+            ))}
+        </List>
+      </Modal>
+      <SheetFor value={loose}>
+        {(l, o) => <LooseExpense id={l.e.id} suggest={l.suggest} cats={data.cats} label={catName(l.e.categoryId)} opened={o} onClose={() => setLoose(null)} />}
+      </SheetFor>
       <Group mt="xl" gap="xs">
         <Button leftSection={<IconShare size={18} />} loading={busy} onClick={() => run(share)}>
           {t('report.sendOwner')}

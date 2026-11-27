@@ -40,6 +40,11 @@ export interface Report {
   /** Expenses dated in the period, as paid. */
   expensesGross: number;
   expensesByCategory: { categoryId: string; gross: number }[];
+  /**
+   * «Запчасти» expenses of the period with no job on them (v0.99, audit Ф26): a scanned receipt is put on its job by
+   * hand (v0.81) — until then the job's line cost and this expense both count. Said in the report, a tap away.
+   */
+  partsLoose: { ids: string[]; gross: number };
   /** Received without an invoice (gross, as received). */
   otherIncome: number;
   /**
@@ -69,6 +74,7 @@ export function computeReport(input: ReportInput): Report {
     partsCostGross: 0,
     expensesGross: 0,
     expensesByCategory: [],
+    partsLoose: { ids: [], gross: 0 },
     otherIncome: 0,
     writtenOffGross: 0,
     grossProfit: 0,
@@ -116,6 +122,10 @@ export function computeReport(input: ReportInput): Report {
     if (e.voidedAt || !inRange(e.date, from, to)) continue;
     r.expensesGross += e.amountFils;
     byCat.set(e.categoryId, (byCat.get(e.categoryId) ?? 0) + e.amountFils);
+    if (input.partsCategoryId && e.categoryId === input.partsCategoryId && !e.orderId) {
+      r.partsLoose.ids.push(e.id);
+      r.partsLoose.gross += e.amountFils;
+    }
   }
   r.expensesByCategory = [...byCat.entries()].map(([categoryId, gross]) => ({ categoryId, gross })).sort((a, b) => b.gross - a.gross);
 

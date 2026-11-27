@@ -10905,3 +10905,27 @@ html.desk .wa-pane-foot {
 .news-here {
   cursor: pointer;
 }
+
+/* The options sent (v0.99, audit С1): a button each — its name over its sum. */
+.opt-btn {
+  height: 52px;
+  padding-inline: 10px;
+}
+.opt-btn .mantine-Button-label {
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+  min-width: 0;
+  max-width: 100%;
+}
+.opt-btn-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+}
+.opt-btn-sum {
+  font-size: 16px;
+  font-weight: 700;
+}

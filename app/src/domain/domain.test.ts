@@ -618,6 +618,24 @@ describe('reports', () => {
     expect(paid.expensesGross).toBe(5000);
     expect(paid.partsCostGross).toBe(6300 - 5000);
     expect(paid.grossProfit).toBe(31500 - 6300);
+    expect(paid.partsLoose).toEqual({ ids: [], gross: 0 });
+    // v0.99 (audit Ф26): the same receipt not put on its job — said, so it can be put on it.
+    const loose = computeReport({
+      from: '2026-11-01',
+      to: '2026-11-30',
+      orders: [order()],
+      invoices: [inv],
+      items: [item({ kind: 'part', approvalState: 'approved', costPriceFils: 6000 })],
+      expenses: [
+        { id: 'p', date: '2026-11-04', categoryId: 'parts', amountFils: 5000, vatFils: 0, method: 'cash', createdAt: '' },
+        { id: 'r', date: '2026-11-04', categoryId: 'rent', amountFils: 700, vatFils: 0, method: 'cash', createdAt: '' },
+        { id: 'old', date: '2026-10-04', categoryId: 'parts', amountFils: 900, vatFils: 0, method: 'cash', createdAt: '' },
+      ],
+      payments: [],
+      closings: [],
+      partsCategoryId: 'parts',
+    });
+    expect(loose.partsLoose).toEqual({ ids: ['p'], gross: 5000 });
     expect(r.payments.card).toBe(31500);
     expect(r.cashDiffFils).toBe(-500);
     expect(r.averageTicketGross).toBe(31500);
