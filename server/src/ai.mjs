@@ -54,6 +54,9 @@ const P = {
     `Translate the WhatsApp message below into ${to === 'ru' ? 'Russian' : 'English'} for the manager of a car garage in the UAE. Keep numbers, prices, part numbers, car and part names as they are. "text": the translation; "from": the message's language (ISO 639-1); "text" is "" when the message is already in that language.`,
   voice: () =>
     `A WhatsApp voice message to a car garage in the UAE — a supplier with prices, a customer, a mechanic; English, Arabic, Hindi/Urdu, Russian or a mix. "text": what is said, word for word, numbers as digits; "english": the same in English ("" when it is English); "from": its language (ISO 639-1); "" for what cannot be heard.`,
+  // Audit 27/11: the manager dictates a job's lines. No part named as an example — a light model gives an example back.
+  lines: () =>
+    `A car garage manager in the UAE dictates what a car needs — parts to replace, work, services — in Russian, English, Arabic or Hindi/Urdu, maybe mixed. "lines": each thing said, in the order said: "name" — in English, in capitals, as a UAE garage writes it on an invoice (the part's usual trade name, with front/rear and left/right when said); "qty" — as said ("both", "left and right", "pair", "обе", "пара" → 2; a set of four → 4), else 1; "kind" — "part" (a thing bought and fitted), "labor" (work the garage does), "service" (a car service done outside or by the hour: wash, towing, painting, alignment); "price" — the sale price in AED only when a number is said for that thing, else 0. Only what is said, nothing added; nothing said — "lines": []. "text": what was said, word for word.`,
   pictureText: () =>
     `A picture or PDF a supplier sent to a car garage in the UAE in answer to a parts request — a price list, a photo of parts with prices, a screenshot of their system, a quotation. "text": every line with a part and its price as written, one per line ("1. brake pads original 180"), numbers as digits; "" if no price is in it.`,
   payment: () =>
@@ -152,6 +155,16 @@ export function carFromFacts(facts) {
   const title = (s) => s.toLowerCase().replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase());
   return { make: facts.make ? title(facts.make) : '', model: facts.model ? title(facts.model) : '', year: Number(facts.year) || undefined, engine, body };
 }
+
+/** A voice recording as the questions take it (an iPhone's AAC in MP4 named m4a — the name Gemini knows). */
+function audioOf(audio) {
+  const type = String(audio?.type ?? '').split(';')[0].trim().toLowerCase();
+  const data = String(audio?.data ?? '');
+  if (!/^audio\/(ogg|opus|mpeg|mp3|mp4|m4a|aac|wav|webm)$/.test(type) || data.length < 200 || data.length > 8_000_000) throw httpError(400, 'no voice');
+  return { type: type === 'audio/mp4' ? 'audio/m4a' : type, data };
+}
+
+const LINE_KINDS = new Set(['part', 'labor', 'service']);
 
 /** A picture as the questions take it: JPEG, PNG or WebP (a supplier's quotation also as a PDF), base64, a sane size. */
 function picOf(image, { pdf = false } = {}) {
@@ -553,6 +566,37 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
      * Audit 27/11: a supplier's prices sent as a picture (a photo of a price list, a screenshot of their system) — its
      * lines written down as text, read then by the app's own rules. A light model, low resolution; NOT kept.
      */
+    /**
+     * Audit 27/11: the job's lines dictated (the «Добавить позицию» sheet's microphone): what was said, as lines — the
+     * name in English, the number, the kind, a price only when said. The app's own rules name and price them after
+     * (the dictionary, the garage's history). NOT kept.
+     */
+    async voiceLines({ audio } = {}) {
+      const a = audioOf(audio);
+      const { value, model } = await json(
+        P.lines(),
+        {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            lines: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, qty: { type: 'number' }, kind: { type: 'string' }, price: { type: 'number' } }, required: ['name', 'qty', 'kind', 'price'] } },
+          },
+          required: ['text', 'lines'],
+        },
+        { kind: 'lines', audio: a, thinking: 'minimal', timeout: 60_000 },
+      );
+      const lines = (Array.isArray(value.lines) ? value.lines : [])
+        .map((l) => ({
+          name: String(l?.name ?? '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 80),
+          qty: Math.min(20, Math.max(1, Math.round(Number(l?.qty) || 1))),
+          kind: LINE_KINDS.has(l?.kind) ? l.kind : 'part',
+          price: Math.min(100_000, Math.max(0, Number(l?.price) || 0)),
+        }))
+        .filter((l) => l.name.length >= 2)
+        .slice(0, 20);
+      return { text: String(value.text ?? '').slice(0, 2000), lines, by: model };
+    },
+
     async pictureText({ image } = {}) {
       const pic = picOf(image, { pdf: true });
       const { value, model } = await json(P.pictureText(), { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] }, { kind: 'picture', images: [pic], thinking: 'minimal', media: 'medium', timeout: 40_000 });

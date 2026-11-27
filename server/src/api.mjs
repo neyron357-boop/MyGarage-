@@ -26,6 +26,7 @@ import { DIRS, httpError } from './store.mjs';
  *        /api/ai/request {texts, image?}  — a customer’s request in WhatsApp: the car and what is asked (v0.90)
  *        /api/ai/translate {text, to}, /api/ai/voice {id} — a chat message translated, a voice message written down
  *        /api/ai/picture {id}, /api/ai/payment {id} — a supplier's prices in a picture; a customer's payment proof
+ *        /api/ai/lines {audio}            — a job's lines dictated: name, number, kind, a price when said
  *                                         (audit 27/11; neither kept — the chat's words are never stored)
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
@@ -218,7 +219,7 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
         if (req.method === 'GET' && parts[2] === 'status') return send(res, 200, ai.status());
         if (req.method === 'POST') {
           // A receipt comes as a picture (v0.50): up to 8 MB; the other questions are a few lines.
-          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : parts[2] === 'car' ? 2 * 1024 * 1024 : parts[2] === 'request' ? 3 * 1024 * 1024 : 16 * 1024);
+          const body = await readJson(req, parts[2] === 'receipt' ? 8 * 1024 * 1024 : parts[2] === 'car' ? 2 * 1024 * 1024 : parts[2] === 'request' ? 3 * 1024 * 1024 : parts[2] === 'lines' ? 6 * 1024 * 1024 : 16 * 1024);
           ai.allow(device.id);
           if (parts[2] === 'vin') return send(res, 200, await ai.vin(body.vin));
           if (parts[2] === 'receipt') return send(res, 200, await ai.receipt(body));
@@ -233,6 +234,8 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           if (parts[2] === 'request') return send(res, 200, await ai.request(body));
           // Audit 27/11: a message translated; a voice message (its bytes from the bridge on this computer) written down.
           if (parts[2] === 'translate') return send(res, 200, await ai.translate(body));
+          // Audit 27/11: the job's lines dictated — the recording comes from the device itself.
+          if (parts[2] === 'lines') return send(res, 200, await ai.voiceLines(body));
           // Audit 27/11: a supplier's prices in a picture; a customer's payment proof — the picture from the bridge too.
           if (parts[2] === 'picture' || parts[2] === 'payment') {
             if (!wa?.mediaBytes) throw httpError(503, 'whatsapp is off');

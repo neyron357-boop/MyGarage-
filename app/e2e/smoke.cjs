@@ -3651,7 +3651,7 @@ async function launchBrowser() {
     await front('[data-rule]').first().waitFor();
     // v0.81 (the user's brief: «убрать автоматические уведомления «Нужно отправить цену»»): no price; v0.93 (the audit) — the
     // declined work offered again and tomorrow's booking: fourteen kinds.
-    if ((await front('[data-rule]').count()) !== 14) throw new Error('fourteen kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
+    if ((await front('[data-rule]').count()) !== 15) throw new Error('fifteen kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
     if (await front('[data-rule="price"]').count()) throw new Error('«Назвать цену» is still a notification');
     // A customer who has not answered — after two hours, every two hours; then the manager's own timing.
     const answer = front('.list-row').filter({ has: page.locator('[data-rule="answer"]') }).first();

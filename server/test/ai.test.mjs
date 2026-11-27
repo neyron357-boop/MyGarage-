@@ -336,6 +336,31 @@ describe('audit 27/11: a message translated, a voice message written down — ne
     await assert.rejects(ai.voice({ audio: { type: 'image/jpeg', data } }), /no voice/);
   });
 
+  it('a job’s lines dictated: names, numbers, kinds — cleaned; nothing said, nothing added', async () => {
+    let lines = [
+      { name: ' front brake pads ', qty: 1, kind: 'part', price: 0 },
+      { name: 'BRAKE DISC FRONT', qty: 2.2, kind: 'part', price: 0 },
+      { name: 'wheel alignment', qty: 1, kind: 'service', price: 120 },
+      { name: 'x', qty: 1, kind: 'part', price: 0 },
+      { name: 'BRAKE SERVICE', qty: 99, kind: 'other', price: -5 },
+    ];
+    const { f, seen } = fake([[/generateContent/, () => answer({ text: 'колодки передние, диски обе, развал 120', lines })]]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const data = Buffer.alloc(900, 5).toString('base64');
+    const r = await ai.voiceLines({ audio: { type: 'audio/mp4', data } });
+    assert.deepEqual(r.lines, [
+      { name: 'FRONT BRAKE PADS', qty: 1, kind: 'part', price: 0 },
+      { name: 'BRAKE DISC FRONT', qty: 2, kind: 'part', price: 0 },
+      { name: 'WHEEL ALIGNMENT', qty: 1, kind: 'service', price: 120 },
+      { name: 'BRAKE SERVICE', qty: 20, kind: 'part', price: 0 },
+    ]);
+    assert.equal(seen[0].body.contents[0].parts.at(-1).inline_data.mime_type, 'audio/m4a');
+    assert.doesNotMatch(seen[0].body.contents[0].parts[0].text, /BRAKE|FILTER|OIL/);
+    lines = [];
+    assert.deepEqual((await ai.voiceLines({ audio: { type: 'audio/webm', data } })).lines, []);
+    await assert.rejects(ai.voiceLines({ audio: { type: 'image/png', data } }), /no voice/);
+  });
+
   it('a supplier’s picture written down as lines; a customer’s payment proof — what is printed; neither kept', async () => {
     const { f, seen } = fake([
       [/generateContent/, (_u, init) => (/payment's proof/.test(JSON.parse(init.body).contents[0].parts[0].text)

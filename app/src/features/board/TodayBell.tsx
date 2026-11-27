@@ -14,6 +14,7 @@ import {
   IconDroplet,
   IconHourglassHigh,
   IconKey,
+  IconLicense,
   IconMessageCircle,
   IconPlus,
   IconSend,
@@ -28,6 +29,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiDate, dubaiTime, formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
+import { formatKm } from '../../domain/odometer';
 import { CUSTOMER_KINDS, type Task, type TaskKind } from '../../domain/today';
 import type { Customer, Reminder, Supplier } from '../../domain/types';
 import { simpleMessage } from '../../services/messages';
@@ -65,6 +67,7 @@ export const TASK_META: Record<TaskKind, { icon: Icon; color: string }> = {
   reminder: { icon: IconAlarm, color: 'cobalt' },
   declined: { icon: IconArrowBackUpDouble, color: 'violet' },
   bookedTomorrow: { icon: IconCalendarTime, color: 'indigo' },
+  mulkiya: { icon: IconLicense, color: 'teal' },
 };
 const META = TASK_META;
 
@@ -131,7 +134,7 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
       case 'followUp':
         return t('today.followUp');
       case 'service':
-        return t('today.service');
+        return task.kmNow ? t('today.serviceKm', { km: formatKm(task.kmNow) }) : t('today.service');
       case 'booked':
         return t(task.late ? 'today.bookedLate' : 'today.booked', { time: dubaiTime(task.at) });
       case 'reminder':
@@ -140,6 +143,8 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
         return t('today.declined');
       case 'bookedTomorrow':
         return t('today.bookedTomorrow', { time: dubaiTime(byOrder.get(task.orderId ?? '')?.order.bookedFor ?? task.at) });
+      case 'mulkiya':
+        return t('today.mulkiya', { date: formatDate(task.expires) });
     }
   };
 

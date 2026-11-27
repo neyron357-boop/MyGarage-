@@ -35,4 +35,31 @@ describe('«Сегодня» — audit 27/11', () => {
     expect(customerMessage({ kind: 'declined', at: NOW }, 'en', '', [{ kind: 'part', approvalState: 'declined', titleEn: 'Front brake discs' }, { kind: 'part', approvalState: 'approved', titleEn: 'Pads' }]).vars.lines).toBe('FRONT BRAKE DISCS');
     expect(customerMessage({ kind: 'bookedTomorrow', at: NOW }, 'en', '', [], '2026-11-28T06:00:00.000Z')).toEqual({ tpl: 'bookedTomorrow', vars: { time: '10:00' } });
   });
+
+  it('the oil service by the mileage: sooner than half a year when the car runs fast; its km in the message', () => {
+    const oil = [{ kind: 'part' as const, approvalState: 'approved' as const, titleEn: 'ENGINE OIL 5W30' }];
+    const km = { dueAt: '2026-11-20T08:00:00.000Z', perDay: 250, atKm: 130_500, nowKm: 142_000 };
+    const t = todayTasks({ ...base, open: [], past: [{ ...past('2026-10-01T08:00:00.000Z', oil), km }] });
+    expect(t.find((x) => x.kind === 'service')).toMatchObject({ at: km.dueAt, kmNow: 142_000, kmAt: 130_500 });
+    // Not yet due by the mileage — and half a year is far: nothing.
+    expect(todayTasks({ ...base, open: [], past: [{ ...past('2026-10-01T08:00:00.000Z', oil), km: { ...km, dueAt: '2026-12-20T08:00:00.000Z' } }] }).some((x) => x.kind === 'service')).toBe(false);
+    // Never in the first month, whatever the mileage says.
+    expect(todayTasks({ ...base, open: [], past: [{ ...past('2026-11-10T08:00:00.000Z', oil), km }] }).some((x) => x.kind === 'service')).toBe(false);
+    // The half-year rule still stands without a pace.
+    expect(todayTasks({ ...base, open: [], past: [past('2026-05-01T08:00:00.000Z', oil)] }).find((x) => x.kind === 'service')?.kmNow).toBeUndefined();
+    expect(customerMessage({ kind: 'service', at: NOW, kmNow: 142_000, kmAt: 130_500 }, 'en', '', [])).toEqual({ tpl: 'serviceDueKm', vars: { km: '11 500', lastKm: '130 500' } });
+    expect(customerMessage({ kind: 'service', at: NOW }, 'en', '', []).tpl).toBe('serviceDue');
+  });
+
+  it('the Mulkiya runs out: the customer told two weeks before, once for that day; not while the car is here', () => {
+    const car = (regExpires: string, regRemindedFor?: string) => ({ vehicles: new Map([['v1', { id: 'v1', regExpires, regRemindedFor }]]) });
+    const job = [past('2026-08-01T08:00:00.000Z', [])];
+    expect(todayTasks({ ...base, ...car('2026-12-05'), open: [], past: job }).find((x) => x.kind === 'mulkiya')).toMatchObject({ vehicleId: 'v1', expires: '2026-12-05', late: false, at: '2026-11-21T05:00:00.000Z' });
+    // Too far ahead, told already for that day, past by more than a month — none; a day just past — late.
+    expect(todayTasks({ ...base, ...car('2027-01-20'), open: [], past: job }).some((x) => x.kind === 'mulkiya')).toBe(false);
+    expect(todayTasks({ ...base, ...car('2026-12-05', '2026-12-05'), open: [], past: job }).some((x) => x.kind === 'mulkiya')).toBe(false);
+    expect(todayTasks({ ...base, ...car('2026-10-01'), open: [], past: job }).some((x) => x.kind === 'mulkiya')).toBe(false);
+    expect(todayTasks({ ...base, ...car('2026-11-20'), open: [], past: job }).find((x) => x.kind === 'mulkiya')?.late).toBe(true);
+    expect(customerMessage({ kind: 'mulkiya', at: NOW, expires: '2026-12-05' }, 'en', '', [])).toEqual({ tpl: 'mulkiyaDue', vars: { date: '05/12/2026' } });
+  });
 });

@@ -18,7 +18,7 @@ import type { Reminder } from './types';
  */
 
 /** Every kind of «Сегодня» can be notified of. In the order the settings and the summary show them. */
-export const NOTIFY_KINDS: TaskKind[] = ['answer', 'order', 'pickup', 'promised', 'booked', 'collect', 'outsource', 'returnBy', 'debt', 'reminder', 'followUp', 'service', 'declined', 'bookedTomorrow'];
+export const NOTIFY_KINDS: TaskKind[] = ['answer', 'order', 'pickup', 'promised', 'booked', 'collect', 'outsource', 'returnBy', 'debt', 'reminder', 'followUp', 'service', 'declined', 'bookedTomorrow', 'mulkiya'];
 
 export interface NotifyRule {
   on: boolean;
@@ -78,6 +78,7 @@ export const KIND_TIME: Record<TaskKind, KindTime> = {
   service: 'since',
   declined: 'since',
   bookedTomorrow: 'since',
+  mulkiya: 'since',
 };
 
 /**
@@ -101,6 +102,7 @@ export const DEFAULT_RULES: Record<TaskKind, NotifyRule> = {
   service: { on: false, after: 0, every: 0 },
   declined: { on: false, after: 0, every: 0 },
   bookedTomorrow: { on: false, after: 0, every: 0 },
+  mulkiya: { on: false, after: 0, every: 0 },
 };
 
 export const DEFAULT_NOTIFY: NotifySettings = { on: true, from: 8 * 60, to: 21 * 60, days: [0, 1, 2, 3, 4, 5, 6], digest: { on: true, at: 9 * 60 }, rules: DEFAULT_RULES };

@@ -1,5 +1,6 @@
 import { ActionIcon, Modal, Text, TextInput } from '@mantine/core';
-import { IconArrowUp, IconBuildingStore, IconPackage, IconPlus, IconSearch, IconSparkles, IconTool, IconX, type Icon } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { IconArrowUp, IconBuildingStore, IconMicrophone, IconPackage, IconPlayerStopFilled, IconPlus, IconSearch, IconSparkles, IconTool, IconX, type Icon } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,12 +13,13 @@ import { formatAed } from '../../domain/money';
 import { autoMatches, exactTitle, guessKind, quickMatches, sideOf, typedPrice, type AutoKind } from '../../domain/quickAdd';
 import { matchPartName } from '../../domain/partsVocab';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf } from '../../domain/vat';
-import { aiAfterLine } from '../../services/ai';
+import { aiAfterLine, aiOn, aiVoiceLines, type SaidLine } from '../../services/ai';
 import { addItem, addTemplate, ensureLabourLine } from '../../services/estimate';
 import { removeLines, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
-import { useAction, useLang } from '../../ui/hooks';
+import { useAction, useErrorText, useLang } from '../../ui/hooks';
+import { canRecord, clock, useRecorder } from '../../ui/recorder';
 import { forgetSuggestions, PriceFromMark, type LineKind } from './LineSheet';
 
 /*
@@ -106,7 +108,8 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
   /** A suggestion's price as the line will show it (with VAT if it was typed with VAT). */
   const shown = (s: Suggestion) => enteredPrice({ unitPriceFils: s.price, unitGrossFils: s.gross }, s.rate || b.settings.vatRateBp, vatModeOf({ vatRateBp: s.rate, unitGrossFils: s.gross }, incl));
 
-  const add = (title: string, forced?: AutoKind) => {
+  /** `heard` (audit 27/11): a line said aloud — its number and the price said for it. */
+  const add = (title: string, forced?: AutoKind, heard?: { qty?: number; priceFils?: number }) => {
     // In the tap: the keyboard stays up for the next one.
     focus();
     const name = lineName(title.trim());
@@ -121,14 +124,14 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
       // A name of the history keeps both its languages; a typed one goes where its letters belong.
       const titles = s ? { titleRu: s.titleRu || name, titleEn: s.titleEn || name } : /[а-яё]/i.test(name) ? { titleRu: name } : { titleEn: name };
       // A price typed after «--» — the sale price, as «+ Цена» takes it (with VAT or without, as the line's prices are typed).
-      const own = said.priceFils;
+      const own = heard ? heard.priceFils : said.priceFils;
       const vat = vatModeOf(s ? { vatRateBp: s.rate, unitGrossFils: s.gross } : undefined, incl);
       const price = own
         ? { ...priceFromEntered(own, b.settings.vatRateBp, vat), vatRateBp: rateFor(vat, b.settings.vatRateBp) }
         : s && s.price > 0
           ? { unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) }
           : {};
-      const item = await addItem(b.order.id, { kind: lineKind, block: 'A', qty: 1, ...titles, ...price, ...(guess && !guess.sure ? { autoKind: true as const } : {}) });
+      const item = await addItem(b.order.id, { kind: lineKind, block: 'A', qty: heard?.qty && heard.qty > 1 ? heard.qty : 1, ...titles, ...price, ...(guess && !guess.sure ? { autoKind: true as const } : {}) });
       // A job's first part brings its labour charge (v0.90, #70): last of the lines, named and priced by itself.
       await ensureLabourLine(b.order.id);
       await syncStage(b.order.id);
@@ -140,6 +143,50 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
       aiAfterLine(item.id);
     });
   };
+  /**
+   * Dictated (audit 27/11): the microphone in the field — tap, say the lines («колодки передние, диски обе, развал»), tap
+   * again. The garage's AI hears them once (services/ai.ts `aiVoiceLines`); each comes on the job as if typed: the
+   * dictionary puts its name right, the history gives its price, its kind as its name says (the AI's word when the name
+   * does not say it) — and each is in sight with ×. Up to a minute.
+   */
+  const rec = useRecorder();
+  const errorText = useErrorText();
+  const [hearing, setHearing] = useState(false);
+  const canDictate = opened && canRecord() && aiOn();
+  const sayLines = async (lines: SaidLine[]) => {
+    for (const l of lines) {
+      const fix = matchPartName(l.name);
+      const name = lineName((fix.known && fix.changed ? fix.fixed : l.name).trim());
+      const own = guessKind(name, suggestions, fix.known);
+      const kind: AutoKind = own.sure ? own.kind : l.kind;
+      await add(name, kind, { qty: l.qty, priceFils: l.price > 0 ? Math.round(l.price * 100) : undefined });
+    }
+  };
+  const dictate = async () => {
+    if (rec.recording) return rec.stop();
+    haptic('light');
+    const stop = window.setTimeout(() => rec.stop(), 60_000);
+    let r: { blob: Blob; seconds: number } | null = null;
+    try {
+      r = await rec.start();
+    } catch (e) {
+      notifications.show({ color: 'red', message: errorText(e) });
+    } finally {
+      window.clearTimeout(stop);
+    }
+    if (!r || r.seconds < 0.8) return;
+    setHearing(true);
+    try {
+      const heard = await aiVoiceLines(r.blob);
+      if (!heard?.lines.length) notifications.show({ message: t('qa.voiceNone'), autoClose: 2500 });
+      else await sayLines(heard.lines);
+    } catch (e) {
+      notifications.show({ color: 'red', message: errorText(e) });
+    } finally {
+      setHearing(false);
+    }
+  };
+
   /** Added by mistake: off the job at once (into its bin, as any draft line taken off). */
   const takeOff = (id: string) => {
     focus();
@@ -266,7 +313,9 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
           ref={field}
           className="qa-field"
           aria-label={placeholder}
-          placeholder={placeholder}
+          placeholder={rec.recording ? t('qa.listening', { time: clock(rec.seconds) }) : hearing ? t('qa.hearing') : placeholder}
+          readOnly={rec.recording || hearing}
+          data-dictating={rec.recording || undefined}
           value={q}
           onChange={(e) => setQ(e.currentTarget.value)}
           data-autofocus
@@ -280,6 +329,20 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
             typed ? (
               <ActionIcon size={34} radius="xl" variant="filled" aria-label={t('qa.add')} onMouseDown={keep} onClick={() => add(exact ?? typed)}>
                 <IconArrowUp size={18} stroke={2.6} />
+              </ActionIcon>
+            ) : canDictate ? (
+              // Audit 27/11: the lines said aloud — tap, speak, tap.
+              <ActionIcon
+                size={34}
+                radius="xl"
+                variant={rec.recording ? 'filled' : 'light'}
+                color={rec.recording ? 'red' : 'cobalt'}
+                loading={hearing}
+                aria-label={t(rec.recording ? 'qa.stop' : 'qa.voice')}
+                onClick={() => void dictate()}
+                data-qa-voice={rec.recording ? 'on' : 'off'}
+              >
+                {rec.recording ? <IconPlayerStopFilled size={16} /> : <IconMicrophone size={18} stroke={2.2} />}
               </ActionIcon>
             ) : undefined
           }

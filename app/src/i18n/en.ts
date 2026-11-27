@@ -472,9 +472,10 @@ export const en: typeof ru = {
   },
   // v0.81: the job's quick «＋» sheet and «+ Price».
   answer: { all: 'Agrees to all', none: 'Refuses all', option: 'Option {{n}}', some: 'Yes: {{agree}} · no: {{refuse}}', agree: 'Agree', refuse: 'Refuse' },
+  mulkiya: { until: 'Until', expires: 'Mulkiya expiry' },
   payShot: { transfer: 'Transfer', card: 'Card', record: 'Record', onShot: 'on the screenshot {{sum}}', saved: 'Payment recorded' },
   buy: { title: 'Order', supplier: 'Supplier', none: 'No parts with suppliers’ prices', when: 'When', go: 'Order · {{n}}', whens: { soon: 'Collect now', evening: 'Today 17:00', morning: 'Tomorrow 9:00', deliver: 'Deliver' }, kind: { oem: 'original', aftermarket: 'copy', used: 'used' } },
-  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together' },
+  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together', voice: 'Dictate', stop: 'Done', listening: 'Speak… {{time}}', hearing: 'The AI is listening…', voiceNone: 'Not heard — say it again' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
@@ -1833,7 +1834,7 @@ export const en: typeof ru = {
   },
   notify: {
     // v0.82: notification titles — a sign and what to do.
-    push: { answer: '📞 No answer from the customer', order: '📦 Parts to order', pickup: '🚚 Parts to collect', promised: '⏰ Promised to the customer', booked: '🚗 Booked — on the way', collect: '🔑 Ready — not collected', outsource: '🏭 Collect from outside', returnBy: '↩️ Return a part', debt: '💰 Debt overdue', reminder: '🔔 Reminder', followUp: '💬 Ask how the car is', service: '🛢 Invite for a service', declined: '🔁 Offer the declined work again', bookedTomorrow: '📅 Remind of tomorrow’s booking' },
+    push: { answer: '📞 No answer from the customer', order: '📦 Parts to order', pickup: '🚚 Parts to collect', promised: '⏰ Promised to the customer', booked: '🚗 Booked — on the way', collect: '🔑 Ready — not collected', outsource: '🏭 Collect from outside', returnBy: '↩️ Return a part', debt: '💰 Debt overdue', reminder: '🔔 Reminder', followUp: '💬 Ask how the car is', service: '🛢 Invite for a service', declined: '🔁 Offer the declined work again', bookedTomorrow: '📅 Remind of tomorrow’s booking', mulkiya: '🪪 A customer’s Mulkiya expires' },
     pushDigest: '📋 Today',
     title: 'Notifications',
     kind: {
@@ -1851,6 +1852,7 @@ export const en: typeof ru = {
       followUp: 'Ask how the car is',
       declined: 'Offer declined work again',
       bookedTomorrow: 'Remind of a booking',
+      mulkiya: 'Mulkiya expires',
       service: 'Invite for a service',
     },
     digestTitle: 'Today',
@@ -1927,8 +1929,10 @@ export const en: typeof ru = {
     followUp: 'How is the car?',
     declined: 'Declined last time — offer again',
     bookedTomorrow: 'Tomorrow at {{time}} — remind the customer',
+    mulkiya: 'Mulkiya until {{date}} — remind the customer',
     writeAll: 'Message all · {{n}}',
     service: 'Service due',
+    serviceKm: 'Service due · ~{{km}} km',
     notNeeded: 'Not needed',
     more: '{{n}} more',
     less: 'Show less',
@@ -2571,7 +2575,9 @@ export const en: typeof ru = {
     followUp: 'Hello {{name}}! This is {{garage}}. How is your {{car}} after the repair? If anything bothers you, just write to us.',
     declinedOffer: 'Hello {{name}}! This is {{garage}}. Last time we recommended for your {{car}} ({{plate}}): {{lines}}. Shall we book you in? Just reply.',
     bookedTomorrow: 'Hello {{name}}! A reminder from {{garage}}: we are expecting your {{car}} ({{plate}}) tomorrow at {{time}}.',
+    mulkiyaDue: 'Hello {{name}}! The registration (Mulkiya) of your {{car}} ({{plate}}) runs until {{date}}. Before the test we can check the car and fix what it needs — reply and we will book you in. {{garage}}',
     serviceDue: 'Hello {{name}}! It has been about six months since the oil change on your {{car}} ({{plate}}). Time for a service — reply and we will book you in. {{garage}}',
+    serviceDueKm: 'Hello {{name}}! By our estimate your {{car}} ({{plate}}) has done about {{km}} km since its oil change with us (at {{lastKm}} km). Time for a service — reply and we will book you in. {{garage}}',
     booked: 'Hello {{name}}! We are expecting your {{car}} ({{plate}}) at {{garage}}. Job no. {{number}}.',
     carReceived: 'Hello {{name}}! Your {{car}} ({{plate}}) has been checked in at {{garage}}, job no. {{number}}. The check-in report with photos is attached. We will send the estimate after diagnostics.',
     carReady: '{{name}}, your {{car}} ({{plate}}) is ready! Amount due: {{amount}}. See you at {{garage}}.',

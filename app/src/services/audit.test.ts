@@ -17,7 +17,10 @@ import { setAiTransport } from './ai';
 import { quickInvoice } from './money';
 import { acceptPaymentShot, dismissPaymentShot, paymentShotOf } from './paymentShot';
 import { proofsOf } from './proofs';
-import { writeAllToday } from './todayBatch';
+import { markCustomerDone, writeAllToday } from './todayBatch';
+import { loadPast, tasksFor } from './today';
+import { setMulkiyaExpiry } from './mulkiya';
+import { dubaiDate, shiftDay } from '../domain/dates';
 
 /* The audit of 27/11/2026 (docs: «Аудит MyGarage»): what was ready in the code but not on the job, now on it. */
 
@@ -258,5 +261,28 @@ describe('the morning’s customer messages in one go', () => {
     const msgs = await db.messages.where('customerId').equals(a.o.customerId).toArray();
     expect(msgs.map((m) => [m.template, m.text, m.channel])).toEqual([['followUp', 'Hello Ahmed! How is your Toyota Camry?', 'whatsapp']]);
     setWaTransport(undefined);
+  });
+});
+
+describe('the oil service by the mileage; the Mulkiya’s expiry — through «Сегодня»', () => {
+  it('a car that runs fast is called for its service before half a year; its Mulkiya two weeks before it runs out', async () => {
+    const { c, o } = await job();
+    const ago = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+    await db.orders.update(o.id, { stage: 'closed', outcome: 'completed', arrivedAt: ago(160), createdAt: ago(160), closedAt: ago(160), mileageKm: 100_000 });
+    const second = await checkIn({ vehicleId: o.vehicleId, customerId: c.id, plate: { emirate: 'DXB', code: 'K', number: '12345' }, make: 'Toyota', model: 'Camry', name: c.name, phone: c.phone, docLanguage: 'en', complaint: 'Service', arrivedNow: true });
+    const oil = await addItem(second.id, { kind: 'part', block: 'A', titleEn: 'ENGINE OIL 5W30', qty: 1, unitPriceFils: 15000 });
+    await db.items.update(oil.id, { approvalState: 'approved' });
+    await db.orders.update(second.id, { stage: 'closed', outcome: 'completed', arrivedAt: ago(50), createdAt: ago(50), closedAt: ago(50), mileageKm: 125_000 });
+    const service = tasksFor([], await loadPast()).find((x) => x.kind === 'service');
+    // 25 000 km in 110 days — ~227 a day: its 10 000 km came up after ~44 days, long before half a year.
+    expect(service).toMatchObject({ vehicleId: o.vehicleId, kmAt: 125_000 });
+    expect(service!.kmNow).toBeGreaterThan(135_000);
+    // The Mulkiya set by hand to run out in ten days: told; once told, not again for that day.
+    await setMulkiyaExpiry(o.vehicleId, shiftDay(dubaiDate(), 10));
+    const mulkiya = tasksFor([], await loadPast()).find((x) => x.kind === 'mulkiya');
+    expect(mulkiya).toMatchObject({ vehicleId: o.vehicleId, expires: shiftDay(dubaiDate(), 10) });
+    await markCustomerDone(mulkiya!);
+    expect(tasksFor([], await loadPast()).some((x) => x.kind === 'mulkiya')).toBe(false);
+    expect((await db.vehicles.get(o.vehicleId))!.regFrom).toBe('hand');
   });
 });

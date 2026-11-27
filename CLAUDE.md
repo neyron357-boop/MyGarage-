@@ -412,7 +412,11 @@ PWA для менеджера небольшой автомастерской в
   `services/waAsk.ts`), читают правила; оплата по скриншоту клиента — только предложение на заказе (`paymentShotOf` →
   `PaymentShotRow`, правила — `domain/paymentShot.ts`), запись — касанием (`acceptPaymentShot`: не больше долга, скриншот —
   пруф); «Написать всем» в «Сегодня» — `services/todayBatch.ts`, дело уходит из списка только ушедшим (`OutItem.today` →
-  `keepSentToday`).
+  `keepSentToday`). v0.96: строки голосом — микрофон в пустом поле `QuickAddSheet` → `aiVoiceLines` (`/api/ai/lines`, без примеров
+  названий в вопросе), строки — через тот же `add` (словарь, история, вид по названию); ТО по пробегу — только `domain/serviceDue.ts`
+  (`serviceForecast`, `PastJob.km`, `Task.kmNow`/`kmAt`, шаблон `serviceDueKm`); срок Mulkiya — `Vehicle.regExpires` (`regFrom`
+  read · hand, `regReadOf`, `regRemindedFor`), правила — `domain/mulkiya.ts`, чтение — только на телефоне (`readMulkiyaExpiry`, не
+  ИИ: на карте личные данные), рукой — `setMulkiyaExpiry` (не перечитывается); вид «Сегодня» `mulkiya` (за 14 дней, до 30 после).
   VAT в отчёте не показывается (v0.22) — строку «VAT к уплате» из аудита
   не возвращать без слова владельца.
 - **WhatsApp мастерской (v0.78**, пользователь: «не через API, а через браузерный метод, как связанные устройства»;

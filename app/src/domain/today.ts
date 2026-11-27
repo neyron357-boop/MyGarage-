@@ -1,3 +1,4 @@
+import { SERVICE_MIN_DAYS, type ServiceForecast } from './serviceDue';
 import { addDays, dubaiDate, hoursBetween, nowIso, shiftDay } from './dates';
 import type { Phase } from './flow';
 import type { Debt, Order, OrderItem, Reminder, Vehicle } from './types';
@@ -9,9 +10,9 @@ import type { Debt, Order, OrderItem, Reminder, Vehicle } from './types';
  * debt, and the customers to write to (how is the car, time for a service). Nothing is typed in — but the manager's
  * own reminders (v0.74): what he set for himself is due here on its day. v0.74 too: a car booked for today.
  */
-export type TaskKind = 'promised' | 'answer' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder' | 'declined' | 'bookedTomorrow';
+export type TaskKind = 'promised' | 'answer' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder' | 'declined' | 'bookedTomorrow' | 'mulkiya';
 /** The kinds that are a message to the customer (a tap opens it, ready; × — not needed). */
-export const CUSTOMER_KINDS: TaskKind[] = ['followUp', 'service', 'declined', 'bookedTomorrow'];
+export const CUSTOMER_KINDS: TaskKind[] = ['followUp', 'service', 'declined', 'bookedTomorrow', 'mulkiya'];
 
 export interface Task {
   kind: TaskKind;
@@ -30,6 +31,11 @@ export interface Task {
   itemId?: string;
   supplierId?: string;
   amountFils?: number;
+  /** A service by the mileage (audit 27/11): the car's mileage now as its pace says, and at its last service. */
+  kmNow?: number;
+  kmAt?: number;
+  /** The Mulkiya's expiry it is about (YYYY-MM-DD). */
+  expires?: string;
   /** A reminder: its record and its words. */
   reminderId?: string;
   text?: string;
@@ -51,13 +57,15 @@ export interface PastJob {
   items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'kind' | 'approvalState'>[];
   /** The customer can be written to. */
   hasPhone: boolean;
+  /** Audit 27/11: the next service by the car's mileage (domain/serviceDue.ts), when its visits tell its pace. */
+  km?: ServiceForecast;
 }
 
 export interface TodayInput {
   open: OpenJob[];
   /** Closed jobs (the app's and the history carried over). */
   past: PastJob[];
-  vehicles: Map<string, Pick<Vehicle, 'id' | 'serviceRemindedAt'>>;
+  vehicles: Map<string, Pick<Vehicle, 'id' | 'serviceRemindedAt'> & Partial<Pick<Vehicle, 'regExpires' | 'regRemindedFor'>>>;
   warnHours: number;
   alertHours: number;
   /** The manager's own reminders (v0.74), not done yet. */
@@ -71,6 +79,9 @@ const FOLLOW_UP_UNTIL = 14;
 /** An oil service is due again after about half a year (not reminded after more than a year). */
 export const SERVICE_DAYS = 180;
 export const SERVICE_UNTIL = 400;
+/** Audit 27/11: the customer reminded of the Mulkiya's expiry this many days before it, and not after this many days past it. */
+export const MULKIYA_AHEAD = 14;
+export const MULKIYA_AFTER = 30;
 /** Audit 27/11: what the customer declined on the car's last visit — offered again this many days after (not after `DECLINED_UNTIL`). */
 export const DECLINED_DAYS = 30;
 export const DECLINED_UNTIL = 60;
@@ -177,10 +188,25 @@ export function todayTasks(input: TodayInput): Task[] {
     const o = p.order;
     if (!o.closedAt || openVehicles.has(vehicleId) || !p.hasPhone || !wasOilService(p.items)) continue;
     const d = daysAgo(o.closedAt);
-    if (d < SERVICE_DAYS || d > SERVICE_UNTIL) continue;
+    // Half a year — or sooner, when the car's mileage says its next 10 000 km come first (audit 27/11).
+    const byTime = addDays(o.closedAt, SERVICE_DAYS);
+    const byKm = p.km && p.km.dueAt < byTime ? p.km : undefined;
+    const due = byKm?.dueAt ?? byTime;
+    if (now < due || d < SERVICE_MIN_DAYS || d > SERVICE_UNTIL) continue;
     const reminded = input.vehicles.get(vehicleId)?.serviceRemindedAt;
     if (reminded && reminded > o.closedAt) continue;
-    tasks.push({ kind: 'service', key: `service:${vehicleId}`, orderId: o.id, vehicleId, customerId: o.customerId, at: addDays(o.closedAt, SERVICE_DAYS), late: false });
+    tasks.push({ kind: 'service', key: `service:${vehicleId}`, orderId: o.id, vehicleId, customerId: o.customerId, at: due, late: false, ...(byKm ? { kmNow: byKm.nowKm, kmAt: byKm.atKm } : {}) });
+  }
+
+  // Audit 27/11: the Mulkiya runs out — the customer reminded two weeks before (until a month after), once for that day;
+  // the garage offers the check before the test.
+  for (const [vehicleId, p] of last) {
+    const v = input.vehicles.get(vehicleId);
+    const exp = v?.regExpires;
+    if (!exp || openVehicles.has(vehicleId) || !p.hasPhone || v.regRemindedFor === exp) continue;
+    const days = (Date.parse(`${exp}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000;
+    if (days > MULKIYA_AHEAD || days < -MULKIYA_AFTER) continue;
+    tasks.push({ kind: 'mulkiya', key: `mulkiya:${vehicleId}`, orderId: p.order.id, vehicleId, customerId: p.order.customerId, at: new Date(Date.parse(`${exp}T05:00:00Z`) - MULKIYA_AHEAD * 86_400_000).toISOString(), late: days < 0, expires: exp });
   }
 
   // Audit 27/11: the lines declined on the car's last visit, offered again a month later (the car not here, not offered yet).

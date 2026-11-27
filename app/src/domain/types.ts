@@ -153,6 +153,13 @@ export interface Vehicle {
   notes?: string;
   /** "Time for a service" sent (or dismissed) after its last job: it leaves the Today list until the next one. */
   serviceRemindedAt?: string;
+  /** Audit 27/11: the Mulkiya's expiry (YYYY-MM-DD) — read off its front on the phone (`read`), or set by hand (`hand`). */
+  regExpires?: string;
+  regFrom?: 'read' | 'hand';
+  /** The Mulkiya front photo already read for its expiry (a photo is read once). */
+  regReadOf?: string;
+  /** The expiry the customer was reminded of (once for each). */
+  regRemindedFor?: string;
   createdAt: string;
   archivedAt?: string;
 }

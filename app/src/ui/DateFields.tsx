@@ -19,6 +19,35 @@ function useDropdown() {
   return mobile ? ('modal' as const) : ('popover' as const);
 }
 
+/**
+ * A day ahead as a pill (audit 27/11: the Mulkiya's expiry) — like `DayPill`, but the days to come are the point; none
+ * yet — its placeholder. Saved at once.
+ */
+export function AheadPill({ value, onChange, label, placeholder, state }: { value?: string; onChange: (day: string) => void; label: string; placeholder: string; state?: 'past' | 'soon' | 'later' }) {
+  const today = dubaiDate();
+  return (
+    <DatePickerInput
+      aria-label={label}
+      value={fromDay(value)}
+      onChange={(d) => {
+        if (d && toDay(d) !== value) onChange(toDay(d));
+      }}
+      valueFormatter={() => (value ? `${label} ${formatDate(value)}` : placeholder)}
+      placeholder={placeholder}
+      minDate={fromDay(shiftDay(today, -400)) ?? undefined}
+      maxDate={fromDay(shiftDay(today, 3 * 366)) ?? undefined}
+      dropdownType={useDropdown()}
+      variant="unstyled"
+      leftSection={<IconCalendar size={17} stroke={2} />}
+      leftSectionPointerEvents="none"
+      classNames={{ root: 'day-pill', input: 'day-pill-input', section: 'day-pill-icon' }}
+      styles={{ input: { fontSize: 15 } }}
+      size="md"
+      data-due={state}
+    />
+  );
+}
+
 /** Date and time; stores an ISO timestamp. */
 export function DateTimeField({ label, value, onChange, description, disabled, placeholder }: { label: ReactNode; value?: string; onChange: (iso: string | undefined) => void; description?: ReactNode; disabled?: boolean; placeholder?: string }) {
   return (

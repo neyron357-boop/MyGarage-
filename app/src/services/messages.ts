@@ -81,8 +81,10 @@ export type SimpleTemplate =
   | 'documents'
   | 'followUp'
   | 'serviceDue'
+  | 'serviceDueKm'
   | 'declinedOffer'
-  | 'bookedTomorrow';
+  | 'bookedTomorrow'
+  | 'mulkiyaDue';
 
 export function simpleMessage(tpl: SimpleTemplate, ctx: MsgContext, lang: Lang, vars: Record<string, string | number> = {}): string {
   const t = tFor(lang);

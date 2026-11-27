@@ -7,6 +7,10 @@ import { useTranslation } from 'react-i18next';
 import { carOwned, coverOf, MULKIYA_SIDES, mulkiyaOf, removeCarPhoto, restoreCarPhoto, rotateCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type CarSlot, type MulkiyaSide } from '../../services/cover';
 import { carPhotoLater } from '../../services/carPhoto';
 import { MediaImage, undoToast } from '../../ui/components';
+import { AheadPill } from '../../ui/DateFields';
+import { dubaiDate, formatDate } from '../../domain/dates';
+import { expiryState } from '../../domain/mulkiya';
+import { readMulkiyaExpiry, setMulkiyaExpiry } from '../../services/mulkiya';
 import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { PhotoViewer } from '../../ui/PhotoViewer';
 import { usePhotoPick } from '../../ui/photoPick';
@@ -130,6 +134,24 @@ export function CarThumb({ vehicleId, size = 56 }: { vehicleId: string; size?: n
 }
 
 /** Under a VIN or Mulkiya photo: read the VIN off it, or (v0.73) type it by hand looking at it. */
+/**
+ * The Mulkiya's expiry (audit 27/11): read off its front on the phone, or picked here by hand — «Сегодня» reminds the
+ * customer two weeks before it. Orange within a month, red when past.
+ */
+function MulkiyaExpiry({ vehicleId, expires }: { vehicleId: string; expires?: string }) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  return (
+    <AheadPill
+      value={expires}
+      state={expiryState(expires, dubaiDate())}
+      label={t('mulkiya.until')}
+      placeholder={t('mulkiya.expires')}
+      onChange={(day) => void run(() => setMulkiyaExpiry(vehicleId, day))}
+    />
+  );
+}
+
 function VinCaption({ vehicleId, onLook, onType }: { vehicleId: string; onLook: () => void; onType: () => void }) {
   return (
     <Group gap="sm" justify="center" wrap="nowrap">
@@ -267,7 +289,7 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
   const { run } = useAction();
   const found = useScreenLiveQuery(async () => {
     const sides = await mulkiyaOf(vehicleId);
-    return { sides, own: await carOwned(Object.values(sides)), vin: !!(await vinPhotoOf(vehicleId)) };
+    return { sides, own: await carOwned(Object.values(sides)), vin: !!(await vinPhotoOf(vehicleId)), expires: (await db.vehicles.get(vehicleId))?.regExpires };
   }, [vehicleId]);
   const photos = found?.sides;
   const edits = useCarPhotoEdits(vehicleId);
@@ -283,7 +305,12 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
     void run(async () => {
       for (let i = 0; i < files.length && i < order.length; i++) await setMulkiya(vehicleId, order[i], files[i]);
       return true;
-    }).then((ok) => ok && readVin(vehicleId, t));
+    }).then((ok) => {
+      if (!ok) return;
+      readVin(vehicleId, t);
+      // Audit 27/11: the front's expiry, read on the phone after the VIN (one reader at a time) — each photo once.
+      void readMulkiyaExpiry(vehicleId).catch(() => undefined);
+    });
   // The chip: one photo goes to the side still missing (the front first); several are front and back, in that order.
   const pick = usePhotoPick((files) => store(files.length > 1 ? MULKIYA_SIDES : [...missing, ...present])(files), { multiple: true });
   // The full view's "retake" / "from photos": the side shown — set right as either is opened.
@@ -296,7 +323,16 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
   ) : (
     <VinCaption vehicleId={vehicleId} onLook={() => setViewing(null)} onType={() => car && setTyping(true)} />
   );
-  const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s, caption }));
+  const withExpiry = typing ? (
+    caption
+  ) : (
+    <Stack gap="xs" align="center">
+      <MulkiyaExpiry vehicleId={vehicleId} expires={found?.expires} />
+      {caption}
+    </Stack>
+  );
+  const items = present.map((s) => ({ id: photos![s]!, title: t(`slot.${s}`), side: s, caption: withExpiry }));
+  const due = expiryState(found?.expires, dubaiDate());
   return (
     <>
       <button
@@ -329,6 +365,12 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
         )}
         <span>{t('intake.mulkiya')}</span>
         {present.length === 1 && <span className="chip-note tnum">1/2</span>}
+        {/* Audit 27/11: the registration runs out within a month (orange) or has (red). */}
+        {(due === 'soon' || due === 'past') && found?.expires && (
+          <span className="chip-note tnum" data-due={due} data-mulkiya-due>
+            {formatDate(found.expires).slice(0, 5)}
+          </span>
+        )}
       </button>
       {pick.inputs}
       {sidePick.inputs}

@@ -7504,6 +7504,20 @@ html.desk .mark-layer-body {
 [data-mantine-color-scheme='dark'] .today-add {
   color: var(--mantine-color-cobalt-4);
 }
+/* Audit 27/11: the Mulkiya's expiry — orange within a month, red when past (its chip and its pill). */
+.chip-note[data-due='soon'],
+.day-pill button.day-pill-input[data-due='soon'] {
+  color: var(--mantine-color-orange-6);
+}
+.chip-note[data-due='past'],
+.day-pill button.day-pill-input[data-due='past'] {
+  color: var(--mantine-color-red-6);
+}
+/* Audit 27/11: lines dictated — the field says it listens, in red while it does. */
+.qa-field input[data-dictating]::placeholder {
+  color: var(--mantine-color-red-6);
+  opacity: 1;
+}
 /* Audit 27/11: the customers' messages of the day in one go — green, as WhatsApp. */
 .today-add.today-batch {
   color: var(--mantine-color-green-filled);

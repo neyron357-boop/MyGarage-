@@ -2,7 +2,7 @@ import type { Task, TaskKind } from '../domain/today';
 import type { Lang } from '../domain/types';
 import { waDigits } from '../domain/whatsapp';
 import { logMessage } from './messages';
-import { markBookingReminded, markDeclinedOffered, markFollowedUp, markServiceReminded } from './today';
+import { markBookingReminded, markDeclinedOffered, markFollowedUp, markMulkiyaReminded, markServiceReminded } from './today';
 import { queueWa, type OutItem } from './waOutbox';
 
 /*
@@ -21,6 +21,8 @@ export interface TodaySend {
   customerId: string;
   template: string;
   lang: Lang;
+  /** The Mulkiya's expiry it is about. */
+  expires?: string;
 }
 
 export interface TodayMessage {
@@ -34,8 +36,9 @@ export interface TodayMessage {
 }
 
 /** Sent, or not needed: the customer's thing leaves «Сегодня». */
-export function markCustomerDone(task: Pick<Task, 'kind' | 'orderId' | 'vehicleId'>): Promise<void> {
+export function markCustomerDone(task: Pick<Task, 'kind' | 'orderId' | 'vehicleId' | 'expires'>): Promise<void> {
   if (task.kind === 'service') return markServiceReminded(task.vehicleId);
+  if (task.kind === 'mulkiya') return markMulkiyaReminded(task.vehicleId, task.expires);
   if (!task.orderId) return Promise.resolve();
   if (task.kind === 'declined') return markDeclinedOffered(task.orderId);
   if (task.kind === 'bookedTomorrow') return markBookingReminded(task.orderId);
@@ -51,7 +54,7 @@ export function todayItems(list: TodayMessage[], day: string): OutItem[] {
       phone: waDigits(m.phone),
       title: m.title,
       parts: [{ text: m.text }],
-      today: { kind: m.task.kind, orderId: m.task.orderId, vehicleId: m.task.vehicleId, customerId: m.task.customerId, template: m.template, lang: m.lang },
+      today: { kind: m.task.kind, orderId: m.task.orderId, vehicleId: m.task.vehicleId, customerId: m.task.customerId, template: m.template, lang: m.lang, ...(m.task.expires ? { expires: m.task.expires } : {}) },
     }));
 }
 

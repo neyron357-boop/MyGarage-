@@ -23,7 +23,9 @@ fs.mkdirSync(OUT, { recursive: true });
 async function launch() {
   for (const channel of [process.env.E2E_BROWSER, undefined, 'chrome', 'msedge'].filter((x, i) => x || i === 1)) {
     try {
-      return await chromium.launch(channel ? { channel } : {});
+      // A fake microphone (the lines dictated, audit 27/11): Chrome's own test tone, no question asked.
+      const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'];
+      return await chromium.launch(channel ? { channel, args } : { args });
     } catch {
       // next
     }
@@ -285,6 +287,7 @@ async function launch() {
       await refreshWa();
       setAiTransport(async (q) => {
         if (q === 'payment') return { isPayment: true, amount: 315, currency: 'AED', date: '', reference: 'FT2611270042', bank: 'Emirates NBD', way: 'transfer', confidence: 0.93 };
+        if (q === 'lines') return { text: 'диски передние обе, развал сто двадцать', lines: [{ name: 'FRONT BRAKE DISCS', qty: 2, kind: 'part', price: 0 }, { name: 'WHEEL ALIGNMENT', qty: 1, kind: 'service', price: 120 }] };
         if (q === 'part-name') return { fixed: '', english: '', isPart: true, kind: 'part', kindSure: 0.5, confidence: 0.5 };
         if (q === 'labour') return { text: '' };
         throw new Error('not played');
@@ -313,6 +316,75 @@ async function launch() {
     await settle(900);
     await shot('phone-11-pay-shot-recorded');
 
+    // 4e. Lines dictated: «Добавить позицию» → the microphone → spoken → the AI's lines on the job (discs ×2, alignment 120).
+    await page.goto(BASE + `#/orders/${buy.jobId}`);
+    await top('[data-add-line]').waitFor({ timeout: 15000 });
+    await settle(500);
+    await top('[data-add-line]').click();
+    const qa2 = page.locator('.mantine-Modal-content').filter({ has: page.locator('.qa-field') });
+    await qa2.waitFor();
+    const mic = qa2.locator('[data-qa-voice]');
+    await mic.waitFor({ timeout: 8000 });
+    await settle(400);
+    await mic.click();
+    await qa2.locator('[data-qa-voice="on"]').waitFor({ timeout: 8000 });
+    await page.waitForTimeout(1500);
+    await shot('phone-14-dictating');
+    await qa2.locator('[data-qa-voice="on"]').click();
+    await page.waitForFunction(() => document.querySelectorAll('.mantine-Modal-content .qa-added-name').length >= 2, null, { timeout: 15000 });
+    const said = await qa2.locator('.qa-added-name').allInnerTexts();
+    check(said.some((x) => x.includes('FRONT BRAKE DISCS')) && said.some((x) => x.includes('WHEEL ALIGNMENT')), 'dictated — the lines on the job: ' + said.join(', '));
+    await settle(500);
+    await shot('phone-15-dictated');
+    const lines = await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      return (await db.items.where('orderId').equals(id).toArray()).map((i) => [i.titleEn, i.qty, i.unitPriceFils ?? 0]);
+    }, buy.jobId);
+    const discs = lines.find((x) => x[0] === 'FRONT BRAKE DISCS');
+    const align = lines.find((x) => x[0] === 'WHEEL ALIGNMENT');
+    check(discs && discs[1] === 2 && align && align[2] > 0, 'the discs ×2 as said, the alignment at the price said: ' + JSON.stringify(lines));
+    await qa2.locator('.mantine-Modal-close').click();
+    await qa2.waitFor({ state: 'detached' });
+
+    // 4f. The Mulkiya's expiry: set on the car — orange on the chip within a month; the pill in the Mulkiya's view.
+    const soon = await page.evaluate(async (x) => {
+      const { db } = await import('/src/db/db.ts');
+      const { setMulkiya } = await import('/src/services/cover.ts');
+      const { setMulkiyaExpiry } = await import('/src/services/mulkiya.ts');
+      const { dubaiDate, shiftDay } = await import('/src/domain/dates.ts');
+      const camry = (await db.orders.get(x.jobId)).vehicleId;
+      const cv = document.createElement('canvas');
+      cv.width = 640;
+      cv.height = 400;
+      const g = cv.getContext('2d');
+      g.fillStyle = '#dfe9f2';
+      g.fillRect(0, 0, 640, 400);
+      g.fillStyle = '#123';
+      g.font = '28px sans-serif';
+      g.fillText('Exp. Date', 40, 160);
+      const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.9));
+      await setMulkiya(camry, 'mulkiya', blob);
+      const day = shiftDay(dubaiDate(), 10);
+      await setMulkiyaExpiry(camry, day);
+      // The Corolla (gone a month ago): its Mulkiya runs out in ten days too — «Сегодня» says it.
+      await setMulkiyaExpiry((await db.orders.get(x.corolla)).vehicleId, day);
+      return day;
+    }, ids);
+    await page.goto(BASE + `#/orders/${ids.jobId}`);
+    const due = top('[data-mulkiya-due]');
+    await due.waitFor({ timeout: 15000 });
+    check((await due.getAttribute('data-due')) === 'soon', 'the Mulkiya chip: its day in orange — ' + (await due.innerText()));
+    await settle(500);
+    await top('.vin-chip').filter({ has: page.locator('[data-mulkiya-due]') }).click();
+    const pill = page.locator('.day-pill').filter({ hasText: 'До' }).first();
+    await pill.waitFor({ timeout: 10000 });
+    check(true, 'the Mulkiya’s view: «До ' + soon + '» — a tap changes it');
+    await settle(600);
+    check((await page.locator('button.day-pill-input[data-due="soon"]').count()) > 0, 'the pill orange: within a month');
+    await shot('phone-16-mulkiya');
+    await page.keyboard.press('Escape');
+    await settle(600);
+
     // 5. «Сегодня»: tomorrow's booking and the work declined a month ago — each a ready message.
     await page.goto(BASE + '#/');
     await top('.today-bell').click();
@@ -321,6 +393,7 @@ async function launch() {
     const notes = await page.locator('.today-note').allInnerTexts();
     check(notes.some((x) => x.includes('Завтра в 10:00')), '«Сегодня»: tomorrow at 10:00 — remind the customer');
     check(notes.some((x) => x.includes('В прошлый раз отказался')), '«Сегодня»: declined last time — offer again');
+    check(notes.some((x) => x.includes('Mulkiya до')), '«Сегодня»: the Corolla’s Mulkiya runs out — remind the customer');
     await shot('phone-07-today');
     await page.locator('.today-note').filter({ hasText: 'В прошлый раз отказался' }).click();
     const offer = page.locator('.mantine-Modal-content').filter({ hasText: 'WIPER BLADES' });
@@ -342,7 +415,7 @@ async function launch() {
     const morning = page.locator('.mantine-Modal-content').filter({ has: page.locator('[data-wa-confirm]') });
     await morning.waitFor({ timeout: 10000 });
     const words = (await morning.textContent()) ?? '';
-    check(words.includes('WIPER BLADES') && words.includes('tomorrow at'), 'the declined work and tomorrow’s booking — both in «Проверить и отправить»');
+    check(words.includes('WIPER BLADES') && words.includes('tomorrow at') && words.includes('registration (Mulkiya)'), 'the declined work, tomorrow’s booking and the Mulkiya — all in «Проверить и отправить»');
     await settle(500);
     await shot('phone-13-today-review');
     await morning.getByRole('button', { name: /^Отправить все/ }).click();
@@ -350,12 +423,13 @@ async function launch() {
     for (let k = 0; k < 20; k++) {
       marks = await page.evaluate(async (x) => {
         const { db } = await import('/src/db/db.ts');
-        return [!!(await db.orders.get(x.corolla)).declinedOfferedAt, !!(await db.orders.get(x.hiace)).bookingRemindedAt];
+        const corolla = await db.orders.get(x.corolla);
+        return [!!corolla.declinedOfferedAt, !!(await db.orders.get(x.hiace)).bookingRemindedAt, !!(await db.vehicles.get(corolla.vehicleId)).regRemindedFor];
       }, ids);
       if (marks.every(Boolean)) break;
       await settle(500);
     }
-    check(marks.every(Boolean), 'sent — the declined offer and the booking reminder left «Сегодня»: ' + JSON.stringify(marks));
+    check(marks.every(Boolean), 'sent — the declined offer, the booking and the Mulkiya reminders left «Сегодня»: ' + JSON.stringify(marks));
 
     check(errors.length === 0, 'no errors in the console' + (errors.length ? ': ' + errors.join(' | ') : ''));
     console.log('audit e2e: all passed');

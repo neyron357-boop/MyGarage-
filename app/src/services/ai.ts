@@ -32,7 +32,7 @@ import { namedByParts, partNames, partsKey } from '../domain/labourName';
  * определения VIN.»): not to come back without his word.
  */
 
-export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request' | 'translate' | 'voice' | 'picture' | 'payment';
+export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request' | 'translate' | 'voice' | 'picture' | 'payment' | 'lines';
 type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
@@ -428,6 +428,26 @@ export async function aiPaymentShot(id: string): Promise<AiPaymentShot | undefin
   } catch {
     return undefined;
   }
+}
+
+/** A line said aloud (audit 27/11): the name in English, the number, the kind, the sale price in AED only when said. */
+export interface SaidLine {
+  name: string;
+  qty: number;
+  kind: 'part' | 'labor' | 'service';
+  price: number;
+}
+/**
+ * The job's lines dictated in «Добавить позицию» (audit 27/11: «механик диктует — я быстро заполняю список»): the
+ * recording to the garage's AI once, the lines it heard back. The app names and prices them by its own rules after
+ * (services: the sheet's `add`). Not kept anywhere. No server, no key — nothing (undefined).
+ */
+export async function aiVoiceLines(voice: Blob): Promise<{ text: string; lines: SaidLine[] } | undefined> {
+  if (!aiOn()) return undefined;
+  const bytes = new Uint8Array(await voice.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return askAi<{ text: string; lines: SaidLine[] }>('lines', { audio: { type: voice.type || 'audio/webm', data: btoa(s) } }, 'lines', 90_000);
 }
 
 export async function aiReadReply(text: string, quote: string, asks: { id: string; car: string; lines: string[] }[]): Promise<AiReply | undefined> {

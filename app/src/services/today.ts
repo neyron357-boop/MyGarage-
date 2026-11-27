@@ -1,9 +1,12 @@
 import { db } from '../db/db';
-import { addDays, dubaiTime, hoursBetween, nowIso } from '../domain/dates';
+import { addDays, dubaiTime, formatDate, hoursBetween, nowIso } from '../domain/dates';
 import { isAwaitingClient, itemTitle } from '../domain/items';
 import { declinedLines, DECLINED_DAYS, DECLINED_UNTIL, FOLLOW_UP_DAYS, SERVICE_DAYS, SERVICE_UNTIL, todayTasks, type OpenJob, type PastJob, type Task } from '../domain/today';
 import type { Customer, Lang, Order, Reminder, Vehicle } from '../domain/types';
+import { formatKm } from '../domain/odometer';
+import { serviceForecast, SERVICE_MIN_DAYS, type KmPoint, type ServiceForecast } from '../domain/serviceDue';
 import type { SimpleTemplate } from './messages';
+import { mileageOfJob } from './mileage';
 import { phaseOf } from './flow';
 import type { OrderBundle } from './orders';
 
@@ -35,10 +38,23 @@ export async function loadPast(now = nowIso()): Promise<{ past: PastJob[]; vehic
     const prev = last.get(o.vehicleId);
     if (o.closedAt && (!prev || (prev.closedAt ?? '') < o.closedAt)) last.set(o.vehicleId, o);
   }
+  // The next service by the mileage (audit 27/11, domain/serviceDue.ts): each car's pace from the mileage of its visits.
+  const points = new Map<string, KmPoint[]>();
+  for (const o of closed) {
+    const km = mileageOfJob(o);
+    if (km !== undefined) points.set(o.vehicleId, [...(points.get(o.vehicleId) ?? []), { at: o.arrivedAt || o.createdAt, km }]);
+  }
+  const kmOf = new Map<string, ServiceForecast>();
+  for (const o of last.values()) {
+    const km = mileageOfJob(o);
+    const f = km === undefined ? undefined : serviceForecast(points.get(o.vehicleId) ?? [], { at: o.closedAt!, km }, now);
+    if (f) kmOf.set(o.id, f);
+  }
   const wanted = [...last.values()].filter((o) => {
     const days = hoursBetween(o.closedAt!, now) / 24;
-    // …and (audit 27/11) a month after, for the lines declined on it.
-    return (days >= SERVICE_DAYS - 1 && days <= SERVICE_UNTIL + 1) || (days >= DECLINED_DAYS - 1 && days <= DECLINED_UNTIL + 1);
+    // …and (audit 27/11) a month after, for the lines declined on it; and the service due sooner by the mileage.
+    const byKm = kmOf.get(o.id);
+    return (days >= SERVICE_DAYS - 1 && days <= SERVICE_UNTIL + 1) || (days >= DECLINED_DAYS - 1 && days <= DECLINED_UNTIL + 1) || (!!byKm && byKm.dueAt <= now && days >= SERVICE_MIN_DAYS - 1);
   });
   const [items, customers, vehicles] = await Promise.all([
     wanted.length ? db.items.where('orderId').anyOf(wanted.map((o) => o.id)).toArray() : [],
@@ -49,7 +65,7 @@ export async function loadPast(now = nowIso()): Promise<{ past: PastJob[]; vehic
   for (const i of items) byOrder.set(i.orderId, [...(byOrder.get(i.orderId) ?? []), i]);
   const phone = new Map(customers.filter((c): c is Customer => !!c).map((c) => [c.id, !!(c.phone || c.whatsapp)]));
   return {
-    past: recent.map((o) => ({ order: o, items: byOrder.get(o.id) ?? [], hasPhone: phone.get(o.customerId) ?? false })),
+    past: recent.map((o) => ({ order: o, items: byOrder.get(o.id) ?? [], hasPhone: phone.get(o.customerId) ?? false, ...(kmOf.has(o.id) ? { km: kmOf.get(o.id) } : {}) })),
     vehicles: new Map(vehicles.filter((v): v is Vehicle => !!v).map((v) => [v.id, v])),
     customers: new Map(customers.filter((c): c is Customer => !!c).map((c) => [c.id, c])),
   };
@@ -78,14 +94,17 @@ export function tasksFor(bundles: OrderBundle[], past: Awaited<ReturnType<typeof
  * to every customer alike (audit 27/11: asking only the happy ones is «review gating», which Google's rules forbid);
  * "time for a service"; the lines declined last time, by name; tomorrow's booking, its time.
  */
-export function customerMessage(task: Pick<Task, 'kind' | 'at'>, lang: Lang, mapsUrl: string | undefined, items: PastJob['items'], bookedFor?: string): { tpl: SimpleTemplate; vars: Record<string, string> } {
+export function customerMessage(task: Pick<Task, 'kind' | 'at' | 'kmNow' | 'kmAt' | 'expires'>, lang: Lang, mapsUrl: string | undefined, items: PastJob['items'], bookedFor?: string): { tpl: SimpleTemplate; vars: Record<string, string> } {
   switch (task.kind) {
     case 'service':
-      return { tpl: 'serviceDue', vars: {} };
+      // By the mileage (audit 27/11): about how far the car has gone since its last service here.
+      return task.kmNow && task.kmAt ? { tpl: 'serviceDueKm', vars: { km: formatKm(Math.max(0, task.kmNow - task.kmAt)), lastKm: formatKm(task.kmAt) } } : { tpl: 'serviceDue', vars: {} };
     case 'declined':
       return { tpl: 'declinedOffer', vars: { lines: declinedLines(items).map((i) => itemTitle(i, lang)).filter(Boolean).join(', ') } };
     case 'bookedTomorrow':
       return { tpl: 'bookedTomorrow', vars: { time: dubaiTime(bookedFor ?? task.at) } };
+    case 'mulkiya':
+      return { tpl: 'mulkiyaDue', vars: { date: formatDate(task.expires) } };
     default:
       return mapsUrl?.trim() ? { tpl: 'reviewRequest', vars: { link: mapsUrl.trim() } } : { tpl: 'followUp', vars: {} };
   }
@@ -105,6 +124,11 @@ export async function markDeclinedOffered(orderId: string): Promise<void> {
 /** The customer reminded of tomorrow's booking (or not needed, audit 27/11). */
 export async function markBookingReminded(orderId: string): Promise<void> {
   await db.orders.update(orderId, { bookingRemindedAt: nowIso() });
+}
+
+/** The Mulkiya's expiry told (or not needed, audit 27/11): not again for that day — a new expiry is told again. */
+export async function markMulkiyaReminded(vehicleId: string, expires: string | undefined): Promise<void> {
+  if (expires) await db.vehicles.update(vehicleId, { regRemindedFor: expires });
 }
 
 /** "Time for a service" sent (or not needed): the car leaves the list until its next job. */
