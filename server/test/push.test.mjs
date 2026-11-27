@@ -115,10 +115,12 @@ function run(p, times, state = {}) {
   const out = [];
   for (const t of times) {
     const r = dueNow(p, state, t);
-    state = { groups: { ...r.state.groups }, digest: r.state.digest };
+    state = { groups: { ...r.state.groups }, digest: r.state.digest, again: r.state.again, held: r.state.held };
     for (const s of r.sends) {
-      Object.assign(state.groups, s.mark.groups);
+      Object.assign(state.groups, s.mark.groups ?? {});
       if (s.mark.digest) state.digest = s.mark.digest;
+      if (s.mark.again) state.again = s.mark.again;
+      if (s.mark.held) state.held = s.mark.held;
       out.push({ t: new Date(t + 4 * 3600_000).toISOString().slice(11, 16), key: s.key, title: s.title, body: s.body, url: s.url, badge: s.badge });
     }
   }
@@ -196,11 +198,11 @@ describe('what is due now', () => {
       [
         ['08:00', 'price', 'Назвать цену · 2', 'Renault Kwid · 67445 · 23 ч\nHonda Civic · 38203 · 22 ч'],
         ['08:00', 'answer', 'Ждём ответа', 'Nissan X-Trail'],
-        ['09:00', 'digest', 'Сегодня', 'Назвать цену · 2\nЖдём ответа · Nissan X-Trail'],
+        ['09:00', 'digest', 'Сегодня · 3', 'Назвать цену: Renault Kwid · 67445 · 24 ч, Honda Civic · 38203 · 23 ч\nЖдём ответа: Nissan X-Trail'],
         ['09:00', 'rem:1', 'Напоминание', 'Позвонить Ахмеду'],
         // An hour after the summary, not after 08:00.
         ['10:00', 'price', 'Назвать цену · 2', 'Renault Kwid · 67445 · 25 ч\nHonda Civic · 38203 · 24 ч'],
-        ['09:00', 'digest', 'Сегодня', 'Назвать цену · 2\nЖдём ответа · Nissan X-Trail'],
+        ['09:00', 'digest', 'Сегодня · 3', 'Назвать цену: Renault Kwid · 67445 · 2 д, Honda Civic · 38203 · 47 ч\nЖдём ответа: Nissan X-Trail'],
       ],
     );
     // A day with nothing to sum up: no summary, and none later that day either.
@@ -209,6 +211,43 @@ describe('what is due now', () => {
     const q = run(quiet, [at('09:00'), at('15:00'), at('15:01')]);
     assert.deepEqual(q.out.map((x) => x.key), ['price']);
     assert.equal(q.state.digest, '2026-11-24');
+  });
+
+  it('v0.97: a group «in the plan» is never said alone — only in the plan of the day; after noon, once more what still waits', () => {
+    const p = cleanPlan({
+      from: 480,
+      to: 1260,
+      digest: { at: 9 * 60, title: 'План дня', again: 15 * 60, againTitle: 'Ещё ждут' },
+      groups: [
+        { key: 'order', plan: true, title: 'Заказать', every: 180, members: [{ id: 'order:a', label: 'Camry · Ahmed', start: new Date(at('08:10')).toISOString() }] },
+        { key: 'booked', title: 'Запись', every: 0, members: [{ id: 'booked:b', label: 'Hiace · 10:00', start: new Date(at('09:30')).toISOString() }] },
+      ],
+    });
+    const { out, state } = run(p, [at('08:30'), at('09:00'), at('09:30'), at('12:00'), at('15:00'), at('15:30'), at('18:00')]);
+    assert.deepEqual(
+      out.map((x) => [x.t, x.key, x.title, x.body]),
+      [
+        ['09:00', 'digest', 'План дня · 1', 'Заказать: Camry · Ahmed'],
+        ['09:30', 'booked', 'Запись', 'Hiace · 10:00'],
+        ['15:00', 'again', 'Ещё ждут · 1', 'Заказать: Camry · Ahmed'],
+      ],
+    );
+    assert.equal(state.again, '2026-11-24');
+  });
+
+  it('v0.97: news held in the night are said when the hours begin — one alone, several together', () => {
+    const p = cleanPlan({ from: 480, to: 1260, away: 'Пока вас не было', groups: [] });
+    const one = run(p, [at('07:00'), at('08:00'), at('08:01')], { held: [{ key: 'answer:m1', title: 'Ahmed согласен', body: '«ok»', url: '#/orders/o1' }] });
+    assert.deepEqual(
+      one.out.map((x) => [x.t, x.key, x.title, x.url]),
+      [['08:00', 'answer:m1', 'Ahmed согласен', '#/orders/o1']],
+    );
+    assert.deepEqual(one.state.held, []);
+    const two = run(p, [at('08:00')], { held: [{ key: 'a', title: 'Ahmed согласен', body: '', url: '#/' }, { key: 'b', title: 'Перевод 315 AED', body: '', url: '#/' }] });
+    assert.deepEqual(
+      two.out.map((x) => [x.key, x.title, x.body]),
+      [['held', 'Пока вас не было · 2', 'Ahmed согласен\nПеревод 315 AED']],
+    );
   });
 
   it('many cars: six lines and «+N»; how long ago in minutes, hours, days', () => {
@@ -279,6 +318,53 @@ describe('the notifications’ service', () => {
     assert.match(p.headers.Authorization, /^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]+$/);
     assert.deepEqual([p.headers['Content-Encoding'], p.headers.TTL, p.headers.Urgency], ['aes128gcm', '120', 'high']);
     assert.match(p.headers.Topic, /^[\w-]{1,32}$/);
+  });
+
+  it('v0.97: news — at once to the other devices (not back to the one that saw it), the same key once; in the night held for the morning', async () => {
+    // Its own garage: the shared one's state stays as the next tests expect it.
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mygarage-news-'));
+    const store2 = openStore(dir2, { keepBackups: 1 });
+    const phone = store2.addDevice('iPhone', 'install-phone-2');
+    const pc = store2.addDevice('PC', 'install-pc-000002');
+    const posted = [];
+    let clock = at('11:00');
+    const push = createPush({
+      store: store2,
+      now: () => clock,
+      fetchImpl: async (url, init) => {
+        posted.push({ url, message: JSON.parse(decrypt(Buffer.from(init.body), ua, auth)) });
+        return new Response(null, { status: 201 });
+      },
+    });
+    push.subscribe(phone.id, sub());
+    push.subscribe(pc.id, sub('fcm.googleapis.com'));
+    push.setPlan(plan({ away: 'Пока вас не было' }));
+    const item = { key: 'answer:msg-1', title: 'Ahmed согласен', body: '«ok go ahead» · 1 250 AED', url: '#/orders/o1' };
+    assert.deepEqual(await push.news(pc.id, item, { except: true }), { ok: true, sent: true });
+    assert.deepEqual(posted.map((p) => new URL(p.url).hostname), ['web.push.apple.com']);
+    assert.deepEqual(posted[0].message, { ...item, tag: 'answer:msg-1' });
+    posted.length = 0;
+    // The phone saw the same message too: said once.
+    assert.deepEqual(await push.news(phone.id, item), { ok: true, dup: true });
+    assert.equal(posted.length, 0);
+    // An address from outside the app is not taken.
+    await push.news(pc.id, { key: 'x:1', title: 'T', url: 'https://evil.example/' });
+    assert.equal(posted.at(-1).message.url, '#/');
+    posted.length = 0;
+    // At 22:30 (after the hours): held; said when the hours begin.
+    clock = at('22:30');
+    assert.deepEqual(await push.news(pc.id, { key: 'payment:msg-2', title: 'Перевод 315 AED', body: 'Camry', url: '#/orders/o2' }), { ok: true, held: true });
+    assert.equal(posted.length, 0);
+    clock = at('08:00', '2026-11-25');
+    await push.tick();
+    assert.ok(posted.some((p) => p.message.title === 'Перевод 315 AED' && p.message.url === '#/orders/o2'));
+    posted.length = 0;
+    clock = at('08:01', '2026-11-25');
+    await push.tick();
+    assert.ok(!posted.some((p) => p.message.title === 'Перевод 315 AED'));
+    await assert.rejects(push.news(pc.id, { key: '', title: '' }), /no news/);
+    store2.close();
+    fs.rmSync(dir2, { recursive: true, force: true });
   });
 
   it('the plan’s due notifications go to every subscribed device; said once taken; not taken — tried again', async () => {

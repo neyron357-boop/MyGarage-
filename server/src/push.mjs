@@ -139,9 +139,10 @@ export function cleanPlan(raw) {
       });
     }
     if (!members.length) continue;
-    groups.push({ key, title: text(g.title, 80), many: text(g.many, 80) || text(g.title, 80), every: whole(g.every, 0, 7 * 1440, 0), url: text(g.url, 200), members, ...(g.solo ? { solo: true } : {}) });
+    groups.push({ key, title: text(g.title, 80), many: text(g.many, 80) || text(g.title, 80), every: whole(g.every, 0, 7 * 1440, 0), url: text(g.url, 200), members, ...(g.solo ? { solo: true } : {}), ...(g.plan ? { plan: true } : {}) });
   }
   const digestAt = r.digest && Number.isFinite(Number(r.digest.at)) ? whole(r.digest.at, 0, 1439, 540) : undefined;
+  const againAt = r.digest && r.digest.again !== undefined && r.digest.again !== null && Number.isFinite(Number(r.digest.again)) ? whole(r.digest.again, 0, 1439, 900) : undefined;
   return {
     v: 1,
     tz: text(r.tz, 60) || 'Asia/Dubai',
@@ -149,7 +150,10 @@ export function cleanPlan(raw) {
     to: whole(r.to, 0, 1440, 1260),
     days: days.length ? days : [0, 1, 2, 3, 4, 5, 6],
     units: { m: text(units.m, 8) || 'min', h: text(units.h, 8) || 'h', d: text(units.d, 8) || 'd' },
-    ...(digestAt !== undefined ? { digest: { at: digestAt, title: text(r.digest.title, 80) || 'MyGarage' } } : {}),
+    ...(digestAt !== undefined
+      ? { digest: { at: digestAt, title: text(r.digest.title, 80) || 'MyGarage', ...(againAt !== undefined && againAt > digestAt ? { again: againAt, againTitle: text(r.digest.againTitle, 80) || text(r.digest.title, 80) || 'MyGarage' } : {}) } }
+      : {}),
+    away: text(r.away, 80) || 'MyGarage',
     groups,
     madeAt: new Date().toISOString(),
   };
@@ -180,10 +184,10 @@ const LINES = 6;
  * add to the state once the notification was really taken (not taken — nothing is marked, it is due again).
  */
 export function dueNow(plan, state, nowMs) {
-  const was = { groups: state?.groups ?? {}, digest: state?.digest ?? '' };
-  if (!plan || !plan.groups?.length || !inHours(plan, nowMs)) return { sends: [], state: was };
+  const was = { groups: state?.groups ?? {}, digest: state?.digest ?? '', again: state?.again ?? '', held: Array.isArray(state?.held) ? state.held : [] };
+  if (!plan || !inHours(plan, nowMs) || (!plan.groups?.length && !was.held.length)) return { sends: [], state: was };
   const t = localTime(nowMs, plan.tz);
-  const next = { groups: {}, digest: was.digest };
+  const next = { groups: {}, digest: was.digest, again: was.again, held: was.held };
   // (Only the plan's own groups are remembered: one that left the plan is forgotten — back again, it is new.)
   for (const g of plan.groups) if (was.groups[g.key]) next.groups[g.key] = was.groups[g.key];
   /** As the state will be once what is in `sends` so far is taken (the summary's groups are not said twice). */
@@ -195,16 +199,35 @@ export function dueNow(plan, state, nowMs) {
   const line = (m) => (m.since ? `${m.label} · ${ago(nowMs - Date.parse(m.since), plan.units)}` : m.label);
   const sends = [];
 
+  // What came while notifications may not (news in the night): said when the hours begin, together.
+  if (was.held.length) {
+    const h = was.held;
+    sends.push(
+      h.length === 1
+        ? { key: h[0].key, tag: h[0].key, title: h[0].title, body: h[0].body, url: h[0].url, badge, mark: { held: [] } }
+        : { key: 'held', tag: 'held', title: `${plan.away} · ${h.length}`, body: h.slice(0, LINES).map((x) => x.title).join('\n'), url: '#/', badge, mark: { held: [] } },
+    );
+  }
+  // The plan of the day (v0.97): a line a kind, its cars by name — the morning's, and once more after noon what still waits.
+  const planBody = (rows) => rows.map(({ g, on }) => `${g.title}: ${on.slice(0, 3).map(line).join(', ')}${on.length > 3 ? ` +${on.length - 3}` : ''}`).slice(0, 8).join('\n');
   if (plan.digest && was.digest !== t.date && t.minutes >= plan.digest.at) {
     const rows = active.filter((x) => !x.g.solo);
     if (rows.length) {
       const mark = { digest: t.date, groups: {} };
       for (const { g, on } of rows) mark.groups[g.key] = seenNow[g.key] = said(on);
-      const body = rows.map(({ g, on }) => (on.length === 1 ? `${g.title} · ${on[0].label}` : g.many.replace('{n}', String(on.length))));
-      sends.push({ key: 'digest', tag: 'digest', title: plan.digest.title, body: body.slice(0, 8).join('\n'), url: '#/', badge, mark });
+      sends.push({ key: 'digest', tag: 'digest', title: `${plan.digest.title} · ${rows.reduce((n, x) => n + x.on.length, 0)}`, body: planBody(rows), url: '#/?today=1', badge, mark });
     } else next.digest = t.date; // nothing to sum up today: the day is done with
+  } else if (plan.digest?.again !== undefined && was.digest === t.date && was.again !== t.date && t.minutes >= plan.digest.again) {
+    const rows = active.filter((x) => !x.g.solo && x.g.plan);
+    if (rows.length) {
+      const mark = { again: t.date, groups: {} };
+      for (const { g, on } of rows) mark.groups[g.key] = seenNow[g.key] = said(on);
+      sends.push({ key: 'again', tag: 'digest', title: `${plan.digest.againTitle} · ${rows.reduce((n, x) => n + x.on.length, 0)}`, body: planBody(rows), url: '#/?today=1', badge, mark });
+    } else next.again = t.date;
   }
   for (const { g, on } of active) {
+    // In the plan of the day only (v0.97: «не замечаю 99 %» — a state said again and again is not read).
+    if (g.plan) continue;
     const st = seenNow[g.key] ?? { at: 0, seen: {} };
     const fresh = on.filter((m) => st.seen[m.id] !== Date.parse(m.start));
     const again = g.every > 0 && st.at > 0 && nowMs - st.at >= g.every * 60_000;
@@ -228,6 +251,7 @@ export function dueNow(plan, state, nowMs) {
 /* ---------- The service ---------- */
 
 const KEYS = 'push.vapid';
+const NEWS = 'push.news';
 const SUBS = 'push.subs';
 const PLAN = 'push.plan';
 const STATE = 'push.state';
@@ -300,11 +324,12 @@ export function createPush({ store, log = () => {}, contact = 'https://neyron357
     return { ok: res.ok, status: res.status, gone, error };
   }
 
-  /** A message to every subscribed device that is still paired. True — at least one took it. */
-  async function sendAll(message, opts) {
+  /** A message to every subscribed device that is still paired (but `except`). True — at least one took it. */
+  async function sendAll(message, opts = {}) {
     const paired = new Set(store.devices().filter((d) => !d.revoked).map((d) => d.id));
     let ok = false;
     for (const id of Object.keys(subs())) {
+      if (id === opts.except) continue;
       if (!paired.has(id)) {
         unsubscribe(id);
         continue;
@@ -332,16 +357,22 @@ export function createPush({ store, log = () => {}, contact = 'https://neyron357
       if (!Object.keys(subs()).length) return 0;
       const before = read(STATE, {});
       const r = dueNow(read(PLAN, null), before, now());
-      const next = { groups: { ...r.state.groups }, digest: r.state.digest };
+      const next = { groups: { ...r.state.groups }, digest: r.state.digest, again: r.state.again, held: r.state.held };
       let sent = 0;
+      let heldSaid = false;
       for (const s of r.sends) {
         // Not taken by any device (no network): nothing is marked — it is due again at the next tick.
         if (!(await sendAll({ title: s.title, body: s.body, tag: s.tag, url: s.url, badge: s.badge }, { topic: s.key }))) continue;
         sent++;
-        Object.assign(next.groups, s.mark.groups);
+        Object.assign(next.groups, s.mark.groups ?? {});
         if (s.mark.digest) next.digest = s.mark.digest;
+        if (s.mark.again) next.again = s.mark.again;
+        if (s.mark.held) heldSaid = true;
       }
-      if (JSON.stringify(next) !== JSON.stringify({ groups: before.groups ?? {}, digest: before.digest ?? '' })) write(STATE, next);
+      // News held meanwhile (it may come while this tick sends) stays; what was said goes.
+      const heldNow = read(STATE, {}).held ?? [];
+      next.held = heldSaid ? heldNow.filter((x) => !r.state.held.some((y) => y.key === x.key)) : heldNow;
+      if (JSON.stringify(next) !== JSON.stringify({ groups: before.groups ?? {}, digest: before.digest ?? '', again: before.again ?? '', held: before.held ?? [] })) write(STATE, next);
       if (sent) {
         last = { at: now(), ok: last.ok + sent, error: '' };
         log(`push: ${sent} sent (${r.sends.map((s) => s.key).join(', ').slice(0, 160)})`);
@@ -355,8 +386,42 @@ export function createPush({ store, log = () => {}, contact = 'https://neyron357
     }
   }
 
+  /**
+   * News (v0.97, the owner: «99 % уведомлений не замечаю… однотипные, скучные»): something happened that needs the manager
+   * now — a customer agreed, a supplier gave prices, a payment came — said at once by the device that saw it, to the others
+   * (`except` — the one that saw it, when it is on its screen). The same key twice is said once (two devices see the same
+   * message); outside the hours it waits and is said when they begin («Пока вас не было»).
+   */
+  async function news(deviceId, raw = {}, { except = false } = {}) {
+    const key = text(raw.key, 120);
+    const title = text(raw.title, 90);
+    if (!key || !title) throw Object.assign(new Error('no news'), { status: 400 });
+    const item = { key, title, body: text(raw.body, 240), url: text(raw.url, 200).startsWith('#/') ? text(raw.url, 200) : '#/' };
+    const seen = read(NEWS, {});
+    if (seen[key]) return { ok: true, dup: true };
+    const t = now();
+    for (const [k, at] of Object.entries(seen)) if (t - at > 7 * 86_400_000) delete seen[k];
+    const keys = Object.keys(seen);
+    if (keys.length > 600) for (const k of keys.slice(0, keys.length - 600)) delete seen[k];
+    seen[key] = t;
+    write(NEWS, seen);
+    const plan = read(PLAN, null);
+    if (plan && !inHours(plan, t)) {
+      const st = read(STATE, {});
+      write(STATE, { ...st, held: [...(Array.isArray(st.held) ? st.held : []), item].slice(-20) });
+      return { ok: true, held: true };
+    }
+    const ok = await sendAll({ ...item, tag: key }, { topic: key, ...(except ? { except: deviceId } : {}) });
+    if (ok) {
+      last = { at: now(), ok: last.ok + 1, error: '' };
+      log(`push: news (${key.split(':')[0]})`);
+    }
+    return { ok: true, sent: ok };
+  }
+
   let timer = null;
   return {
+    news,
     publicKey: () => vapid().publicKey,
     subscribed: (deviceId) => !!subs()[deviceId],
     subscribe,

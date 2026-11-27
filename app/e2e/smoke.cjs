@@ -3653,15 +3653,20 @@ async function launchBrowser() {
     // declined work offered again and tomorrow's booking: fourteen kinds.
     if ((await front('[data-rule]').count()) !== 15) throw new Error('fifteen kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
     if (await front('[data-rule="price"]').count()) throw new Error('«Назвать цену» is still a notification');
-    // A customer who has not answered — after two hours, every two hours; then the manager's own timing.
+    // v0.97 («99 % не замечаю»): a customer who has not answered — a line of the plan of the day, not a notification of
+    // its own; the news (a customer's answer, a supplier's prices, a payment, a request) — at once.
+    if ((await front('[data-news]').count()) !== 4) throw new Error('four kinds of news are to be told at once');
     const answer = front('.list-row').filter({ has: page.locator('[data-rule="answer"]') }).first();
-    if (!(await answer.innerText()).replace(/\s+/g, ' ').includes('через 2 ч · каждые 3 ч')) throw new Error('«Ждём ответа» must be two hours, every three hours, by default (v0.82): ' + (await answer.innerText()));
+    if (!(await front('[data-notify-when="plan"] [data-rule="answer"]').count())) throw new Error('«Клиент не ответил» must be in the plan of the day by default (v0.97)');
+    if ((await front('[data-notify-when="now"] [data-rule]').count()) !== 3) throw new Error('only a booking, a time promised and a reminder are said on their own by default');
+    // The manager's own: said on its own, after half an hour, every quarter.
     await answer.click({ position: { x: 120, y: 20 } });
+    await page.locator('[data-rule-sheet="answer"] .mantine-SegmentedControl-root').getByText('Сразу', { exact: true }).click();
     await page.locator('[data-rule-sheet="answer"] [data-first="30"]').click();
     await page.locator('[data-rule-sheet="answer"] [data-every="15"]').click();
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
-    if (JSON.stringify((await notify())?.rules?.answer) !== JSON.stringify({ on: true, after: 30, every: 15 })) throw new Error('the kind’s own timing was not kept: ' + JSON.stringify(await notify()));
+    if (JSON.stringify((await notify())?.rules?.answer) !== JSON.stringify({ on: true, after: 30, every: 15, when: 'now' })) throw new Error('the kind’s own timing was not kept: ' + JSON.stringify(await notify()));
     await front('[data-notify-from]').first().fill('07:30');
     await front('[data-day="5"]').first().click();
     await page.waitForTimeout(400);

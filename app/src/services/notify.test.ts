@@ -40,20 +40,21 @@ describe('the notifications’ plan from the garage’s data', () => {
     expect(p.groups.flatMap((x) => x.members.map((m) => m.url))).not.toContain(`#/orders/${price.id}`);
     const g = group(p, 'answer')!;
     // v0.82: bright — its sign first; the line — the car, its plate (code and number) and whose it is.
-    expect([g.title, g.many, g.every, g.url]).toEqual(['📞 Клиент не ответил', '📞 Клиент не ответил · {n}', 180, '#/?today=1']);
+    // v0.97: a line of the plan of the day — not a notification of its own.
+    expect([g.title, g.many, g.every, g.url, g.plan]).toEqual(['📞 Клиент не ответил', '📞 Клиент не ответил · {n}', 0, '#/?today=1', true]);
     expect(g.members.map((m) => [m.id, m.label, m.url])).toEqual([[`answer:${o.id}`, 'Renault Kwid · R 67445', `#/orders/${o.id}`]]);
     expect(g.members[0].start).toBe(new Date(Date.parse(v.sentAt) + 2 * 3600_000).toISOString());
     expect(g.members[0].since).toBe(v.sentAt);
-    expect([p.tz, p.from, p.to, p.units, p.digest]).toEqual(['Asia/Dubai', 480, 1260, { m: 'мин', h: 'ч', d: 'д' }, { at: 540, title: '📋 Сегодня' }]);
+    expect([p.tz, p.from, p.to, p.units, p.digest, p.away]).toEqual(['Asia/Dubai', 480, 1260, { m: 'мин', h: 'ч', d: 'д' }, { at: 540, title: '📋 План дня', again: 900, againTitle: '📋 Ещё ждут' }, '🌙 Пока вас не было']);
     // In English on a device set so.
     expect(group(await makePlan(now, 'en'), 'answer')!.title).toBe('📞 No answer from the customer');
   });
 
   it('the manager’s own settings are kept with the garage’s and the plan follows: half an hour, every 15 minutes; a kind off; all off', async () => {
     await told('Renault', 'Kwid', '67445', ['CLUTCH FULL SET']);
-    await saveNotify({ from: 7 * 60, rules: { answer: { on: true, after: 30, every: 15 } } as never });
+    await saveNotify({ from: 7 * 60, rules: { answer: { on: true, after: 30, every: 15, when: 'now' } } as never });
     const s = notifyOf((await getSettings()).notify);
-    expect([s.from, s.to, s.rules.answer, s.rules.order.every]).toEqual([420, 1260, { on: true, after: 30, every: 15 }, 180]);
+    expect([s.from, s.to, s.rules.answer, s.rules.order.every]).toEqual([420, 1260, { on: true, after: 30, every: 15, when: 'now' }, 0]);
     const p = await makePlan();
     expect([p.from, group(p, 'answer')!.every]).toEqual([420, 15]);
     await saveNotify({ rules: { answer: { on: false, after: 30, every: 15 } } as never });

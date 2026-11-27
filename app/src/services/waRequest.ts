@@ -4,6 +4,7 @@ import { chatRole, whoOf, type WaChat, type WaEvent, type WaMessage } from '../d
 import { looksLikeRequest, requestPlan, type AiRequest, type RequestPlan } from '../domain/waRequest';
 import type { QuoteOption } from '../domain/types';
 import { askAi, notifyAi } from './ai';
+import { requestNews } from './newsWatch';
 import { findVehicleByPlate } from './customers';
 import { addItem, ensureLabourLine } from './estimate';
 import { setBoardStatus } from './flow';
@@ -163,6 +164,8 @@ export async function considerChat(chatId: string): Promise<void> {
     const relay = burst.some((m) => m.fwd) || role === 'work';
     const made = await makeRequestJob(plan, chat, relay, complaint, last.id);
     if (!made) return;
+    // v0.97: told at once to the other devices — the car, who, how many lines.
+    void requestNews(made.orderId, chat?.name ?? '', [plan.make, plan.model, plan.year].filter(Boolean).join(' '), plan.lines.length).catch(() => false);
     notifyAi({
       kind: 'request',
       orderId: made.orderId,

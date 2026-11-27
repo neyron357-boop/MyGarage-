@@ -5,6 +5,7 @@ import { startWaAuto } from './waAuto';
 import { startWaOutbox } from './waOutbox';
 import { startWaRequests } from './waRequest';
 import { startDailySummary } from './dailySummary';
+import { startNewsWatch } from './newsWatch';
 
 /** The garage's WhatsApp by itself (v0.79), started once with the app: the reports heard, the outbox kept, the answers read. */
 export function startWaAutomation() {
@@ -18,6 +19,8 @@ export function startWaAutomation() {
   startWaRequests();
   // The owner's summary of the day in the evening (audit 27/11) — on the main device, through «Проверить и отправить».
   startDailySummary();
+  // v0.97: what happened, told at once — a customer's answer to the quote, a payment's proof (services/newsWatch.ts).
+  startNewsWatch();
 }
 export function startWaAsk() {
   startWaReplies();

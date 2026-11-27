@@ -30,7 +30,21 @@ export interface NotifyRule {
   after: number;
   /** Said again every so many minutes while it lasts; 0 — once (and again the next morning, if it still lasts). */
   every: number;
+  /**
+   * v0.97 (the owner: «99 % этих уведомлений практически не замечаю… однотипные, скучные»): `now` — a notification of its
+   * own when its time comes; `plan` — only a line of the plan of the day (morning, and once more after noon): a state
+   * the manager knows of is not said again and again. Not said — `now` (as before v0.97).
+   */
+  when?: 'now' | 'plan';
 }
+
+/**
+ * News (v0.97): something happened that needs the manager now — said at once by the device that saw it, with what
+ * happened in it (services/news.ts): the customer answered the quote, a supplier gave prices, a payment came, a request
+ * came in WhatsApp.
+ */
+export type NewsKind = 'answer' | 'prices' | 'payment' | 'request';
+export const NEWS_KINDS: NewsKind[] = ['answer', 'prices', 'payment', 'request'];
 
 export interface NotifySettings {
   /** All of it: off — the phone is told nothing. */
@@ -40,9 +54,11 @@ export interface NotifySettings {
   to: number;
   /** The days they may come: 0 — Sunday … 6 — Saturday. */
   days: number[];
-  /** A summary once a day: a line a kind. */
-  digest: { on: boolean; at: number };
+  /** The plan of the day: a line a kind, its cars by name; `again` — once more after noon (what still waits), null — not. */
+  digest: { on: boolean; at: number; again: number | null };
   rules: Record<TaskKind, NotifyRule>;
+  /** v0.97: the news said at once. */
+  news: Record<NewsKind, boolean>;
   /**
    * Which defaults the kinds were set by (v0.82: `NOTIFY_V`): settings kept under older ones take the new kinds' rules
    * once — the user: «оставить самые важные».
@@ -50,8 +66,8 @@ export interface NotifySettings {
   v?: number;
 }
 
-/** The defaults the kinds are set by now (v0.82: only the important ones on). */
-export const NOTIFY_V = 2;
+/** The defaults the kinds are set by now (v0.82: only the important ones on; v0.97: states — in the plan of the day). */
+export const NOTIFY_V = 3;
 
 /** How each kind stands with time, for its rule and its settings. */
 export type KindTime =
@@ -87,25 +103,31 @@ export const KIND_TIME: Record<TaskKind, KindTime> = {
  * silent, parts to order or to collect, a debt overdue; the rest (a car not collected, work outside, a return deadline,
  * «how is the car», a service due) stay in «Сегодня» and are switched on by hand.
  */
+/*
+ * v0.97 (the owner: «99 % не замечаю»): what has its own time — a booking, a time promised, his own reminders — once, when
+ * it is due; the states (a customer silent, parts to order, a debt, the customers to write to) — lines of the plan of the
+ * day, never a notification of their own; what happened — news, at once (`news`).
+ */
 export const DEFAULT_RULES: Record<TaskKind, NotifyRule> = {
-  answer: { on: true, after: 120, every: 180 },
-  order: { on: true, after: 60, every: 180 },
-  pickup: { on: true, after: 0, every: 240 },
-  promised: { on: true, after: -30, every: 60 },
-  booked: { on: true, after: -30, every: 30 },
-  collect: { on: false, after: 0, every: 240 },
-  outsource: { on: false, after: 0, every: 240 },
-  returnBy: { on: false, after: 0, every: 0 },
-  debt: { on: true, after: 0, every: 0 },
-  reminder: { on: true, after: 0, every: 60 },
-  followUp: { on: false, after: 0, every: 0 },
-  service: { on: false, after: 0, every: 0 },
-  declined: { on: false, after: 0, every: 0 },
-  bookedTomorrow: { on: false, after: 0, every: 0 },
-  mulkiya: { on: false, after: 0, every: 0 },
+  answer: { on: true, after: 120, every: 0, when: 'plan' },
+  order: { on: true, after: 60, every: 0, when: 'plan' },
+  pickup: { on: true, after: 0, every: 0, when: 'plan' },
+  promised: { on: true, after: -30, every: 0, when: 'now' },
+  booked: { on: true, after: -30, every: 0, when: 'now' },
+  collect: { on: true, after: 0, every: 0, when: 'plan' },
+  outsource: { on: true, after: 0, every: 0, when: 'plan' },
+  returnBy: { on: true, after: 0, every: 0, when: 'plan' },
+  debt: { on: true, after: 0, every: 0, when: 'plan' },
+  reminder: { on: true, after: 0, every: 0, when: 'now' },
+  followUp: { on: true, after: 0, every: 0, when: 'plan' },
+  service: { on: true, after: 0, every: 0, when: 'plan' },
+  declined: { on: true, after: 0, every: 0, when: 'plan' },
+  bookedTomorrow: { on: true, after: 0, every: 0, when: 'plan' },
+  mulkiya: { on: true, after: 0, every: 0, when: 'plan' },
 };
+export const DEFAULT_NEWS: Record<NewsKind, boolean> = { answer: true, prices: true, payment: true, request: true };
 
-export const DEFAULT_NOTIFY: NotifySettings = { on: true, from: 8 * 60, to: 21 * 60, days: [0, 1, 2, 3, 4, 5, 6], digest: { on: true, at: 9 * 60 }, rules: DEFAULT_RULES };
+export const DEFAULT_NOTIFY: NotifySettings = { on: true, from: 8 * 60, to: 21 * 60, days: [0, 1, 2, 3, 4, 5, 6], digest: { on: true, at: 9 * 60, again: 15 * 60 }, rules: DEFAULT_RULES, news: DEFAULT_NEWS };
 
 /** The choices the settings offer (minutes). */
 export const AFTER_CHOICES = [0, 15, 30, 60, 120, 240];
@@ -125,15 +147,22 @@ export function notifyOf(raw?: Partial<NotifySettings> | null): NotifySettings {
   for (const k of NOTIFY_KINDS) {
     const x = kept?.[k];
     const def = DEFAULT_RULES[k];
-    rules[k] = { on: typeof x?.on === 'boolean' ? x.on : def.on, after: int(x?.after, -1440, 7 * 1440, def.after), every: int(x?.every, 0, 7 * 1440, def.every) };
+    // A reminder is always its own (its words are the notification).
+    const when = k === 'reminder' ? 'now' : x?.when === 'now' || x?.when === 'plan' ? x.when : def.when;
+    rules[k] = { on: typeof x?.on === 'boolean' ? x.on : def.on, after: int(x?.after, -1440, 7 * 1440, def.after), every: int(x?.every, 0, 7 * 1440, def.every), ...(when ? { when } : {}) };
   }
+  const news = {} as Record<NewsKind, boolean>;
+  for (const k of NEWS_KINDS) news[k] = typeof r.news?.[k] === 'boolean' ? r.news[k] : DEFAULT_NEWS[k];
+  // The second look of the day: kept as set (null — off) once the settings are of v0.97; before — its default.
+  const again = r.v === NOTIFY_V && r.digest && 'again' in r.digest ? (r.digest.again === null ? null : int(r.digest.again, 0, 1439, 15 * 60)) : d.digest.again;
   return {
     on: typeof r.on === 'boolean' ? r.on : d.on,
     from: int(r.from, 0, 1439, d.from),
     to: int(r.to, 1, 1440, d.to),
     days: days.length ? days : d.days,
-    digest: { on: typeof r.digest?.on === 'boolean' ? r.digest.on : d.digest.on, at: int(r.digest?.at, 0, 1439, d.digest.at) },
+    digest: { on: typeof r.digest?.on === 'boolean' ? r.digest.on : d.digest.on, at: int(r.digest?.at, 0, 1439, d.digest.at), again },
     rules,
+    news,
     v: NOTIFY_V,
   };
 }
@@ -165,6 +194,8 @@ export interface PlanGroup {
   url: string;
   /** Its own notification always, never a line of the summary (a reminder). */
   solo?: boolean;
+  /** v0.97: only a line of the plan of the day — never a notification of its own. */
+  plan?: boolean;
   members: PlanMember[];
 }
 export interface PushPlan {
@@ -173,7 +204,9 @@ export interface PushPlan {
   to: number;
   days: number[];
   units: { m: string; h: string; d: string };
-  digest?: { at: number; title: string };
+  digest?: { at: number; title: string; again?: number; againTitle?: string };
+  /** v0.97: the title of the news that came in the night, said together when the hours begin. */
+  away?: string;
   groups: PlanGroup[];
 }
 
@@ -189,6 +222,9 @@ export interface PlanWords {
   /** Where a notification about several opens («Сегодня»). */
   listUrl: string;
   digest: string;
+  /** v0.97: the plan's second look after noon; the news of the night together. */
+  again?: string;
+  away?: string;
   units: { m: string; h: string; d: string };
 }
 
@@ -227,9 +263,9 @@ export function planInstants(now: string, from: number): string[] {
  */
 export function buildPlan(input: { settings: NotifySettings; now: string; tasksAt: (at: string) => Task[]; words: PlanWords }): PushPlan {
   const { settings: s, now, words } = input;
-  const plan: PushPlan = { tz: 'Asia/Dubai', from: s.from, to: s.to, days: s.days, units: words.units, groups: [] };
+  const plan: PushPlan = { tz: 'Asia/Dubai', from: s.from, to: s.to, days: s.days, units: words.units, groups: [], ...(words.away ? { away: words.away } : {}) };
   if (!s.on) return plan;
-  if (s.digest.on) plan.digest = { at: s.digest.at, title: words.digest };
+  if (s.digest.on) plan.digest = { at: s.digest.at, title: words.digest, ...(s.digest.again !== null && s.digest.again > s.digest.at ? { again: s.digest.again, againTitle: words.again ?? words.digest } : {}) };
   type Found = { task: Task; start: string; notBefore?: string };
   const members = new Map<string, Found>();
   for (const moment of planInstants(now, s.from)) {
@@ -262,7 +298,10 @@ export function buildPlan(input: { settings: NotifySettings; now: string; tasksA
         const own = words.soloTitle?.(m.task) || title;
         plan.groups.push({ key: m.task.key, title: own, many: own, every: rule.every, url: words.url(m.task), solo: true, members: [member(m)] });
       }
-    else plan.groups.push({ key: kind, title, many: `${title} · {n}`, every: rule.every, url: words.listUrl, members: list.map(member) });
+    // v0.97: «in the plan» — a line of the plan of the day only (with no plan of the day — said nowhere but «Сегодня»).
+    else if (rule.when === 'plan') {
+      if (plan.digest) plan.groups.push({ key: kind, title, many: `${title} · {n}`, every: 0, url: words.listUrl, plan: true, members: list.map(member) });
+    } else plan.groups.push({ key: kind, title, many: `${title} · {n}`, every: rule.every, url: words.listUrl, members: list.map(member) });
   }
   return plan;
 }

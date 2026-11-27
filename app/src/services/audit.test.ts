@@ -17,6 +17,8 @@ import { setAiTransport } from './ai';
 import { quickInvoice } from './money';
 import { acceptPaymentShot, dismissPaymentShot, paymentShotOf } from './paymentShot';
 import { proofsOf } from './proofs';
+import { lookAt } from './newsWatch';
+import { setNewsTransport, type NewsItem } from './news';
 import { markCustomerDone, writeAllToday } from './todayBatch';
 import { loadPast, tasksFor } from './today';
 import { setMulkiyaExpiry } from './mulkiya';
@@ -284,5 +286,44 @@ describe('the oil service by the mileage; the Mulkiya’s expiry — through «�
     await markCustomerDone(mulkiya!);
     expect(tasksFor([], await loadPast()).some((x) => x.kind === 'mulkiya')).toBe(false);
     expect((await db.vehicles.get(o.vehicleId))!.regFrom).toBe('hand');
+  });
+});
+
+describe('v0.97: news — what happened, told at once', () => {
+  it('the customer agreed to the quote: «✅ Ahmed согласен · Toyota Camry», their words and the sum; a payment’s screenshot: «💵 Перевод 315,00 AED»', async () => {
+    const told: NewsItem[] = [];
+    setNewsTransport(async (n) => void told.push(n));
+    const { o } = await job();
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 20000 });
+    await sendVersion(o.id, { via: 'whatsapp' });
+    let msgs = [{ id: 'm-yes', chat: '971501234567@c.us', t: Date.now() + 1000, me: false, type: 'chat', text: 'ok go ahead', ack: 0 }];
+    setWaTransport(async (path: string) => {
+      if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 0 };
+      if (path === 'chats') return { chats: [{ id: '971501234567@c.us', name: 'Ahmed', group: false, phone: '971501234567', unread: 1, t: Date.now(), archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 1 };
+      if (path === 'messages') return { messages: msgs, more: false };
+      if (path === 'number') return { ok: true, chat: '971501234567@c.us' };
+      throw new Error('not played: ' + path);
+    });
+    await refreshWa();
+    expect(await lookAt('971501234567', { type: 'chat' })).toBe(1);
+    expect(told[0]).toMatchObject({ key: 'answer:m-yes', url: `#/orders/${o.id}` });
+    expect(told[0].title).toMatch(/Ahmed.*Toyota Camry/);
+    expect(told[0].body).toMatch(/«ok go ahead»/);
+    // Looked at again (another message, the same answer): not told twice.
+    expect(await lookAt('971501234567', { type: 'chat' })).toBe(0);
+    // The job agreed and invoiced; the customer sends the transfer's screenshot.
+    await acceptCustomerAnswer((await customerAnswerOf(o.id))!);
+    await quickInvoice(o.id);
+    msgs = [{ id: 'm-pay', chat: '971501234567@c.us', t: Date.now() + 5000, me: false, type: 'image', text: '', ack: 0 } as never];
+    setAiTransport(async () => ({ isPayment: true, amount: 210, currency: 'AED', confidence: 0.9 }));
+    expect(await lookAt('971501234567', { type: 'image' })).toBe(1);
+    expect(told[1]).toMatchObject({ key: 'payment:m-pay', url: `#/orders/${o.id}` });
+    expect(told[1].title).toMatch(/210/);
+    expect(told[1].body).toMatch(/210/);
+    // Not a customer's number: nothing looked at.
+    expect(await lookAt('971509999999', { type: 'chat' })).toBe(0);
+    setAiTransport(undefined);
+    setWaTransport(undefined);
+    setNewsTransport(undefined);
   });
 });

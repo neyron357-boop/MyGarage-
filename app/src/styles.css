@@ -10721,3 +10721,8 @@ html.desk .wa-pane-foot {
   flex: 1;
   min-width: 0;
 }
+
+/* v0.97: news seen on this device while it is on screen — a tap opens the job. */
+.news-here {
+  cursor: pointer;
+}

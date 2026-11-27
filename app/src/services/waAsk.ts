@@ -10,6 +10,7 @@ import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
 import { waAutoOf } from '../domain/waAuto';
 import { waDigits } from '../domain/whatsapp';
 import { AppError } from './errors';
+import { pricesNews } from './newsWatch';
 import { updateItem } from './estimate';
 import { partsRequestText } from './messages';
 import { saveSupplier } from './parts';
@@ -275,6 +276,9 @@ async function readNow(phones?: string[]): Promise<number> {
         }
       if (got < 0) got = await applyReply(target.ref.order.id, target.ref.ask.id, m, settings, s, false);
       priced += Math.max(0, got);
+      // v0.97: the prices told at once — the supplier, the car, the lines with their prices.
+      if (got > 0)
+        for (const x of [target.ref, ...others]) if (await pricesNews(x, m.id).catch(() => false)) break;
       seen.add(m.id);
     }
   }

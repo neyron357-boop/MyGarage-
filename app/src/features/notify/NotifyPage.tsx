@@ -1,11 +1,11 @@
-import { Button, Group, Modal, Stack, Switch, Text } from '@mantine/core';
+import { Button, Group, Modal, SegmentedControl, Stack, Switch, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconAlarm, IconBell, IconBellCheck, IconBellOff, IconCheck, IconDeviceMobile, IconPlus, IconServer } from '@tabler/icons-react';
+import { IconAlarm, IconBell, IconBellCheck, IconBellOff, IconCash, IconCheck, IconDeviceMobile, IconMessageCheck, IconPlus, IconServer, IconSparkles, IconTag, type Icon } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { dayShort, dubaiTime } from '../../domain/dates';
-import { AFTER_CHOICES, BEFORE_CHOICES, clock, EVERY_CHOICES, KIND_TIME, minutesOf, NOTIFY_KINDS, notifyOf, type NotifyRule, type NotifySettings } from '../../domain/notify';
+import { AFTER_CHOICES, BEFORE_CHOICES, clock, EVERY_CHOICES, KIND_TIME, minutesOf, NEWS_KINDS, NOTIFY_KINDS, notifyOf, type NewsKind, type NotifyRule, type NotifySettings } from '../../domain/notify';
 import type { TaskKind } from '../../domain/today';
 import type { Reminder } from '../../domain/types';
 import { saveNotify } from '../../services/notify';
@@ -18,6 +18,14 @@ import { useAction, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
 import { TASK_META } from '../board/TodayBell';
 import { ReminderSheet } from './ReminderSheet';
+
+/** v0.97: the news said at once, each its sign and colour. */
+const NEWS_META: Record<NewsKind, { icon: Icon; color: string }> = {
+  answer: { icon: IconMessageCheck, color: 'green' },
+  prices: { icon: IconTag, color: 'orange' },
+  payment: { icon: IconCash, color: 'teal' },
+  request: { icon: IconSparkles, color: 'cobalt' },
+};
 
 /** Sunday is 0; the week is shown from Monday. */
 const WEEK = [1, 2, 3, 4, 5, 6, 0];
@@ -122,9 +130,23 @@ function RuleSheet({ kind, rule, opened, onClose, onChange }: { kind: TaskKind; 
   const time = KIND_TIME[kind];
   const firsts = time === 'moment' ? BEFORE_CHOICES.map((m) => -m) : time === 'since' ? AFTER_CHOICES : [];
   const firstLabel = (m: number) => (m === 0 ? t(time === 'moment' ? 'notify.onTime' : 'notify.atOnce') : span(Math.abs(m)));
+  const inPlan = rule.when === 'plan';
   return (
     <Modal opened={opened} onClose={onClose} title={t(`notify.kind.${kind}`)}>
       <Stack gap="md" data-rule-sheet={kind}>
+        {/* v0.97: a notification of its own, or a line of the plan of the day (a reminder — always its own). */}
+        {kind !== 'reminder' && (
+          <SegmentedControl
+            fullWidth
+            value={inPlan ? 'plan' : 'now'}
+            onChange={(v) => onChange({ ...rule, when: v === 'plan' ? 'plan' : 'now' })}
+            data={[
+              { value: 'now', label: t('notify.whenNow') },
+              { value: 'plan', label: t('notify.whenPlan') },
+            ]}
+            data-when={inPlan ? 'plan' : 'now'}
+          />
+        )}
         {firsts.length > 0 && (
           <div>
             <Text size="sm" fw={500} mb={6}>
@@ -139,18 +161,20 @@ function RuleSheet({ kind, rule, opened, onClose, onChange }: { kind: TaskKind; 
             </div>
           </div>
         )}
-        <div>
-          <Text size="sm" fw={500} mb={6}>
-            {t('notify.repeatLabel')}
-          </Text>
-          <div className="chip-row wrap">
-            {EVERY_CHOICES.map((m) => (
-              <button key={m} type="button" className="chip" data-active={rule.every === m} onClick={() => onChange({ ...rule, every: m })} data-every={m}>
-                {m === 0 ? t('notify.once') : span(m)}
-              </button>
-            ))}
+        {!inPlan && (
+          <div>
+            <Text size="sm" fw={500} mb={6}>
+              {t('notify.repeatLabel')}
+            </Text>
+            <div className="chip-row wrap">
+              {EVERY_CHOICES.map((m) => (
+                <button key={m} type="button" className="chip" data-active={rule.every === m} onClick={() => onChange({ ...rule, every: m })} data-every={m}>
+                  {m === 0 ? t('notify.once') : span(m)}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </Stack>
     </Modal>
   );
@@ -213,44 +237,80 @@ export function NotifyPage() {
             </div>
             <FormRow label={t('notify.digest')}>
               <span className="notify-hours">
-                {s.digest.on && <input type="time" className="time-input" value={clock(s.digest.at)} onChange={(e) => minutesOf(e.currentTarget.value) !== undefined && save({ digest: { on: true, at: minutesOf(e.currentTarget.value)! } })} aria-label={t('notify.digest')} data-notify-digest-at />}
+                {s.digest.on && <input type="time" className="time-input" value={clock(s.digest.at)} onChange={(e) => minutesOf(e.currentTarget.value) !== undefined && save({ digest: { ...s.digest, on: true, at: minutesOf(e.currentTarget.value)! } })} aria-label={t('notify.digest')} data-notify-digest-at />}
                 <Switch checked={s.digest.on} onChange={(e) => save({ digest: { ...s.digest, on: e.currentTarget.checked } })} aria-label={t('notify.digest')} data-notify-digest />
               </span>
             </FormRow>
+            {s.digest.on && (
+              <FormRow label={t('notify.again')}>
+                <span className="notify-hours">
+                  {s.digest.again !== null && <input type="time" className="time-input" value={clock(s.digest.again)} onChange={(e) => minutesOf(e.currentTarget.value) !== undefined && save({ digest: { ...s.digest, again: minutesOf(e.currentTarget.value)! } })} aria-label={t('notify.again')} data-notify-again-at />}
+                  <Switch checked={s.digest.again !== null} onChange={(e) => save({ digest: { ...s.digest, again: e.currentTarget.checked ? 15 * 60 : null } })} aria-label={t('notify.again')} data-notify-again />
+                </span>
+              </FormRow>
+            )}
           </>
         )}
       </RowGroup>
 
       {s.on && (
+        // v0.97: what happened — at once, with what happened in it.
         <div className="notify-group">
-          <div className="group-title">{t('notify.whatTitle')}</div>
+          <div className="group-title">{t('notify.news.title')}</div>
           <List>
-            {NOTIFY_KINDS.map((k) => {
-              const r = s.rules[k];
-              const m = TASK_META[k];
+            {NEWS_KINDS.map((k) => {
+              const m = NEWS_META[k];
+              const on = s.news[k];
               return (
                 <ListRow
                   key={k}
-                  onClick={() => setRule(k)}
-                  dim={!r.on}
+                  dim={!on}
                   left={
-                    <span className="row-icon" style={{ background: `var(--mantine-color-${r.on ? m.color : 'gray'}-6)` }} aria-hidden>
+                    <span className="row-icon" style={{ background: `var(--mantine-color-${on ? m.color : 'gray'}-6)` }} aria-hidden>
                       <m.icon size={18} stroke={2.2} />
                     </span>
                   }
-                  title={<span data-rule={k}>{t(`notify.kind.${k}`)}</span>}
-                  subtitle={r.on ? ruleLine(k, r) : undefined}
-                  right={
-                    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <Switch checked={r.on} onChange={(e) => save({ rules: { ...s.rules, [k]: { ...r, on: e.currentTarget.checked } } })} aria-label={t(`notify.kind.${k}`)} data-rule-on={k} />
-                    </span>
-                  }
+                  title={<span data-news={k}>{t(`notify.news.kind.${k}`)}</span>}
+                  right={<Switch checked={on} onChange={(e) => save({ news: { ...s.news, [k]: e.currentTarget.checked } })} aria-label={t(`notify.news.kind.${k}`)} data-news-on={k} />}
                 />
               );
             })}
           </List>
         </div>
       )}
+
+      {s.on &&
+        (['now', 'plan'] as const).map((when) => (
+          <div className="notify-group" key={when} data-notify-when={when}>
+            <div className="group-title">{t(when === 'now' ? 'notify.nowTitle' : 'notify.planTitle')}</div>
+            <List>
+              {NOTIFY_KINDS.filter((k) => (s.rules[k].when === 'plan' ? 'plan' : 'now') === when).map((k) => {
+                const r = s.rules[k];
+                const m = TASK_META[k];
+                return (
+                  <ListRow
+                    key={k}
+                    onClick={() => setRule(k)}
+                    dim={!r.on}
+                    left={
+                      <span className="row-icon" style={{ background: `var(--mantine-color-${r.on ? m.color : 'gray'}-6)` }} aria-hidden>
+                        <m.icon size={18} stroke={2.2} />
+                      </span>
+                    }
+                    title={<span data-rule={k}>{t(`notify.kind.${k}`)}</span>}
+                    // (In the plan — the group's title says it; the plan of the day off — said, it is said nowhere then.)
+                    subtitle={r.on ? (r.when === 'plan' ? (s.digest.on ? undefined : t('notify.planOff')) : ruleLine(k, r)) : undefined}
+                    right={
+                      <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <Switch checked={r.on} onChange={(e) => save({ rules: { ...s.rules, [k]: { ...r, on: e.currentTarget.checked } } })} aria-label={t(`notify.kind.${k}`)} data-rule-on={k} />
+                      </span>
+                    }
+                  />
+                );
+              })}
+            </List>
+          </div>
+        ))}
 
       <div className="notify-group">
         <div className="group-title">{t('reminder.list')}</div>

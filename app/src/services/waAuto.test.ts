@@ -18,6 +18,9 @@ import type { OutItem } from './waOutbox';
 import { forgetAsks, resetWaAsks, waAsks } from './waConfirm';
 import { loadChats, refreshWa, setWaTransport, waStore, type WaCallInit } from './whatsapp';
 import type { WaMessage } from '../domain/whatsapp';
+import { setNewsTransport, type NewsItem } from './news';
+import { saveSettings } from './settings';
+import { notifyOf } from '../domain/notify';
 
 /*
  * What the garage's WhatsApp says by itself (v0.79), with the server's part played here: what is handed over to its
@@ -355,6 +358,32 @@ describe('suppliers', () => {
     expect(await readReplies()).toBe(0);
     expect(seen).toHaveLength(2);
     setAiTransport(undefined);
+  });
+
+  it('v0.97: a supplier’s prices told at once as news — the supplier, the car, the lines with their prices; off — not told', async () => {
+    const told: NewsItem[] = [];
+    setNewsTransport(async (n) => void told.push(n));
+    const { o } = await job();
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 0 });
+    const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts LLC', phone: '+971507776655' } as never)) as string;
+    await recordLinkAsk(o.id, supId, [pads], 'BRAKE PADS');
+    chatMsgs['55512345678901@lid'] = [{ id: 'false_x_N1', chat: '55512345678901@lid', t: Date.now() + 5000, me: false, type: 'chat', text: '180', ack: 0 }];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect(told).toHaveLength(1);
+    expect(told[0]).toMatchObject({ key: 'prices:false_x_N1', url: `#/orders/${o.id}` });
+    expect(told[0].title).toContain('Noor Parts');
+    expect(told[0].title).toContain('Toyota');
+    expect(told[0].body).toContain('BRAKE PADS 180');
+    // The manager does not want prices told: none.
+    await saveSettings({ notify: { ...notifyOf(undefined), news: { answer: true, prices: false, payment: true, request: true } } });
+    const disc = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake disc', unitPriceFils: 0 });
+    await recordLinkAsk(o.id, supId, [disc], 'BRAKE DISC');
+    chatMsgs['55512345678901@lid'] = [{ id: 'false_x_N2', chat: '55512345678901@lid', t: Date.now() + 9000, me: false, type: 'chat', text: '95', ack: 0 }];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect(told).toHaveLength(1);
+    setNewsTransport(undefined);
   });
 
   it('v0.86: an answer’s price is the line’s cost by default; «offers only» set — the cost is left to the manager', async () => {

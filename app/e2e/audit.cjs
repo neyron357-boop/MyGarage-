@@ -186,6 +186,19 @@ async function launch() {
     check((await answer.innerText()).includes('ok go ahead'), 'the customer’s words on the job: «ok go ahead» — «Согласен на всё»');
     await settle(400);
     await shot('phone-06-customer-answer');
+    // v0.97: the same answer as news — on this device (on screen) a banner in the app; a tap opens the job.
+    const newsSaid = await page.evaluate(async () => {
+      const { lookAt } = await import('/src/services/newsWatch.ts');
+      return lookAt('971501239876', { type: 'chat' });
+    });
+    const banner = page.locator('.news-here').first();
+    await banner.waitFor({ timeout: 8000 });
+    const bannerText = await banner.innerText();
+    check(newsSaid === 1 && /согласен/.test(bannerText) && /ok go ahead/.test(bannerText), 'the news in the app: ' + bannerText.replace(/\s+/g, ' '));
+    await settle(300);
+    await shot('phone-06b-news');
+    await banner.locator('.mantine-Notification-closeButton').click().catch(() => undefined);
+    await settle(400);
     await answer.getByRole('button', { name: 'Согласовать' }).click();
     await answer.waitFor({ state: 'detached', timeout: 8000 });
     const states = await page.evaluate(async (id) => {
@@ -430,6 +443,16 @@ async function launch() {
       await settle(500);
     }
     check(marks.every(Boolean), 'sent — the declined offer, the booking and the Mulkiya reminders left «Сегодня»: ' + JSON.stringify(marks));
+
+    // v0.97: «Уведомления» — what happened at once (four kinds), at its time (three), the rest in the plan of the day.
+    await page.goto(BASE + '#/notify');
+    await top('[data-news]').first().waitFor({ timeout: 10000 });
+    check((await top('[data-news]').count()) === 4 && (await top('[data-notify-when="now"] [data-rule]').count()) === 3 && (await top('[data-notify-when="plan"] [data-rule]').count()) === 12, '«Уведомления»: 4 news at once, 3 on their time, 12 in the plan of the day');
+    await settle(500);
+    await shot('phone-17-notify');
+    await top('[data-notify-when="plan"]').scrollIntoViewIfNeeded();
+    await settle(400);
+    await shot('phone-18-notify-plan');
 
     check(errors.length === 0, 'no errors in the console' + (errors.length ? ': ' + errors.join(' | ') : ''));
     console.log('audit e2e: all passed');

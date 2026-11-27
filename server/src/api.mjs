@@ -32,6 +32,7 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
  *   POST /api/push/test {title, body}    — one notification to this device now
+ *   POST /api/push/news {key, title, body, url, except} — news said now to the other devices (v0.97; the same key once)
  *   /api/wa/…                            — the garage's WhatsApp, this computer a linked device of it (v0.78, whatsapp.mjs)
  *   (pair, status and pull also give `relay`: where the server leaves its address, sealed — relay.mjs, v0.42.2)
  *   PUT  /api/media/:id/:variant         — a photo's (PDF's…) file: blob | thumb | card (1080 px, v0.41.3)
@@ -263,6 +264,7 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           }
           if (parts[2] === 'unsubscribe') return send(res, 200, { ok: true, was: push.unsubscribe(device.id) });
           if (parts[2] === 'plan') return send(res, 200, { ok: true, ...push.setPlan(body.plan) });
+          if (parts[2] === 'news') return send(res, 200, await push.news(device.id, body, { except: !!body.except }));
           if (parts[2] === 'test') {
             const r = await push.test(device.id, body);
             return send(res, 200, { ok: r.ok, status: r.status, gone: r.gone, error: r.error || undefined });

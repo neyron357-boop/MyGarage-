@@ -69,6 +69,8 @@ function wordsFor(lang: Lang, byOrder: Map<string, OrderBundle>, vehicles: Map<s
     url: (task) => (task.kind === 'pickup' ? '#/parts?tab=pickup' : CUSTOMER_KINDS.includes(task.kind) || !task.orderId ? TODAY_URL : `#/orders/${task.orderId}`),
     listUrl: TODAY_URL,
     digest: t('notify.pushDigest'),
+    again: t('notify.pushAgain'),
+    away: t('notify.pushAway'),
     units: { m: t('notify.unit.m'), h: t('notify.unit.h'), d: t('notify.unit.d') },
   };
 }
