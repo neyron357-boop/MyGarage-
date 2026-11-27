@@ -19,6 +19,7 @@ import { DIRS, httpError } from './store.mjs';
  *   POST /api/sync/replace {keys, counters} — the main device's data becomes the garage's (what it lacks is deleted)
  *   POST /api/sync/numbers               — job numbers kept for this device, for jobs made without the server (v0.84.2)
  *   POST /api/forget                     — this device leaves (its key no longer works)
+ *   POST /api/claim {key}                — the first device to ask takes a piece of work (v0.98: a request made a job once)
  *   GET  /api/ai/status, POST /api/ai/vin {vin}, /api/ai/part-name {name, make, model, year},
  *        /api/ai/receipt {image}          — the garage's AI (v0.48, ai.mjs; the part-number search — gone, v0.85)
  *        /api/ai/labour {parts, work}, /api/ai/reply {text, quote, asks}, /api/ai/roles {chats} — v0.86, light models
@@ -275,6 +276,26 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
       // The garage's WhatsApp (v0.78, whatsapp.mjs): asked of the bridge on this computer — the device never talks to it.
       if (wa && parts[0] === 'api' && parts[1] === 'wa' && (await wa.api(req, res, { url, parts, send, readJson, device }))) return;
 
+      // v0.98: one piece of work for one device (a request in WhatsApp made a job by whichever device saw it first).
+      if (req.method === 'POST' && url.pathname === '/api/claim') {
+        const body = await readJson(req, 4096);
+        const key = String(body.key ?? '').slice(0, 160);
+        if (!key) throw httpError(400, 'no key');
+        let all = {};
+        try {
+          all = JSON.parse(store.metaGet('claims') ?? '{}');
+        } catch {
+          all = {};
+        }
+        const now = Date.now();
+        if (all[key]) return send(res, 200, { ok: true, mine: all[key].device === device.id });
+        for (const [k, v] of Object.entries(all)) if (now - (v.at ?? 0) > 30 * 86_400_000) delete all[k];
+        const keys = Object.keys(all);
+        if (keys.length > 3000) for (const k of keys.slice(0, keys.length - 3000)) delete all[k];
+        all[key] = { device: device.id, at: now };
+        store.metaSet('claims', JSON.stringify(all));
+        return send(res, 200, { ok: true, mine: true });
+      }
       if (req.method === 'POST' && url.pathname === '/api/forget') {
         push?.unsubscribe(device.id);
         store.revoke(device.id);

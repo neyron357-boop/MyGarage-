@@ -10,7 +10,7 @@ import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
 import { waAutoOf } from '../domain/waAuto';
 import { waDigits } from '../domain/whatsapp';
 import { AppError } from './errors';
-import { pricesNews } from './newsWatch';
+import { pricesNews, quoteNews } from './newsWatch';
 import { updateItem } from './estimate';
 import { partsRequestText } from './messages';
 import { saveSupplier } from './parts';
@@ -278,7 +278,12 @@ async function readNow(phones?: string[]): Promise<number> {
       priced += Math.max(0, got);
       // v0.97: the prices told at once — the supplier, the car, the lines with their prices.
       if (got > 0)
-        for (const x of [target.ref, ...others]) if (await pricesNews(x, m.id).catch(() => false)) break;
+        for (const x of [target.ref, ...others])
+          if (await pricesNews(x, m.id).catch(() => false)) {
+            // v0.98: a request's job priced whole — its quote is ready to go.
+            void quoteNews(x.order.id).catch(() => false);
+            break;
+          }
       seen.add(m.id);
     }
   }
@@ -393,13 +398,15 @@ async function applyReply(orderId: string, askId: string, m: { id: string; t: nu
     // As set: the line's cost (and its supplier) from the best offer — only on a line without a cost yet, not bought yet.
     const best = bestOffer(offers, s.ask.prefer);
     const free = item.costPriceFils === undefined && (!item.procurementStatus || item.procurementStatus === 'needed') && !item.customerSupplied;
-    if (best && free && (s.ask.prices === 'cost' || s.ask.prices === 'price')) {
+    // v0.98: a job of a request (its autopilot) takes the customer's price too — the quote is to be ready by itself.
+    const prices = order.fromChat ? 'price' : s.ask.prices;
+    if (best && free && (prices === 'cost' || prices === 'price')) {
       patch.costPriceFils = best.costFils;
       patch.supplierId = best.supplierId;
       // Put by the AI's reading: said so on the line (v0.86).
       if (best.ai) patch.costAi = true;
       // …and the customer's price by the garage's markup — a draft line without a price only.
-      if (s.ask.prices === 'price' && item.approvalState === 'draft' && !item.unitPriceFils && best.costFils !== undefined) {
+      if (prices === 'price' && item.approvalState === 'draft' && !item.unitPriceFils && best.costFils !== undefined) {
         const rate = item.vatRateBp || settings.vatRateBp;
         const mode = vatModeOf(item, settings.pricesIncludeVat);
         const net = withMarkup(best.costFils, settings.defaultMarkupBp);

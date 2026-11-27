@@ -5,7 +5,13 @@ import { byPosition } from '../domain/items';
 import { optionItems } from '../domain/quoteOptions';
 import { requestPlan } from '../domain/waRequest';
 import { ensureSeed } from './seed';
-import { makeRequestJob } from './waRequest';
+import { considerChat, makeRequestJob } from './waRequest';
+import { setAiTransport } from './ai';
+import { setClaimTransport } from './claim';
+import { mulkiyaOf } from './cover';
+import { saveSettings } from './settings';
+import { refreshWa, setWaTransport, type WaCallInit } from './whatsapp';
+import type { WaMessage } from '../domain/whatsapp';
 
 /* v0.90, #69: a customer's request in WhatsApp — a job of «Заявки» with its lines, the labour charge and two options. */
 
@@ -50,5 +56,71 @@ describe('a job made of a WhatsApp request', () => {
     const customer = (await db.customers.get((await db.orders.get(made.orderId))!.customerId))!;
     expect([customer.name, customer.phone]).toEqual(['Someone', '+971500000001']);
     expect(await makeRequestJob({ ...plan(), plate: undefined }, chat, false, '', 'false_x_CCC')).toBeUndefined();
+  });
+
+  it('v0.98: the same car again — its open job takes the new lines (not a second job); the words a note; the registration card its Mulkiya', async () => {
+    const card = new Blob([new Uint8Array(3000)], { type: 'image/jpeg' });
+    const made = (await makeRequestJob(plan(), chat, true, 'Engine mount noise', 'false_x_D1', card))!;
+    expect((await mulkiyaOf((await db.orders.get(made.orderId))!.vehicleId)).mulkiya).toBeTruthy();
+    const more = requestPlan({ isRequest: true, car: { make: 'Nissan', model: 'Altima', plate: { emirate: 'DXB', code: 'V', number: '12345' } }, items: [{ name: 'Front brake pads', kind: 'part' }, { name: 'Engine mount original', kind: 'part' }], confidence: 0.9 })!;
+    const again = (await makeRequestJob(more, chat, true, 'Also the brakes', 'false_x_D2'))!;
+    expect([again.orderId, again.merged, again.added]).toEqual([made.orderId, true, 1]);
+    const titles = (await db.items.where('orderId').equals(made.orderId).toArray()).map((i) => i.titleEn);
+    expect(titles.filter((x) => x === 'FRONT BRAKE PADS')).toHaveLength(1);
+    expect(titles.filter((x) => x === 'ENGINE MOUNT ORIGINAL')).toHaveLength(1);
+    const notes = await db.notes.where('orderId').equals(made.orderId).toArray();
+    expect(notes.map((n) => n.text)).toEqual(['WhatsApp: Also the brakes']);
+    expect(await db.orders.where('vehicleId').equals((await db.orders.get(made.orderId))!.vehicleId).count()).toBe(1);
+  });
+
+  it('v0.98: the boss’s chat — a forward and a voice note make a job on whichever device claims it first; claimed by another — nothing', async () => {
+    const BOSS = '971500000009@c.us';
+    let msgs: WaMessage[] = [];
+    setWaTransport(async (path: string, init: WaCallInit) => {
+      if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 0 };
+      if (path === 'chats') return { chats: [{ id: BOSS, name: 'Boss', group: false, phone: '971500000009', unread: 2, t: Date.now(), archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 2 };
+      if (path === 'messages') return { messages: init.query?.chat === BOSS ? msgs : [], more: false };
+      throw new Error('not played: ' + path);
+    });
+    await saveSettings({ waChatTags: { [BOSS]: 'work' } } as never);
+    await refreshWa();
+    const { loadChats } = await import('./whatsapp');
+    await loadChats(true);
+    const asked: string[] = [];
+    setAiTransport(async (path, body) => {
+      asked.push(path);
+      if (path === 'voice') return { text: 'Он просит поменять передние колодки', english: 'He asks to change the front brake pads', from: 'ru' };
+      if (path === 'request') {
+        const texts = (body as { texts: string[] }).texts;
+        expect(texts.some((x) => x.startsWith('[fwd] '))).toBe(true);
+        expect(texts.some((x) => x.startsWith('[voice] He asks'))).toBe(true);
+        return { isRequest: true, car: { make: 'Toyota', model: 'Camry', year: 2019, plate: { emirate: 'DXB', code: 'K', number: '55555' } }, items: [{ name: 'Front brake pads', kind: 'part' }], owner: 'Omar', picture: '', confidence: 0.9 };
+      }
+      throw new Error('not played: ' + path);
+    });
+    let claims = true;
+    setClaimTransport(async () => claims);
+    const now = Date.now();
+    msgs = [
+      { id: 'false_b_1', chat: BOSS, t: now - 120_000, me: false, type: 'chat', text: 'My Toyota Camry DXB K 55555 makes noise when braking', ack: 0, fwd: true } as WaMessage,
+      { id: 'false_b_2', chat: BOSS, t: now - 60_000, me: false, type: 'ptt', text: '', ack: 0, file: { sec: 12 } } as WaMessage,
+    ];
+    await considerChat(BOSS);
+    const made = (await db.orders.toArray()).find((o) => o.fromChat?.chat === BOSS)!;
+    expect(made).toBeTruthy();
+    expect(made.boardTab).toBe('request');
+    expect((await db.customers.get(made.customerId))!.name).toBe('Omar');
+    expect((await db.items.where('orderId').equals(made.id).toArray()).map((i) => i.titleEn)).toContain('FRONT BRAKE PADS');
+    expect(made.complaint).toContain('🎤 He asks to change the front brake pads');
+    // Another device claimed the next burst: this one asks nobody and makes nothing.
+    claims = false;
+    asked.length = 0;
+    msgs = [...msgs, { id: 'false_b_3', chat: BOSS, t: now, me: false, type: 'chat', text: 'Nissan Patrol DXB A 77777 needs AC service', ack: 0, fwd: true } as WaMessage];
+    await considerChat(BOSS);
+    expect(asked).toEqual([]);
+    expect((await db.orders.toArray()).filter((o) => o.fromChat?.chat === BOSS)).toHaveLength(1);
+    setAiTransport(undefined);
+    setClaimTransport(undefined);
+    setWaTransport(undefined);
   });
 });

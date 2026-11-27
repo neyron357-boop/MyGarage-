@@ -19,6 +19,7 @@ import { forgetAsks, resetWaAsks, waAsks } from './waConfirm';
 import { loadChats, refreshWa, setWaTransport, waStore, type WaCallInit } from './whatsapp';
 import type { WaMessage } from '../domain/whatsapp';
 import { setNewsTransport, type NewsItem } from './news';
+import { askForPrices, autopilotOf } from './autopilot';
 import { saveSettings } from './settings';
 import { notifyOf } from '../domain/notify';
 
@@ -358,6 +359,38 @@ describe('suppliers', () => {
     expect(await readReplies()).toBe(0);
     expect(seen).toHaveLength(2);
     setAiTransport(undefined);
+  });
+
+  it('v0.98: a request’s autopilot — «Спросить цены» to the ranked supplier, its answer prices the part with the markup, «Смета готова» told', async () => {
+    const told: NewsItem[] = [];
+    setNewsTransport(async (n) => void told.push(n));
+    const { o } = await job();
+    await db.orders.update(o.id, { fromChat: { chat: BOSS.chat, msg: 'false_boss_1' } });
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Front brake pads', unitPriceFils: 0 });
+    await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655', makes: ['Toyota'] } as never);
+    const first = (await autopilotOf(o.id))!;
+    expect([first.step, first.parts.map((i) => i.id), first.suppliers.map((s) => s.name)]).toEqual(['ask', [pads.id], ['Noor Parts']]);
+    // One tap: the request — seen in «Проверить и отправить» and sent there (nothing goes by itself).
+    tapping = false;
+    await askForPrices(o.id);
+    expect(waAsks()).toHaveLength(1);
+    expect((await autopilotOf(o.id))!.step).toBe('ask');
+    await tap();
+    expect((await autopilotOf(o.id))!.step).toBe('wait');
+    // The supplier answers «180»: the cost, and — a request's job — the customer's price by the garage's markup.
+    chatMsgs['55512345678901@lid'] = [{ id: 'false_x_A1', chat: '55512345678901@lid', t: Date.now() + 5000, me: false, type: 'chat', text: '180', ack: 0 }];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    const p = (await db.items.get(pads.id))!;
+    const markup = (await db.settings.get('main'))!.defaultMarkupBp;
+    expect([p.costPriceFils, p.unitPriceFils]).toEqual([18000, Math.round((18000 * (10000 + markup)) / 10000)]);
+    const done = (await autopilotOf(o.id))!;
+    expect(done.step).toBe('quote');
+    await wait(() => told.some((n) => n.key.startsWith('quote:')));
+    const quote = told.find((n) => n.key.startsWith('quote:'))!;
+    expect(quote.url).toBe(`#/orders/${o.id}`);
+    expect(quote.title).toContain('Toyota Hiace');
+    setNewsTransport(undefined);
   });
 
   it('v0.97: a supplier’s prices told at once as news — the supplier, the car, the lines with their prices; off — not told', async () => {

@@ -4,6 +4,7 @@ import { itemAmounts, itemTitle } from '../domain/items';
 import type { Customer, Lang, Order, OrderItem, PartAsk, Vehicle } from '../domain/types';
 import { kindOf, type WaMessage } from '../domain/whatsapp';
 import i18n, { tFor } from '../i18n';
+import { autopilotOf } from './autopilot';
 import { customerAnswerOf } from './customerReply';
 import { tellNews } from './news';
 import { bundleAmountDue, loadOrderBundle } from './orders';
@@ -109,6 +110,20 @@ export async function pricesNews(x: { order: Order; ask: PartAsk }, msgId: strin
     body: lines + (priced.length > 4 ? ` +${priced.length - 4}` : ''),
     url: `#/orders/${x.order.id}`,
   });
+}
+
+/** A request's job priced whole (v0.98, its autopilot): «📋 Смета готова · Camry · 1 250 AED» — the quote to send. */
+export async function quoteNews(orderId: string): Promise<boolean> {
+  const v = await autopilotOf(orderId);
+  if (v?.step !== 'quote') return false;
+  const order = await db.orders.get(orderId);
+  if (!order) return false;
+  const l = lang();
+  const t = tFor(l);
+  const car = carLine(await db.vehicles.get(order.vehicleId));
+  // Once for each priced state of the job (more lines later, priced again — said again).
+  const lines = (await db.items.where('orderId').equals(orderId).count()).toString();
+  return tellNews('prices', { key: `quote:${orderId}:${lines}`, title: t('autopilot.newsQuote', { car, sum: formatAed(v.totalFils, l) }), body: t('autopilot.newsQuoteBody'), url: `#/orders/${orderId}` });
 }
 
 /** A request in WhatsApp made a job of «Заявки» (services/waRequest.ts). */

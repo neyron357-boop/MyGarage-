@@ -104,6 +104,16 @@ describe('MyGarage server', () => {
     assert.equal(store.record('customers', 'c1'), undefined);
   });
 
+  it('v0.98: a piece of work goes to the first device that claims it; asked again — still that one’s', async () => {
+    const claim = async (token, key) => (await call('/api/claim', { token, method: 'POST', body: { key } })).json();
+    assert.deepEqual(await claim(a, 'request:chat-1:msg-1'), { ok: true, mine: true });
+    assert.deepEqual(await claim(b, 'request:chat-1:msg-1'), { ok: true, mine: false });
+    assert.deepEqual(await claim(a, 'request:chat-1:msg-1'), { ok: true, mine: true });
+    assert.deepEqual(await claim(b, 'request:chat-1:msg-2'), { ok: true, mine: true });
+    assert.equal((await call('/api/claim', { token: a, method: 'POST', body: {} })).status, 400);
+    assert.equal((await call('/api/claim', { method: 'POST', body: { key: 'x' } })).status, 401);
+  });
+
   it('a job’s number only goes up — a device behind gets the higher one', async () => {
     await call('/api/sync/push', { token: a, method: 'POST', body: { changes: [{ t: 'counters', k: 'invoice', d: { name: 'invoice', value: 12 } }] } });
     const since = (await (await call('/api/sync/pull?since=0', { token: b })).json()).cursor;

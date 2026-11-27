@@ -73,9 +73,9 @@ Give make, model (the name it is sold under), year, engine (litres and cylinders
   // v0.90 (the owner's note #69: «на такие запросы в ватсапе реагировать и автоматически создавать заявку/карточку
   // заказа»): the messages a chat just sent, a picture last (a registration card, the car) when there was one.
   request: (texts, picture) =>
-    `WhatsApp messages to a car repair garage in the UAE, oldest first ("[photo]" — a picture${picture ? '; the last one is attached' : ''}):
+    `WhatsApp messages to a car repair garage in the UAE, oldest first ("[photo]" — a picture${picture ? '; the last one is attached' : ''}; "[voice]" — a voice message written down; "[fwd]" — passed on from someone else):
 ${texts.map((t) => `- "${t.slice(0, 400)}"`).join('\n')}
-isRequest: someone asks the garage to repair, service, fit or price parts or work on a car (not a supplier offering parts, not small talk). car: make, model, year (0 if not said), plate (as written or as on the registration card in the picture: emirate — DXB, AUH, SHJ, AJM, UAQ, RAK, FUJ or ""; code — the letters or digits before the number; number; "" for what is not seen), vin (the 17 characters if shown, else ""). items: each part or work asked, as an English invoice line ("ENGINE MOUNT", "FRONT BRAKE PADS", "AC SERVICE"), kind "part" or "work", both: true when they ask the price of the original and of a copy (duplicate, aftermarket). owner: the car owner's name if said, else "". confidence 0..1 that it is a request. Only what the messages and the picture show.`,
+isRequest: someone asks the garage to repair, service, fit or price parts or work on a car (not a supplier offering parts, not small talk). car: make, model, year (0 if not said), plate (as written or as on the registration card in the picture: emirate — DXB, AUH, SHJ, AJM, UAQ, RAK, FUJ or ""; code — the letters or digits before the number; number; "" for what is not seen), vin (the 17 characters if shown, else ""). items: each part or work asked, as an English invoice line ("ENGINE MOUNT", "FRONT BRAKE PADS", "AC SERVICE"), kind "part" or "work", both: true when they ask the price of the original and of a copy (duplicate, aftermarket). owner: the car owner's name if said, else "". picture: what the attached picture is — "registration" (the car's registration card, mulkiya), "car", "part", "other", "" if none. confidence 0..1 that it is a request. Only what the messages and the picture show.`,
   name: (name, car) =>
     `A line of a car repair job typed at a UAE garage${car ? ` for a ${car}` : ''}: "${name}" — a spare part, a service or work. It may have typos; it may be English, Russian, or Russian in Latin letters.
 fixed: the same words in the same order and language, only spelling put right (keep numbers, sizes, front/rear/left/right); english: the usual English invoice name (e.g. "FRONT BRAKE PADS", "WHEEL ALIGNMENT"); isPart: is it a car part, service or work item; kind: "part" (a spare part, fluid or material that is bought — "CHECK VALVE", "SERVICE KIT", "ENGINE OIL"), "labour" (the labour charge itself), "service" (work done on the car — repair, replacement, fitting, alignment, wash, AC service, towing); kindSure 0..1 for kind; confidence 0..1 for fixed.`,
@@ -515,7 +515,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       const data = String(image?.data ?? '');
       const pic = /^image\/(jpeg|png|webp)$/.test(type) && data.length > 1000 && data.length < 3_000_000 ? [{ type, data }] : [];
       const hash = createHash('sha256').update(JSON.stringify(list)).update(pic[0]?.data ?? '').digest('hex');
-      return cached(`request:1:${hash}`, 'request', async () => {
+      return cached(`request:2:${hash}`, 'request', async () => {
         const item = { type: 'object', properties: { name: { type: 'string' }, kind: { type: 'string', enum: ['part', 'work'] }, both: { type: 'boolean' } }, required: ['name', 'kind'] };
         const plate = { type: 'object', properties: { emirate: { type: 'string' }, code: { type: 'string' }, number: { type: 'string' } }, required: ['emirate', 'code', 'number'] };
         const { value, model } = await json(
@@ -527,6 +527,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
               car: { type: 'object', properties: { make: { type: 'string' }, model: { type: 'string' }, year: { type: 'integer' }, plate, vin: { type: 'string' } }, required: ['make', 'model'] },
               items: { type: 'array', items: item },
               owner: { type: 'string' },
+              picture: { type: 'string' },
               confidence: { type: 'number' },
             },
             required: ['isRequest', 'items', 'confidence'],

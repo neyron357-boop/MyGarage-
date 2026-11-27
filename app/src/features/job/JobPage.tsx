@@ -151,6 +151,7 @@ import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { DeclinedBefore, PrevVisit } from './PrevVisit';
 import { CustomerAnswerRow } from './CustomerAnswer';
 import { PaymentShotRow } from './PaymentShot';
+import { AutopilotRow } from './Autopilot';
 import { ShareJobButton } from './ShareJob';
 import { ClientView } from './ClientView';
 import { lockForClient, useClientLock } from '../../ui/clientLock';
@@ -1471,6 +1472,8 @@ export function JobPage() {
             {/* A long job comes in two steps (v0.56): its first lines with the screen, the rest a frame later. */}
             {/* Audit 27/11: the customer's WhatsApp answer to the quote, a proposal — one tap records it; first, above the lines, where it is seen. */}
             {phase === 'wait' && <CustomerAnswerRow orderId={oid} phone={c?.whatsapp || c?.phone} />}
+            {/* v0.98: a request's autopilot — its one next step (ask the suppliers, the quote ready). */}
+            {(phase === 'booked' || phase === 'look' || phase === 'price') && b.order.fromChat && <AutopilotRow b={b} onSend={toClient} />}
             <FirstRows rows={lines.map(row)} />
             {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
             {refusedLines.map(row)}

@@ -36,9 +36,22 @@ export function looksLikeRequest(texts: string[], models: Set<string>): boolean 
   return ASK_WORDS.test(all) || texts.some((t) => matchPartName(t).known);
 }
 
+/**
+ * v0.98 (the manager: «чат от владельца гаража… отправляет техпаспорта клиентов, пересылает сообщения клиентов с жалобами, что
+ * нужно делать, и список запчастей»): the boss's chat (and the garage's own) is where requests come by — a burst there is
+ * worth the AI's look with a picture, something passed on, or words that look like a request (its voice notes written down);
+ * a customer's own chat — only its words that look like one.
+ */
+export function worthAsking(texts: string[], models: Set<string>, burst: { work: boolean; forwarded: boolean; picture: boolean }): boolean {
+  if (burst.work && (burst.forwarded || burst.picture)) return true;
+  return looksLikeRequest(texts, models);
+}
+
 /** What the AI said of the messages (server/src/ai.mjs `request`). */
 export interface AiRequest {
   isRequest: boolean;
+  /** v0.98: what the picture with them is — the car's registration card goes onto the car. */
+  picture?: string;
   car?: { make?: string; model?: string; year?: number; plate?: { emirate?: string; code?: string; number?: string }; vin?: string };
   items?: { name: string; kind: 'part' | 'work'; both?: boolean }[];
   owner?: string;
@@ -56,6 +69,8 @@ export interface RequestPlan {
   /** Two options of the quote: the originals, the copies (the other lines in both). */
   options: boolean;
   owner: string;
+  /** v0.98: the picture is the car's registration card (Mulkiya). */
+  registration: boolean;
 }
 
 const EMIRATES: Emirate[] = ['DXB', 'AUH', 'SHJ', 'AJM', 'RAK', 'UAQ', 'FUJ'];
@@ -105,5 +120,5 @@ export function requestPlan(ai: AiRequest, now = new Date()): RequestPlan | unde
       options = true;
     } else lines.push({ titleEn: name, kind });
   }
-  return { make: known ? make : '', model: known ? model : '', year, plate: plateOf(ai.car?.plate), vin, lines, options, owner: String(ai.owner ?? '').trim().slice(0, 60) };
+  return { make: known ? make : '', model: known ? model : '', year, plate: plateOf(ai.car?.plate), vin, lines, options, owner: String(ai.owner ?? '').trim().slice(0, 60), registration: ai.picture === 'registration' };
 }

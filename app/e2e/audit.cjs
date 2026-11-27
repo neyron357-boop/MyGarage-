@@ -398,6 +398,51 @@ async function launch() {
     await page.keyboard.press('Escape');
     await settle(600);
 
+    // 4g. v0.98: a request from the boss's chat — its job's autopilot: «Спросить цены» → «Проверить и отправить»; priced — «Смета готова → Отправить».
+    const req = await page.evaluate(async () => {
+      const { makeRequestJob } = await import('/src/services/waRequest.ts');
+      const { requestPlan } = await import('/src/domain/waRequest.ts');
+      const plan = requestPlan({ isRequest: true, car: { make: 'Toyota', model: 'Corolla', year: 2018, plate: { emirate: 'DXB', code: 'Q', number: String(20000 + Math.floor(Math.random() * 9000)) } }, items: [{ name: 'Front brake pads', kind: 'part' }], owner: 'Omar Test', confidence: 0.9 });
+      const made = await makeRequestJob(plan, { id: '971500000009@c.us', name: 'Boss', phone: '971500000009' }, true, 'Noise when braking', 'false_e2e_boss_1');
+      return made.orderId;
+    });
+    await page.goto(BASE + `#/orders/${req}`);
+    const auto = top('.list-row').filter({ has: page.locator('[data-autopilot]') });
+    await auto.waitFor({ timeout: 15000 });
+    check((await auto.locator('[data-autopilot]').getAttribute('data-autopilot')) === 'ask' && /Fast Toyota Parts|Desert Spares/.test(await auto.innerText()), 'the request’s job: «Спросить цены» — to: ' + (await auto.innerText()).replace(/\s+/g, ' '));
+    await settle(500);
+    await shot('phone-19-autopilot-ask');
+    await auto.locator('[data-autopilot-ask]').click();
+    const askReview = page.locator('.mantine-Modal-content').filter({ has: page.locator('[data-wa-confirm]') });
+    await askReview.waitFor({ timeout: 10000 });
+    check(((await askReview.textContent()) ?? '').includes('FRONT BRAKE PADS'), 'the request to the suppliers — seen in «Проверить и отправить» first');
+    await settle(400);
+    await shot('phone-20-autopilot-review');
+    await askReview.getByRole('button', { name: /^Отправить все/ }).click();
+    await top('[data-autopilot="wait"]').waitFor({ timeout: 10000 });
+    check(true, 'sent — «Ждём цены»');
+    // The suppliers answered (their reading is the services' tests): the part priced, the labour priced.
+    await page.evaluate(async (id) => {
+      const { db } = await import('/src/db/db.ts');
+      for (const i of await db.items.where('orderId').equals(id).toArray()) {
+        if (i.kind === 'part') await db.items.update(i.id, { costPriceFils: 18000, unitPriceFils: 24000, offers: [{ id: 'e2e-of', kind: 'oem', costFils: 18000, supplierId: (await db.suppliers.toArray())[0].id, msg: 'e2e-msg' }] });
+        else await db.items.update(i.id, { unitPriceFils: 10000 });
+      }
+    }, req);
+    const ready = top('[data-autopilot="quote"]');
+    await ready.waitFor({ timeout: 10000 });
+    check(/Смета готова/.test(await top('.list-row').filter({ has: page.locator('[data-autopilot="quote"]') }).innerText()), '«Смета готова» with its sum');
+    await settle(500);
+    await shot('phone-21-autopilot-quote');
+    await top('[data-autopilot-send]').click();
+    const quoteSheet = page.locator('.mantine-Modal-content').filter({ hasText: 'FRONT BRAKE PADS' }).first();
+    await quoteSheet.waitFor({ timeout: 10000 });
+    check(true, '«Отправить» — the quote to send for approval (the usual sheet)');
+    await settle(400);
+    await shot('phone-22-autopilot-send');
+    await page.keyboard.press('Escape');
+    await settle(600);
+
     // 5. «Сегодня»: tomorrow's booking and the work declined a month ago — each a ready message.
     await page.goto(BASE + '#/');
     await top('.today-bell').click();
