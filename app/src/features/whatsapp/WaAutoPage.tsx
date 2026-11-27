@@ -150,6 +150,7 @@ export function WaAutoPage() {
           <On label={t('wa.auto.expense')} value={s.boss.expense} onChange={(v) => save('boss', { expense: v })} mark="boss-expense" />
           <On label={t('wa.auto.pdf')} value={s.boss.pdf} onChange={(v) => save('boss', { pdf: v })} mark="boss-pdf" />
           <On label={t('wa.auto.receipt')} value={s.boss.photo} onChange={(v) => save('boss', { photo: v })} mark="boss-photo" />
+          <On label={t('wa.auto.daily')} value={s.boss.daily} onChange={(v) => save('boss', { daily: v })} mark="boss-daily" />
           {langChips('boss', s.boss.lang)}
         </RowGroup>
 

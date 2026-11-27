@@ -472,6 +472,7 @@ export const en: typeof ru = {
   },
   // v0.81: the job's quick «＋» sheet and «+ Price».
   answer: { all: 'Agrees to all', none: 'Refuses all', option: 'Option {{n}}', some: 'Yes: {{agree}} · no: {{refuse}}', agree: 'Agree', refuse: 'Refuse' },
+  buy: { title: 'Order', supplier: 'Supplier', none: 'No parts with suppliers’ prices', when: 'When', go: 'Order · {{n}}', whens: { soon: 'Collect now', evening: 'Today 17:00', morning: 'Tomorrow 9:00', deliver: 'Deliver' }, kind: { oem: 'original', aftermarket: 'copy', used: 'used' } },
   qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
@@ -2229,6 +2230,7 @@ export const en: typeof ru = {
       expense: 'Expenses',
       pdf: 'Estimate and invoice PDF',
       receipt: 'Receipt photo',
+      daily: 'The day’s summary at 20:00',
       wash: 'Wash',
       washNote: "A job line with these words — the car's photo with the caption to the group.",
       words: 'Words',
@@ -2273,6 +2275,7 @@ export const en: typeof ru = {
       queued_many: 'Queued: {{count}} suppliers',
       queued_other: 'Queued: {{count}} suppliers',
       noNumber: 'no number: {{names}}',
+      noSupplierNumber: 'The supplier has no number',
       queued: 'Queued',
       sent: 'Sent',
       failed: 'Not sent',

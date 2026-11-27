@@ -17,11 +17,14 @@ import { checkDigitOk, makeMatches, vinsInText } from './vin';
  */
 
 const ASK_WORDS =
-  /\b(change|chang|replace|repair|fix|service|servic|check|install|fit|price|prices|cost|how much|quotation|quote|estimate|need|want|original|duplicate|genuine|aftermarket)\b|поменя|замен|ремонт|почин|сколько|цен[аыу]|смет|нужн|оригинал|копи/i;
+  /\b(change|chang|replace|repair|fix|service|servic|check|install|fit|price|prices|cost|how much|quotation|quote|estimate|need|want|original|duplicate|genuine|aftermarket)\b|поменя|замен|ремонт|почин|сколько|цен[аыу]|смет|нужн|оригинал|копи|تغيير|غير|بدل|تبديل|تصليح|اصلاح|إصلاح|صيانة|فحص|كم سعر|سعر|قطعة|قطع|غيار|ابغى|أبغى|ابي|أبي|محتاج|اصلي|أصلي|تجاري/i;
+
+/** Arabic names of the makes and models the garage sees (audit 27/11), as the chats write them. */
+const CARS_AR = /تويوتا|نيسان|لكزس|هوندا|ميتسوبيشي|متسوبيشي|هيونداي|هونداي|كيا|مرسيدس|بي ام|شفروليه|شيفروليه|فورد|جيب|مازدا|سوزوكي|لاندكروزر|لاند كروزر|باترول|كامري|برادو|يارس|كورولا|هايلكس|اكورد|سيفيك|التيما|صني|رنج روفر/;
 
 /** The words of a chat that name a car: a maker, a model the garage has had, or a VIN. */
 export function namesCar(text: string, models: Set<string>): boolean {
-  if (vinsInText(text.toUpperCase()).length) return true;
+  if (vinsInText(text.toUpperCase()).length || CARS_AR.test(text)) return true;
   const words = text.toLowerCase().split(/[^a-z0-9а-яё-]+/i).filter(Boolean);
   return words.some((w) => CAR_MAKES.has(w) || (w.length >= 3 && models.has(w)));
 }

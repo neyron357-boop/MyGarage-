@@ -15,6 +15,10 @@ describe('a WhatsApp request (v0.90, #69)', () => {
     expect(looksLikeRequest(['Okay', 'Thank you'], models)).toBe(false);
     expect(looksLikeRequest(['How much for the engine mount?'], models)).toBe(false);
     expect(looksLikeRequest(['Nissan'], models)).toBe(false);
+    // Audit 27/11: in Arabic too — a car named and something asked.
+    expect(looksLikeRequest(['ابغى تغيير فحمات الفرامل كامري 2018'], models)).toBe(true);
+    expect(looksLikeRequest(['كم سعر بطارية باترول'], models)).toBe(true);
+    expect(looksLikeRequest(['شكرا'], models)).toBe(false);
   });
 
   it('the plate only whole', () => {

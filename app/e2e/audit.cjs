@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
  * - «Готово»: nothing pops up (the customer may pay at once); the job says «Клиенту не сказано» — «Отправить» there;
  * - the customer answered the quote in WhatsApp «ok go ahead» — on the job their words and «Согласовать»;
  * - a message in Arabic in the chat — «Перевести», the translation under it;
+ * - «Заказать»: the cheaper offer picked, one order to the supplier seen before it goes, then the part «заказано»;
  * - «Сегодня»: tomorrow's booking — remind the customer; the work declined a month ago — offer it again.
  * Screenshots — test-results/audit/.
  *
@@ -201,6 +202,51 @@ async function launch() {
     await top('[data-wa-extra="done"]').waitFor({ timeout: 8000 });
     check((await top('[data-wa-extra="done"]').innerText()).includes('Тормозные колодки есть'), 'a message in Arabic — «Перевести» — its translation under it');
     await shot('phone-07-translated');
+
+    // 4c. «Заказать»: a part two suppliers priced — the cheaper picked; one message through «Проверить и отправить»; then «заказано».
+    const buy = await page.evaluate(async () => {
+      const { db, uid } = await import('/src/db/db.ts');
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const c = (await db.customers.toArray()).find((x) => x.name === 'Rashid Test');
+      const o = await checkIn({ customerId: c.id, plate: { emirate: 'DXB', code: 'Q', number: String(90000 + Math.floor(Math.random() * 9000)) }, make: 'Toyota', model: 'Land Cruiser', name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', arrivedNow: true });
+      const a = uid();
+      const b = uid();
+      await db.suppliers.bulkAdd([
+        { id: a, name: 'Fast Toyota Parts', phone: '+971501110001' },
+        { id: b, name: 'Desert Spares', phone: '+971501110002' },
+      ]);
+      const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'FRONT BRAKE PADS', qty: 1, unitPriceFils: 40000 });
+      await db.items.update(pads.id, { approvalState: 'approved', offers: [{ id: 'o-a', kind: 'oem', costFils: 26000, supplierId: a }, { id: 'o-b', kind: 'aftermarket', costFils: 14000, supplierId: b, brand: 'TRW' }] });
+      return { jobId: o.id, itemId: pads.id, cheap: b };
+    });
+    await page.goto(BASE + `#/orders/${buy.jobId}`);
+    await top('button.add-extra[aria-label="Заказать"]').waitFor({ timeout: 15000 });
+    await settle(400);
+    await top('button.add-extra[aria-label="Заказать"]').click();
+    const sheet = page.locator('.mantine-Modal-content.buy-sheet');
+    await sheet.waitFor({ timeout: 8000 });
+    check((await sheet.locator('[data-buy-offer][data-on]').innerText()).includes('Desert Spares'), '«Заказать»: the cheaper offer picked first (Desert Spares, 140)');
+    await settle(400);
+    await shot('phone-08-buy');
+    await sheet.locator('[data-buy-go]').click();
+    const review = page.locator('.mantine-Modal-content').filter({ hasText: 'Please keep for us' });
+    await review.waitFor({ timeout: 10000 });
+    check(((await review.textContent()) ?? '').includes('FRONT BRAKE PADS (copy TRW) — 140.00 AED'), 'the order to the supplier, seen before it goes');
+    await shot('phone-09-buy-review');
+    await review.getByRole('button', { name: /^Отправить/ }).first().click();
+    // (A page's async waitForFunction returns at once — polled from here.)
+    let after = [];
+    for (let k = 0; k < 20; k++) {
+      after = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const i = await db.items.get(id);
+        return [i.procurementStatus, i.costPriceFils, i.supplierId];
+      }, buy.itemId);
+      if (after[0] === 'ordered') break;
+      await settle(500);
+    }
+    check(after[0] === 'ordered' && after[1] === 14000 && after[2] === buy.cheap, 'sent — the part «заказано» at Desert Spares, 140: ' + JSON.stringify(after));
 
     // 5. «Сегодня»: tomorrow's booking and the work declined a month ago — each a ready message.
     await page.goto(BASE + '#/');

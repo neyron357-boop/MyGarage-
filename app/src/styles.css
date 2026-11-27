@@ -10678,3 +10678,25 @@ html.desk .wa-pane-foot {
   color: var(--mantine-color-cobalt-6);
   cursor: pointer;
 }
+
+/* Audit 27/11: «Заказать» — each part's offers as rows to pick, the cheapest picked first. */
+.buy-offer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 16px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.buy-offer-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}

@@ -50,6 +50,7 @@ import { IconHelpCircle,
   IconUserDollar,
   IconUserPlus,
   IconTruck,
+  IconShoppingCart,
   IconTruckDelivery,
   IconUserCheck,
   IconUserX,
@@ -106,6 +107,8 @@ import { markJobOpened } from '../../ui/recentJobs';
 import { QuickAddSheet, type QuickKind } from './QuickAdd';
 import { offLabel } from './LineOff';
 import { SupplierAskSheet } from './SupplierAsk';
+import { BuySheet } from './BuySheet';
+import { buyable } from '../../domain/supplierOrder';
 import { PriceSheet } from './PriceSheet';
 import { setJobQuiet } from '../../services/notify';
 import { ReminderSheet } from '../notify/ReminderSheet';
@@ -623,6 +626,7 @@ export function JobPage() {
   const [priceFor, setPriceFor] = useState<OrderItem | null>(null);
   // «Поставщики» (v0.82): the parts to the suppliers that fit, picked in one sheet.
   const [askOpen, setAskOpen] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
   const lastPrice = useRef<OrderItem | null>(null);
   if (priceFor) lastPrice.current = b?.items.find((x) => x.id === priceFor.id) ?? priceFor;
   const openPrice = (i: OrderItem) => {
@@ -1508,6 +1512,8 @@ export function JobPage() {
             {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
             {/* v0.82 (#22, in «Копия»'s place — the copy is in its sheet): the parts to the suppliers that fit, by WhatsApp. */}
             {parts.length > 0 && <AddExtra icon={IconTruck} label={t('ask.title')} word={t('ask.title')} onClick={() => setAskOpen(true)} />}
+            {/* Audit 27/11: the parts the suppliers offered — ordered in one tap («Заказать»). */}
+            {parts.some(buyable) && <AddExtra icon={IconShoppingCart} label={t('buy.title')} word={t('buy.title')} onClick={() => setBuyOpen(true)} />}
             {parts.length > 0 && <AddExtra icon={IconUserCheck} label={t('job.more.owner')} word={t('job.more.owner')} onClick={() => setOwnerOpen(true)} />}
             {/* v0.90 (#72): the quote's options — the original and the copy, with a part and without it. */}
             {lines.length > 0 && !inv && <AddExtra icon={IconStack2} label={t('qo.title')} word={t('qo.tile')} onClick={() => setOptionsOpen(true)} />}
@@ -1670,6 +1676,7 @@ export function JobPage() {
         {(o) => <QuickAddSheet b={b} kind={quickKind ?? lastQuick.current} opened={o} onClose={() => setQuick(null)} suggestions={suggestions} />}
       </LazySheet>
       <LazySheet opened={askOpen}>{(o) => <SupplierAskSheet b={b} opened={o} onClose={() => setAskOpen(false)} />}</LazySheet>
+      <LazySheet opened={buyOpen}>{(o) => <BuySheet b={b} opened={o} onClose={() => setBuyOpen(false)} />}</LazySheet>
       <LazySheet opened={!!priceFor}>
         {(o) => <PriceSheet b={b} item={lastPrice.current} opened={o} onClose={() => setPriceFor(null)} service={!!lastPrice.current && sheetKind(lastPrice.current) === 'service'} />}
       </LazySheet>

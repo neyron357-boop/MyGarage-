@@ -59,6 +59,8 @@ export interface WaAuto {
     pdf: boolean;
     /** A receipt's photo with an expense. */
     photo: boolean;
+    /** Audit 27/11: the summary of the day in the evening (services/dailySummary.ts). */
+    daily: boolean;
   };
   /** The wash: a line of the job named so — the car's photo with a word. */
   wash: {
@@ -99,7 +101,7 @@ export const ASK_V = 2;
 export const WA_AUTO: WaAuto = {
   work: { on: true, lang: 'en', checkin: false, agreed: true, done: false, complaint: true, lines: true, mechanics: true },
   client: { on: true, lang: 'en', driver: true, mileage: true, lines: true, complaint: false, photos: 1, done: false },
-  boss: { on: true, lang: 'en', estimate: true, invoice: true, payment: true, income: true, expense: true, pdf: true, photo: true },
+  boss: { on: true, lang: 'en', estimate: true, invoice: true, payment: true, income: true, expense: true, pdf: true, photo: true, daily: true },
   wash: { on: true, words: WASH_WORDS, caption: 'CAR WASH', plate: false },
   ask: { gapSec: 8, max: 15, read: true, prices: 'cost', vat: 'net', prefer: 'oem', v: ASK_V },
 };

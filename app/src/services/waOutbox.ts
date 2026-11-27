@@ -37,6 +37,8 @@ export interface OutItem {
   note?: WaNote;
   /** A supplier's request (audit 27/11): kept on its job once it really went (`keepSentAsks`), never sent to the server. */
   ask?: { orderId: string; ask: PartAsk };
+  /** An order to a supplier (audit 27/11): its lines «заказано» once it really went (`keepSentBuys`), never sent to the server. */
+  buy?: { orderId: string; supplierId: string; lines: { itemId: string; costFils?: number }[]; expectedAt?: string };
   chat?: string;
   phone?: string;
   parts: OutPart[];
@@ -89,7 +91,7 @@ export async function queueWa(raw: OutItem[], { confirmed = false }: { confirmed
     askToSend(raw);
     return raw.map((it) => ({ key: it.key, state: 'confirm' as const }));
   }
-  const items = raw.map(({ note: _note, ask: _ask, ...item }) => item);
+  const items = raw.map(({ note: _note, ask: _ask, buy: _buy, ...item }) => item);
   try {
     const out: OutboxFace[] = [];
     // A few at a time: a request's sheets of diagrams make each item large.

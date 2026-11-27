@@ -4,6 +4,7 @@ import { fillPriceBook } from './priceBook';
 import { startWaAuto } from './waAuto';
 import { startWaOutbox } from './waOutbox';
 import { startWaRequests } from './waRequest';
+import { startDailySummary } from './dailySummary';
 
 /** The garage's WhatsApp by itself (v0.79), started once with the app: the reports heard, the outbox kept, the answers read. */
 export function startWaAutomation() {
@@ -15,6 +16,8 @@ export function startWaAutomation() {
   void fillPriceBook().catch(() => undefined);
   // A customer's request made a job of «Заявки» (v0.90, #69) — on the main device.
   startWaRequests();
+  // The owner's summary of the day in the evening (audit 27/11) — on the main device, through «Проверить и отправить».
+  startDailySummary();
 }
 export function startWaAsk() {
   startWaReplies();
