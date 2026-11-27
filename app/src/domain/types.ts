@@ -431,6 +431,12 @@ export interface Order {
   };
   /** "How is the car?" asked a few days after the car left (or the reminder dismissed): it leaves the Today list. */
   followedUpAt?: string;
+  /** Audit 27/11: the lines declined on this visit offered to the customer again (or not needed) — out of «Сегодня». */
+  declinedOfferedAt?: string;
+  /** Audit 27/11: the customer reminded of this booking the day before (or not needed). */
+  bookingRemindedAt?: string;
+  /** Audit 27/11: the customer's WhatsApp message last proposed as their answer to the quote (taken or ×) — not again. */
+  answerSeen?: string;
   /**
    * Who brought the car this time (v0.43) — a company's driver mostly: as he was then (his name and phone may change
    * in the list of drivers later; the job keeps them). Not the customer: the job, its invoices and debts stay theirs.

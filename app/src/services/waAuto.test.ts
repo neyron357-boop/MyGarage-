@@ -15,7 +15,7 @@ import { askSuppliers, readReplies, recordLinkAsk } from './waAsk';
 import { saveWaAuto, sendAsked, sendClientReport, sendExpenseToBoss, sendWorkReport, setCustomerGroup, setWaAutoDelays, startWaAuto } from './waAuto';
 import { updateExpense } from './ledger';
 import type { OutItem } from './waOutbox';
-import { resetWaAsks, waAsks } from './waConfirm';
+import { forgetAsks, resetWaAsks, waAsks } from './waConfirm';
 import { loadChats, refreshWa, setWaTransport, waStore, type WaCallInit } from './whatsapp';
 import type { WaMessage } from '../domain/whatsapp';
 
@@ -244,6 +244,18 @@ describe('suppliers', () => {
     expect((await db.orders.get(o.id))!.asks).toMatchObject([{ supplierId: a.id, phone: '971507776655', items: [pads.id, filter.id], via: 'server' }]);
   });
 
+  it('audit 27/11: a request dropped in «Проверить и отправить» is not kept on the job as asked', async () => {
+    const { o } = await job();
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+    const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [] })).toEqual({ asked: 1, noNumber: [] });
+    // Waiting for «Отправить»: not asked yet.
+    expect((await db.orders.get(o.id))!.asks ?? []).toHaveLength(0);
+    forgetAsks(waAsks().map((a) => a.id));
+    expect((await db.orders.get(o.id))!.asks ?? []).toHaveLength(0);
+    expect(keyed('ask:')).toHaveLength(0);
+  });
+
   it('v0.91.7 (#76): later — the server keeps it until then; the request counts from then; an old server — refused', async () => {
     const { o } = await job();
     const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
@@ -286,6 +298,31 @@ describe('suppliers', () => {
     // read once: the same messages read again change nothing
     expect(await readReplies()).toBe(0);
     expect((await db.orders.get(o.id))!.asks![0].replies?.map((x) => x.lines)).toEqual([2, 0]);
+  });
+
+  it('audit 27/11: a supplier’s voice answer — heard by the AI, read by the rules, its prices marked as the AI’s', async () => {
+    const { o } = await job();
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+    const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+    await recordLinkAsk(o.id, supId, [pads], '*Toyota Hiace*\n\n1. BRAKE PADS FRONT');
+    const heard: string[] = [];
+    setAiTransport(async (path, body) => {
+      if (path === 'voice') {
+        heard.push((body as { id: string }).id);
+        return { text: 'brake pads front original 180', english: '', from: 'en' };
+      }
+      throw new Error('not played: ' + path);
+    });
+    chatMsgs['55512345678901@lid'] = [{ id: 'false_55512345678901@lid_V1', chat: '55512345678901@lid', t: Date.now() + 5000, me: false, type: 'ptt', text: '', ack: 0, file: { sec: 14 } } as never];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect(heard).toEqual(['false_55512345678901@lid_V1']);
+    const p = (await db.items.get(pads.id))!;
+    expect(p.offers?.map((x) => [x.kind, x.costFils, !!x.ai])).toEqual([['oem', 18000, true]]);
+    // Heard once: read again — not asked again.
+    expect(await readReplies()).toBe(0);
+    expect(heard).toHaveLength(1);
+    setAiTransport(undefined);
   });
 
   it('v0.86: an answer’s price is the line’s cost by default; «offers only» set — the cost is left to the manager', async () => {

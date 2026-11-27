@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import type { PartAsk } from '../domain/types';
 import { SyncError } from './sync/api';
 import { askToSend } from './waConfirm';
 import { keepOutbox, waCall, waCan, type OutboxFace } from './whatsapp';
@@ -34,6 +35,8 @@ export interface WaNote {
 export interface OutItem {
   key: string;
   note?: WaNote;
+  /** A supplier's request (audit 27/11): kept on its job once it really went (`keepSentAsks`), never sent to the server. */
+  ask?: { orderId: string; ask: PartAsk };
   chat?: string;
   phone?: string;
   parts: OutPart[];
@@ -86,7 +89,7 @@ export async function queueWa(raw: OutItem[], { confirmed = false }: { confirmed
     askToSend(raw);
     return raw.map((it) => ({ key: it.key, state: 'confirm' as const }));
   }
-  const items = raw.map(({ note: _note, ...item }) => item);
+  const items = raw.map(({ note: _note, ask: _ask, ...item }) => item);
   try {
     const out: OutboxFace[] = [];
     // A few at a time: a request's sheets of diagrams make each item large.

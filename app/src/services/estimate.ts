@@ -84,14 +84,43 @@ export async function ensureLabourLine(orderId: string): Promise<OrderItem | und
   return added;
 }
 
-export async function addTemplate(orderId: string, templateId: string, block: Block = 'A'): Promise<OrderItem[]> {
+/**
+ * A job template's lines at once (audit 27/11: the templates were only seeded — now a chip in «Добавить позицию»).
+ * `prices[k]` — the k-th line's price from the garage's history (this car, customer, model…), when it had one: the
+ * template's own price is a starting figure, not the garage's. The job's labour charge stays last (`ensureLabourLine`).
+ */
+export async function addTemplate(orderId: string, templateId: string, block: Block = 'A', prices: (Pick<OrderItem, 'unitPriceFils'> & Partial<Pick<OrderItem, 'unitGrossFils' | 'vatRateBp'>>)[] = []): Promise<OrderItem[]> {
   const t = await db.jobTemplates.get(templateId);
   if (!t) throw new AppError('err.notFound');
   const out: OrderItem[] = [];
-  for (const ti of t.items) {
-    out.push(await addItem(orderId, { ...ti, block: block === 'A' ? ti.block : block, templateId }));
+  for (const [k, ti] of t.items.entries()) {
+    out.push(await addItem(orderId, { ...ti, ...(prices[k]?.unitPriceFils ? prices[k] : {}), block: block === 'A' ? ti.block : block, templateId }));
   }
+  await ensureLabourLine(orderId);
   return out;
+}
+
+/**
+ * A line the customer declined on an earlier visit, on this job again (audit 27/11): a new draft with its name, number
+ * and price then — the earlier visit's line and its «no» stay as they were.
+ */
+export async function addDeclinedBack(orderId: string, itemId: string): Promise<OrderItem> {
+  const was = await db.items.get(itemId);
+  if (!was) throw new AppError('err.notFound');
+  const added = await addItem(orderId, {
+    kind: was.kind,
+    block: 'A',
+    qty: was.qty,
+    unit: was.unit,
+    titleRu: was.titleRu,
+    titleEn: was.titleEn,
+    unitPriceFils: was.unitPriceFils,
+    ...(was.unitGrossFils !== undefined ? { unitGrossFils: was.unitGrossFils } : {}),
+    ...(was.vatRateBp !== undefined ? { vatRateBp: was.vatRateBp } : {}),
+    ...(was.partNumber ? { partNumber: was.partNumber } : {}),
+  });
+  await ensureLabourLine(orderId);
+  return added;
 }
 
 export async function updateItem(id: string, patch: Partial<OrderItem>): Promise<void> {

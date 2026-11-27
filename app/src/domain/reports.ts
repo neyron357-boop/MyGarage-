@@ -78,13 +78,13 @@ export function computeReport(input: ReportInput): Report {
   };
 
   // Revenue: invoices issued in the period, credit notes subtract.
-  let salesCount = 0;
+  // The average ticket is per job (audit 27/11): an invoice cancelled by a credit note and issued again is one sale,
+  // not two — a job counts when what it was invoiced in the period, less its credit notes, is above nothing.
+  const netByJob = new Map<string, number>();
   for (const inv of input.invoices) {
     if (!inPeriod(inv.issuedAt)) continue;
     const sign = inv.type === 'credit_note' ? -1 : 1;
-    if (sign > 0) {
-      salesCount += 1;
-    }
+    netByJob.set(inv.orderId, (netByJob.get(inv.orderId) ?? 0) + sign * inv.totalFils);
     r.revenueGross += sign * inv.totalFils;
     for (const l of inv.lines) {
       if (l.kind === 'labor') r.laborGross += sign * l.gross;
@@ -144,6 +144,7 @@ export function computeReport(input: ReportInput): Report {
   }
 
   r.grossProfit = r.revenueGross + r.otherIncome - r.writtenOffGross - r.partsCostGross - r.expensesGross;
+  const salesCount = [...netByJob.values()].filter((v) => v > 0).length;
   r.averageTicketGross = salesCount ? Math.round(r.revenueGross / salesCount) : 0;
   return r;
 }

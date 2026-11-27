@@ -2,7 +2,7 @@ import { db } from '../db/db';
 import { dubaiTime, formatDate, nowIso } from '../domain/dates';
 import { formatAed } from '../domain/money';
 import { buildPlan, notifyOf, type NotifySettings, type PlanWords, type PushPlan } from '../domain/notify';
-import type { Task, TaskKind } from '../domain/today';
+import { CUSTOMER_KINDS, type Task, type TaskKind } from '../domain/today';
 import type { Customer, Lang, Vehicle } from '../domain/types';
 import i18n, { tFor } from '../i18n';
 import { loadRowBundles, type OrderBundle } from './orders';
@@ -66,7 +66,7 @@ function wordsFor(lang: Lang, byOrder: Map<string, OrderBundle>, vehicles: Map<s
           return name;
       }
     },
-    url: (task) => (task.kind === 'pickup' ? '#/parts?tab=pickup' : task.kind === 'followUp' || task.kind === 'service' || !task.orderId ? TODAY_URL : `#/orders/${task.orderId}`),
+    url: (task) => (task.kind === 'pickup' ? '#/parts?tab=pickup' : CUSTOMER_KINDS.includes(task.kind) || !task.orderId ? TODAY_URL : `#/orders/${task.orderId}`),
     listUrl: TODAY_URL,
     digest: t('notify.pushDigest'),
     units: { m: t('notify.unit.m'), h: t('notify.unit.h'), d: t('notify.unit.d') },

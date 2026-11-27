@@ -621,6 +621,23 @@ describe('reports', () => {
     expect(r.payments.card).toBe(31500);
     expect(r.cashDiffFils).toBe(-500);
     expect(r.averageTicketGross).toBe(31500);
+    // Audit 27/11: cancelled by a credit note and issued again (a discount after the invoice) — one sale, not two.
+    const again = computeReport({
+      from: '2026-11-01',
+      to: '2026-11-30',
+      orders: [order()],
+      invoices: [
+        inv,
+        { ...inv, id: 'cn1', number: 'CN-1', type: 'credit_note', originalInvoiceId: 'inv1', issuedAt: '2026-11-07T10:00:00.000Z' },
+        { ...inv, id: 'inv2', number: 'INV-1-1', totalFils: 30000, issuedAt: '2026-11-07T10:05:00.000Z' },
+      ],
+      items: [],
+      expenses: [],
+      payments: [],
+      closings: [],
+    });
+    expect(again.revenueGross).toBe(30000);
+    expect(again.averageTicketGross).toBe(30000);
     // Closed «Без оплаты» (audit 25/11): the invoice stays in the revenue, what was let go is off the profit — in the
     // period it was let go; «Оплата у главного» is the garage's money; a job never invoiced added nothing to take off.
     const base = { from: '2026-11-01', to: '2026-11-30', items: [], expenses: [], payments: [], closings: [] };

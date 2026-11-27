@@ -8310,6 +8310,22 @@ html.desk .mark-layer-body {
   font-size: 13px;
   font-weight: 600;
 }
+/* Audit 27/11: «Часто вместе» after a line, «Шаблоны» before the first — chips while nothing is typed. */
+.qa-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.qa-hints-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-label-2);
+}
+.qa-hints .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .qa-added-text {
   min-width: 0;
   overflow: hidden;
@@ -10626,4 +10642,39 @@ html.desk .wa-pane-foot {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Audit 27/11: on the car's new visit, what was declined before — each a tap from this job. */
+.declined-before-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+/* Audit 27/11: a message's translation, a voice message's words — under the bubble's own words. */
+.wa-extra {
+  display: block;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--app-hairline);
+  font-size: 15px;
+  color: var(--app-label-2);
+  white-space: pre-wrap;
+}
+.wa-extra-also {
+  display: block;
+  margin-top: 2px;
+}
+.wa-extra-ask {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mantine-color-cobalt-6);
+  cursor: pointer;
 }

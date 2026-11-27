@@ -9,7 +9,8 @@ import { itemAmounts, itemCostPaid, itemTitle, lineName } from '../../domain/ite
 import { formatAed, roundFils, withMarkup } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
 import { buildSuggestions, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
-import type { OrderItem, Outsource, PartOffer } from '../../domain/types';
+import type { JobTemplate, OrderItem, Outsource, PartOffer, RelatedRule } from '../../domain/types';
+import { buildTogether } from '../../domain/together';
 import { aiAfterLine } from '../../services/ai';
 import { AiMark, YandexButton } from '../ai/Ai';
 import { LineMedia } from './LineMedia';
@@ -93,11 +94,11 @@ export function forgetSuggestions(): void {
  * newest first, each line's job (its car, customer, make and model, complaint) and the price list — read once a
  * minute, not for every job opened.
  */
-type Sources = { at: number; priceList: PriceListLine[]; items: OrderItem[]; jobs: Map<string, HistJob> };
+type Sources = { at: number; priceList: PriceListLine[]; items: OrderItem[]; jobs: Map<string, HistJob>; templates: JobTemplate[]; rules: RelatedRule[] };
 let sources: Sources | undefined;
 async function suggestionSources(): Promise<Sources> {
   if (sources && Date.now() - sources.at < 60_000) return sources;
-  const [templates, items, orders, vehicles] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray(), db.orders.toArray(), db.vehicles.toArray()]);
+  const [templates, items, orders, vehicles, rules] = await Promise.all([db.jobTemplates.toArray(), db.items.toArray(), db.orders.toArray(), db.vehicles.toArray(), db.relatedRules.toArray()]);
   items.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
   const cars = new Map(vehicles.map((v) => [v.id, v]));
   const jobs = new Map<string, HistJob>(
@@ -106,13 +107,14 @@ async function suggestionSources(): Promise<Sources> {
       return [o.id, { vehicleId: o.vehicleId, customerId: o.customerId, make: v?.make, model: v?.model, complaint: o.complaint }];
     }),
   );
-  sources = { at: Date.now(), priceList: templates.flatMap((t) => t.items), items, jobs };
+  sources = { at: Date.now(), priceList: templates.flatMap((t) => t.items), items, jobs, templates, rules };
   return sources;
 }
 
 async function loadSuggestions(ctx: PriceContext): Promise<SuggestionSet> {
-  const { priceList, items, jobs } = await suggestionSources();
-  return buildSuggestions(items, jobs, priceList, ctx);
+  const { priceList, items, jobs, templates, rules } = await suggestionSources();
+  // What usually goes together (audit 27/11): the garage's own jobs, then the starter rules.
+  return { ...buildSuggestions(items, jobs, priceList, ctx), together: buildTogether(items, ctx.lang, rules, templates) };
 }
 
 /** Where a suggestion's price is from, as a mark beside it: this car, this customer (nothing for the rest). */

@@ -1,14 +1,20 @@
-import { Badge, Text, UnstyledButton } from '@mantine/core';
-import { IconHistory } from '@tabler/icons-react';
+import { Badge, Button, Text, UnstyledButton } from '@mantine/core';
+import { IconArrowBackUpDouble, IconHistory } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../db/db';
 import { hoursBetween, nowIso } from '../../domain/dates';
-import { itemTitle } from '../../domain/items';
+import { itemAmounts, itemTitle } from '../../domain/items';
+import { formatAed } from '../../domain/money';
+import { declinedBefore } from '../../domain/together';
 import { formatKm } from '../../domain/odometer';
 import type { Order, Settings } from '../../domain/types';
+import { addDeclinedBack } from '../../services/estimate';
+import { syncStage } from '../../services/flow';
 import { mileageOfJob } from '../../services/mileage';
-import { useScreenLiveQuery } from '../../ui/hooks';
+import { haptic } from '../../ui/haptics';
+import { forgetSuggestions } from './LineSheet';
+import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 
 /**
  * The day a visit was — the day the car came (v0.88, the owner: «какой день физически машина приезжала»): not when the
@@ -56,5 +62,66 @@ export function PrevVisit({ order, settings, lang }: { order: Pick<Order, 'id' |
         </Badge>
       )}
     </UnstyledButton>
+  );
+}
+
+/** The car's earlier visits with their lines — what the customer declined then (audit 27/11). */
+async function declinedOnCar(order: Pick<Order, 'id' | 'vehicleId' | 'createdAt' | 'arrivedAt'>, onJob: string[], lang: 'ru' | 'en') {
+  const all = await db.orders.where('vehicleId').equals(order.vehicleId).toArray();
+  const earlier = all.filter((o) => o.id !== order.id && o.stage !== 'cancelled' && o.stage !== 'booked' && visitDay(o) <= visitDay(order));
+  if (!earlier.length) return [];
+  const items = await db.items.where('orderId').anyOf(earlier.map((o) => o.id)).toArray();
+  const byJob = new Map<string, typeof items>();
+  for (const i of items) byJob.set(i.orderId, [...(byJob.get(i.orderId) ?? []), i]);
+  return declinedBefore(
+    earlier.map((o) => ({ order: { id: o.id, day: visitDay(o).slice(0, 10) }, items: (byJob.get(o.id) ?? []).map((i) => ({ ...i, gross: itemAmounts(i).gross })) })),
+    { id: order.id, day: visitDay(order).slice(0, 10) },
+    onJob,
+    lang,
+  );
+}
+
+/**
+ * "В прошлый раз отказался: FRONT BRAKE DISCS · 380 AED · Добавить" (audit 27/11; docs/01 §10.8): on the car's new visit,
+ * what was said no to before and is still not done — one tap puts it on this job as a draft. Only while lines can be added.
+ */
+export function DeclinedBefore({ orderId, order, onJob, lang }: { orderId: string; order: Pick<Order, 'id' | 'vehicleId' | 'createdAt' | 'arrivedAt'>; onJob: string[]; lang: 'ru' | 'en' }) {
+  const { t } = useTranslation();
+  const uiLang = useLang();
+  const { run, busy } = useAction();
+  const list = useScreenLiveQuery(() => declinedOnCar(order, onJob, lang), [order.id, order.vehicleId, lang, onJob.join('|')]);
+  if (!list?.length) return null;
+  return (
+    <div className="job-line job-complaint declined-before" data-declined-before>
+      <IconArrowBackUpDouble size={18} stroke={1.8} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <Text size="sm" c="dimmed">
+          {t('job.declinedBefore')}
+        </Text>
+        {list.map((d) => (
+          <div key={d.itemId} className="declined-before-row">
+            <Text size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+              {d.title}
+              {d.gross > 0 && <Text span inherit c="dimmed" className="tnum">{` · ${formatAed(d.gross, uiLang)}`}</Text>}
+            </Text>
+            <Button
+              size="compact-sm"
+              variant="light"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  await addDeclinedBack(orderId, d.itemId);
+                  await syncStage(orderId);
+                  forgetSuggestions();
+                  haptic('light');
+                })
+              }
+            >
+              {t('qa.add')}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -309,3 +309,30 @@ describe('v0.86: the labour line, a supplier’s answer, who chats are — light
     assert.match(asked, /written by the garage/);
   });
 });
+
+describe('audit 27/11: a message translated, a voice message written down — neither kept', () => {
+  it('translates for the manager, asked again each time (the chat’s words are never stored)', async () => {
+    const { f, seen } = fake([[/generateContent/, () => answer({ text: 'Тормозные колодки есть, 250 дирхам', from: 'ar' })]]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const r = await ai.translate({ text: 'فحمات الفرامل موجودة 250 درهم', to: 'ru' });
+    assert.equal(r.text, 'Тормозные колодки есть, 250 дирхам');
+    assert.equal(r.from, 'ar');
+    await ai.translate({ text: 'فحمات الفرامل موجودة 250 درهم', to: 'ru' });
+    assert.equal(seen.filter((s) => s.url.includes('generateContent')).length, 2);
+    assert.match(seen[0].body.contents[0].parts[0].text, /into Russian/);
+    await assert.rejects(ai.translate({ text: '  ' }), /no text/);
+  });
+
+  it('a voice message: heard as audio (an iPhone’s mp4 as m4a), written down and in English', async () => {
+    const { f, seen } = fake([[/generateContent/, () => answer({ text: 'pads original 295, copy 150', english: '', from: 'en' })]]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const data = Buffer.alloc(600, 7).toString('base64');
+    const r = await ai.voice({ audio: { type: 'audio/ogg; codecs=opus', data } });
+    assert.equal(r.text, 'pads original 295, copy 150');
+    const parts = seen[0].body.contents[0].parts;
+    assert.deepEqual(parts.slice(-2), [{ text: 'Voice message:' }, { inline_data: { mime_type: 'audio/ogg', data } }]);
+    await ai.voice({ audio: { type: 'audio/mp4', data } });
+    assert.equal(seen[1].body.contents[0].parts.at(-1).inline_data.mime_type, 'audio/m4a');
+    await assert.rejects(ai.voice({ audio: { type: 'image/jpeg', data } }), /no voice/);
+  });
+});

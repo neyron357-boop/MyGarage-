@@ -473,7 +473,8 @@ export const ru = {
     mileageHistory: 'Пробег по визитам',
   },
   // v0.81: быстрый лист «＋» заказа и «+ Цена».
-  qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить', auto: 'Авто', autoPlaceholder: 'Запчасть, работа или услуга', fixed: 'исправлено' },
+  answer: { all: 'Согласен на всё', none: 'Отказ от всего', option: 'Вариант {{n}}', some: 'Да: {{agree}} · нет: {{refuse}}', agree: 'Согласовать', refuse: 'Отказ' },
+  qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить', auto: 'Авто', autoPlaceholder: 'Запчасть, работа или услуга', fixed: 'исправлено', templates: 'Шаблоны', together: 'Часто вместе' },
   price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
   // v0.82: скидка строки; лист «Поставщики» заказа.
   lineOff: { title: 'Скидка', amount: 'Сумма', amountLabel: 'Скидка, AED' },
@@ -1178,6 +1179,8 @@ export const ru = {
   job: {
     // v0.81: состояние сметы в заказе.
     quoteUnsent: 'Смета не отправлена',
+    readyUntold: 'Клиенту не сказано',
+    readyTold: 'Клиенту сказано · {{time}}',
     quoteNewUnsent: 'Новые строки не отправлены',
     quoteSend: 'Отправить',
     quoteSentAgo: 'Смета отправлена · {{time}}',
@@ -1197,6 +1200,7 @@ export const ru = {
     profit: 'Прибыль',
     who: 'Кто делает',
     prevVisit: 'Прошлый визит',
+    declinedBefore: 'В прошлый раз отказался',
     prevToday: 'Был сегодня',
     prevDays: 'Был {{n}} д назад',
     prevMonths: 'Был {{n}} мес. назад',
@@ -1832,7 +1836,7 @@ export const ru = {
   },
   notify: {
     // v0.82: заголовки уведомлений — знак и что сделать.
-    push: { answer: '📞 Клиент не ответил', order: '📦 Заказать запчасти', pickup: '🚚 Забрать запчасти', promised: '⏰ Срок клиенту', booked: '🚗 Запись — едет', collect: '🔑 Готова — не забрали', outsource: '🏭 Забрать со стороны', returnBy: '↩️ Вернуть деталь', debt: '💰 Долг просрочен', reminder: '🔔 Напоминание', followUp: '💬 Спросить, как машина', service: '🛢 Позвать на ТО' },
+    push: { answer: '📞 Клиент не ответил', order: '📦 Заказать запчасти', pickup: '🚚 Забрать запчасти', promised: '⏰ Срок клиенту', booked: '🚗 Запись — едет', collect: '🔑 Готова — не забрали', outsource: '🏭 Забрать со стороны', returnBy: '↩️ Вернуть деталь', debt: '💰 Долг просрочен', reminder: '🔔 Напоминание', followUp: '💬 Спросить, как машина', service: '🛢 Позвать на ТО', declined: '🔁 Предложить отказанное снова', bookedTomorrow: '📅 Напомнить о записи на завтра' },
     pushDigest: '📋 Сегодня',
     title: 'Уведомления',
     kind: {
@@ -1848,6 +1852,8 @@ export const ru = {
       debt: 'Долг просрочен',
       reminder: 'Напоминание',
       followUp: 'Спросить, как машина',
+      declined: 'Предложить отказанное снова',
+      bookedTomorrow: 'Напомнить о записи',
       service: 'Позвать на ТО',
     },
     digestTitle: 'Сегодня',
@@ -1922,6 +1928,8 @@ export const ru = {
     collect: 'Готова · ждёт {{time}}',
     debt: 'Долг просрочен',
     followUp: 'Как машина?',
+    declined: 'В прошлый раз отказался — предложить снова',
+    bookedTomorrow: 'Завтра в {{time}} — напомнить клиенту',
     service: 'Пора на ТО',
     notNeeded: 'Не нужно',
     more: 'Ещё {{n}}',
@@ -1937,6 +1945,12 @@ export const ru = {
   },
   // WhatsApp мастерской в приложении (v0.78): сервер мастерской — связанное устройство аккаунта.
   wa: {
+    // Audit 27/11: a message in the manager's language; a voice message in words.
+    translate: 'Перевести',
+    voiceText: 'Текст',
+    translating: 'Перевожу…',
+    voiceTextBusy: 'Слушаю…',
+    extraFailed: 'Не вышло',
     // v0.81: «Только гараж», статусы чатов, голосовые, расход руководителю.
     garageOnly: 'Только гараж',
     // v0.83: чат заказа открывается касанием.
@@ -2570,6 +2584,8 @@ export const ru = {
     months_many: '{{count}} месяцев',
     months_other: '{{count}} месяца',
     followUp: 'Здравствуйте, {{name}}! Это {{garage}}. Как ваш {{car}} после ремонта? Если что-то беспокоит — напишите, поможем.',
+    declinedOffer: 'Здравствуйте, {{name}}! Это {{garage}}. В прошлый раз мы рекомендовали для вашего {{car}} ({{plate}}): {{lines}}. Записать вас? Просто ответьте.',
+    bookedTomorrow: 'Здравствуйте, {{name}}! Напоминаем от {{garage}}: ждём ваш {{car}} ({{plate}}) завтра в {{time}}.',
     serviceDue: 'Здравствуйте, {{name}}! Прошло около полугода с замены масла на вашем {{car}} ({{plate}}). Пора на ТО — ответьте, и мы запишем вас. {{garage}}',
     booked: 'Здравствуйте, {{name}}! Ждём ваш {{car}} ({{plate}}) в {{garage}}. Заказ №{{number}}.',
     carReceived: 'Здравствуйте, {{name}}! Ваш {{car}} ({{plate}}) принят в {{garage}}, заказ №{{number}}. Акт приёмки с фото — во вложении. Оценку пришлём после диагностики.',

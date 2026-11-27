@@ -2,6 +2,8 @@ import { Button, Loader, Modal, Stack, Text, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
   IconAlertCircle,
+  IconLanguage,
+  IconTextCaption,
   IconArrowBackUp,
   IconArrowForwardUp,
   IconBan,
@@ -71,6 +73,7 @@ import { DeskMenu, type DeskMenuItem } from '../../ui/desk';
 import { haptic } from '../../ui/haptics';
 import { useHistoryLayer } from '../../ui/historyLayer';
 import { useErrorText, useLang } from '../../ui/hooks';
+import { foreignScript, translateMessage, useWaExtra, voiceMessageText } from './waExtra';
 import { SheetFor } from '../../ui/lazy';
 import { useLongPress } from '../../ui/longPress';
 import { PhotoViewer } from '../../ui/PhotoViewer';
@@ -425,6 +428,36 @@ function Quoted({ q, onGo, name, color }: { q: NonNullable<WaMessage['quote']>; 
   );
 }
 
+/* ---------- A message's translation, a voice message's words (audit 27/11) ---------- */
+
+/** Under an incoming bubble: the translation or the words once asked; for Arabic, Urdu, Hindi — «Перевести» at hand. */
+function ExtraLine({ m, kind }: { m: WaMessage; kind: string }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const x = useWaExtra(m.id);
+  if (x?.state === 'busy')
+    return (
+      <span className="wa-extra" data-wa-extra="busy">
+        <Loader size={10} color="currentColor" /> {t(x.kind === 'voice' ? 'wa.voiceTextBusy' : 'wa.translating')}
+      </span>
+    );
+  if (x?.state === 'failed') return <span className="wa-extra" data-wa-extra="failed">{t('wa.extraFailed')}</span>;
+  if (x?.state === 'done')
+    return (
+      <span className="wa-extra" data-wa-extra="done">
+        {x.text}
+        {x.also && <span className="wa-extra-also">{x.also}</span>}
+      </span>
+    );
+  const voice = kind === 'voice' || kind === 'audio';
+  if (!voice && !(m.text && foreignScript(m.text))) return null;
+  return (
+    <button type="button" className="wa-extra-ask" onClick={(e) => (e.stopPropagation(), void (voice ? voiceMessageText(m.id, lang) : translateMessage(m.id, m.text, lang)))} data-wa-extra-ask>
+      {t(voice ? 'wa.voiceText' : 'wa.translate')}
+    </button>
+  );
+}
+
 /* ---------- A message ---------- */
 
 interface BubbleProps {
@@ -564,6 +597,8 @@ const Bubble = memo(function Bubble({ m, tail, gap, author, quoteName, desk, onP
           {quote}
           {inner}
           {kind === 'place' ? null : words}
+          {/* Audit 27/11: its translation or a voice message's words (asked by a tap, kept in memory only). */}
+          {!m.me && <ExtraLine m={m} kind={kind} />}
           {foot}
           {/* A PC (v0.87, as WhatsApp's own window): ⌄ in the corner while the pointer is over it — the message's menu. */}
           {desk && (
@@ -1641,6 +1676,9 @@ export function ChatThread({
     const hasFile = !!m.file && !m.pending;
     return [
       ...(!m.pending && !m.failed ? [{ key: 'reply', label: t('wa.reply'), icon: IconArrowBackUp, onClick: () => onReply(m) }] : []),
+      // Audit 27/11: in the manager's language; a voice message in words.
+      ...(!m.me && m.text?.trim() ? [{ key: 'translate', label: t('wa.translate'), icon: IconLanguage, onClick: () => void translateMessage(m.id, m.text, lang) }] : []),
+      ...(!m.me && (kindOf(m.type) === 'voice' || kindOf(m.type) === 'audio') ? [{ key: 'voiceText', label: t('wa.voiceText'), icon: IconTextCaption, onClick: () => void voiceMessageText(m.id, lang) }] : []),
       ...(m.text ? [{ key: 'copy', label: t('wa.copy'), icon: IconCopy, onClick: () => void copyText(m.text).then((ok) => ok && notifications.show({ color: 'green', message: t('common.copied') })) }] : []),
       ...(!m.pending && !m.failed ? [{ key: 'forward', label: t('wa.forward'), icon: IconArrowForwardUp, onClick: () => setForwarding(m) }] : []),
       ...(hasFile ? [{ key: 'file', label: t(desk ? 'wa.save' : 'wa.share'), icon: desk ? IconDownload : IconShare2, onClick: () => void fileOf(m).then((f) => f && (desk ? downloadFile(f) : shareOrDownload(f))) }] : []),

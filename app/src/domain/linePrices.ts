@@ -1,5 +1,6 @@
 import { lineName } from './items';
 import { labourWords, plainLabour } from './labourName';
+import type { TogetherHint } from './together';
 import type { ApprovalState, Lang } from './types';
 
 /*
@@ -34,7 +35,14 @@ export interface Suggestion {
 }
 export type Suggestions = { list: Map<string, Suggestion>; top: string[] };
 /** Per sheet: work (the labour charges), parts, services; `work` — every line that is not a part (the job's chips). */
-export type SuggestionSet = { labor: Suggestions; part: Suggestions; service: Suggestions; work: Suggestions };
+export type SuggestionSet = {
+  labor: Suggestions;
+  part: Suggestions;
+  service: Suggestions;
+  work: Suggestions;
+  /** What usually goes with each title (audit 27/11, domain/together.ts) — the history, then the starter rules. */
+  together?: Map<string, TogetherHint[]>;
+};
 
 /** A line of the history, as it is read. */
 export interface HistLine {

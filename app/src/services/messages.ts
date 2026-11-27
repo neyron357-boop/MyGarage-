@@ -80,11 +80,22 @@ export type SimpleTemplate =
   | 'invoice'
   | 'documents'
   | 'followUp'
-  | 'serviceDue';
+  | 'serviceDue'
+  | 'declinedOffer'
+  | 'bookedTomorrow';
 
 export function simpleMessage(tpl: SimpleTemplate, ctx: MsgContext, lang: Lang, vars: Record<string, string | number> = {}): string {
   const t = tFor(lang);
   return tidy(t(`msg.${tpl}`, { ...base(ctx, lang), ...vars }));
+}
+
+/**
+ * The words that go with the invoice (audit 27/11): nothing to pay — «the documents»; the car still here — «ready, amount
+ * due»; the car already gone (handed over on debt, closed with a balance) — a payment reminder, never «your car is ready».
+ */
+export function invoiceTemplate(stage: Order['stage'], dueFils: number): SimpleTemplate {
+  if (dueFils <= 0) return 'documents';
+  return stage === 'delivered' || stage === 'closed' ? 'paymentReminder' : 'carReady';
 }
 
 /** Itemized estimate / supplement text; the customer answers in the chat. */

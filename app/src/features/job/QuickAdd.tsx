@@ -1,15 +1,19 @@
 import { ActionIcon, Modal, Text, TextInput } from '@mantine/core';
 import { IconArrowUp, IconBuildingStore, IconPackage, IconPlus, IconSearch, IconSparkles, IconTool, IconX, type Icon } from '@tabler/icons-react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { db } from '../../db/db';
 import { lineName } from '../../domain/items';
+import { hintsFor } from '../../domain/together';
+import type { JobTemplate } from '../../domain/types';
 import type { Suggestion, SuggestionSet } from '../../domain/linePrices';
 import { formatAed } from '../../domain/money';
 import { autoMatches, exactTitle, guessKind, quickMatches, sideOf, typedPrice, type AutoKind } from '../../domain/quickAdd';
 import { matchPartName } from '../../domain/partsVocab';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf } from '../../domain/vat';
 import { aiAfterLine } from '../../services/ai';
-import { addItem, ensureLabourLine } from '../../services/estimate';
+import { addItem, addTemplate, ensureLabourLine } from '../../services/estimate';
 import { removeLines, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
@@ -102,14 +106,14 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
   /** A suggestion's price as the line will show it (with VAT if it was typed with VAT). */
   const shown = (s: Suggestion) => enteredPrice({ unitPriceFils: s.price, unitGrossFils: s.gross }, s.rate || b.settings.vatRateBp, vatModeOf({ vatRateBp: s.rate, unitGrossFils: s.gross }, incl));
 
-  const add = (title: string) => {
+  const add = (title: string, forced?: AutoKind) => {
     // In the tap: the keyboard stays up for the next one.
     focus();
     const name = lineName(title.trim());
     if (!name) return;
     const s = sugOf(name);
     // The kind: forced by the row above the keyboard, else the suggestion's own, else what the name says (v0.91.7).
-    const guess = auto ? (kindOfMatch.has(name) ? { kind: kindOfMatch.get(name)!, sure: true } : guessKind(name, suggestions, matchPartName(name).known)) : undefined;
+    const guess = forced ? { kind: forced, sure: true } : auto ? (kindOfMatch.has(name) ? { kind: kindOfMatch.get(name)!, sure: true } : guessKind(name, suggestions, matchPartName(name).known)) : undefined;
     const kindNow: AutoKind = guess?.kind ?? (mode === 'auto' ? 'part' : mode);
     setQ('');
     return run(async () => {
@@ -146,6 +150,30 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
     });
   };
 
+  // The job templates (audit 27/11: seeded, never on the job before) — while nothing is typed, one tap adds the lot.
+  const templates = useLiveQuery(() => (opened ? db.jobTemplates.filter((x) => x.active).toArray() : Promise.resolve([] as JobTemplate[])), [opened]);
+  const docLang = b.order.docLanguage ?? 'en';
+  /** A template line's price from the garage's own history (this car, customer, model…); the template's figure otherwise. */
+  const historyPrice = (ti: JobTemplate['items'][number]) => {
+    const title = lineName((docLang === 'ru' ? ti.titleRu || ti.titleEn : ti.titleEn || ti.titleRu).trim());
+    const s = (ti.kind === 'part' ? suggestions?.part : suggestions?.work)?.list.get(title);
+    return s && s.price > 0 && s.from !== 'list' ? { unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) } : { unitPriceFils: 0 };
+  };
+  const addTpl = (tpl: JobTemplate) => {
+    focus();
+    return run(async () => {
+      const lines = await addTemplate(b.order.id, tpl.id, 'A', tpl.items.map(historyPrice));
+      await syncStage(b.order.id);
+      forgetSuggestions();
+      haptic('light');
+      setAdded((a) => [...a, ...lines.map((l) => ({ id: l.id, title: lineName((docLang === 'ru' ? l.titleRu || l.titleEn : l.titleEn || l.titleRu) ?? ''), kind: (l.kind === 'part' ? 'part' : 'labor') as AutoKind }))]);
+    });
+  };
+  // What usually goes with what was just added (domain/together.ts): not on the job yet, a tap adds it.
+  const onJob = useMemo(() => b.items.flatMap((i) => [i.titleEn, i.titleRu].filter((x): x is string => !!x)), [b.items]);
+  const hints = useMemo(() => hintsFor(suggestions?.together, added.map((a) => a.title), [...onJob, ...added.map((a) => a.title)]), [suggestions, added, onJob]);
+  const idle = !q.trim();
+
   const placeholder = t(mode === 'auto' ? 'qa.autoPlaceholder' : mode === 'part' ? 'qi.partPlaceholder' : mode === 'labor' ? 'qi.workPlaceholder' : 'qi.servicePlaceholder');
   return (
     <Modal opened={opened} onClose={onClose} title={added.length ? t('qa.addedN', { n: added.length }) : t('qa.title')} classNames={{ content: 'sheet-grouped qa-sheet' }}>
@@ -161,6 +189,35 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
                 </button>
               </span>
             ))}
+          </div>
+        )}
+        {idle && (hints.length > 0 || (!added.length && !!templates?.length)) && (
+          <div className="qa-hints">
+            {hints.length > 0 && (
+              <>
+                <Text className="qa-hints-title">{t('qa.together')}</Text>
+                <div className="chip-row" data-qa-together>
+                  {hints.map((h) => (
+                    <button key={h.title} type="button" className="chip" onMouseDown={keep} onClick={() => add(h.title, h.kind)}>
+                      <IconPlus size={14} stroke={2.4} aria-hidden />
+                      {h.title}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {!added.length && !!templates?.length && (
+              <>
+                <Text className="qa-hints-title">{t('qa.templates')}</Text>
+                <div className="chip-row" data-qa-templates>
+                  {templates.map((tpl) => (
+                    <button key={tpl.id} type="button" className="chip" onMouseDown={keep} onClick={() => addTpl(tpl)}>
+                      {uiLang === 'ru' ? tpl.titleRu : tpl.titleEn}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
         {(matches.length > 0 || typed) && (

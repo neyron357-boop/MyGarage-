@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer, EstimateVersion, Order, OrderItem, SnapshotItem, Vehicle } from '../domain/types';
-import { jobShareText, linesText, partNamesText, telegramChatUrl, versionMessage, whatsappUrl } from './messages';
+import { invoiceTemplate, jobShareText, linesText, partNamesText, telegramChatUrl, versionMessage, whatsappUrl } from './messages';
 
 describe('quotation message', () => {
   it('names the discount once, right before the total', () => {
@@ -79,5 +79,16 @@ describe('contact links', () => {
 
   it('builds WhatsApp links with digits only', () => {
     expect(whatsappUrl('+971501234567', 'Привет')).toBe('https://wa.me/971501234567?text=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82');
+  });
+});
+
+describe('the words with the invoice (audit 27/11)', () => {
+  it('nothing to pay — the documents; the car here — ready; the car gone on debt — a payment reminder, never «ready»', () => {
+    expect(invoiceTemplate('ready', 0)).toBe('documents');
+    expect(invoiceTemplate('ready', 12500)).toBe('carReady');
+    expect(invoiceTemplate('in_progress', 12500)).toBe('carReady');
+    expect(invoiceTemplate('delivered', 12500)).toBe('paymentReminder');
+    expect(invoiceTemplate('closed', 12500)).toBe('paymentReminder');
+    expect(invoiceTemplate('delivered', 0)).toBe('documents');
   });
 });

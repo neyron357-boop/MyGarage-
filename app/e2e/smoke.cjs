@@ -114,6 +114,9 @@ async function launchBrowser() {
   const TILE = { labor: 'Работа', part: 'Запчасть', service: 'Услуга' };
   const addLine = async (kind, name, { price, cost, keep } = {}) => {
     const open = await page.locator('.mantine-Modal-content .qa-field').filter({ visible: true }).count();
+    // (The tap guard — ui/tapGuard.ts — drops a tap on another control near the last one right after an action, e.g. «Сохранить»
+    // of the sheet before: a person does not tap that fast; the scenario waits as a person would.)
+    if (!open) await page.waitForTimeout(400);
     if (!open) await front('[data-add-line]').first().click();
     const dlg = page.locator('.mantine-Modal-content').filter({ has: page.locator('.qa-field') });
     await dlg.waitFor();
@@ -3646,8 +3649,9 @@ async function launchBrowser() {
     const notify = () => page.evaluate(async () => (await (await import('/src/db/db.ts')).db.settings.get('main'))?.notify ?? null);
     await page.goto(BASE + '#/notify');
     await front('[data-rule]').first().waitFor();
-    // v0.81 (the user's brief: «убрать автоматические уведомления «Нужно отправить цену»»): twelve kinds — no price.
-    if ((await front('[data-rule]').count()) !== 12) throw new Error('twelve kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
+    // v0.81 (the user's brief: «убрать автоматические уведомления «Нужно отправить цену»»): no price; v0.93 (the audit) — the
+    // declined work offered again and tomorrow's booking: fourteen kinds.
+    if ((await front('[data-rule]').count()) !== 14) throw new Error('fourteen kinds of «Сегодня» are to be told of: ' + (await front('[data-rule]').count()));
     if (await front('[data-rule="price"]').count()) throw new Error('«Назвать цену» is still a notification');
     // A customer who has not answered — after two hours, every two hours; then the manager's own timing.
     const answer = front('.list-row').filter({ has: page.locator('[data-rule="answer"]') }).first();

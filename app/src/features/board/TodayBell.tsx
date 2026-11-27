@@ -1,6 +1,8 @@
 import { ActionIcon, Modal } from '@mantine/core';
 import {
   IconAlarm,
+  IconArrowBackUpDouble,
+  IconCalendarTime,
   IconArrowBackUp,
   IconBell,
   IconBuildingFactory2,
@@ -25,13 +27,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
 import { dubaiTime, formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
-import type { Task, TaskKind } from '../../domain/today';
+import { CUSTOMER_KINDS, type Task, type TaskKind } from '../../domain/today';
 import type { Customer, Reminder, Supplier } from '../../domain/types';
 import { simpleMessage } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { setBadge } from '../../services/push';
 import { doneReminder, openReminders, restoreReminder } from '../../services/reminders';
-import { loadPast, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
+import { customerMessage, loadPast, markBookingReminded, markDeclinedOffered, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
 import { EmptyState, Money, PlateText, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
@@ -58,6 +60,8 @@ export const TASK_META: Record<TaskKind, { icon: Icon; color: string }> = {
   service: { icon: IconDroplet, color: 'cobalt' },
   booked: { icon: IconCalendarEvent, color: 'gray' },
   reminder: { icon: IconAlarm, color: 'cobalt' },
+  declined: { icon: IconArrowBackUpDouble, color: 'violet' },
+  bookedTomorrow: { icon: IconCalendarTime, color: 'indigo' },
 };
 const META = TASK_META;
 
@@ -129,26 +133,46 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
         return t(task.late ? 'today.bookedLate' : 'today.booked', { time: dubaiTime(task.at) });
       case 'reminder':
         return task.text ?? t('reminder.title');
+      case 'declined':
+        return t('today.declined');
+      case 'bookedTomorrow':
+        return t('today.bookedTomorrow', { time: dubaiTime(byOrder.get(task.orderId ?? '')?.order.bookedFor ?? task.at) });
     }
   };
 
-  /** The customer's message, ready: "how is the car?" or "time for a service". */
+  /**
+   * The customer's message, ready: "how is the car?" (with the review link to everyone, audit 27/11 — Google forbids
+   * asking only the happy ones), "time for a service", the lines declined last time, tomorrow's booking.
+   */
   const write = (task: Task) => {
     const customer = customerOf(task);
     const vehicle = vehicleOf(task);
-    const order = past?.past.find((p) => p.order.id === task.orderId)?.order;
+    const was = past?.past.find((p) => p.order.id === task.orderId);
+    const order = byOrder.get(task.orderId ?? '')?.order ?? was?.order;
     if (!customer || !vehicle || !order) return;
-    const ctx = { customer, vehicle, order: order as never, garageName: bundles[0]?.settings.name ?? '' };
-    const tpl = task.kind === 'service' ? 'serviceDue' : 'followUp';
-    setSend({ task, customer, request: { text: simpleMessage(tpl, ctx, customer.docLanguage), template: tpl, lang: customer.docLanguage, orderId: task.orderId } });
+    const settings = bundles[0]?.settings;
+    const ctx = { customer, vehicle, order: order as never, garageName: settings?.name ?? '' };
+    const docLang = customer.docLanguage;
+    const msg = customerMessage(task, docLang, settings?.googleMapsUrl, was?.items ?? [], byOrder.get(task.orderId ?? '')?.order.bookedFor);
+    setSend({ task, customer, request: { text: simpleMessage(msg.tpl, ctx, docLang, msg.vars), template: msg.tpl, lang: docLang, orderId: task.orderId } });
   };
+  /** Sent, or not needed: the customer's thing leaves «Сегодня». */
+  const markDone = (task: Task) =>
+    task.kind === 'service'
+      ? markServiceReminded(task.vehicleId)
+      : !task.orderId
+        ? Promise.resolve()
+        : task.kind === 'declined'
+          ? markDeclinedOffered(task.orderId)
+          : task.kind === 'bookedTomorrow'
+            ? markBookingReminded(task.orderId)
+            : markFollowedUp(task.orderId);
   const dismiss = (task: Task) =>
     run(async () => {
-      if (task.kind === 'service') await markServiceReminded(task.vehicleId);
-      else if (task.orderId) await markFollowedUp(task.orderId);
+      await markDone(task);
       haptic('light');
     });
-  const isCustomer = (task: Task) => task.kind === 'followUp' || task.kind === 'service';
+  const isCustomer = (task: Task) => CUSTOMER_KINDS.includes(task.kind);
   /** A reminder done from the list (a repeating one moves on to its next time), with «Отменить». */
   const done = (task: Task) =>
     run(async () => {
@@ -232,7 +256,7 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
           customer={send.customer}
           request={send.request}
           onClose={() => setSend(null)}
-          onSent={() => void (send.task.kind === 'service' ? markServiceReminded(send.task.vehicleId) : send.task.orderId && markFollowedUp(send.task.orderId))}
+          onSent={() => void markDone(send.task)}
         />
       )}
     </>

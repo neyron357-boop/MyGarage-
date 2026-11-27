@@ -1,8 +1,9 @@
 import { db } from '../db/db';
-import { addDays, hoursBetween, nowIso } from '../domain/dates';
-import { isAwaitingClient } from '../domain/items';
-import { FOLLOW_UP_DAYS, SERVICE_DAYS, SERVICE_UNTIL, todayTasks, type OpenJob, type PastJob, type Task } from '../domain/today';
-import type { Customer, Order, Reminder, Vehicle } from '../domain/types';
+import { addDays, dubaiTime, hoursBetween, nowIso } from '../domain/dates';
+import { isAwaitingClient, itemTitle } from '../domain/items';
+import { declinedLines, DECLINED_DAYS, DECLINED_UNTIL, FOLLOW_UP_DAYS, SERVICE_DAYS, SERVICE_UNTIL, todayTasks, type OpenJob, type PastJob, type Task } from '../domain/today';
+import type { Customer, Lang, Order, Reminder, Vehicle } from '../domain/types';
+import type { SimpleTemplate } from './messages';
 import { phaseOf } from './flow';
 import type { OrderBundle } from './orders';
 
@@ -14,7 +15,7 @@ export function openJobOf(b: OrderBundle): OpenJob {
     const v = b.versions.find((x) => x.id === i.lastVersionId);
     if (v && (!since || v.sentAt < since)) since = v.sentAt;
   }
-  return { order: b.order, phase: phaseOf(b), items: b.items, debts: b.debts, waitingSince: since };
+  return { order: b.order, phase: phaseOf(b), items: b.items, debts: b.debts, waitingSince: since, hasPhone: !!(b.customer?.phone || b.customer?.whatsapp) };
 }
 
 /**
@@ -36,7 +37,8 @@ export async function loadPast(now = nowIso()): Promise<{ past: PastJob[]; vehic
   }
   const wanted = [...last.values()].filter((o) => {
     const days = hoursBetween(o.closedAt!, now) / 24;
-    return days >= SERVICE_DAYS - 1 && days <= SERVICE_UNTIL + 1;
+    // …and (audit 27/11) a month after, for the lines declined on it.
+    return (days >= SERVICE_DAYS - 1 && days <= SERVICE_UNTIL + 1) || (days >= DECLINED_DAYS - 1 && days <= DECLINED_UNTIL + 1);
   });
   const [items, customers, vehicles] = await Promise.all([
     wanted.length ? db.items.where('orderId').anyOf(wanted.map((o) => o.id)).toArray() : [],
@@ -71,10 +73,38 @@ export function tasksFor(bundles: OrderBundle[], past: Awaited<ReturnType<typeof
   });
 }
 
+/**
+ * The customer's message of a «Сегодня» thing: "how is the car?" — with the Google review link when the garage has one,
+ * to every customer alike (audit 27/11: asking only the happy ones is «review gating», which Google's rules forbid);
+ * "time for a service"; the lines declined last time, by name; tomorrow's booking, its time.
+ */
+export function customerMessage(task: Pick<Task, 'kind' | 'at'>, lang: Lang, mapsUrl: string | undefined, items: PastJob['items'], bookedFor?: string): { tpl: SimpleTemplate; vars: Record<string, string> } {
+  switch (task.kind) {
+    case 'service':
+      return { tpl: 'serviceDue', vars: {} };
+    case 'declined':
+      return { tpl: 'declinedOffer', vars: { lines: declinedLines(items).map((i) => itemTitle(i, lang)).filter(Boolean).join(', ') } };
+    case 'bookedTomorrow':
+      return { tpl: 'bookedTomorrow', vars: { time: dubaiTime(bookedFor ?? task.at) } };
+    default:
+      return mapsUrl?.trim() ? { tpl: 'reviewRequest', vars: { link: mapsUrl.trim() } } : { tpl: 'followUp', vars: {} };
+  }
+}
+
 /** "How is the car?" asked (or not needed): the job leaves the Today list. */
 export async function markFollowedUp(orderId: string): Promise<void> {
   // A closed job: only this mark changes (its stage, documents and money stay).
   await db.orders.update(orderId, { followedUpAt: nowIso() });
+}
+
+/** The declined lines offered again (or not needed, audit 27/11): the job leaves the Today list. */
+export async function markDeclinedOffered(orderId: string): Promise<void> {
+  await db.orders.update(orderId, { declinedOfferedAt: nowIso() });
+}
+
+/** The customer reminded of tomorrow's booking (or not needed, audit 27/11). */
+export async function markBookingReminded(orderId: string): Promise<void> {
+  await db.orders.update(orderId, { bookingRemindedAt: nowIso() });
 }
 
 /** "Time for a service" sent (or not needed): the car leaves the list until its next job. */

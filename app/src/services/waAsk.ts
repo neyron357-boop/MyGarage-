@@ -3,7 +3,8 @@ import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { withMarkup } from '../domain/money';
 import { askFor, kindOnly, netUnit, parseReply, type AskLine, type ParsedReply } from '../domain/supplierReply';
-import { aiReadReply, type AiReply } from './ai';
+import { aiReadReply, aiVoiceText, type AiReply } from './ai';
+import { kindOf } from '../domain/whatsapp';
 import type { Order, OrderItem, PartAsk, PartOffer, Supplier, Vehicle } from '../domain/types';
 import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
 import { waAutoOf } from '../domain/waAuto';
@@ -13,7 +14,7 @@ import { updateItem } from './estimate';
 import { partsRequestText } from './messages';
 import { saveSupplier } from './parts';
 import { getSettings } from './settings';
-import { blobBase64, queueWa } from './waOutbox';
+import { blobBase64, queueWa, type OutItem } from './waOutbox';
 import { chatOfPhone, fetchChatMessages, loadChatRoles, numberOnWa, onWaEvent, waReady, waStore } from './whatsapp';
 
 /*
@@ -81,7 +82,7 @@ export async function askSuppliers(orderId: string, picks: AskPick[], x: { items
   const batch = uid().slice(0, 8);
   const noNumber: string[] = [];
   const asks: PartAsk[] = [];
-  const items = [];
+  const items: OutItem[] = [];
   for (const sup of suppliers) {
     const phone = phoneOf(sup);
     if (!phone) {
@@ -92,15 +93,25 @@ export async function askSuppliers(orderId: string, picks: AskPick[], x: { items
     const files = isUsed ? used : sheets;
     const text = partsRequestText(vehicle as Vehicle, x.items, { diagrams: !isUsed && sheets.length > 0, used: isUsed });
     const key = `ask:${orderId}:${batch}:${sup.id}`;
-    items.push({ key, phone, gap: s.ask.gapSec, title: `#${order.number} · ${sup.name}`, parts: [{ text }, ...files], ...(later ? { after: later } : {}) });
     // Asked when it goes: an answer is looked for after it.
-    asks.push({ id: `${batch}:${sup.id}`, supplierId: sup.id, phone, at: later ? new Date(later).toISOString() : nowIso(), items: x.items.map((i) => i.id), text, via: 'server', key, used: isUsed || undefined });
+    const ask: PartAsk = { id: `${batch}:${sup.id}`, supplierId: sup.id, phone, at: later ? new Date(later).toISOString() : nowIso(), items: x.items.map((i) => i.id), text, via: 'server', key, used: isUsed || undefined };
+    asks.push(ask);
+    items.push({ key, phone, gap: s.ask.gapSec, title: `#${order.number} · ${sup.name}`, parts: [{ text }, ...files], ask: { orderId, ask }, ...(later ? { after: later } : {}) });
   }
   if (!items.length) return { asked: 0, noNumber };
-  await queueWa(items);
-  await keepAsks(orderId, asks);
-  askPhones = undefined;
+  const went = await queueWa(items);
+  // Kept on the job only once it went (audit 27/11): a request dropped in «Проверить и отправить» is not «asked» —
+  // `keepSentAsks` keeps it at «Отправить». Handed over already (no review on this device) — kept now.
+  await keepSentAsks(items.filter((_, k) => went[k]?.state !== 'confirm'));
   return { asked: asks.length, noNumber };
+}
+
+/** The supplier requests among what really went (audit 27/11): each kept on its job, its answer looked for after it. */
+export async function keepSentAsks(items: OutItem[]): Promise<void> {
+  const byJob = new Map<string, PartAsk[]>();
+  for (const it of items) if (it.ask) byJob.set(it.ask.orderId, [...(byJob.get(it.ask.orderId) ?? []), it.ask.ask]);
+  for (const [orderId, asks] of byJob) await keepAsks(orderId, asks);
+  askPhones = undefined;
 }
 
 /** The request opened by hand (the supplier's chat by its link, the list in it): its answer is read the same way. */
@@ -231,8 +242,12 @@ async function readNow(phones?: string[]): Promise<number> {
     }
     const first = Math.min(...asks.map((a) => Date.parse(a.ask.at))) - 60_000;
     const seen = new Set(asks.flatMap((a) => (a.ask.replies ?? []).map((r) => r.id)));
-    for (const m of msgs) {
-      if (m.me || m.t < first || seen.has(m.id) || !(m.text ?? '').trim()) continue;
+    for (const raw of msgs) {
+      if (raw.me || raw.t < first || seen.has(raw.id)) continue;
+      // Audit 27/11: an answer said aloud (a voice message up to 3 minutes) — heard by the garage's AI, then read as words.
+      const heard = !(raw.text ?? '').trim() && (kindOf(raw.type) === 'voice' || kindOf(raw.type) === 'audio') && (raw.file?.sec ?? 0) <= 180 ? await aiVoiceText(raw.id) : undefined;
+      const m = heard ? { ...raw, text: (heard.english || heard.text).trim() } : raw;
+      if (!(m.text ?? '').trim()) continue;
       const target = askFor({ t: m.t, text: m.text, quote: m.quote?.text }, asks.map((a) => ({ ...a.ask, at: Date.parse(a.ask.at), ref: a })));
       if (!target) continue;
       // A list numbered past that request's parts answers another one to the same supplier (the newest that fits).
@@ -242,7 +257,17 @@ async function readNow(phones?: string[]): Promise<number> {
       // request, which line, what price (a light model, only for such a message).
       const read = await aiFallback(m, [target.ref, ...others]);
       if (read) got = await applyReply(read.x.order.id, read.x.ask.id, m, settings, s, false, read.parsed);
-      if (!read)
+      // A voice answer read by the rules: its prices still came through the AI's ears — marked so (`PartOffer.ai`).
+      if (!read && heard)
+        for (const x of [target.ref, ...others]) {
+          const { lines } = await linesOf(x);
+          const v = await db.vehicles.get(x.order.vehicleId);
+          const parsed = parseReply(m.text, lines, { make: v?.make });
+          if (!parsed.lines.length) continue;
+          got = await applyReply(x.order.id, x.ask.id, m, settings, s, false, { ...parsed, ai: true });
+          if (got >= 0) break;
+        }
+      if (!read && !heard)
         for (const x of [target.ref, ...others]) {
           got = await applyReply(x.order.id, x.ask.id, m, settings, s, true);
           if (got >= 0) break;

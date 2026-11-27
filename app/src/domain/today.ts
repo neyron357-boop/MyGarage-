@@ -9,7 +9,9 @@ import type { Debt, Order, OrderItem, Reminder, Vehicle } from './types';
  * debt, and the customers to write to (how is the car, time for a service). Nothing is typed in — but the manager's
  * own reminders (v0.74): what he set for himself is due here on its day. v0.74 too: a car booked for today.
  */
-export type TaskKind = 'promised' | 'answer' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder';
+export type TaskKind = 'promised' | 'answer' | 'order' | 'pickup' | 'returnBy' | 'outsource' | 'collect' | 'debt' | 'followUp' | 'service' | 'booked' | 'reminder' | 'declined' | 'bookedTomorrow';
+/** The kinds that are a message to the customer (a tap opens it, ready; × — not needed). */
+export const CUSTOMER_KINDS: TaskKind[] = ['followUp', 'service', 'declined', 'bookedTomorrow'];
 
 export interface Task {
   kind: TaskKind;
@@ -34,8 +36,10 @@ export interface Task {
 }
 
 export interface OpenJob {
-  order: Pick<Order, 'id' | 'vehicleId' | 'customerId' | 'promisedReadyAt' | 'stageChangedAt' | 'bookedFor'>;
+  order: Pick<Order, 'id' | 'vehicleId' | 'customerId' | 'promisedReadyAt' | 'stageChangedAt' | 'bookedFor'> & Partial<Pick<Order, 'bookingRemindedAt'>>;
   phase: Phase;
+  /** The customer can be written to (a booking reminded the evening before). */
+  hasPhone?: boolean;
   items: OrderItem[];
   debts: Pick<Debt, 'id' | 'status' | 'dueDate' | 'amountFils'>[];
   /** When the lines waiting for the customer's answer were sent (the oldest). */
@@ -43,7 +47,7 @@ export interface OpenJob {
 }
 
 export interface PastJob {
-  order: Pick<Order, 'id' | 'vehicleId' | 'customerId' | 'closedAt' | 'outcome' | 'followedUpAt' | 'imported'>;
+  order: Pick<Order, 'id' | 'vehicleId' | 'customerId' | 'closedAt' | 'outcome' | 'followedUpAt' | 'imported'> & Partial<Pick<Order, 'declinedOfferedAt'>>;
   items: Pick<OrderItem, 'titleEn' | 'titleRu' | 'kind' | 'approvalState'>[];
   /** The customer can be written to. */
   hasPhone: boolean;
@@ -67,6 +71,11 @@ const FOLLOW_UP_UNTIL = 14;
 /** An oil service is due again after about half a year (not reminded after more than a year). */
 export const SERVICE_DAYS = 180;
 export const SERVICE_UNTIL = 400;
+/** Audit 27/11: what the customer declined on the car's last visit — offered again this many days after (not after `DECLINED_UNTIL`). */
+export const DECLINED_DAYS = 30;
+export const DECLINED_UNTIL = 60;
+/** The customer reminded of a booking the day before, from this hour (Dubai). */
+const BOOKED_EVE_UTC = 'T13:00:00.000Z';
 /** A part's return deadline shows this many days ahead. */
 const RETURN_AHEAD = 2;
 
@@ -74,6 +83,11 @@ const OIL = /\boil\b|масл/i;
 /** A job that was an oil service (the reminder for the next one). */
 export function wasOilService(items: PastJob['items']): boolean {
   return items.some((i) => i.kind !== 'discount' && i.approvalState === 'approved' && OIL.test(`${i.titleEn ?? ''} ${i.titleRu ?? ''}`));
+}
+
+/** The lines the customer said no to (a discount is not work): what can be offered again. */
+export function declinedLines<T extends Pick<OrderItem, 'kind' | 'approvalState'>>(items: T[]): T[] {
+  return items.filter((i) => i.kind !== 'discount' && i.kind !== 'fee' && i.approvalState === 'declined');
 }
 
 const working: Phase[] = ['look', 'price', 'wait', 'work'];
@@ -89,6 +103,9 @@ export function todayTasks(input: TodayInput): Task[] {
     openVehicles.add(o.vehicleId);
     const base = { orderId: o.id, vehicleId: o.vehicleId, customerId: o.customerId };
     const since = (at: string) => hoursBetween(at, now);
+    // A booking tomorrow (audit 27/11): the customer reminded the day before — a message ready, from 17:00 Dubai.
+    if (j.phase === 'booked' && o.bookedFor && j.hasPhone && !o.bookingRemindedAt && dubaiDate(o.bookedFor) === shiftDay(today, 1))
+      tasks.push({ ...base, kind: 'bookedTomorrow', key: `bookedTomorrow:${o.id}`, at: `${today}${BOOKED_EVE_UTC}`, late: false });
     // A car booked for today (v0.74): due at its time; its time gone and the car not here — late.
     if (j.phase === 'booked' && o.bookedFor && dubaiDate(o.bookedFor) <= today) tasks.push({ ...base, kind: 'booked', key: `booked:${o.id}`, at: o.bookedFor, late: o.bookedFor < now });
     if (o.promisedReadyAt && working.includes(j.phase) && dubaiDate(o.promisedReadyAt) <= today)
@@ -166,7 +183,17 @@ export function todayTasks(input: TodayInput): Task[] {
     tasks.push({ kind: 'service', key: `service:${vehicleId}`, orderId: o.id, vehicleId, customerId: o.customerId, at: addDays(o.closedAt, SERVICE_DAYS), late: false });
   }
 
+  // Audit 27/11: the lines declined on the car's last visit, offered again a month later (the car not here, not offered yet).
+  for (const [vehicleId, p] of last) {
+    const o = p.order;
+    if (!o.closedAt || o.imported || o.declinedOfferedAt || openVehicles.has(vehicleId) || !p.hasPhone) continue;
+    const d = daysAgo(o.closedAt);
+    if (d < DECLINED_DAYS || d > DECLINED_UNTIL) continue;
+    const n = declinedLines(p.items).length;
+    if (n) tasks.push({ kind: 'declined', key: `declined:${o.id}`, orderId: o.id, vehicleId, customerId: o.customerId, at: addDays(o.closedAt, DECLINED_DAYS), late: false, count: n });
+  }
+
   // Late first, then by time; the customers to write to after the cars on the ground.
-  const rank = (t: Task) => (t.late ? 0 : t.kind === 'followUp' || t.kind === 'service' ? 2 : 1);
+  const rank = (t: Task) => (t.late ? 0 : CUSTOMER_KINDS.includes(t.kind) ? 2 : 1);
   return tasks.sort((a, b) => rank(a) - rank(b) || a.at.localeCompare(b.at));
 }

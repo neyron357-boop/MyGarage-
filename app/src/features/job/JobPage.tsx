@@ -79,7 +79,7 @@ import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, ensureLabourLine, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, setUnconfirmed, syncStage, takeBack } from '../../services/flow';
-import { partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { invoiceTemplate, partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
 import { waReady } from '../../services/whatsapp';
 import { useWaSel } from '../../ui/waSel';
 import { useOpenChat } from '../whatsapp/openChat';
@@ -145,7 +145,8 @@ import { qtyShort } from '../../domain/sides';
 import { labourWords, plainLabour } from '../../domain/labourName';
 import { QtyCheckList, QtyCheckSheet } from './QtyCheck';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
-import { PrevVisit } from './PrevVisit';
+import { DeclinedBefore, PrevVisit } from './PrevVisit';
+import { CustomerAnswerRow } from './CustomerAnswer';
 import { ShareJobButton } from './ShareJob';
 import { ClientView } from './ClientView';
 import { lockForClient, useClientLock } from '../../ui/clientLock';
@@ -775,11 +776,13 @@ export function JobPage() {
       photos: live.filter((i) => i.approvalState === 'approved').flatMap((i) => i.mediaIds ?? []),
     });
   };
+  // When the customer was told of this invoice (the message logged after it was issued), audit 27/11.
+  const toldAt = inv ? b.messages.filter((m) => ['carReady', 'documents', 'paymentReminder'].includes(m.template) && m.createdAt >= inv.issuedAt).map((m) => m.createdAt).sort().pop() : undefined;
   const sendInvoice = () =>
     inv &&
     setSend({
-      text: due > 0 ? simpleMessage('carReady', ctx, docLang, { amount: formatAed(due, docLang) }) : simpleMessage('documents', ctx, docLang),
-      template: due > 0 ? 'carReady' : 'documents',
+      text: simpleMessage(invoiceTemplate(b.order.stage, due), ctx, docLang, { amount: formatAed(due, docLang) }),
+      template: invoiceTemplate(b.order.stage, due),
       lang: docLang,
       orderId: oid,
       pdf: () => invoicePdf(inv.id),
@@ -1338,6 +1341,8 @@ export function JobPage() {
         </UnstyledButton>
       )}
       <PrevVisit order={b.order} settings={b.settings} lang={docLang} />
+      {/* Audit 27/11: what the customer said no to on an earlier visit — a tap puts it on this job. */}
+      {addable && <DeclinedBefore orderId={b.order.id} order={b.order} onJob={b.items.flatMap((i) => [i.titleEn, i.titleRu].filter((x): x is string => !!x))} lang={docLang} />}
       <ObdLine orderId={b.order.id} scans={b.order.obdScans ?? []} open={open} />
       {/* One flow of chips: when the car was promised, the car's own papers (VIN, Mulkiya, Job card, the mileage),
           who does the job (one or several — each chip on or off by itself), its suppliers. On a phone two rows that
@@ -1401,6 +1406,24 @@ export function JobPage() {
               </Group>
             }
           />
+          {/* Audit 27/11: the invoice told to the customer or not — said here, sent by hand (nothing goes by itself). */}
+          {(phase === 'pay' || phase === 'out' || phase === 'debt') && (
+            <ListRow
+              left={<IconFileInvoice size={20} stroke={1.9} color={`var(--mantine-color-${toldAt ? 'green' : 'violet'}-6)`} aria-hidden />}
+              title={
+                <Text span inherit c={toldAt ? 'green.7' : 'dimmed'} data-ready-state={toldAt ? 'told' : 'untold'}>
+                  {toldAt ? t('job.readyTold', { time: shortDuration(hoursBetween(toldAt), lang) }) : t('job.readyUntold')}
+                </Text>
+              }
+              right={
+                toldAt ? undefined : (
+                  <Button variant="light" color="violet" size="compact-md" onClick={sendInvoice}>
+                    {t('job.quoteSend')}
+                  </Button>
+                )
+              }
+            />
+          )}
           {inv.lines
             .filter((l) => l.kind !== 'discount')
             .map((l, k) => (
@@ -1439,6 +1462,8 @@ export function JobPage() {
         {(lines.length > 0 || refusedLines.length > 0) && (
           <List animate={!picking}>
             {/* A long job comes in two steps (v0.56): its first lines with the screen, the rest a frame later. */}
+            {/* Audit 27/11: the customer's WhatsApp answer to the quote, a proposal — one tap records it; first, above the lines, where it is seen. */}
+            {phase === 'wait' && <CustomerAnswerRow orderId={oid} phone={c?.whatsapp || c?.phone} />}
             <FirstRows rows={lines.map(row)} />
             {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
             {refusedLines.map(row)}
@@ -1712,6 +1737,8 @@ export function JobPage() {
             await quickInvoice(oid, { day: invDay || undefined });
             haptic('success');
             scrollToTop();
+            // (Audit 27/11: no sheet pops up here — the customer is often at the counter to pay; «Клиенту не сказано ·
+            // Отправить» under the invoice says it, one tap.)
             return true;
           })
         }

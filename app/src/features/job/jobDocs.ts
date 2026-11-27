@@ -7,7 +7,7 @@ import type { EstimateVersion } from '../../domain/types';
 import { invoicePdf, quotationPdf, versionPdf } from '../../services/documents';
 import { previewVersion, sendVersion } from '../../services/estimate';
 import { phaseOf } from '../../services/flow';
-import { simpleMessage, versionMessage } from '../../services/messages';
+import { invoiceTemplate, simpleMessage, versionMessage } from '../../services/messages';
 import { bundleAmountDue, type OrderBundle } from '../../services/orders';
 import type { SendRequest } from '../../ui/SendDialog';
 
@@ -69,8 +69,8 @@ export function jobDocs(b: OrderBundle): JobDocs {
   const due = Math.max(0, bundleAmountDue(b));
   const invoice = inv
     ? (): SendRequest => ({
-        text: due > 0 ? simpleMessage('carReady', ctx, docLang, { amount: formatAed(due, docLang) }) : simpleMessage('documents', ctx, docLang),
-        template: due > 0 ? 'carReady' : 'documents',
+        text: simpleMessage(invoiceTemplate(b.order.stage, due), ctx, docLang, { amount: formatAed(due, docLang) }),
+        template: invoiceTemplate(b.order.stage, due),
         lang: docLang,
         orderId: oid,
         pdf: () => invoicePdf(inv.id),

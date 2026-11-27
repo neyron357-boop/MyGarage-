@@ -471,7 +471,8 @@ export const en: typeof ru = {
     mileageHistory: 'Mileage by visit',
   },
   // v0.81: the job's quick «＋» sheet and «+ Price».
-  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed' },
+  answer: { all: 'Agrees to all', none: 'Refuses all', option: 'Option {{n}}', some: 'Yes: {{agree}} · no: {{refuse}}', agree: 'Agree', refuse: 'Refuse' },
+  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
@@ -1174,6 +1175,8 @@ export const en: typeof ru = {
   job: {
     // v0.81: the quote's state in the job.
     quoteUnsent: 'Quote not sent',
+    readyUntold: 'Customer not told',
+    readyTold: 'Customer told · {{time}}',
     quoteNewUnsent: 'New lines not sent',
     quoteSend: 'Send',
     quoteSentAgo: 'Quote sent · {{time}}',
@@ -1193,6 +1196,7 @@ export const en: typeof ru = {
     profit: 'Profit',
     who: 'Who does it',
     prevVisit: 'Last visit',
+    declinedBefore: 'Declined last time',
     prevToday: 'Here today',
     prevDays: 'Here {{n}} d ago',
     prevMonths: 'Here {{n}} mo ago',
@@ -1827,7 +1831,7 @@ export const en: typeof ru = {
   },
   notify: {
     // v0.82: notification titles — a sign and what to do.
-    push: { answer: '📞 No answer from the customer', order: '📦 Parts to order', pickup: '🚚 Parts to collect', promised: '⏰ Promised to the customer', booked: '🚗 Booked — on the way', collect: '🔑 Ready — not collected', outsource: '🏭 Collect from outside', returnBy: '↩️ Return a part', debt: '💰 Debt overdue', reminder: '🔔 Reminder', followUp: '💬 Ask how the car is', service: '🛢 Invite for a service' },
+    push: { answer: '📞 No answer from the customer', order: '📦 Parts to order', pickup: '🚚 Parts to collect', promised: '⏰ Promised to the customer', booked: '🚗 Booked — on the way', collect: '🔑 Ready — not collected', outsource: '🏭 Collect from outside', returnBy: '↩️ Return a part', debt: '💰 Debt overdue', reminder: '🔔 Reminder', followUp: '💬 Ask how the car is', service: '🛢 Invite for a service', declined: '🔁 Offer the declined work again', bookedTomorrow: '📅 Remind of tomorrow’s booking' },
     pushDigest: '📋 Today',
     title: 'Notifications',
     kind: {
@@ -1843,6 +1847,8 @@ export const en: typeof ru = {
       debt: 'Debt overdue',
       reminder: 'Reminder',
       followUp: 'Ask how the car is',
+      declined: 'Offer declined work again',
+      bookedTomorrow: 'Remind of a booking',
       service: 'Invite for a service',
     },
     digestTitle: 'Today',
@@ -1917,6 +1923,8 @@ export const en: typeof ru = {
     collect: 'Ready · waiting {{time}}',
     debt: 'Debt overdue',
     followUp: 'How is the car?',
+    declined: 'Declined last time — offer again',
+    bookedTomorrow: 'Tomorrow at {{time}} — remind the customer',
     service: 'Service due',
     notNeeded: 'Not needed',
     more: '{{n}} more',
@@ -1932,6 +1940,12 @@ export const en: typeof ru = {
   },
   // The garage's WhatsApp in the app (v0.78): the garage's server is a linked device of the account.
   wa: {
+    // Audit 27/11: a message in the manager's language; a voice message in words.
+    translate: 'Translate',
+    voiceText: 'Text',
+    translating: 'Translating…',
+    voiceTextBusy: 'Listening…',
+    extraFailed: 'Could not',
     // v0.81: «Garage only», chats' statuses, voice messages, an expense to the boss.
     garageOnly: 'Garage only',
     // v0.83: a job's chat opens by a tap.
@@ -2550,6 +2564,8 @@ export const en: typeof ru = {
     months_many: '{{count}} months',
     months_other: '{{count}} months',
     followUp: 'Hello {{name}}! This is {{garage}}. How is your {{car}} after the repair? If anything bothers you, just write to us.',
+    declinedOffer: 'Hello {{name}}! This is {{garage}}. Last time we recommended for your {{car}} ({{plate}}): {{lines}}. Shall we book you in? Just reply.',
+    bookedTomorrow: 'Hello {{name}}! A reminder from {{garage}}: we are expecting your {{car}} ({{plate}}) tomorrow at {{time}}.',
     serviceDue: 'Hello {{name}}! It has been about six months since the oil change on your {{car}} ({{plate}}). Time for a service — reply and we will book you in. {{garage}}',
     booked: 'Hello {{name}}! We are expecting your {{car}} ({{plate}}) at {{garage}}. Job no. {{number}}.',
     carReceived: 'Hello {{name}}! Your {{car}} ({{plate}}) has been checked in at {{garage}}, job no. {{number}}. The check-in report with photos is attached. We will send the estimate after diagnostics.',

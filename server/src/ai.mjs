@@ -49,6 +49,11 @@ const TTL = 365 * DAY;
  * in front of the model instead of being asked of it.
  */
 const P = {
+  // Audit 27/11: a WhatsApp message in Arabic, Hindi/Urdu… for the manager; a voice message written down. Never kept.
+  translate: (to) =>
+    `Translate the WhatsApp message below into ${to === 'ru' ? 'Russian' : 'English'} for the manager of a car garage in the UAE. Keep numbers, prices, part numbers, car and part names as they are. "text": the translation; "from": the message's language (ISO 639-1); "text" is "" when the message is already in that language.`,
+  voice: () =>
+    `A WhatsApp voice message to a car garage in the UAE — a supplier with prices, a customer, a mechanic; English, Arabic, Hindi/Urdu, Russian or a mix. "text": what is said, word for word, numbers as digits; "english": the same in English ("" when it is English); "from": its language (ISO 639-1); "" for what cannot be heard.`,
   // v0.88 (the owner: «по VIN ИИ узнала… марку угадала, но модель неверная: верный Veloz, а ИИ написала Land Cruiser»): no
   // model named in the question — a light model with no thinking gave back the example; the VIN's parts said instead.
   vin: (vin, facts, built) =>
@@ -244,11 +249,11 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
    * low resolution (v0.89: a car's make — a few hundred tokens, not a thousand; a model that does not take it is asked
    * again without it); `'medium'` — a paper's letters (v0.90: a registration card in a WhatsApp request).
    */
-  async function ask(text, { kind = 'other', schema, images = [], models: list, timeout = 25_000, thinking = 'low', media } = {}) {
+  async function ask(text, { kind = 'other', schema, images = [], audio, models: list, timeout = 25_000, thinking = 'low', media } = {}) {
     if (!key()) throw httpError(503, 'ai off');
     const bodyFor = (model, res) => ({
       // Each picture under its own label («Picture 1:»…).
-      contents: [{ parts: [{ text }, ...images.flatMap((i, k) => [{ text: `Picture ${k + 1}:` }, { inline_data: { mime_type: i.type, data: i.data } }])] }],
+      contents: [{ parts: [{ text }, ...images.flatMap((i, k) => [{ text: `Picture ${k + 1}:` }, { inline_data: { mime_type: i.type, data: i.data } }]), ...(audio ? [{ text: 'Voice message:' }, { inline_data: { mime_type: audio.type, data: audio.data } }] : [])] }],
       generationConfig: {
         temperature: 0,
         maxOutputTokens: 2048,
@@ -505,6 +510,31 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         );
         return { ...value, by: model };
       });
+    },
+
+    /**
+     * Audit 27/11: a chat message in the manager's language (Arabic, Hindi/Urdu… → Russian or English). A light model, no
+     * thinking. The answer is NOT kept (the chat's words are never stored, v0.78) — asked each time it is tapped.
+     */
+    async translate({ text, to } = {}) {
+      const t = String(text ?? '').trim().slice(0, 2000);
+      if (!t) throw httpError(400, 'no text');
+      const { value, model } = await json(`${P.translate(to === 'ru' ? 'ru' : 'en')}\n\nMessage:\n${t}`, { type: 'object', properties: { text: { type: 'string' }, from: { type: 'string' } }, required: ['text', 'from'] }, { kind: 'translate', thinking: 'minimal', timeout: 20_000 });
+      return { text: String(value.text ?? ''), from: String(value.from ?? ''), by: model };
+    },
+
+    /**
+     * Audit 27/11: a voice message written down (and in English) — a supplier's prices said aloud, a customer's request.
+     * Gemini hears it (32 tokens a second: half a minute ≈ 1 000). NOT kept, as the chat's words never are.
+     */
+    async voice({ audio } = {}) {
+      const type = String(audio?.type ?? '').split(';')[0].trim().toLowerCase();
+      const data = String(audio?.data ?? '');
+      if (!/^audio\/(ogg|opus|mpeg|mp3|mp4|m4a|aac|wav|webm)$/.test(type) || data.length < 200 || data.length > 8_000_000) throw httpError(400, 'no voice');
+      // Gemini knows m4a, not mp4 (an iPhone's recording is AAC in MP4).
+      const mime = type === 'audio/mp4' ? 'audio/m4a' : type;
+      const { value, model } = await json(P.voice(), { type: 'object', properties: { text: { type: 'string' }, english: { type: 'string' }, from: { type: 'string' } }, required: ['text', 'english', 'from'] }, { kind: 'voice', audio: { type: mime, data }, thinking: 'minimal', timeout: 60_000 });
+      return { text: String(value.text ?? ''), english: String(value.english ?? ''), from: String(value.from ?? ''), by: model };
     },
 
     /** v0.86: what the labour charge is for, by the job's parts and work (a light model; kept for the same parts). */

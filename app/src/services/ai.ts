@@ -32,7 +32,7 @@ import { namedByParts, partNames, partsKey } from '../domain/labourName';
  * определения VIN.»): not to come back without his word.
  */
 
-export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request';
+export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request' | 'translate' | 'voice';
 type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
@@ -371,6 +371,31 @@ export interface AiReply {
 }
 
 /** A supplier's answer the rules found no price in, read by the AI (light model; none — undefined). */
+/**
+ * Audit 27/11: a chat message in the manager's language — asked by a tap, kept nowhere (the chat's words never are).
+ */
+export async function aiTranslate(text: string, to: 'ru' | 'en'): Promise<{ text: string; from: string } | undefined> {
+  if (!aiOn() || !text.trim()) return undefined;
+  try {
+    return await askAi<{ text: string; from: string }>('translate', { text, to }, `translate:${text.slice(0, 40)}`, 30_000);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Audit 27/11: a voice message written down — the server takes its sound from WhatsApp on the garage's PC itself (the
+ * phone sends only the message's id); kept nowhere.
+ */
+export async function aiVoiceText(id: string): Promise<{ text: string; english: string; from: string } | undefined> {
+  if (!aiOn() || !id) return undefined;
+  try {
+    return await askAi<{ text: string; english: string; from: string }>('voice', { id }, `voice:${id}`, 90_000);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function aiReadReply(text: string, quote: string, asks: { id: string; car: string; lines: string[] }[]): Promise<AiReply | undefined> {
   if (!aiOn() || !asks.length) return undefined;
   try {

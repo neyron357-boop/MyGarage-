@@ -24,6 +24,8 @@ import { DIRS, httpError } from './store.mjs';
  *        /api/ai/labour {parts, work}, /api/ai/reply {text, quote, asks}, /api/ai/roles {chats} — v0.86, light models
  *        /api/ai/car {image}              — a car's make and model off a small photo (v0.89)
  *        /api/ai/request {texts, image?}  — a customer’s request in WhatsApp: the car and what is asked (v0.90)
+ *        /api/ai/translate {text, to}, /api/ai/voice {id} — a chat message translated, a voice message written down
+ *                                         (audit 27/11; neither kept — the chat's words are never stored)
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
  *   POST /api/push/plan {plan}           — what to remind of and when (made by the app from the garage's data)
@@ -228,6 +230,13 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           if (parts[2] === 'roles') return send(res, 200, await ai.roles(body));
           // v0.90: a customer's request in WhatsApp — the car and what is asked.
           if (parts[2] === 'request') return send(res, 200, await ai.request(body));
+          // Audit 27/11: a message translated; a voice message (its bytes from the bridge on this computer) written down.
+          if (parts[2] === 'translate') return send(res, 200, await ai.translate(body));
+          if (parts[2] === 'voice') {
+            if (!wa?.mediaBytes) throw httpError(503, 'whatsapp is off');
+            const m = await wa.mediaBytes(String(body.id ?? ''));
+            return send(res, 200, await ai.voice({ audio: { type: m.type, data: m.bytes.toString('base64') } }));
+          }
         }
       }
 

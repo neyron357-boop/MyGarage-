@@ -13,6 +13,8 @@ import { saveSupplier } from './parts';
 import { ensureSeed } from './seed';
 import { loadTop, suppliersForJob, suppliersRanked } from './supplierRank';
 import { askSuppliers } from './waAsk';
+import { sendAsked } from './waAuto';
+import { waAsks } from './waConfirm';
 import { loadChatRoles, loadChats, loadPeople, refreshWa, setWaTransport, tagChats, type WaCallInit } from './whatsapp';
 
 /*
@@ -225,6 +227,9 @@ describe('studying the chats (v0.91)', () => {
     // Asked: of the base now, the request kept under it.
     const res = await askSuppliers(o.id, [{ supplierId: only.supplier.id }], { items: [part], sheets: [], usedFiles: [] });
     expect(res.asked).toBe(1);
+    // Kept on the job once «Отправить» is tapped (audit 27/11).
+    expect((await db.orders.get(o.id))!.asks ?? []).toHaveLength(0);
+    await sendAsked(waAsks());
     const made = (await db.suppliers.toArray()).find((s) => s.phone === '+971501110003')!;
     expect(made.name).toBe('Desert Auto Spare Parts');
     expect((await db.orders.get(o.id))!.asks?.[0].supplierId).toBe(made.id);

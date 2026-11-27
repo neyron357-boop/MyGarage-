@@ -463,7 +463,22 @@ export function createWhatsApp({ config, store, log = () => {}, events, port = N
     await pipe(req, res, `/${what}${query(url, ['id'])}`, { headers: { 'Access-Control-Allow-Origin': '*' } });
   }
 
+  /** A message's file as bytes, for this server itself (audit 27/11: a voice message to the AI) — never to a device. */
+  async function mediaBytes(id) {
+    if (!available() || !turnedOn()) throw httpError(503, 'whatsapp is off');
+    if (!id) throw httpError(400, 'no id');
+    let res;
+    try {
+      res = await fetch(`${base}/media?${new URLSearchParams({ id })}`, { headers: { 'X-Bridge': secret }, signal: AbortSignal.timeout(60_000) });
+    } catch {
+      throw httpError(503, 'whatsapp is starting');
+    }
+    if (!res.ok) throw httpError(res.status === 404 ? 404 : 502, 'no file');
+    return { type: res.headers.get('content-type') || '', bytes: Buffer.from(await res.arrayBuffer()) };
+  }
+
   return {
+    mediaBytes,
     /** With the server: back, if it was on. */
     start() {
       if (turnedOn() && available()) run();
