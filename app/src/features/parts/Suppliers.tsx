@@ -1,7 +1,7 @@
 import { ActionIcon, Button, Group, Loader, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconBrandWhatsapp, IconMapPin, IconPhone, IconPinFilled, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCamera, IconMapPin, IconPhone, IconPinFilled, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
@@ -24,6 +24,7 @@ import { DataTable, type Column } from '../../ui/DataTable';
 import { SheetFor } from '../../ui/lazy';
 import { useMoreRows } from '../../ui/moreRows';
 import { PhotoStrip } from '../../ui/PhotoStrip';
+import { usePhotoPick } from '../../ui/photoPick';
 import { SupplierBookActions } from './SupplierBookActions';
 import { partsType } from '../../domain/supplierTidy';
 import { emirateName, NO_REGION, regionLabel, SupplierFilters, useSupplierFilter } from './SupplierFilters';
@@ -63,6 +64,9 @@ export function SupplierSheet({
   const ranked = useLiveQuery(() => (supplier?.id ? suppliersRanked() : undefined), [supplier?.id]);
   const use = supplier?.id && ranked ? useOf(ranked.use, supplier.id) : undefined;
   const know = supplier?.id ? ranked?.know.get(supplier.id) : undefined;
+  // v0.99 (audit Ч14): the card taken from the top of a new supplier's sheet — read as the strip's photo is.
+  const addCard = useRef<(files: File[]) => void>(() => undefined);
+  const cardPick = usePhotoPick((files) => addCard.current(files));
   useEffect(() => {
     // Its number as it is read out: «+971 50 765 4321» (kept as E.164).
     setV(supplier?.phone ? { ...supplier, phone: formatPhone(normalizePhone(supplier.phone) ?? supplier.phone) } : supplier ?? {});
@@ -101,6 +105,10 @@ export function SupplierSheet({
       setReading(false);
     }
   };
+  addCard.current = (files) => {
+    setFresh((f) => [...f, ...files.map((file) => ({ id: uid(), file, src: URL.createObjectURL(file) }))]);
+    if (files[0]) void readCard(files[0]);
+  };
   const save = () =>
     run(async () => {
       const phone = v.phone?.trim() ? normalizePhone(v.phone) ?? v.phone.trim() : undefined;
@@ -117,6 +125,12 @@ export function SupplierSheet({
     <Modal opened={opened} onClose={onClose} title={v.id ? t('parts.editSupplier') : t('parts.addSupplier')} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
         {v.id && (v.phone || chat) && <ContactTiles phone={v.phone ? typed ?? v.phone : ''} whatsappHref={chat} />}
+        {!v.id && !kept.length && !fresh.length && (
+          <Button size="lg" variant="light" leftSection={<IconCamera size={20} />} {...cardPick.handlers} onClick={() => !cardPick.consumeClick() && cardPick.camera()} data-card-shot>
+            {t('suppliers.cardShot')}
+          </Button>
+        )}
+        {cardPick.inputs}
         {use && use.jobs > 0 && (
           <div className="supplier-stats" data-supplier-stats>
             <span>
@@ -168,7 +182,7 @@ export function SupplierSheet({
         {know && <SupplierProfile seen={know.seen} />}
         <div className="ios-group">
           <div className="ios-row left line-name">
-            <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" data-autofocus={(!v.id && !v.phone) || undefined} />
+            <TextInput aria-label={t('suppliers.name')} placeholder={t('suppliers.name')} value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} w="100%" />
           </div>
           {/* The name as it came, in Arabic (v0.60: put in English by the app). */}
           {v.nameAr && (
@@ -306,9 +320,20 @@ export function SupplierSheet({
           </div>
         </div>
 
-        <Button size="lg" loading={busy} disabled={!v.name?.trim()} onClick={save}>
-          {t('common.save')}
-        </Button>
+        {twin ? (
+          <Stack gap="xs">
+            <Button size="lg" onClick={() => openTwin(twin)} data-open-twin>
+              {t('suppliers.openTwin', { name: twin.name })}
+            </Button>
+            <Button size="lg" variant="subtle" color="gray" loading={busy} disabled={!v.name?.trim()} onClick={save} data-save-anyway>
+              {t('suppliers.saveAnyway')}
+            </Button>
+          </Stack>
+        ) : (
+          <Button size="lg" loading={busy} disabled={!v.name?.trim()} onClick={save}>
+            {t('common.save')}
+          </Button>
+        )}
       </Stack>
     </Modal>
   );

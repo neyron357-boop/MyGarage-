@@ -126,7 +126,18 @@ export async function refuseAll(orderId: string): Promise<'closed' | 'open'> {
   const items = await db.items.where('orderId').equals(orderId).toArray();
   if (activeInvoice(await db.invoices.where('orderId').equals(orderId).toArray())) throw new AppError('err.invoiceExists');
   await answer(items.filter(isAwaitingClient), 'decline');
-  for (const i of items) if (i.approvalState === 'draft') await db.items.delete(i.id);
+  // The lines never sent go into the job's bin, as a deletion puts them (v0.99, audit С14: they were deleted outright —
+  // the customer changed his mind, and «Возобновить» gave an empty job to type again).
+  const drafts: OrderItem[] = [];
+  for (const i of items) if (i.approvalState === 'draft' && i.kind !== 'discount') {
+    const r = await removeItem(i.id);
+    if (r) drafts.push(r);
+  }
+  for (const i of items) if (i.approvalState === 'draft' && i.kind === 'discount') await db.items.delete(i.id);
+  if (drafts.length) {
+    const order = await db.orders.get(orderId);
+    if (order) await db.orders.update(orderId, { removedLines: withRemoved(order, drafts, nowIso()) });
+  }
   const left = await db.items.where('orderId').equals(orderId).toArray();
   if (!nothingToBill(left)) {
     await syncDiscount(orderId);

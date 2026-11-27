@@ -1,4 +1,5 @@
 import { db, uid } from '../db/db';
+import { plateHabitsOf, type PlateHabits } from '../domain/plateHabits';
 import { aiReadVinLater } from './ai';
 import { nowIso } from '../domain/dates';
 import { normalizePhone } from '../domain/phone';
@@ -206,6 +207,11 @@ export async function popularMakes(defaults: string[], limit = 12): Promise<stri
   return chipNames((await db.vehicles.toArray()).map((v) => v.make), canonicalMake, defaults, limit);
 }
 
+/** The emirate most cars come from and each emirate's frequent codes (v0.99, audit П8–П10). */
+export async function plateHabits(): Promise<PlateHabits> {
+  return plateHabitsOf((await db.vehicles.toArray()).map((v) => v.plate));
+}
+
 /** Models of this make seen in the garage first, then the catalogue order — one chip per model. */
 export async function popularModels(make: string, catalogue: string[], limit = 10): Promise<string[]> {
   const mk = canonicalMake(make);
@@ -229,16 +235,18 @@ export async function search(query: string, limit = 30): Promise<SearchHit[]> {
   const digits = q.replace(/\D/g, '').replace(/^00/, '').replace(/^0/, '');
   const hits: SearchHit[] = [];
   const seenCustomers = new Set<string>();
+  // The customer by any of his names: the person and the company (v0.99, audit К1 — «Desert…» as the board shows it
+  // found nothing: only the contact's name was looked at), and the company's TRN.
+  const whoMatches = (c: Customer) =>
+    c.name.toLowerCase().includes(q) ||
+    (!!c.companyName && c.companyName.toLowerCase().includes(q)) ||
+    (!!c.trn && digits.length >= 5 && c.trn.replace(/\D/g, '').includes(digits)) ||
+    (digits.length >= 3 && c.phone.replace(/\D/g, '').includes(digits));
   for (const v of vehicles) {
     if (v.archivedAt) continue;
     const c = byId.get(v.customerId);
     if (!c) continue;
-    const match =
-      plateMatches(v.plateSearch, q) ||
-      (v.vin && v.vin.toLowerCase().includes(q)) ||
-      `${v.make} ${v.model}`.toLowerCase().includes(q) ||
-      c.name.toLowerCase().includes(q) ||
-      (digits.length >= 3 && c.phone.replace(/\D/g, '').includes(digits));
+    const match = plateMatches(v.plateSearch, q) || (v.vin && v.vin.toLowerCase().includes(q)) || `${v.make} ${v.model}`.toLowerCase().includes(q) || whoMatches(c);
     if (match) {
       hits.push({ customer: c, vehicle: v });
       seenCustomers.add(c.id);
@@ -246,9 +254,7 @@ export async function search(query: string, limit = 30): Promise<SearchHit[]> {
   }
   for (const c of customers) {
     if (seenCustomers.has(c.id) || c.archivedAt) continue;
-    if (c.name.toLowerCase().includes(q) || (digits.length >= 3 && c.phone.replace(/\D/g, '').includes(digits))) {
-      hits.push({ customer: c });
-    }
+    if (whoMatches(c)) hits.push({ customer: c });
   }
   return hits.slice(0, limit);
 }

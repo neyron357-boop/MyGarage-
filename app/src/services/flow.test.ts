@@ -153,6 +153,34 @@ describe('lazy flow', () => {
     expect(b.items.map((i) => i.approvalState)).toEqual(['declined']);
   });
 
+  it('v0.99 (audit К1, С29): a company is found by its name and TRN; the payment sheet offers the way the customer paid last', async () => {
+    const o = await job();
+    const { search } = await import('./customers');
+    const { lastPayMethod } = await import('./money');
+    await db.customers.update(o.customerId, { type: 'company', companyName: 'Desert Fleet LLC', trn: '100223344500003', name: 'Omar' });
+    expect((await search('desert')).map((h) => h.customer.id)).toContain(o.customerId);
+    expect((await search('100223344')).map((h) => h.customer.id)).toContain(o.customerId);
+    expect(await lastPayMethod(o.customerId)).toBeUndefined();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'Oil change', unitPriceFils: 10000 });
+    await approveAll(o.id);
+    await quickInvoice(o.id);
+    await addPayment(o.id, { kind: 'payment', method: 'card', amountFils: 5000 });
+    expect(await lastPayMethod(o.customerId)).toBe('card');
+  });
+
+  it('v0.99 (audit С14): «refused» puts the lines never sent into the bin — «back» brings them on the job again', async () => {
+    const o = await job();
+    await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 30000 });
+    expect(await refuseAll(o.id)).toBe('closed');
+    const after = (await db.orders.get(o.id))!;
+    const bin = binOf(after, await db.items.where('orderId').equals(o.id).toArray());
+    expect(bin.map((l) => l.item.titleEn)).toEqual(['BRAKE PADS']);
+    expect(await restoreFromBin(o.id, bin.map((l) => l.id))).toBe(1);
+    const b = (await loadOrderBundle(o.id))!;
+    expect(b.order.stage).not.toBe('closed');
+    expect(liveLines(b.items).map((i) => i.titleEn)).toEqual(['BRAKE PADS']);
+  });
+
   it('"refused" the rest: what was agreed before is still to be invoiced', async () => {
     const o = await job();
     await addItem(o.id, { kind: 'fee', block: 'A', titleEn: 'Diagnostics', unitPriceFils: 5000 });

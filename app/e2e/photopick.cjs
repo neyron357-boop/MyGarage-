@@ -115,9 +115,12 @@ async function launch() {
   await vin.waitFor();
   await page.waitForTimeout(800);
 
-  await step('empty VIN: a tap opens the camera', async () => {
-    expectOpened(await gesture(() => tap(vin)), ['camera'], 'tap');
+  await step('empty VIN: a tap opens its sheet — its «Камера» the camera (v0.99, audit П24: the VIN typed there too)', async () => {
+    expectOpened(await gesture(() => tap(vin)), [], 'tap');
+    await page.locator('[data-vin-start]').waitFor();
+    expectOpened(await gesture(() => tap(page.locator('[data-vin-camera]'))), ['camera'], 'its camera');
     await waiting[0].setFiles([]);
+    await page.locator('[data-vin-start]').waitFor({ state: 'detached' });
   });
   await step('empty VIN: a still hold opens the photos, and only them', async () => {
     const got = await gesture(() => hold(vin));

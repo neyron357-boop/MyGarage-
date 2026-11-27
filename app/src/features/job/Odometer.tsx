@@ -101,8 +101,8 @@ export function OdometerChip({ order, open }: { order: JobFor; open: boolean }) 
           if (pick.consumeClick()) return;
           // Not read yet whether there is a photo: no camera over one there may be.
           if (!photo) return;
-          if (photo.id || km !== undefined) setSheet(true);
-          else pick.camera();
+          // v0.99 (audit П22): the sheet — the number typed or the camera; a long press stays the phone's photos.
+          setSheet(true);
         }}
       >
         {photo?.id ? (
@@ -198,6 +198,7 @@ function OdometerPanel({ order, photoId, onDone, onPhoto, reading: busy }: { ord
         autoComplete="off"
         error={typed.trim() && km === undefined ? t('err.mileage') : undefined}
         classNames={{ input: 'tnum' }}
+        data-autofocus={!photoId || undefined}
       />
       {offered.length > 0 && (
         <div className="chip-row wrap" aria-label={t('odo.offered')}>

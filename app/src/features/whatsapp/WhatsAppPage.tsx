@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Group, Loader, Modal, Stack, Switch, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconBriefcase, IconCar, IconPinFilled, IconPinnedOff, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconStarFilled, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconBriefcase, IconCar, IconPinFilled, IconPinnedOff, IconChevronLeft, IconCircle, IconCircleCheckFilled, IconCloudOff, IconListCheck, IconSearch, IconStarFilled, IconTag, IconTool, IconX, IconCopy, IconExternalLink, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconMessageCircle, IconMessagePlus, IconPhone, IconPin, IconPlus, IconServer, IconSettings, IconTruck, IconUser, IconUserPlus, IconUsers, IconVolumeOff, type Icon } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -12,6 +12,7 @@ import { aiRoleOf, CHAT_TABS, chatPath, chatRole, chatTitle, filterChats, NO_ROL
 import type { Supplier } from '../../domain/types';
 import { whatsappUrl } from '../../services/messages';
 import { loadChatRoles, loadChats, loadPeople, numberOnWa, refreshWa, tagChats, waCan, waReady, type WaStore } from '../../services/whatsapp';
+import { setUnreadMark, useUnreadMarks } from '../../services/waMarks';
 import { chatKnow, chatsMakes, onStudyProgress, setChatMakes, setChatPin, studyProgress } from '../../services/chatStudy';
 import { loadTop, NO_TOP, TOP_TABLES } from '../../services/supplierRank';
 import { CHAT_INDEX_TABLES, loadChatIndex } from '../../services/chatIndex';
@@ -123,11 +124,15 @@ export function WaGate({ s }: { s: WaStore }) {
 
 /* ---------- The list ---------- */
 
-const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, active, onOpen, onPicture, picking, picked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; top?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; onPicture?: (c: WaChat, title: string) => void; picking?: boolean; picked?: boolean }) {
+const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, active, onOpen, onPicture, picking, picked, marked }: { c: WaChat; who?: Who; role?: WhoKind | WaTag; byAi?: boolean; makes?: KnownMake[]; top?: boolean; when: string; active: boolean; onOpen: (c: WaChat) => void; onPicture?: (c: WaChat, title: string) => void; picking?: boolean; picked?: boolean; marked?: boolean }) {
   const { t } = useTranslation();
   const title = c.self ? t('wa.self') : chatTitle(c, who);
+  // v0.99 (audit W5, W6): a swipe to the right as in WhatsApp — «Непрочитано» (this device's mark until the chat is opened)
+  // or «Прочитано» (the mark off).
+  const unreadNow = c.unread > 0 || !!marked;
   return (
     <ListRow
+      leading={picking || c.unread > 0 ? undefined : { label: marked ? t('wa.markRead') : t('wa.markUnread'), icon: IconMessageCircle, color: 'cobalt', onCommit: () => setUnreadMark(c.id, !marked) }}
       selected={active || picked}
       // The chat in a tab of its own (v0.89, the PC's right click, the wheel, Ctrl+click) — not while picking chats.
       data-route={picking ? undefined : chatPath(c.id)}
@@ -184,17 +189,19 @@ const ChatRow = memo(function ChatRow({ c, who, role, byAi, makes, top, when, ac
       }
       right={
         <span className="wa-row-side">
-          <span className="wa-row-when tnum" data-unread={c.unread > 0 || undefined}>
+          <span className="wa-row-when tnum" data-unread={unreadNow || undefined}>
             {when}
           </span>
           <span className="wa-row-marks">
             {c.muted && <IconVolumeOff size={15} stroke={2} aria-hidden />}
             {/* v0.91.6: a main supplier — pinned on top by the app (whatever WhatsApp says). */}
             {top ? <IconPinFilled size={15} className="wa-row-top" aria-label={t('wa.top.label')} data-wa-top /> : c.pinned && <IconPin size={15} stroke={2} aria-hidden />}
-            {c.unread > 0 && (
+            {c.unread > 0 ? (
               <span className="wa-badge" data-muted={c.muted || undefined}>
                 {c.unread > 99 ? '99+' : c.unread}
               </span>
+            ) : (
+              marked && <span className="wa-badge wa-badge-dot" aria-label={t('wa.markUnread')} data-wa-marked />
             )}
           </span>
         </span>
@@ -378,7 +385,8 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
   const makes = index?.makes;
   const top = index?.top ?? NO_TOP;
   const study = useSyncExternalStore(onStudyProgress, studyProgress);
-  const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly, top: top.chats }), [s.chats, tab, query, people, roles, garageOnly, top]);
+  const marks = useUnreadMarks();
+  const rows = useMemo(() => filterChats(s.chats, { tab, query, people, roles, garageOnly, top: top.chats, marked: marks }), [s.chats, tab, query, people, roles, garageOnly, top, marks]);
   // A search with «Только гараж» on: how many more the whole list has (one tap shows them).
   const elsewhere = useMemo(
     () => (garageOnly && query.trim() ? filterChats(s.chats, { tab, query, people, roles, garageOnly: false }).length - rows.length : 0),
@@ -607,6 +615,7 @@ function ChatList({ s, people, active, onOpen }: { s: WaStore; people: Map<strin
                 onPicture={desk ? undefined : openPicture}
                 picking={picking}
                 picked={picked.has(c.id)}
+                marked={marks.has(c.id)}
               />
             ))}
             {more()}
@@ -895,8 +904,29 @@ export function WhatsAppPage() {
   }, [openNumber, errorText]);
 
   // The chats kept on this device (v0.88) while the server is asked: shown at once, not a spinner.
-  const kept = !s.status && !s.old && !s.away && waCan() && s.chats.length > 0;
+  // v0.99 (audit W32): reconnecting, loading or away for a moment — the list and the chat stay, a line over them says it
+  // (the whole screen was a spinner with no button); after half a minute — «Перезапустить».
+  const passing = !s.status || s.status.phase === 'starting' || s.status.phase === 'loading' || s.status.phase === 'offline';
+  const kept = !s.old && waCan() && s.chats.length > 0 && passing;
   const gate = ready || kept ? null : <WaGate s={s} />;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (ready || !kept || !s.status) return;
+    const timer = window.setTimeout(() => setSlow(true), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [ready, kept, s.status?.phase]);
+  const reconnect = !ready && kept && s.status ? (
+    <div className="wa-reconnect" role="status" data-wa-reconnect>
+      <Loader size={14} color="orange" />
+      <span>{t('wa.reconnecting')}</span>
+      {slow && (
+        <Button size="compact-sm" variant="light" color="orange" radius="xl" data-route="/whatsapp/setup" onClick={() => navigate('/whatsapp/setup')}>
+          {t('wa.restartShort')}
+        </Button>
+      )}
+    </div>
+  ) : null;
   // Under the chat's name: whose it is in the garage and the number (a group — «Группа»).
   const headLine = face ? (face.c.group ? t('wa.groupLine') : [face.who ? t(`wa.who.${face.who.kind}`) : '', face.c.phone ? formatPhone(`+${face.c.phone}`) : ''].filter(Boolean).join(' · ')) : '';
   const eyebrow = s.status?.me && ready ? formatPhone(`+${s.status.me.phone}`) : undefined;
@@ -911,6 +941,7 @@ export function WhatsAppPage() {
     return (
       <>
         <PageHeader title="WhatsApp" eyebrow={eyebrow} right={<HeaderButtons ready={ready} onNew={() => setAdding(true)} />} />
+        {reconnect}
         {gate ?? (
           // Narrow (an iPad upright, v0.84): the list or the chat, one at a time — «‹» in the chat's head back to the list.
           <div className="wa-desk" data-open={chatId ? true : undefined}>
@@ -963,6 +994,7 @@ export function WhatsAppPage() {
             ) : undefined
           }
         />
+        {reconnect}
         {gate ?? (
           <div className="notes-page">
             <ChatThread key={chatId} chatId={chatId} title={face.title} group={face.c.group} people={people} desk={false} quick={quick} who={face.who} phone={face.c.phone} />

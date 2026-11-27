@@ -1,5 +1,5 @@
 import { ActionIcon, Autocomplete, Box, Button, Group, Loader, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconCamera, IconCameraOff, IconCar, IconCheck, IconKeyboard, IconScan, IconUser, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCamera, IconCameraOff, IconCar, IconCheck, IconKeyboard, IconRestore, IconScan, IconUser, IconX } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,7 +12,11 @@ import { EMIRATES } from '../../domain/plates';
 import { checkDigitOk, isVin, vinChars } from '../../domain/vin';
 import type { VinCar } from '../../domain/vinDecode';
 import type { Customer, Emirate, Lang, Order, Plate, Vehicle } from '../../domain/types';
-import { findVehicleForCheckIn, findVehiclesByNumber, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
+import { findVehicleForCheckIn, findVehiclesByNumber, plateHabits, popularMakes, popularModels, suggestCustomers, type CheckInCar } from '../../services/customers';
+import { NUMERIC_CODES, type PlateHabits } from '../../domain/plateHabits';
+import { parseKm } from '../../domain/odometer';
+import { setJobMileage } from '../../services/mileage';
+import { clearNewOrderDraft, readNewOrderDraft, saveNewOrderDraft, type NewOrderDraft } from '../../ui/newOrderDraft';
 import { setCover, setVinPhoto } from '../../services/cover';
 import { decodeVin } from '../../services/vinDecode';
 import { checkIn } from '../../services/orders';
@@ -35,7 +39,9 @@ import { askCarCheck, CAR_PHOTO_WORK, carPhotoLater, guessCar, takePhotoCar } fr
 import { AiMark, useAiWorking } from '../ai/Ai';
 import { CarChoice } from '../ai/CarCheck';
 
-const LAST_EMIRATE = 'mygarage.lastEmirate';
+// v0.99 (audit П10): the emirate most of the garage's cars come from — kept here to be there at once; the last one typed
+// was the default before, and one Sharjah car made the next Dubai car Sharjah, unseen.
+const LAST_EMIRATE = 'mygarage.usualEmirate';
 
 function lastEmirate(): Emirate {
   try {
@@ -47,13 +53,6 @@ function lastEmirate(): Emirate {
   return 'DXB';
 }
 
-function rememberEmirate(e: Emirate) {
-  try {
-    localStorage.setItem(LAST_EMIRATE, e);
-  } catch {
-    // storage unavailable
-  }
-}
 
 /** A customer with no name yet is shown by phone, or as "no name". */
 function who(c: Customer | undefined, noName: string): string {
@@ -67,10 +66,34 @@ function who(c: Customer | undefined, noName: string): string {
  * phone's photos) reads it off a photo. Typed, it is drawn here at once and the page hears of it without hurry
  * (v0.89, `useTypedValue`): a key never waits for the whole page to be drawn again.
  */
-function PlateBlock({ plate: page, onChange, unsure, focus, camera, children }: { plate: Plate; onChange: (p: Plate) => void; unsure?: { code: boolean; number: boolean }; focus: boolean; camera?: ReactNode; children?: ReactNode }) {
+function PlateBlock({
+  plate: page,
+  onChange,
+  unsure,
+  focus,
+  camera,
+  codes,
+  usual,
+  onEnter,
+  children,
+}: {
+  plate: Plate;
+  onChange: (p: Plate) => void;
+  unsure?: { code: boolean; number: boolean };
+  focus: boolean;
+  camera?: ReactNode;
+  /** The garage's frequent codes of this emirate (v0.99, audit П8): one tap, the keyboard stays. */
+  codes?: string[];
+  /** The garage's usual emirate: another one chosen is orange — seen, not slipped in. */
+  usual?: Emirate;
+  /** Enter in the number (a PC): «Принять». */
+  onEnter?: () => void;
+  children?: ReactNode;
+}) {
   const { t } = useTranslation();
   const lang = useLang();
   const [plate, setPlate] = useTypedValue(page, onChange);
+  const numberRef = useRef<HTMLInputElement>(null);
   return (
     <Box className="surface" p="md" pos="relative">
       {camera}
@@ -87,7 +110,17 @@ function PlateBlock({ plate: page, onChange, unsure, focus, camera, children }: 
       </Box>
       <div className="chip-row" role="radiogroup" aria-label={t('vehicle.emirate')}>
         {EMIRATES.map((e) => (
-          <button key={e.code} type="button" className="chip" role="radio" aria-checked={plate.emirate === e.code} data-active={plate.emirate === e.code} onClick={() => setPlate({ ...plate, emirate: e.code })}>
+          <button
+            key={e.code}
+            type="button"
+            className="chip"
+            role="radio"
+            aria-checked={plate.emirate === e.code}
+            data-active={plate.emirate === e.code}
+            data-odd={(plate.emirate === e.code && !!usual && e.code !== usual) || undefined}
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={() => setPlate({ ...plate, emirate: e.code })}
+          >
             {e[lang]}
           </button>
         ))}
@@ -103,6 +136,13 @@ function PlateBlock({ plate: page, onChange, unsure, focus, camera, children }: 
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="next"
+          // Abu Dhabi's and Sharjah's codes are numbers: the number pad (v0.99, audit П9). «Далее» — the number.
+          inputMode={NUMERIC_CODES.includes(plate.emirate) ? 'numeric' : undefined}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            numberRef.current?.focus();
+          }}
           autoComplete="off"
           size="lg"
           classNames={{ input: unsure?.code ? 'plate-unsure' : undefined }}
@@ -114,9 +154,15 @@ function PlateBlock({ plate: page, onChange, unsure, focus, camera, children }: 
           placeholder={t('vehicle.plateNumber')}
           value={plate.number}
           onChange={(e) => setPlate({ ...plate, number: e.currentTarget.value.replace(/\D/g, '') })}
+          ref={numberRef}
           inputMode="numeric"
           enterKeyHint="done"
           autoComplete="off"
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || !onEnter) return;
+            e.preventDefault();
+            onEnter();
+          }}
           maxLength={6}
           size="lg"
           autoFocus={focus}
@@ -126,6 +172,15 @@ function PlateBlock({ plate: page, onChange, unsure, focus, camera, children }: 
           styles={{ input: { fontFamily: 'var(--font-plate)', fontSize: 24, letterSpacing: '0.08em', fontWeight: 600 } }}
         />
       </Group>
+      {!plate.code && codes && codes.length > 0 && (
+        <div className="chip-row plate-codes" data-plate-codes aria-label={t('vehicle.plateCode')}>
+          {codes.map((c) => (
+            <button key={c} type="button" className="chip" onMouseDown={(e) => e.preventDefault()} onClick={() => setPlate({ ...plate, code: c })}>
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
       {children}
     </Box>
   );
@@ -351,6 +406,26 @@ export function NewOrderPage() {
     plateNow.current = p;
     setPlateState(p);
   }, []);
+  // The garage's plate habits (v0.99, audit П8–П10): its usual emirate is the default while nothing is typed.
+  const [habits, setHabits] = useState<PlateHabits>();
+  useEffect(() => {
+    let alive = true;
+    void plateHabits().then((h) => {
+      if (!alive) return;
+      setHabits(h);
+      try {
+        localStorage.setItem(LAST_EMIRATE, h.emirate);
+      } catch {
+        // storage unavailable
+      }
+      setPlate((p) => (p.number || p.code ? p : { ...p, emirate: h.emirate }));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [setPlate]);
+  // Today's mileage right at the counter (v0.99, audit П2): written to the job after «Принять».
+  const [km, setKm] = useState('');
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
   const [year, setYear] = useState<number>();
@@ -423,6 +498,10 @@ export function NewOrderPage() {
   // Documents are in English by default, whatever language the app itself is in.
   const docLanguage: Lang = 'en';
   const [complaint, setComplaint] = useState('');
+  // What was typed and left without «Принять» (v0.99, audit П5): offered once at the top of a plain «Новый заказ».
+  const [draft, setDraft] = useState<NewOrderDraft | undefined>(() =>
+    ['photo', 'customerId', 'vehicleId', 'day', 'when'].some((k) => params.has(k)) ? undefined : readNewOrderDraft(),
+  );
   const [later, setLater] = useState(params.get('when') === 'later');
   const [bookedFor, setBookedFor] = useState<string>();
   // The day the car came (v0.53): today — or an earlier day, for a job forgotten and typed in later (v0.69: from a month
@@ -514,6 +593,7 @@ export function NewOrderPage() {
   // job; the open one is a tap away under it.
   const auto = !picked && match ? match : undefined;
   const known = picked ?? auto;
+  const activeJob = picked?.activeOrder ?? match?.activeOrder;
   const owner = known?.owner ?? pickedCustomer;
 
   // The photo asked about the car only once the plate is looked up and the car is not in the base (a car the garage
@@ -603,7 +683,10 @@ export function NewOrderPage() {
         driver: company ? typedDriver : undefined,
         day: target === 'book' ? undefined : day,
       });
-      if (!picked) rememberEmirate(plate.emirate);
+      // Today's mileage typed at the counter (v0.99, audit П2).
+      const kmTyped = parseKm(km);
+      if (target !== 'book' && kmTyped !== undefined) await setJobMileage(o.id, kmTyped).catch(() => undefined);
+      clearNewOrderDraft();
       // The photo is the car's main photo now (a fresh one of a car in the base takes the place of the old).
       if (shot) {
         await setCover(o.vehicleId, shot.file).catch(() => undefined);
@@ -624,6 +707,44 @@ export function NewOrderPage() {
       navigate(`/orders/${o.id}`, { replace: true });
     });
 
+  // The draft kept as it is typed; while the one offered waits, typing anything new puts the offer away.
+  useEffect(() => {
+    if (draft) {
+      if (plate.number || complaint || name || phone) setDraft(undefined);
+      return;
+    }
+    saveNewOrderDraft({ plate, complaint, name, phone, make, model, km });
+  }, [draft, plate, complaint, name, phone, make, model, km]);
+  const restore = (d: NewOrderDraft) => {
+    setDraft(undefined);
+    setPlate(d.plate);
+    setComplaint(d.complaint);
+    setName(d.name);
+    setPhone(d.phone);
+    setMake(d.make);
+    setModel(d.model);
+    setKm(d.km);
+    haptic('selection');
+  };
+  // Enter in the number, Ctrl+Enter anywhere (a PC, v0.99, audit П37): what the main button would do.
+  const enter = () => {
+    if (later || busy) return;
+    if (activeJob) navigate(`/orders/${activeJob.id}`);
+    else if (plateNow.current.number || known) void submit('job');
+  };
+  const enterRef = useRef(enter);
+  enterRef.current = enter;
+  useEffect(() => {
+    if (onPhone) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      enterRef.current();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onPhone]);
+
   const noName = t('customer.noName');
   return (
     <>
@@ -634,6 +755,22 @@ export function NewOrderPage() {
           className="desk-form"
           side={
             <>
+              {draft && (
+                <button type="button" className="suggest rise-enter" style={{ marginBottom: 12 }} onClick={() => restore(draft)} data-draft>
+                  <IconRestore size={22} color="var(--mantine-color-cobalt-6)" style={{ flexShrink: 0 }} />
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    <Text size="sm" fw={600} lh={1.3}>
+                      {t('newOrder.draft')}
+                    </Text>
+                    <Text size="xs" c="dimmed" lineClamp={1}>
+                      {[[draft.plate.code, draft.plate.number].filter(Boolean).join(' '), draft.complaint.trim(), draft.name.trim() || draft.phone.trim()].filter(Boolean).join(' · ')}
+                    </Text>
+                  </Box>
+                  <Text size="sm" c="cobalt.6" fw={600} style={{ flexShrink: 0 }}>
+                    {t('newOrder.draftGo')}
+                  </Text>
+                </button>
+              )}
               <div className="group-title">{t('newOrder.vehicle')}</div>
               {shot && <CarShot file={shot.file} state={read?.state ?? 'reading'} box={fromPhoto?.box} pick={shoot} onRemove={() => setShot(undefined)} />}
               {picked ? (
@@ -674,6 +811,9 @@ export function NewOrderPage() {
                     onChange={typePlate}
                     unsure={unsure}
                     focus={!shot}
+                    codes={habits?.codes[plate.emirate]}
+                    usual={habits?.emirate}
+                    onEnter={onPhone ? undefined : () => enterRef.current()}
                     camera={
                       !shot && (
                         <ActionIcon className="plate-cam" size={40} radius="xl" variant="light" aria-label={t('newOrder.photo')} {...shoot.handlers} onClick={() => !shoot.consumeClick() && shoot.camera()}>
@@ -712,7 +852,8 @@ export function NewOrderPage() {
                           </Text>
                           {/* Whose it is (v0.81): the plate typed over a misread one finds the right customer — seen at once. */}
                           <Text size="sm" c="dimmed" lineClamp={1}>
-                            {[t('newOrder.inBase'), who(auto.owner, noName)].filter(Boolean).join(' · ')}
+                            {/* Whose it is, not a service phrase (v0.99, audit П13): the name and the number. */}
+                            {[who(auto.owner, noName), auto.owner?.phone].filter(Boolean).join(' · ')}
                           </Text>
                         </Box>
                       </Group>
@@ -833,6 +974,29 @@ export function NewOrderPage() {
                   )}
                 </>
               )}
+              {/* Today's mileage at the counter (v0.99, audit П2) — the last visit's is right above it. */}
+              {!later && (
+                <RowGroup>
+                  <FormRow label={t('odo.title')}>
+                    <TextInput
+                      aria-label={t('odo.title')}
+                      inputMode="numeric"
+                      enterKeyHint="done"
+                      placeholder={t('newOrder.kmHint')}
+                      value={km}
+                      onChange={(e) => setKm(e.currentTarget.value.replace(/[^\d\s]/g, ''))}
+                      autoComplete="off"
+                      rightSection={
+                        <Text size="sm" c="dimmed">
+                          {t('newOrder.km')}
+                        </Text>
+                      }
+                      w="100%"
+                      data-new-km
+                    />
+                  </FormRow>
+                </RowGroup>
+              )}
             </>
           }
           main={
@@ -933,13 +1097,26 @@ export function NewOrderPage() {
 
       <StickyBar>
         {later ? (
-          <Button fullWidth onClick={() => submit('book')} loading={busy} disabled={!bookedFor}>
+          // A booking needs the car's number (v0.99, audit П29: the button was lit, the save then failed).
+          <Button fullWidth onClick={() => submit('book')} loading={busy} disabled={!bookedFor || (!plate.number && !known)}>
             {t('newOrder.book')}
           </Button>
+        ) : activeJob ? (
+          // The car is already in work (v0.99, audit П1): opening that job is the main button — the big «Принять» made a
+          // second job by habit. A second job stays possible (v0.53), as the second button.
+          <Group gap={10} wrap="nowrap">
+            <Button variant="default" onClick={() => submit('job')} loading={busy} style={{ flex: '0 0 auto' }} data-second-job>
+              {t('newOrder.secondJob')}
+            </Button>
+            <Button style={{ flex: 1 }} leftSection={<IconCar size={20} />} data-route={`/orders/${activeJob.id}`} onClick={() => navigate(`/orders/${activeJob.id}`)} data-open-active>
+              {t('newOrder.openN', { n: activeJob.number })}
+            </Button>
+          </Group>
         ) : (
-          // Lit once there is a number (or a known car): no tap that only says "type the number".
-          <Button fullWidth onClick={() => submit('job')} loading={busy} disabled={!plate.number && !known} leftSection={<IconCheck size={20} />}>
-            {t('job.accept')}
+          // Lit once there is a number (or a known car): no tap that only says "type the number". Another day than today
+          // says so on the button, in orange (v0.99, audit П30).
+          <Button fullWidth onClick={() => submit('job')} loading={busy} disabled={!plate.number && !known} leftSection={<IconCheck size={20} />} color={day !== dubaiDate() ? 'orange' : undefined}>
+            {day !== dubaiDate() ? t('newOrder.acceptOn', { day: `${day.slice(8, 10)}/${day.slice(5, 7)}` }) : t('job.accept')}
           </Button>
         )}
       </StickyBar>

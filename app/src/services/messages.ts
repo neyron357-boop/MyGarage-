@@ -155,7 +155,9 @@ export function jobShareText(
   const t = tFor(lang);
   const name = ((customer.type === 'company' && customer.companyName) || customer.name || '').trim();
   const said = complaint?.trim();
-  const [car, , ...rest] = linesText(vehicle, items, lang).split('\n');
+  const [car] = linesText(vehicle, items, lang).split('\n');
+  // v0.99 (audit З35): no prices — what goes to the garage's group never has them (the mechanics see it).
+  const rest = items.filter((i) => i.kind !== 'discount').map((i, n) => `${n + 1}. ${itemTitle(i, lang)}${i.qty !== 1 ? ` × ${i.qty}` : ''}`);
   return [car, ...(name ? [`${t('job.client')}: ${name}`] : []), ...(said ? [`${t('job.complaint')}: ${said}`] : []), '', ...rest].join('\n');
 }
 
@@ -267,6 +269,12 @@ export function mechanicText(
     notes.forEach((x) => out.push(`- ${x}`));
   }
   return out.join('\n');
+}
+
+/** A short reminder of a quote sent (v0.99, audit С7): the job, its sum, how to answer — the PDF goes with it if left on. */
+export function quoteReminder(ctx: MsgContext, v: EstimateVersion): string {
+  const t = tFor(v.language);
+  return tidy(t('msg.quoteReminder', { ...base(ctx, v.language), amount: formatAed(v.fixedGross, v.language) }));
 }
 
 export function versionMessage(ctx: MsgContext, v: EstimateVersion): string {

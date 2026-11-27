@@ -33,8 +33,14 @@ export function CustomersPage() {
     const [cs, vs, orders] = await Promise.all([db.customers.orderBy('name').toArray(), db.vehicles.toArray(), db.orders.toArray()]);
     const s = q.trim().toLowerCase();
     const digits = s.replace(/\D/g, '').replace(/^0+/, '');
+    // v0.99 (audit Ч23): the car's number, make or model finds its customer.
+    const plateDigits = s.replace(/\D/g, '');
+    const carsBy = new Map<string, Vehicle[]>();
+    for (const v of vs) if (v.customerId) carsBy.set(v.customerId, [...(carsBy.get(v.customerId) ?? []), v]);
+    const carHit = (c: Customer) =>
+      (carsBy.get(c.id) ?? []).some((v) => (plateDigits.length >= 2 && (v.plate?.number ?? '').includes(plateDigits)) || (s.length >= 2 && [v.make, v.model].some((x) => !!x && x.toLowerCase().includes(s))));
     return cs
-      .filter((c) => !c.archivedAt && (!s || c.name.toLowerCase().includes(s) || (c.companyName ?? '').toLowerCase().includes(s) || (digits.length >= 3 && c.phone.includes(digits))))
+      .filter((c) => !c.archivedAt && (!s || c.name.toLowerCase().includes(s) || (c.companyName ?? '').toLowerCase().includes(s) || (digits.length >= 3 && c.phone.includes(digits)) || carHit(c)))
       .map((c): Row => {
         const mine = orders.filter((o) => o.customerId === c.id);
         // The last visit (v0.41, a PC's column): the newest job of the customer.
@@ -79,6 +85,7 @@ export function CustomersPage() {
   return (
     <>
       <PageHeader
+        back={phone ? '/more' : undefined}
         title={t('nav.customers')}
         subtitle={list ? t('customer.count', { n: list.length }) : undefined}
         right={

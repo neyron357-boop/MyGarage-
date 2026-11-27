@@ -67,9 +67,9 @@ export function CustomerAnswerRow({ orderId, phone }: { orderId: string; phone?:
               })
             }
           >
-            {t(p.answer.kind === 'none' ? 'answer.refuse' : 'answer.agree')}
+            {p.answer.kind === 'none' ? t('answer.refuse') : p.answer.kind === 'all' ? t('answer.agree') : t('answer.record', { what })}
           </Button>
-          <ActionIcon variant="subtle" color="gray" size={30} radius="xl" aria-label={t('today.notNeeded')} onClick={() => run(async () => (await dismissCustomerAnswer(orderId, p.msgId), setP(undefined)))}>
+          <ActionIcon variant="subtle" color="gray" size={36} radius="xl" aria-label={t('today.notNeeded')} onClick={() => run(async () => (await dismissCustomerAnswer(orderId, p.msgId), setP(undefined)))}>
             <IconX size={16} />
           </ActionIcon>
         </>

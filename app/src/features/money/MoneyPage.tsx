@@ -1,4 +1,4 @@
-import { Alert, Badge, Box, Button, Group, Modal, Progress, Select, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
+import { Alert, Badge, Box, Button, Group, Modal, Progress, SimpleGrid, Stack, Text, TextInput, ThemeIcon } from '@mantine/core';
 import {
   IconArrowDownLeft,
   IconArrowUpRight,
@@ -11,9 +11,10 @@ import {
 } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { formatDate, formatDateTime, monthKey } from '../../domain/dates';
+import { dayShort, dubaiTime, formatDate, formatDateTime, monthKey } from '../../domain/dates';
 import { expenseEntry, withEntries } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { CashReason, ExpenseMethod, PayMethod, SalaryPayment } from '../../domain/types';
@@ -56,6 +57,13 @@ function MethodPicker({ value, onChange }: { value: PayMethod; onChange: (m: Pay
       })}
     </SimpleGrid>
   );
+}
+
+/** A moment as people say it (v0.99, audit Ф32): «Сегодня 20:28», «Вчера 09:10», «14/11 18:02». */
+function whenSaid(t: TFunction, iso: string): string {
+  const d = dayShort(iso);
+  const day = d.word ? t(`common.${d.word}`) : d.text;
+  return `${day} ${dubaiTime(iso)}`;
 }
 
 function CashTab() {
@@ -150,7 +158,7 @@ function CashTab() {
                         {' · '}
                       </>
                     )}
-                    {`${timed ? formatDateTime(m.at) : formatDate(date)}${m.note ? ` · ${m.note}` : ''}`}
+                    {`${timed ? whenSaid(t, m.at) : formatDate(date)}${m.note ? ` · ${m.note}` : ''}`}
                   </>
                 }
                 right={
@@ -175,7 +183,7 @@ function CashTab() {
                 key={c.id}
                 title={closings.filter((x) => x.date === c.date).length > 1 ? formatDateTime(c.closedAt) : formatDate(c.date)}
                 subtitle={`${t('cash.expected')} ${formatAed(c.expectedFils)} · ${t('cash.actual')} ${formatAed(c.actualFils)} · ${t('payment.method.card')} ${formatAed(c.cardTotalFils)}${c.comment ? ` · ${c.comment}` : ''}`}
-                right={c.diffFils !== 0 ? <Badge color="red">{formatAed(c.diffFils)}</Badge> : <Badge color="green">OK</Badge>}
+                right={c.diffFils !== 0 ? <Badge color={c.diffFils < 0 ? 'red' : 'orange'}>{`${c.diffFils > 0 ? '+' : '−'}${formatAed(Math.abs(c.diffFils))}`}</Badge> : <Badge color="green">{t('cash.matched')}</Badge>}
               />
             ))}
           </List>
@@ -195,7 +203,13 @@ function CashTab() {
               </SelectCard>
             ))}
           </SimpleGrid>
-          <Select value={reason} onChange={(v) => v && setReason(v as CashReason)} allowDeselect={false} data={(['collection', 'adjustment', 'other'] as const).map((r) => ({ value: r, label: t(`cashReason.${r}`) }))} />
+          <div className="chip-row wrap" role="radiogroup" aria-label={t('common.comment')} data-cash-reasons>
+            {(['collection', 'adjustment', 'other'] as const).map((r) => (
+              <button key={r} type="button" className="chip" role="radio" aria-checked={reason === r} data-active={reason === r} onClick={() => setReason(r)}>
+                {t(`cash.reasonChip.${r}`)}
+              </button>
+            ))}
+          </div>
           <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} />
           <TextInput label={t('common.comment')} value={note} onChange={(e) => setNote(e.currentTarget.value)} description={t('cash.commentHint')} />
           <Button loading={busy} onClick={() => run(async () => { await addCashMovement({ direction: dir, amountFils: amount ?? 0, reason, note }); setMoveOpen(false); setAmount(undefined); setNote(''); }, 'common.saved')}>
@@ -215,9 +229,14 @@ function CashTab() {
           {actual !== undefined && diff === 0 && <Alert color="green">{t('cash.match')}</Alert>}
           {actual !== undefined && diff !== 0 && (
             <>
-              <Alert color="red" title={t('cash.diff')}>
-                {formatAed(diff)}
-              </Alert>
+              <Alert color={diff < 0 ? 'red' : 'orange'} title={t(diff < 0 ? 'cash.short' : 'cash.over', { sum: formatAed(Math.abs(diff)) })} data-cash-diff={diff < 0 ? 'short' : 'over'} />
+              <div className="chip-row wrap" data-diff-reasons>
+                {(['change', 'unwritten', 'owner'] as const).map((r) => (
+                  <button key={r} type="button" className="chip" data-active={comment === t(`cash.why.${r}`)} onClick={() => setComment(t(`cash.why.${r}`))}>
+                    {t(`cash.why.${r}`)}
+                  </button>
+                ))}
+              </div>
               <TextInput label={t('common.comment')} required value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
             </>
           )}

@@ -25,6 +25,20 @@ import { jobsSure, jobUnsure, takeKeptNumber } from './sync/numbers';
 
 const year = () => Number(dubaiDate().slice(0, 4));
 
+/**
+ * How this customer paid last time (v0.99, audit С29): the payment sheet's first choice — a customer who pays by card
+ * does not get cash put on him silently. Newest payments first, until his (a few hundred a year at most).
+ */
+export async function lastPayMethod(customerId: string): Promise<PayMethod | undefined> {
+  if (!customerId) return undefined;
+  const p = await db.payments
+    .orderBy('receivedAt')
+    .reverse()
+    .filter((x) => x.customerId === customerId && x.kind !== 'refund' && !x.incomeId && (x.method === 'cash' || x.method === 'card' || x.method === 'transfer'))
+    .first();
+  return p?.method;
+}
+
 export interface PaymentInput {
   kind: Payment['kind'];
   method: PayMethod;

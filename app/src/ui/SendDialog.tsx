@@ -80,6 +80,8 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
   const [channel, setChannel] = useState<Channel>(customer.preferredChannel === 'telegram' ? 'telegram' : 'whatsapp');
   const [opened, setOpened] = useState(false);
   const [copied, setCopied] = useState(false);
+  // With the garage's WhatsApp the other ways wait under «Ещё» (v0.99, audit С2).
+  const [more, setMore] = useState(false);
   const [sharing, setSharing] = useState(false);
   const files = usePhotoFiles(request?.photos);
   const canSharePhotos = files.length > 0 && typeof navigator.canShare === 'function' && navigator.canShare({ files });
@@ -205,9 +207,26 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
       .catch(() => undefined);
   };
 
+  // «Сначала боссу»: above the words when WhatsApp sends by itself (it comes first), else among the ways.
+  const BOSS_SLOT = waLinked ? (
+    <Button
+      fullWidth
+      size="md"
+      variant="light"
+      color="green"
+      loading={bossSending}
+      disabled={bossDone}
+      leftSection={bossDone ? <IconCheck size={20} /> : <IconUserShield size={20} />}
+      onClick={() => (boss.to ? void sendBoss(boss.to) : setPickingBoss(true))}
+      data-send-boss
+    >
+      {bossDone ? t('wa.sentToBoss') : t('wa.toBossFirst')}
+    </Button>
+  ) : null;
   return (
     <Modal opened={shown && !!live} onClose={onClose} title={t('send.title')} size="lg">
       <Stack gap="md">
+        {!direct && (
         <SimpleGrid cols={2} spacing="xs">
           <SelectCard active={channel === 'whatsapp'} onClick={() => setChannel('whatsapp')}>
             <Group gap={8} wrap="nowrap">
@@ -226,6 +245,8 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
             </Group>
           </SelectCard>
         </SimpleGrid>
+        )}
+        {direct && BOSS_SLOT}
         <Text size="sm" c="dimmed">
           {[customer.name || t('customer.noName'), phone ? formatPhone(phone) : ''].filter(Boolean).join(', ')} · {t(`lang.${request.lang}`)}
         </Text>
@@ -250,25 +271,18 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
                 </div>
               )}
               <Button fullWidth size="md" color="green" loading={sending} leftSection={<IconBrandWhatsapp size={20} />} onClick={() => void sendDirect()} data-send-direct>
-                {t('wa.sendDirect')}
+                {customer.name ? t('wa.sendTo', { name: customer.name }) : t('wa.sendDirect')}
               </Button>
+              {!more && (
+                <Button fullWidth variant="subtle" color="gray" onClick={() => setMore(true)} data-send-more>
+                  {t('send.more')}
+                </Button>
+              )}
             </>
           )}
-          {waLinked && (
-            <Button
-              fullWidth
-              size="md"
-              variant="light"
-              color="green"
-              loading={bossSending}
-              disabled={bossDone}
-              leftSection={bossDone ? <IconCheck size={20} /> : <IconUserShield size={20} />}
-              onClick={() => (boss.to ? void sendBoss(boss.to) : setPickingBoss(true))}
-              data-send-boss
-            >
-              {bossDone ? t('wa.sentToBoss') : t('wa.toBossFirst')}
-            </Button>
-          )}
+          {(!direct || more) && (
+          <>
+          {!direct && BOSS_SLOT}
           <Button
             fullWidth
             size="md"
@@ -310,6 +324,8 @@ function SendSheet({ customer, request: live, onClose, onSent, shown }: SendProp
               </Button>
             )}
           </Group>
+          </>
+          )}
         </Stack>
         {opened && (
           <Group justify="space-between" p="sm" className="surface-soft rise-enter" wrap="nowrap">

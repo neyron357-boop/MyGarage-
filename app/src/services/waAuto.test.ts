@@ -238,7 +238,7 @@ describe('suppliers', () => {
     const b = await db.suppliers.add({ id: uid(), name: 'No Phone Parts' } as never);
     const sheet = new File([new Uint8Array(300)], 'diagrams-1.jpg', { type: 'image/jpeg' });
     const r = await askSuppliers(o.id, [{ supplierId: a.id }, { supplierId: b as string }], { items: [pads, filter], sheets: [sheet], usedFiles: [] });
-    expect(r).toEqual({ asked: 1, noNumber: ['No Phone Parts'] });
+    expect(r).toEqual({ asked: 1, noNumber: ['No Phone Parts'], queued: true });
     await tap();
     const ask = keyed('ask:')[0];
     expect(ask.phone).toBe('971507776655');
@@ -252,12 +252,22 @@ describe('suppliers', () => {
     const { o } = await job();
     const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
     const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
-    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [] })).toEqual({ asked: 1, noNumber: [] });
+    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [] })).toEqual({ asked: 1, noNumber: [], queued: true });
     // Waiting for «Отправить»: not asked yet.
     expect((await db.orders.get(o.id))!.asks ?? []).toHaveLength(0);
     forgetAsks(waAsks().map((a) => a.id));
     expect((await db.orders.get(o.id))!.asks ?? []).toHaveLength(0);
     expect(keyed('ask:')).toHaveLength(0);
+  });
+
+  it('v0.99 (audit W28): seen in the sheet — its «Отправить» sends it, the request kept on the job at once', async () => {
+    const { o } = await job();
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+    const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [], seen: true })).toEqual({ asked: 1, noNumber: [], queued: false });
+    expect(waAsks()).toHaveLength(0);
+    expect(keyed('ask:')).toHaveLength(1);
+    expect((await db.orders.get(o.id))!.asks).toMatchObject([{ supplierId: supId }]);
   });
 
   it('v0.91.7 (#76): later — the server keeps it until then; the request counts from then; an old server — refused', async () => {
@@ -268,7 +278,7 @@ describe('suppliers', () => {
     // The server of before (no «later» in its status) would send it now: not handed over.
     await expect(askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [], after })).rejects.toThrow('later.oldServer');
     waStore().status = { ...waStore().status!, later: true };
-    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [], after })).toEqual({ asked: 1, noNumber: [] });
+    expect(await askSuppliers(o.id, [{ supplierId: supId }], { items: [pads], sheets: [], usedFiles: [], after })).toEqual({ asked: 1, noNumber: [], queued: true });
     await tap();
     expect(keyed('ask:')[0].after).toBe(after);
     expect(Date.parse((await db.orders.get(o.id))!.asks![0].at)).toBe(after);

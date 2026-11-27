@@ -1,7 +1,7 @@
 import { Box, Button, Group, Modal, SegmentedControl, Select, SimpleGrid, Stack, Text, Textarea, TextInput, UnstyledButton } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
 import { formatPhone } from '../../domain/phone';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Customer, Plate, Vehicle, VehicleType } from '../../domain/types';
 import { VEHICLE_TYPES, vehicleTypeOf } from '../../domain/vehicleType';
@@ -244,26 +244,29 @@ export function CustomerModal({
       } else onSaved?.(await createCustomer(v));
       onClose();
     }, 'common.saved');
+  // v0.99 (audit П3): the number typed is someone's in the base — he is the main button; a second customer with the same
+  // number only by the second one (two cards with one number split his debts).
+  const digits = (s: string) => s.replace(/\D/g, '').slice(-9);
+  const samePhone = typedPhone && digits(typedPhone).length >= 9 ? found.find((c) => c.phone && digits(c.phone) === digits(typedPhone)) : undefined;
+  // v0.99 (audit П2): on a job, a customer who had a number gets another one typed over it — likely another person
+  // brought the car: «Новый клиент для заказа» first; changing this one (in every job, debt and statement) second.
+  const another = !!orderId && !!customer && !samePhone && !!customer.phone && !!typedPhone;
+  const saveAsNew = () =>
+    run(async () => {
+      const c = await createCustomer({ ...EMPTY_CUSTOMER, name: v.name, phone: v.phone });
+      await setJobCustomer(orderId!, c.id);
+      haptic('success');
+      onSaved?.(c);
+      onClose();
+    }, 'common.saved');
+  const nameRef = useRef<HTMLInputElement>(null);
   // A compact card (v0.81, the user's brief: «имя, один контактный номер для звонка и WhatsApp и кнопка «Сохранить». Все
   // поля и кнопка доступны без прокрутки»): two rows and «Сохранить» right under them — in sight above the keyboard;
-  // everything else under «Ещё».
+  // everything else under «Ещё». v0.99 (audit П11): the number first, as in «Новый заказ» — it finds the person.
   return (
     <Modal opened={opened} onClose={onClose} title={customer ? t('customer.edit') : t('customer.new')} size="md" classNames={{ content: 'sheet-grouped customer-sheet' }}>
       <Stack gap="md">
         <div className="ios-group">
-          <FormRow label={t('customer.name')}>
-            <TextInput
-              aria-label={t('customer.name')}
-              placeholder={t('newOrder.namePlaceholder')}
-              value={v.name}
-              onChange={(e) => setV({ ...v, name: e.currentTarget.value })}
-              data-autofocus
-              autoCapitalize="words"
-              autoComplete="off"
-              enterKeyHint="next"
-              w="100%"
-            />
-          </FormRow>
           <FormRow label={t('customer.phoneWa')}>
             <TextInput
               aria-label={t('customer.phone')}
@@ -272,17 +275,57 @@ export function CustomerModal({
               placeholder="050 123 4567"
               value={v.phone}
               onChange={(e) => setV({ ...v, phone: e.currentTarget.value })}
+              data-autofocus={!customer?.phone || undefined}
+              autoComplete="off"
+              enterKeyHint="next"
+              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && (e.preventDefault(), nameRef.current?.focus())}
+              w="100%"
+            />
+          </FormRow>
+          <FormRow label={t('customer.name')}>
+            <TextInput
+              ref={nameRef}
+              aria-label={t('customer.name')}
+              placeholder={t('newOrder.namePlaceholder')}
+              value={v.name}
+              onChange={(e) => setV({ ...v, name: e.currentTarget.value })}
+              data-autofocus={!!customer?.phone || undefined}
+              autoCapitalize="words"
               autoComplete="off"
               enterKeyHint="done"
-              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && (e.preventDefault(), void save())}
+              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && (e.preventDefault(), void (samePhone ? pick(samePhone) : another ? saveAsNew() : save()))}
               w="100%"
             />
           </FormRow>
         </div>
-        {suggestions}
-        <Button size="lg" fullWidth onClick={save} loading={busy}>
-          {t('common.save')}
-        </Button>
+        {samePhone ? (
+          <>
+            <Button size="lg" fullWidth onClick={() => void pick(samePhone)} loading={busy} data-its-them>
+              {t('customer.itsThem', { name: (samePhone.type === 'company' && samePhone.companyName) || samePhone.name || formatPhone(samePhone.phone) })}
+            </Button>
+            <Button variant="subtle" fullWidth onClick={save} loading={busy}>
+              {t('customer.saveAnyway')}
+            </Button>
+          </>
+        ) : (
+          <>
+            {suggestions}
+            {another ? (
+              <>
+                <Button size="lg" fullWidth onClick={() => void saveAsNew()} loading={busy} data-new-for-job>
+                  {t('customer.newForJob')}
+                </Button>
+                <Button variant="subtle" fullWidth onClick={save} loading={busy}>
+                  {t('customer.fixThis')}
+                </Button>
+              </>
+            ) : (
+              <Button size="lg" fullWidth onClick={save} loading={busy}>
+                {t('common.save')}
+              </Button>
+            )}
+          </>
+        )}
         <More label={t('customer.more')}>
           <CustomerMore value={v} onChange={setV} />
         </More>

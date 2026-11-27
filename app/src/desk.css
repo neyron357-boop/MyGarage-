@@ -657,7 +657,15 @@ html.desk .add-row > .add-btn > .tile-icon svg {
   height: 15px;
 }
 html.desk .add-row > .add-extra {
-  flex: 0 0 40px;
+  flex: 0 0 auto;
+  min-width: 40px;
+}
+/* Their word beside the symbol (v0.99, audit К21): a PC has the room; a phone keeps the bare symbol beside the tile. */
+html.desk .add-row:not(.add-extras) > .add-extra > .add-extra-word {
+  display: inline;
+}
+html.desk .add-row {
+  flex-wrap: wrap;
 }
 /* Empty states and skeletons: quieter. */
 html.desk .empty-icon {

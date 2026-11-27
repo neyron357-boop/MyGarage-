@@ -11,6 +11,9 @@ import { statementPdf } from '../../services/debtDocs';
 import { phaseOf, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { sendClientReport } from '../../services/waAuto';
+import { askToSend } from '../../services/waConfirm';
+import { blobBase64 } from '../../services/waOutbox';
+import { partsRequestText } from '../../services/messages';
 import { sendWaFile } from '../../services/whatsapp';
 import { liveLines } from '../../domain/flow';
 import { ConfirmModal, List, ListRow, Money, SearchField } from '../../ui/components';
@@ -75,15 +78,28 @@ function AnyQuick({ chatId, opened, onClose, onFiles }: { chatId: string; opened
       window.clearTimeout(timer);
     };
   }, [opened, query]);
+  // v0.99 (audit W21): a job's quote or invoice from a chat that is not its customer's (a supplier, the work group) is seen
+  // first in «Проверить и отправить» — its prices went to a supplier at one tap before. A group of the garage gets no prices
+  // at all; a supplier gets «Заявка» — the parts' list without prices.
+  const group = chatId.endsWith('@g.us');
   const sendDoc = (b: OrderBundle, kind: 'quote' | 'invoice') =>
     void run(async () => {
       const inv = activeInvoice(b.invoices);
       const file = kind === 'invoice' && inv ? await invoicePdf(inv.id) : await quotationPdf(b.order.id);
       const plate = b.vehicle.plate?.number ? formatPlate(b.vehicle.plate, lang) : '';
-      await sendWaFile(chatId, file.blob, { name: file.filename, doc: true, caption: [`№${b.order.number}`, carOf(b), plate].filter(Boolean).join(' · ') });
-      haptic('success');
+      const caption = [`№${b.order.number}`, carOf(b), plate].filter(Boolean).join(' · ');
+      askToSend([{ key: `doc:${chatId}:${b.order.id}:${kind}:${Date.now()}`, chat: chatId, title: caption, parts: [{ data: await blobBase64(file.blob), name: file.filename, mime: 'application/pdf', caption }] }]);
+      haptic('light');
       onClose();
-    }, 'wa.quick.sent');
+    });
+  const sendList = (b: OrderBundle) =>
+    void run(async () => {
+      const parts = liveLines(b.items).filter((i) => i.kind === 'part');
+      const text = partsRequestText(b.vehicle, parts.length ? parts : liveLines(b.items).filter((i) => i.kind !== 'discount'));
+      askToSend([{ key: `list:${chatId}:${b.order.id}:${Date.now()}`, chat: chatId, title: [`№${b.order.number}`, carOf(b)].filter(Boolean).join(' · '), parts: [{ text }] }]);
+      haptic('light');
+      onClose();
+    });
   return (
     <Modal opened={opened} onClose={onClose} title={t('wa.quick.title')}>
       <Stack gap="sm" data-wa-quick-any>
@@ -124,12 +140,18 @@ function AnyQuick({ chatId, opened, onClose, onFiles }: { chatId: string; opened
                   right={
                     <span className="wa-quick-docs">
                       {lines && (
+                        <button type="button" className="chip" disabled={busy} onClick={() => sendList(b)} data-wa-quick-doc="list">
+                          <IconFileText size={16} stroke={2} aria-hidden />
+                          {t('wa.quick.list')}
+                        </button>
+                      )}
+                      {lines && !group && (
                         <button type="button" className="chip" disabled={busy} onClick={() => sendDoc(b, 'quote')} data-wa-quick-doc="quote">
                           <IconFileDollar size={16} stroke={2} aria-hidden />
                           {t('wa.quick.estimate')}
                         </button>
                       )}
-                      {inv && (
+                      {inv && !group && (
                         <button type="button" className="chip" disabled={busy} onClick={() => sendDoc(b, 'invoice')} data-wa-quick-doc="invoice">
                           <IconFileInvoice size={16} stroke={2} aria-hidden />
                           {t('wa.quick.invoice')}

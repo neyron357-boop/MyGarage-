@@ -72,6 +72,8 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
   const [mode, setMode] = useState<QuickKind>(kind);
   const [q, setQ] = useState('');
   const [added, setAdded] = useState<{ id: string; title: string; kind?: AutoKind }[]>([]);
+  // What the job has already (v0.99, audit З22): its suggestion is marked «уже есть».
+  const have = new Set(b.items.filter((i) => i.approvalState !== 'declined' && i.kind !== 'discount').flatMap((i) => [i.titleEn, i.titleRu].filter((x): x is string => !!x).map((x) => x.trim().toUpperCase())));
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!opened) return;
@@ -291,6 +293,11 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               return (
                 <button key={title} type="button" role="option" aria-selected={title === exact} className="qa-row" data-side={side} onMouseDown={keep} onClick={() => add(title)}>
                   <span className="qa-name">{title}</span>
+                  {have.has(title.trim().toUpperCase()) && (
+                    <span className="qa-have" data-qa-have>
+                      {t('qa.have')}
+                    </span>
+                  )}
                   {k && <KindMark kind={k} />}
                   {said.priceFils ? (
                     <Text span className="qa-price tnum" data-typed-price>

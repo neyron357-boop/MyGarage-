@@ -239,7 +239,7 @@ const fold = (s: string) => s.toLowerCase().replace(/ё/g, 'е').trim();
  * finds them. A search goes by the garage's name, WhatsApp's name and the number however it is typed («050 123-45-67»,
  * «+971…», «00971…»).
  */
-export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who>; roles?: ChatRoles; garageOnly?: boolean; top?: Map<string, number> }): WaChat[] {
+export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: string; people: Map<string, Who>; roles?: ChatRoles; garageOnly?: boolean; top?: Map<string, number>; /** Marked unread on this device (v0.99, audit W6). */ marked?: Set<string> }): WaChat[] {
   const q = fold(opts.query ?? '');
   // Letters in it — a name, not a number («Ali 2» is not «2»).
   const qDigits = /\p{L}/u.test(q) ? '' : searchDigits(q);
@@ -255,15 +255,27 @@ export function filterChats(chats: WaChat[], opts: { tab: ChatTab; query?: strin
     } else if (c.archived) return false;
     // «Только гараж» (v0.81): the chats that are something to the garage (and oneself). A search keeps to it too (v0.84,
     // «поиск по имени и номеру учитывает текущий фильтр»): the list says how many more the whole list has.
-    if (opts.garageOnly && !role && !c.self) return false;
-    if (opts.tab === 'unread') return c.unread > 0;
+    // v0.99 (audit W1): a new number that wrote and is not read yet stays in sight — a new customer's first words.
+    // v0.99 (audit W7): a search goes through every chat — a name that is there was «Ничего не найдено» under the filter.
+    if (opts.garageOnly && !q && !role && !c.self && !newNumber(c)) return false;
+    if (opts.tab === 'unread') return c.unread > 0 || !!opts.marked?.has(c.id);
     if (opts.tab === 'customers') return role === 'customer';
     if (opts.tab === 'suppliers') return role === 'supplier' || role === 'service';
     if (opts.tab === 'groups') return c.group;
     return true;
   });
-  return orderChats(out, opts.top);
+  if (opts.tab === 'suppliers') return orderChats(out, opts.top);
+  // v0.99 (audit W3): in «Все» and «Новые» a customer's (or a new number's) unread chat comes first, and the app pins no
+  // more than three main suppliers over the rest — fifteen of them put a customer's fresh message below the first screen.
+  const top3 = opts.top ? new Map([...opts.top].filter(([, n]) => n < 3)) : undefined;
+  const waiting = (c: WaChat) => (c.unread > 0 || !!opts.marked?.has(c.id)) && !c.group && !c.muted && (chatRole(c, opts.people, roles) === 'customer' || (newNumber(c) && !chatRole(c, opts.people, roles)));
+  const ordered = orderChats(out, top3);
+  return [...ordered.filter(waiting), ...ordered.filter((c) => !waiting(c))];
 }
+
+/** A number that wrote and is nobody to the garage yet, not read (v0.99, audit W1): shown even under «Только гараж». */
+// A muted chat is not news, however much it has unread (an old muted stranger was in «Только гараж»).
+const newNumber = (c: WaChat) => c.unread > 0 && !c.group && !c.self && !c.archived && !c.muted;
 
 /** How many chats of each tab wait to be read (the tab's number). */
 export function tabCounts(chats: WaChat[], people: Map<string, Who>, roles: ChatRoles = NO_ROLES, garageOnly = false): Record<ChatTab, number> {
@@ -271,7 +283,7 @@ export function tabCounts(chats: WaChat[], people: Map<string, Who>, roles: Chat
   for (const c of chats) {
     if (c.archived || !c.unread) continue;
     const role = chatRole(c, people, roles);
-    if (garageOnly && !role && !c.self) continue;
+    if (garageOnly && !role && !c.self && !newNumber(c)) continue;
     n.all++;
     n.unread++;
     if (role === 'customer') n.customers++;

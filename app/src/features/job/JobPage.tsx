@@ -27,6 +27,7 @@ import { IconHelpCircle,
   IconDots,
   IconLayoutSidebarRightExpand,
   IconLock,
+  IconTag,
   IconEngine,
   IconFileInvoice,
   IconFileTypePdf,
@@ -65,7 +66,7 @@ import { formatDate, hoursBetween, monthLong, shortDuration } from '../../domain
 import { lockedMonthOf } from '../../domain/monthLock';
 import { discountBase } from '../../domain/discount';
 import { isToSend, isUnconfirmed, jobLines, liveLines, type Phase } from '../../domain/flow';
-import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet, reissueDue } from '../../domain/invoice';
+import { activeInvoice, canAmendInvoice, invoiceBuyer, paidNet, reissueDue, chooseInvoiceType } from '../../domain/invoice';
 import { canReprice, isAwaitingClient, itemAmounts, itemTitle, lineName, unitGross, unitGrossPrice } from '../../domain/items';
 import { formatAed, roundFils } from '../../domain/money';
 import { formatPhone } from '../../domain/phone';
@@ -80,7 +81,7 @@ import { AppError } from '../../services/errors';
 import { debtPdf, invoicePdf, openPdf, quotationPdf, versionPdf } from '../../services/documents';
 import { addItem, ensureLabourLine, updateItem } from '../../services/estimate';
 import { amendInvoice, answerLines, approveAll, carArrived, dropLine, leaveOnDebt, lineDone, phaseOf, refuseAll, removeLines, reopenJob, reorderLines, repriceLine, restoreFromBin, restoreLines, reviseLine, setUnconfirmed, syncStage, takeBack } from '../../services/flow';
-import { invoiceTemplate, partNamesText, reportText, simpleMessage, versionMessage, whatsappUrl } from '../../services/messages';
+import { invoiceTemplate, partNamesText, quoteReminder, reportText, simpleMessage, whatsappUrl } from '../../services/messages';
 import { waReady } from '../../services/whatsapp';
 import { useWaSel } from '../../ui/waSel';
 import { useOpenChat } from '../whatsapp/openChat';
@@ -413,6 +414,24 @@ function PriceField({ item, onDone }: { item: OrderItem; onDone: (now: 'draft' |
 }
 
 /** A line already told to the customer: the answer, done or not, where its part is — or take it off. */
+/** The cost of a part the customer agreed to (v0.99, audit З14): typed here, per piece, without VAT — the price stays. */
+function AgreedCost({ item }: { item: OrderItem }) {
+  const { t } = useTranslation();
+  const { run } = useAction();
+  const [value, setValue] = useState<number | undefined>(item.costPriceFils);
+  const save = () => value !== item.costPriceFils && run(() => setProcurement(item.id, { status: item.procurementStatus ?? 'needed', costPriceFils: value ?? 0 }), 'common.saved');
+  return (
+    <Group gap="sm" wrap="nowrap" align="flex-end" data-agreed-cost>
+      <Box style={{ flex: 1, minWidth: 0 }}>
+        <MoneyInput label={t('job.costEach')} value={value} onChange={setValue} leftSection={item.qty !== 1 ? `${item.qty} ×` : undefined} />
+      </Box>
+      <ActionIcon size={44} radius="xl" variant="filled" disabled={value === item.costPriceFils} aria-label={t('common.save')} onClick={() => void save()}>
+        <IconCheck size={22} />
+      </ActionIcon>
+    </Group>
+  );
+}
+
 function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: OrderItem | null; onClose: () => void; onEdit: (i: OrderItem) => void }) {
   const { t } = useTranslation();
   const { run, busy } = useAction();
@@ -421,10 +440,14 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
   if (item) last.current = b.items.find((x) => x.id === item.id) ?? item;
   // Typing a new price: closed again each time the sheet opens (kept while it slides away).
   const [pricing, setPricing] = useState(false);
+  const [editAsk, setEditAsk] = useState(false);
   const [openFor, setOpenFor] = useState(item);
   if (item !== openFor) {
     setOpenFor(item);
-    if (item) setPricing(false);
+    if (item) {
+      setPricing(false);
+      setEditAsk(false);
+    }
   }
   const i = last.current;
   if (!i) return null;
@@ -510,25 +533,43 @@ function LineActions({ b, item, onClose, onEdit }: { b: OrderBundle; item: Order
           </>
         )}
         {/* The whole line again (name, how many, price): back to a draft — told again, as a new line is. */}
+        {/* A part bought after the customer agreed (v0.99, audit З14): its cost here — the price to the customer stays. */}
+        {part && agreed && !invoiced && <AgreedCost item={i} />}
         {(waiting || (agreed && !invoiced && i.kind !== 'discount')) && (
           <Button
             variant="subtle"
+            color={editAsk ? 'orange' : undefined}
             loading={busy}
             leftSection={<IconPencil size={18} />}
-            onClick={() =>
-              run(async () => {
+            onClick={() => {
+              // v0.99 (audit З11): the line back to a draft only after a second tap that says so — a look at it took the
+              // customer's yes away.
+              if (!editAsk) return setEditAsk(true);
+              void run(async () => {
                 if (waiting) await takeBack([i.id]);
                 else await reviseLine(i.id);
                 onClose();
                 onEdit({ ...i, approvalState: 'draft', done: false });
-              })
-            }
+              });
+            }}
+            data-line-edit
           >
-            {t('common.edit')}
+            {editAsk ? t('job.editAgain') : t('common.edit')}
           </Button>
         )}
         {(waiting || (agreed && !invoiced)) && (
-          <Button variant="subtle" color="red" loading={busy} onClick={() => act(() => (waiting ? takeBack([i.id], { cancel: true }) : dropLine(i.id)))}>
+          <Button
+            variant="subtle"
+            color="red"
+            loading={busy}
+            onClick={() =>
+              act(async () => {
+                await (waiting ? takeBack([i.id], { cancel: true }) : dropLine(i.id));
+                // v0.99 (audit З12): «Отменить» — the line back from the job's bin.
+                undoToast(t('item.removed', { title: itemTitle(i, b.order.docLanguage) }), t('common.undo'), () => void restoreFromBin(i.orderId, [i.id]));
+              })
+            }
+          >
             {t('job.drop')}
           </Button>
         )}
@@ -764,7 +805,8 @@ export function JobPage() {
   const toClient = () => (live.some((i) => qtyShort(i)) ? setQtyCheck(true) : void sendNow());
   const remind = () => {
     const v = b.versions.filter((x) => waiting.some((i) => i.lastVersionId === x.id)).pop();
-    if (v) setSend({ text: versionMessage(ctx, v), template: 'estimate', lang: v.language, orderId: oid, pdf: () => versionPdf(v.id), photos: waiting.flatMap((i) => i.mediaIds ?? []) });
+    // v0.99 (audit С7): a short reminder, not the whole quote again; its PDF stays with it.
+    if (v) setSend({ text: quoteReminder(ctx, v), template: 'estimate', lang: v.language, orderId: oid, pdf: () => versionPdf(v.id) });
   };
   /** What was done, for the customer (or a company's group chat): the lines, the checks, mileage, warranty, photos. */
   const report = () => {
@@ -865,14 +907,14 @@ export function JobPage() {
       : picking || !canPick(i)
       ? undefined
       : isAwaitingClient(i)
-        ? { label: t('job.agreed'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await answerLines([i.id], 'approve'), haptic('success'))) }
+        ? { label: t('job.agreed'), icon: IconCheck, color: 'green', full: false, onCommit: () => void run(async () => (await answerLines([i.id], 'approve'), haptic('success'))) }
         : i.approvalState === 'approved'
-          ? { label: i.done ? t('job.lineUndone') : t('job.lineDone'), icon: IconChecks, color: i.done ? 'gray' : 'green', onCommit: () => void run(async () => (await lineDone(i.id, !i.done), haptic(i.done ? 'light' : 'success'))) }
+          ? { label: i.done ? t('job.lineUndone') : t('job.lineDone'), icon: IconChecks, color: i.done ? 'gray' : 'green', full: false, onCommit: () => void run(async () => (await lineDone(i.id, !i.done), haptic(i.done ? 'light' : 'success'))) }
           : i.approvalState === 'draft' && i.kind !== 'discount'
             ? // A draft (v0.88): not confirmed yet — out of the quote and the invoice; again — confirmed.
               isUnconfirmed(i)
-              ? { label: t('job.confirm'), icon: IconCheck, color: 'green', onCommit: () => void run(async () => (await setUnconfirmed([i.id], false), haptic('success'))) }
-              : { label: t('job.unconfirm'), icon: IconHelpCircle, color: 'yellow', onCommit: () => void run(async () => (await setUnconfirmed([i.id], true), haptic('light'))) }
+              ? { label: t('job.confirm'), icon: IconCheck, color: 'green', full: false, onCommit: () => void run(async () => (await setUnconfirmed([i.id], false), haptic('success'))) }
+              : { label: t('job.unconfirm'), icon: IconHelpCircle, color: 'yellow', full: false, onCommit: () => void run(async () => (await setUnconfirmed([i.id], true), haptic('light'))) }
             : undefined;
   const row = (i: OrderItem) => (
     <PickRow
@@ -1078,6 +1120,8 @@ export function JobPage() {
     />
   ) : null;
   const hasAgreed = live.some((i) => i.kind !== 'discount' && i.approvalState === 'approved');
+  // What «Готово» agrees in person on the way (v0.99, audit С16): said in its sheet.
+  const toAgree = live.filter((i) => i.kind !== 'discount' && isToSend(i)).length;
 
   // The '…' tiles keep their places: the ones every job has first (customer, car), then what this step brings,
   // and the destructive ones always last. Not here (v0.21): the mechanics — their chips on the card (a hold: their
@@ -1113,6 +1157,9 @@ export function JobPage() {
   else if (live.length) tiles.push({ key: 'quote', icon: IconFileTypePdf, onClick: () => void run(async () => openPdf(await quotationPdf(oid))) });
   if (inv || hasAgreed) tiles.push({ key: 'report', icon: IconClipboardCheck, color: 'green', onClick: report });
   if (open && !inv && !reissue) tiles.push({ key: 'prepay', icon: IconCash, color: 'green', onClick: () => setPay('prepayment') });
+  // Money back (v0.99, audit С35): from here — the payment sheet no longer has «Оплата · Предоплата · Возврат» on top,
+  // a refund one tap away from a payment.
+  if (b.payments.some((p) => p.kind !== 'refund')) tiles.push({ key: 'refund', icon: IconCash, color: 'red', onClick: () => setPay('refund') });
   // On credit and without payment are ways to settle the job: in the payment sheet ("Pay"), not here.
   if (phase === 'closed') tiles.push({ key: 'claim', icon: IconScale, color: 'orange', onClick: () => navigate(`/orders/${oid}/claim`) });
   if (live.some((i) => i.kind !== 'discount')) tiles.push({ key: 'owner', icon: IconUserCheck, onClick: () => setOwnerOpen(true) });
@@ -1120,6 +1167,7 @@ export function JobPage() {
   if (amendable) tiles.push({ key: 'amend', icon: IconPencil, onClick: () => setAmend({}) });
   if (editable && phase !== 'booked' && !reissue) tiles.push({ key: 'refuse', icon: IconUserX, color: 'red', onClick: () => setRefuse(true) });
   if (binOf(b.order, b.items).length) tiles.push({ key: 'bin', icon: IconArrowBackUp, color: 'gray', onClick: () => setBinOpen(true) });
+  if (phone) tiles.push({ key: 'lock', icon: IconLock, color: 'gray', onClick: () => (haptic('light'), lockForClient(b.order.id)) });
   if (!lockedMonth) tiles.push({ key: 'remove', icon: IconTrash, color: 'red', onClick: () => setRemove(true) });
 
   // This job's «＋» (v0.85, the owner: «быстрое действие для отправки сметы или инвойса, в группу рабочий чат, боссу или
@@ -1138,6 +1186,32 @@ export function JobPage() {
     return out;
   };
 
+  // «Согласен» (v0.99, audit З10 / С12): the customer's yes in person, with «Отменить» — a thumb that missed «Клиенту»
+  // sent the job «В работу» for good. Undo: the lines just agreed go back to drafts (`reviseLine`).
+  const agreeAll = () =>
+    run(async () => {
+      const ids = live.filter((i) => i.kind !== 'discount' && (isToSend(i) || isAwaitingClient(i))).map((i) => i.id);
+      await approveAll(oid);
+      haptic('success');
+      undoToast(t('job.agreedN', { n: ids.length }), t('common.undo'), () =>
+        void run(async () => {
+          for (const id of ids) if ((await db.items.get(id))?.approvalState === 'approved') await reviseLine(id);
+        }),
+      );
+    });
+  // «Выдать» (v0.99, audit С38): back on the board, «Выдана · Отменить» — the closed job no longer stays on screen with
+  // a big «Возобновить» where «Выдать» was.
+  const handOver = () =>
+    run(async () => {
+      await changeStage(oid, 'closed');
+      haptic('success');
+      celebrate(t('job.handedOver'));
+      const car = [b.vehicle.make, b.vehicle.model].filter(Boolean).join(' ') || t('payment.jobNo', { n: b.order.number });
+      undoToast(t('job.handedOverN', { car }), t('common.undo'), () => void run(() => reopenJob(oid)));
+      if (stackBack) stackBack('/');
+      else navigate('/');
+    });
+
   let bar: ReactNode = null;
   if (phase === 'booked')
     bar = (
@@ -1148,21 +1222,36 @@ export function JobPage() {
   else if (phase === 'price')
     bar = (
       <Group gap={10} wrap="nowrap">
-        <Button variant="default" loading={busy} disabled={unpriced.length > 0} leftSection={<IconCheck size={18} />} onClick={() => run(async () => (await approveAll(oid), haptic('success')))} style={{ flex: '0 0 auto' }}>
-          {t('job.agreed')}
-        </Button>
-        <Button loading={busy} disabled={unpriced.length > 0} leftSection={<IconSend size={18} />} onClick={toClient} style={{ flex: 1 }}>
-          {t('job.toClient')} · {formatAed(sum.gross)}
-        </Button>
+        {hasAgreed ? (
+          // v0.99 (audit С16): a line added while the work went on — «Готово» agrees it in person and makes the invoice.
+          <Button variant="default" c="green.7" loading={busy} disabled={unpriced.length > 0} leftSection={<IconChecks size={18} />} onClick={() => (setInvDay(invoiceDayFor(b.order)), setFinish(true))} style={{ flex: '0 0 auto' }} data-done-now>
+            {t('job.done')}
+          </Button>
+        ) : (
+          <Button variant="default" loading={busy} disabled={unpriced.length > 0} leftSection={<IconCheck size={18} />} onClick={agreeAll} style={{ flex: '0 0 auto' }}>
+            {t('job.agreedInPerson')}
+          </Button>
+        )}
+        {unpriced.length > 0 ? (
+          <Button color="orange" loading={busy} leftSection={<IconTag size={18} />} onClick={() => openPrice(unpriced[0])} style={{ flex: 1 }} data-price-missing>
+            {t('job.priceMissing', { n: unpriced.length })}
+          </Button>
+        ) : (
+          <Button loading={busy} leftSection={<IconSend size={18} />} onClick={toClient} style={{ flex: 1 }}>
+            {t('job.toClient')} · {formatAed(sum.gross)}
+          </Button>
+        )}
       </Group>
     );
   else if (phase === 'wait')
     bar = (
       <Group gap={10} wrap="nowrap">
-        <Button variant="default" c="red" loading={busy} onClick={() => run(() => answerLines(waiting.map((i) => i.id), 'decline'))} style={{ flex: '0 0 auto' }}>
+        {/* v0.99 (audit С9): the same «Отказ» as «…» → «Отказ», asked first — one tap here wrote the customer's no for
+            good and left the job on «Смотрим» with no main button. */}
+        <Button variant="default" c="red" loading={busy} onClick={() => setRefuse(true)} style={{ flex: '0 0 auto' }}>
           {t('job.refused')}
         </Button>
-        <Button color="green" loading={busy} leftSection={<IconCheck size={18} />} onClick={() => run(async () => (await approveAll(oid), haptic('success')))} style={{ flex: 1 }}>
+        <Button color="green" loading={busy} leftSection={<IconCheck size={18} />} onClick={agreeAll} style={{ flex: 1 }}>
           {t('job.agreed')}
         </Button>
       </Group>
@@ -1207,13 +1296,7 @@ export function JobPage() {
         color="teal"
         loading={busy}
         leftSection={<IconKey size={20} />}
-        onClick={() =>
-          run(async () => {
-            await changeStage(oid, 'closed');
-            haptic('success');
-            celebrate(t('job.handedOver'));
-          })
-        }
+        onClick={handOver}
       >
         {t('job.handOver')}
       </Button>
@@ -1303,7 +1386,7 @@ export function JobPage() {
           <PhasePill phase={phase} filled />
         </span>
       </Group>
-      <PhaseTrack phase={phase} />
+      {!phone && <PhaseTrack phase={phase} />}
       <Group justify="space-between" wrap="nowrap" mt="sm" gap="sm">
         {c.name || c.phone ? (
           <UnstyledButton className="job-line" onClick={() => setCustomerOpen(true)}>
@@ -1364,7 +1447,20 @@ export function JobPage() {
         <OdometerChip order={b.order} open={open} />
         {open &&
           mechanics.map((m) => (
-            <MechanicChip key={m.id} name={m.name} on={crew.includes(m.id)} onToggle={() => void run(() => toggleMechanic(oid, m.id))} onTask={() => setMechanicOpen(true)} />
+            <MechanicChip
+              key={m.id}
+              name={m.name}
+              on={crew.includes(m.id)}
+              onToggle={() =>
+                void run(async () => {
+                  const was = crew.includes(m.id);
+                  await toggleMechanic(oid, m.id);
+                  // v0.99 (audit З37): taken off by a finger in passing — «Отменить».
+                  if (was) undoToast(t('job.mechanicOff', { name: m.name }), t('common.undo'), () => void toggleMechanic(oid, m.id));
+                })
+              }
+              onTask={() => setMechanicOpen(true)}
+            />
           ))}
       </div>
     </Box>
@@ -1415,7 +1511,7 @@ export function JobPage() {
           {/* Audit 27/11: the customer's transfer screenshot in WhatsApp — a payment proposal, recorded by a tap. */}
           {due > 0 && (phase === 'pay' || phase === 'out' || phase === 'debt') && <PaymentShotRow orderId={oid} phone={c?.whatsapp || c?.phone} dueFils={due} />}
           {/* Audit 27/11: the invoice told to the customer or not — said here, sent by hand (nothing goes by itself). */}
-          {(phase === 'pay' || phase === 'out' || phase === 'debt') && (
+          {(phase === 'pay' || phase === 'debt' || (phase === 'out' && !!toldAt)) && (
             <ListRow
               left={<IconFileInvoice size={20} stroke={1.9} color={`var(--mantine-color-${toldAt ? 'green' : 'violet'}-6)`} aria-hidden />}
               title={
@@ -1438,7 +1534,6 @@ export function JobPage() {
               <ListRow
                 key={k}
                 title={lineName(l.description, l.kind)}
-                onClick={amendable ? () => setAmend({}) : undefined}
                 subtitle={[l.qty !== 1 ? `${l.qty} × ${formatAed(roundFils(l.gross / l.qty))}` : '', l.vatRateBp === 0 && !l.customerSupplied ? t('item.noVat') : ''].filter(Boolean).join(' · ') || undefined}
                 right={<Money fils={l.gross} />}
               />
@@ -1449,7 +1544,7 @@ export function JobPage() {
           // Something forgotten or to change after the invoice: the same tiles, the invoice is redone. "%" — a
           // discount on the invoice out (a credit note and a new invoice at once), while money is due.
           <AddBar onAdd={(kind) => setAmend({ then: () => setQuick(kind) })}>
-            {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+            {due > 0 && <AddExtra icon={IconDiscount} label={t('discount.all')} word={t('discount.all')} onClick={() => setDiscountOpen(true)} />}
             <AddExtra icon={IconPencil} label={t('job.amend')} word={t('job.amend')} onClick={() => setAmend({})} />
           </AddBar>
         )}
@@ -1515,7 +1610,7 @@ export function JobPage() {
         {editable && phase !== 'booked' && (
           // Under the lines: work, a part, a service (done by others, the garage pays) — then the discount and the copy.
           <AddBar onAdd={openQuick} flush={!lines.length}>
-            {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />}
+            {lines.length > 0 && <AddExtra icon={IconDiscount} label={t('discount.all')} word={t('discount.all')} onClick={() => setDiscountOpen(true)} />}
             {/* v0.82 (#22, in «Копия»'s place — the copy is in its sheet): the parts to the suppliers that fit, by WhatsApp. */}
             {parts.length > 0 && <AddExtra icon={IconTruck} label={t('ask.title')} word={t('ask.title')} onClick={() => setAskOpen(true)} />}
             {/* Audit 27/11: the parts the suppliers offered — ordered in one tap («Заказать»). */}
@@ -1529,7 +1624,7 @@ export function JobPage() {
           // A booked car's quote (its lines brought in from a PDF): its discount too — "%" is the only way to one. Its
           // options (v0.90): a request from WhatsApp comes with them (original or copy) — the prices go before the car.
           <div className="add-row">
-            <AddExtra icon={IconDiscount} label={t('discount.title')} word={t('discount.title')} onClick={() => setDiscountOpen(true)} />
+            <AddExtra icon={IconDiscount} label={t('discount.all')} word={t('discount.all')} onClick={() => setDiscountOpen(true)} />
             {!inv && <AddExtra icon={IconStack2} label={t('qo.title')} word={t('qo.tile')} onClick={() => setOptionsOpen(true)} />}
           </div>
         )}
@@ -1569,7 +1664,7 @@ export function JobPage() {
     {(phase === 'pay' || phase === 'out') && <HandoverChecks order={b.order} />}
 
     {bar && (
-      <StickyBar>
+      <StickyBar full={picking}>
         {/* The button of the new step settles in on a spring. */}
         <div key={picking ? 'pick' : phase} className="bar-swap">
           {bar}
@@ -1616,21 +1711,24 @@ export function JobPage() {
         }
         right={
           <>
-            {/* Shown to the customer (v0.67): the lock — only the work and its prices on screen, nothing opens. */}
-            <ActionIcon
-              variant="default"
-              size={40}
-              radius={phone ? 'xl' : 'md'}
-              aria-label={t('client.lock')}
-              title={t('client.lock')}
-              data-client-lock-btn
-              onClick={() => {
-                haptic('light');
-                lockForClient(b.order.id);
-              }}
-            >
-              <IconLock size={20} />
-            </ActionIcon>
+            {/* Shown to the customer (v0.67): the lock — on a PC in the head; on a phone a tile of «…» (v0.99, audit З34: the
+                rarest button stood first in the head, and a tap in passing locked the job). */}
+            {!phone && (
+              <ActionIcon
+                variant="default"
+                size={40}
+                radius="md"
+                aria-label={t('client.lock')}
+                title={t('client.lock')}
+                data-client-lock-btn
+                onClick={() => {
+                  haptic('light');
+                  lockForClient(b.order.id);
+                }}
+              >
+                <IconLock size={20} />
+              </ActionIcon>
+            )}
             {/* The job to the garage's group: the car's photo, the car, the customer's name, the lines. */}
             <ShareJobButton b={b} />
             {/* A PC (v0.80): a new job beside this one, both on one screen. */}
@@ -1760,13 +1858,33 @@ export function JobPage() {
         <QtyCheckList items={live} lang={docLang} />
         {/* Not confirmed (v0.88): they stay on the job, not on the invoice. */}
         {unconfirmed.length > 0 && (
-          <Text size="sm" c="yellow.8" fw={600} mb="xs" data-unconfirmed-out>
-            {t('job.unconfirmedOut', { count: unconfirmed.length })}
+          <Group gap="sm" wrap="nowrap" justify="space-between" mb="xs">
+            <Text size="sm" c="yellow.8" fw={600} data-unconfirmed-out>
+              {t('job.unconfirmedOut', { count: unconfirmed.length })}
+            </Text>
+            <Button size="compact-md" variant="light" color="yellow" loading={busy} onClick={() => run(async () => (await setUnconfirmed(unconfirmed.map((i) => i.id), false), haptic('success')))} style={{ flexShrink: 0 }} data-include-unconfirmed>
+              {t('job.includeN', { n: unconfirmed.length })}
+            </Button>
+          </Group>
+        )}
+        {phase === 'price' && toAgree > 0 && (
+          <Text size="sm" c="dimmed" mb="xs" data-agree-on-done>
+            {t('job.agreeOnDone', { count: toAgree })}
           </Text>
         )}
-        <Text size="sm" mt={live.some((i) => qtyShort(i)) ? 'sm' : undefined}>
-          {t('invoice.confirmText')}
+        <Text size="sm" fw={600} mt={live.some((i) => qtyShort(i)) ? 'sm' : undefined} data-invoice-who>
+          {[c.name || t('customer.noName'), t(`invoice.type.${chooseInvoiceType(c)}`)].join(' · ')}
         </Text>
+        {c.type === 'company' && !c.trn && (
+          <Group gap="sm" wrap="nowrap" justify="space-between" mt={6}>
+            <Text size="sm" c="orange.7" fw={600}>
+              {t('invoice.noTrnShort')}
+            </Text>
+            <Button size="compact-md" variant="light" color="orange" onClick={() => (setFinish(false), setCustomerOpen(true))} style={{ flexShrink: 0 }} data-add-trn>
+              {t('invoice.addTrn')}
+            </Button>
+          </Group>
+        )}
         <Group mt="sm" justify="space-between" wrap="nowrap" gap="sm">
           <Text fw={700} fz={20}>
             <Money fils={sum.gross} display />

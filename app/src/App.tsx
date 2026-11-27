@@ -53,7 +53,7 @@ import { WaCount } from './ui/WaCount';
 import { cashState } from './services/money';
 import { AppearanceControls, useStatusBarColor } from './ui/Appearance';
 import { useResolvedScheme } from './ui/scheme';
-import { Celebration, Logo, Money, Tip } from './ui/components';
+import { Celebration, Logo, Money, Tip, undoLast } from './ui/components';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useLang, usePhone, useSettings } from './ui/hooks';
 import { PwaUpdater } from './ui/pwa';
@@ -863,7 +863,8 @@ function useBannerDismiss() {
       startY = banner(e.target) ? e.touches[0].clientY : null;
     };
     const onMove = (e: TouchEvent) => {
-      if (startY !== null && e.touches[0].clientY - startY < -18) {
+      // Flicked away from the edge it stands at: down at the bottom (v0.99), up at the top (with the keyboard).
+      if (startY !== null && Math.abs(e.touches[0].clientY - startY) > 18) {
         startY = null;
         notifications.clean();
       }
@@ -883,11 +884,25 @@ function Providers({ children }: { children: React.ReactNode }) {
   const lang = useLang();
   const mobile = usePhone();
   useBannerDismiss();
+  // A desk: Ctrl+Z is the last action's «Отменить» while its toast is up (v0.99, audit К7) — not in a field (its own undo).
+  useEffect(() => {
+    if (mobile) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ') return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (undoLast()) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobile]);
   // After a restore and its reload: what came back.
   useRestoreReport();
   return (
     <DatesProvider settings={{ locale: lang, firstDayOfWeek: 1, weekendDays: [6, 0] }}>
-      <Notifications position={mobile ? 'top-center' : 'top-right'} limit={1} autoClose={2600} transitionDuration={260} />
+      {/* v0.99 (audit О1): at the bottom, where the thumb is — at the top they covered «‹», the job's number and a
+          sheet's sum, and «Отменить» was a reach across the whole screen. */}
+      <Notifications position="bottom-center" limit={1} autoClose={3500} transitionDuration={260} />
       <Celebration />
       <FeedbackTool />
       <AiNotices />

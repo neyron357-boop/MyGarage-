@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Group, Modal, Stack } from '@mantine/core';
-import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCheck, IconFilter, IconFilterFilled, IconLayoutGrid, IconListCheck, IconX, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
+import { IconAdjustmentsHorizontal, IconArchive, IconArrowBackUp, IconCheck, IconFilter, IconFilterFilled, IconLayoutGrid, IconX, IconCar, IconExternalLink, IconLayoutKanban, IconPlus, IconUserDollar } from '@tabler/icons-react';
 import { boardMatches } from '../../domain/boardSearch';
 import { jobOpenedAt } from '../../ui/recentJobs';
 import { SearchResults } from '../search/SearchPage';
@@ -294,6 +294,15 @@ export function BoardPage() {
       return n;
     });
   }, []);
+  // «Выбрать несколько» from a card's menu (v0.99, audit Д1): the head's checklist button looked like «Сегодня» and put the
+  // board into picking by surprise.
+  const startPick = useCallback(
+    (id: string) => {
+      setPicking(true);
+      pick(id);
+    },
+    [pick],
+  );
   const endPick = () => {
     setPicking(false);
     setPicked(new Set());
@@ -379,9 +388,11 @@ export function BoardPage() {
           mobile ? (
             <Group gap="xs" wrap="nowrap">
               {/* Several jobs into a tab at once (v0.70). */}
-              <ActionIcon variant={picking ? 'filled' : 'default'} size={40} radius="xl" aria-label={t(picking ? 'common.cancel' : 'board.pick')} onClick={() => (picking ? endPick() : setPicking(true))} data-board-pick>
-                {picking ? <IconX size={22} stroke={2} /> : <IconListCheck size={22} stroke={2} />}
-              </ActionIcon>
+              {picking && (
+                <ActionIcon variant="filled" size={40} radius="xl" aria-label={t('common.cancel')} onClick={endPick} data-board-pick>
+                  <IconX size={22} stroke={2} />
+                </ActionIcon>
+              )}
               <TodayBell bundles={bundles} />
               {/* «Фильтры» (v0.81): «Все» unless one is picked — then it is lit. */}
               <ActionIcon variant={filter !== 'all' ? 'filled' : 'default'} size={40} radius="xl" aria-label={t('board.filters')} onClick={() => setFiltersOpen(true)} data-board-filters>
@@ -435,18 +446,26 @@ export function BoardPage() {
     archived.length + done.length > 0 ? (
       <Stack gap="lg">
         {archived.length > 0 && (
+          <div>
+          <div className="group-title">
+            {t('board.byHand')} <span className="count">{archived.length}</span>
+          </div>
           <List animate className="mini-list">
             {archived.map((j) => (
               <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={back(j.b)} variant="row" dated />
             ))}
           </List>
+          </div>
         )}
         {done.length > 0 && (
+          <div>
+          {archived.length > 0 && <div className="group-title">{t('board.closedOnes')}</div>}
           <List animate className="mini-list">
             {done.map((j) => (
               <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} variant="row" dated />
             ))}
           </List>
+          </div>
         )}
       </Stack>
     ) : closed ? (
@@ -529,9 +548,9 @@ export function BoardPage() {
             // The board's cars that match, then the rest of the base (closed jobs, cars, customers, suppliers).
             <div className="tab-panel board-found">
               {found.length > 0 && (
-                <List animate className={compact ? 'mini-list' : 'board-cards'}>
+                <List animate className="mini-list">
                   {found.map((j) => (
-                    <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} variant={compact ? 'row' : 'card'} status={statusOf(j)} />
+                    <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} variant="row" status={statusOf(j)} />
                   ))}
                 </List>
               )}
@@ -548,7 +567,7 @@ export function BoardPage() {
             ) : shown.length ? (
               <List animate className={compact ? 'mini-list' : 'board-cards'}>
                 {shown.map((j) => (
-                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={picking ? undefined : toArchive(j.b)} variant={compact ? 'row' : 'card'} picking={picking} picked={picked.has(j.b.order.id)} onPick={pick} status={statusOf(j)} pinned={pinnedIds.has(j.b.order.id) || undefined} />
+                  <JobRow key={j.b.order.id} b={j.b} phase={j.phase} cover={covers?.get(j.b.vehicle.id)} tick={tick} swipe={picking ? undefined : toArchive(j.b)} variant={compact ? 'row' : 'card'} picking={picking} picked={picked.has(j.b.order.id)} onPick={pick} onStartPick={startPick} status={statusOf(j)} pinned={pinnedIds.has(j.b.order.id) || undefined} />
                 ))}
               </List>
             ) : (

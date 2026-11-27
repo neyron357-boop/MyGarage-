@@ -13,6 +13,11 @@ describe('a job in a line, for its card (v0.30)', () => {
     const items = [line('labor', 'AC service', 'declined'), line('discount', 'Discount'), line('part', 'Wiper', 'approved')];
     expect(jobSummary(items, '', 'en')).toBe('WIPER');
   });
+  it('the labour charge is left out while anything else is on the job (v0.99)', () => {
+    const items = [line('labor', 'Labor charge: brake pads'), line('part', 'Brake pads')];
+    expect(jobSummary(items, '', 'en')).toBe('BRAKE PADS');
+    expect(jobSummary([line('labor', 'Labor charge')], '', 'en')).toBe('LABOR CHARGE');
+  });
   it('nothing on it yet: what the customer complained of', () => {
     expect(jobSummary([], '  Brakes  squeak,\n AC weak ', 'en')).toBe('Brakes squeak, AC weak');
     expect(jobSummary([], undefined, 'en')).toBe('');

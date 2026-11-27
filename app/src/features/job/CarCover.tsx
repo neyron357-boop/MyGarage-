@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Group, Stack } from '@mantine/core';
+import { ActionIcon, Button, Group, Modal, Stack } from '@mantine/core';
 import { useAiWorking } from '../ai/Ai';
 import { IconCamera, IconCameraPlus, IconCar, IconPhoto, IconTrash } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { carOwned, coverOf, MULKIYA_SIDES, mulkiyaOf, removeCarPhoto, restoreCarPhoto, rotateCarPhoto, setCover, setMulkiya, setVinPhoto, vinPhotoOf, type CarSlot, type MulkiyaSide } from '../../services/cover';
 import { carPhotoLater } from '../../services/carPhoto';
 import { MediaImage, undoToast } from '../../ui/components';
+import { LazySheet } from '../../ui/lazy';
 import { AheadPill } from '../../ui/DateFields';
 import { dubaiDate, formatDate } from '../../domain/dates';
 import { expiryState } from '../../domain/mulkiya';
@@ -176,6 +177,8 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
   const [viewing, setViewing] = useState(false);
   // The VIN typed by hand right in the photo's view (v0.73).
   const [typing, setTyping] = useState(false);
+  // No photo yet (v0.99, audit П24): a sheet — the camera, the photos or the VIN typed; it was only the camera.
+  const [start, setStart] = useState(false);
   const pick = usePhotoPick(
     ([file]) =>
       void run(async () => {
@@ -208,7 +211,7 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
           // Not read yet whether there is a photo: no camera over one there may be.
           if (!photo) return;
           if (photo.id) setViewing(true);
-          else pick.camera();
+          else setStart(true);
         }}
       >
         {photo?.id ? (
@@ -222,6 +225,39 @@ export function VinTile({ vehicleId, vin, year, hideEmpty }: { vehicleId: string
       </button>
       {pick.inputs}
       {sheet}
+      <LazySheet opened={start}>
+        {(o) => (
+          <Modal opened={o} onClose={() => setStart(false)} title="VIN">
+            <Stack gap="md" className="vin-start" data-vin-start>
+              <Group grow gap="sm">
+                <Button
+                  size="lg"
+                  leftSection={<IconCamera size={20} />}
+                  onClick={() => {
+                    setStart(false);
+                    pick.camera();
+                  }}
+                  data-vin-camera
+                >
+                  {t('job.vinCamera')}
+                </Button>
+                <Button
+                  size="lg"
+                  variant="default"
+                  leftSection={<IconPhoto size={20} />}
+                  onClick={() => {
+                    setStart(false);
+                    pick.gallery();
+                  }}
+                >
+                  {t('job.vinGallery')}
+                </Button>
+              </Group>
+              <VinTypeIn vehicleId={vehicleId} current={{ vin, year }} onDone={() => setStart(false)} />
+            </Stack>
+          </Modal>
+        )}
+      </LazySheet>
       {viewing && photo?.id && (
         <PhotoViewer
           items={[
@@ -307,6 +343,9 @@ export function MulkiyaTile({ vehicleId, hideEmpty }: { vehicleId: string; hideE
       return true;
     }).then((ok) => {
       if (!ok) return;
+      // v0.99 (audit П27): the front alone — its back offered right away (it took a chip, the view and a side to find it).
+      if (files.length === 1 && order[0] === MULKIYA_SIDES[0] && !photos?.[MULKIYA_SIDES[1]])
+        undoToast(t('job.mulkiyaFrontTaken'), t('job.mulkiyaBack'), () => ((shown.current = MULKIYA_SIDES[1]), sidePick.camera()), { undo: false });
       readVin(vehicleId, t);
       // Audit 27/11: the front's expiry, read on the phone after the VIN (one reader at a time) — each photo once.
       void readMulkiyaExpiry(vehicleId).catch(() => undefined);

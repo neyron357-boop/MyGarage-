@@ -3,10 +3,10 @@ import { dubaiTime } from '../../domain/dates';
 import { IconBrandWhatsapp, IconFileTypePdf, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { editAsk, forgetAsks, useWaAsks, type WaAsk } from '../../services/waConfirm';
+import { askToSend, editAsk, forgetAsks, useWaAsks, type WaAsk } from '../../services/waConfirm';
 import { sendAsked } from '../../services/waAuto';
 import type { OutItem, OutPart } from '../../services/waOutbox';
-import { MediaImage } from '../../ui/components';
+import { MediaImage, undoToast } from '../../ui/components';
 import { showPdf } from '../../ui/PdfViewer';
 import { haptic } from '../../ui/haptics';
 import { useAction } from '../../ui/hooks';
@@ -26,12 +26,25 @@ export function WaConfirm() {
   const [open, setOpen] = useState(false);
   const seen = useRef(new Set(asks.map((a) => a.id)));
   const { run, busy } = useAction({ exclusive: true });
+  // The last tap anywhere: what was prepared right after it is the person's own — shown at once (v0.99, audit W25).
+  const tapAt = useRef(0);
+  useEffect(() => {
+    const on = () => (tapAt.current = Date.now());
+    window.addEventListener('pointerdown', on, true);
+    window.addEventListener('keydown', on, true);
+    return () => {
+      window.removeEventListener('pointerdown', on, true);
+      window.removeEventListener('keydown', on, true);
+    };
+  }, []);
 
-  // Something new prepared: shown at once.
+  // Something new prepared: shown at once when it follows a tap here; prepared by itself (the boss's reports, the
+  // autopilot, the evening summary) — the capsule «Ждут отправки» says it, without coming over what is being done.
   useEffect(() => {
     const fresh = asks.some((a) => !seen.current.has(a.id));
     for (const a of asks) seen.current.add(a.id);
-    if (fresh) setOpen(true);
+    if (fresh && Date.now() - tapAt.current < 6000) setOpen(true);
+    else if (fresh) haptic('light');
     if (!asks.length) setOpen(false);
   }, [asks]);
   useEffect(() => {
@@ -46,27 +59,46 @@ export function WaConfirm() {
       haptic('success');
     }, 'wa.confirm.sent');
 
+  // Dropped — with «Отменить» (v0.99, audit W26): the dropped ones come back as they were.
+  const drop = (list: WaAsk[]) => {
+    forgetAsks(list.map((a) => a.id));
+    undoToast(t('wa.confirm.dropped', { n: list.length }), t('common.undo'), () => askToSend(list.map((a) => a.item)));
+  };
+
   return (
-    <Modal opened={open && asks.length > 0} onClose={() => setOpen(false)} title={t('wa.confirm.title')}>
-      <Stack gap="md" data-wa-confirm>
-        {asks.map((a) => (
-          <Ask key={a.id} ask={a} busy={busy} onSend={() => void send([a])} onDrop={() => forgetAsks([a.id])} />
-        ))}
-        {asks.length > 1 && (
-          <Button fullWidth color="green" size="md" loading={busy} leftSection={<IconBrandWhatsapp size={20} />} onClick={() => void send(asks)}>
-            {t('wa.confirm.sendAll', { n: asks.length })}
-          </Button>
-        )}
-        <Group grow gap="sm">
-          <Button variant="default" onClick={() => setOpen(false)}>
-            {t('wa.confirm.later')}
-          </Button>
-          <Button variant="subtle" color="red" onClick={() => forgetAsks(asks.map((a) => a.id))}>
-            {t('wa.confirm.dropAll')}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <>
+      {/* v0.99 (audit W24): while something waits, a capsule says so on every screen — a closed sheet was gone until something
+          new came. */}
+      {asks.length > 0 && !open && (
+        <button type="button" className="wa-pending glass" onClick={() => setOpen(true)} data-wa-pending>
+          <IconBrandWhatsapp size={18} />
+          {t('wa.confirm.waiting', { n: asks.length })}
+        </button>
+      )}
+      <Modal opened={open && asks.length > 0} onClose={() => setOpen(false)} title={t('wa.confirm.title')}>
+        <Stack gap="md" data-wa-confirm>
+          {asks.map((a) => (
+            <Ask key={a.id} ask={a} busy={busy} small={asks.length > 1} onSend={() => void send([a])} onDrop={() => drop([a])} />
+          ))}
+          {/* At the bottom in reach (v0.99, audit W26): «Отправить все» and «Позже» stay while the cards scroll. */}
+          <div className="sheet-footer" style={{ '--sheet-bg': 'var(--mantine-color-body)' } as React.CSSProperties}>
+            {asks.length > 1 && (
+              <Button fullWidth color="green" size="md" mb={8} loading={busy} leftSection={<IconBrandWhatsapp size={20} />} onClick={() => void send(asks)}>
+                {t('wa.confirm.sendAll', { n: asks.length })}
+              </Button>
+            )}
+            <Group grow gap="sm">
+              <Button variant="default" onClick={() => setOpen(false)}>
+                {t('wa.confirm.later')}
+              </Button>
+              <Button variant="subtle" color="red" onClick={() => drop(asks)}>
+                {t('wa.confirm.dropAll')}
+              </Button>
+            </Group>
+          </div>
+        </Stack>
+      </Modal>
+    </>
   );
 }
 
@@ -76,7 +108,7 @@ const isPdf = (p: OutPart) => /pdf/i.test(p.mime ?? '') || PDF_EXT.test(p.name ?
 const pdfOf = (p: OutPart) => ({ blob: new Blob([Uint8Array.from(atob(p.data ?? ''), (c) => c.charCodeAt(0))], { type: 'application/pdf' }), filename: p.name || 'document.pdf' });
 
 /** One message: to whom, each of its parts as it will go; the words editable. */
-function Ask({ ask, busy, onSend, onDrop }: { ask: WaAsk; busy: boolean; onSend: () => void; onDrop: () => void }) {
+function Ask({ ask, busy, small, onSend, onDrop }: { ask: WaAsk; busy: boolean; /** Among several: its own button smaller (the sheet's «Отправить все» is the main one). */ small?: boolean; onSend: () => void; onDrop: () => void }) {
   const { t } = useTranslation();
   const item = ask.item;
   const setPart = (i: number, patch: Partial<OutPart>) => {
@@ -124,7 +156,7 @@ function Ask({ ask, busy, onSend, onDrop }: { ask: WaAsk; busy: boolean; onSend:
           ) : null,
         )}
       </Stack>
-      <Button mt={10} fullWidth color="green" loading={busy} leftSection={<IconBrandWhatsapp size={18} />} onClick={onSend}>
+      <Button mt={10} fullWidth={!small} size={small ? 'compact-md' : undefined} variant={small ? 'light' : 'filled'} color="green" loading={busy} leftSection={<IconBrandWhatsapp size={18} />} onClick={onSend}>
         {t('wa.confirm.send')}
       </Button>
     </div>

@@ -641,7 +641,7 @@ const check = (name, ok, detail) => {
   check('double tap on "Issue invoice": one invoice, no false error', issue.invoices === 1 && issue.notes.length === 0, issue);
   await mainBtn('Оплата').click();
   await page.waitForTimeout(900);
-  await twoTaps(sheetBtn('Провести'), 90);
+  await twoTaps(page.locator('.mantine-Modal-content [data-pay-save]').last(), 90);
   await page.waitForTimeout(1400);
   const paid = { hash: await page.evaluate(() => location.hash), ...(await facts()) };
   check('double tap on "Record payment": one payment, the tab bar under the sheet untouched', paid.hash === '#/orders/' + jobId && paid.payments === 1, paid);
@@ -771,7 +771,7 @@ const check = (name, ok, detail) => {
   await wp.waitForTimeout(1300);
   await wp.getByRole('button', { name: 'Оплата' }).last().click();
   await wp.waitForTimeout(800);
-  const record = wp.locator('.mantine-Modal-content button').filter({ hasText: 'Провести' }).last();
+  const record = wp.locator('.mantine-Modal-content [data-pay-save]').last();
   const rbox = await record.boundingBox();
   await wp.mouse.click(rbox.x + rbox.width / 2, rbox.y + rbox.height / 2);
   await wp.waitForFunction(() => !document.querySelector('.mantine-Modal-content button[data-loading]'), null, { timeout: 5000 });

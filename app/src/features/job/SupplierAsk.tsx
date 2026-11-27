@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandWhatsapp, IconCircle, IconCircleCheckFilled, IconCopy, IconSend, IconStarFilled } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCircle, IconCircleCheckFilled, IconClock, IconCopy, IconSend, IconStarFilled } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { itemTitle } from '../../domain/items';
@@ -98,6 +98,8 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
   const shown = found.slice(0, limit);
   // The picked ones stay in sight whatever is searched.
   const pickedRows = sellers.filter((r) => who.has(r.supplier.id) && !shown.includes(r));
+  // The best three with a number to write to.
+  const best = useMemo(() => sellers.filter((r) => !!r.supplier.phone).slice(0, 3).map((r) => r.supplier.id), [sellers]);
   const text = b.vehicle && asked.length ? partsRequestText(b.vehicle, asked) : '';
   const toggle = (set: Set<string>, id: string) => {
     const n = new Set(set);
@@ -111,11 +113,12 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
       const r = await askSuppliers(
         b.order.id,
         [...who].map((supplierId) => ({ supplierId })),
-        { items: asked, sheets: [], usedFiles: [], after },
+        { items: asked, sheets: [], usedFiles: [], after, seen: true },
       );
       haptic('success');
       if (r.noNumber.length) notifications.show({ color: 'orange', message: t('ask.noNumber', { names: r.noNumber.join(', ') }) });
-      notifications.show({ color: 'green', message: after ? t('later.queued', { n: r.asked, time: dubaiTime(new Date(after).toISOString()) }) : t('ask.sent', { n: r.asked }) });
+      // Says what really happened (v0.99, audit W28): «Отправлено» only when it went.
+      notifications.show({ color: 'green', message: after ? t('later.queued', { n: r.asked, time: dubaiTime(new Date(after).toISOString()) }) : r.queued ? t('ask.queuedReview', { n: r.asked }) : t('ask.sent', { n: r.asked }) });
       setLater(false);
       onClose();
     });
@@ -159,6 +162,14 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
             {t('ask.who')}
             {who.size > 0 && <> <span className="count">{who.size}</span></>}
           </div>
+          <Group gap={8} wrap="nowrap" mb={8}>
+            {/* The best for this car and parts, one tap (v0.99, audit W29). */}
+            {best.length > 1 && (
+              <button type="button" className="chip" data-active={best.every((id) => who.has(id)) || undefined} onClick={() => (setWho(new Set(best)), haptic('selection'))} data-ask-best>
+                {t('ask.best', { n: best.length })}
+              </button>
+            )}
+          </Group>
           <SearchField value={query} onChange={setQuery} placeholder={t('ask.search')} />
           <div className="ios-group" style={{ marginTop: 8 }}>
             {pickedRows.map(row)}
@@ -172,6 +183,13 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
           </div>
         </div>
         <div className="sheet-footer">
+          {/* The words that go (v0.99, audit W28/W29): seen here, so «Отправить» is the tap that sends them. */}
+          {canSend && text && (
+            <details className="ask-text" data-ask-text>
+              <summary>{t('ask.textTitle')}</summary>
+              <pre>{text}</pre>
+            </details>
+          )}
           <Group gap={8} wrap="nowrap">
             <ActionIcon size={48} radius="xl" variant="light" aria-label={t('job.copyLines')} disabled={!asked.length} onClick={copy} data-ask-copy>
               <IconCopy size={20} />
@@ -192,6 +210,12 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
             >
               {canSend ? t('ask.send', { n: who.size }) : t('ask.noWa')}
             </Button>
+            {/* «Отправить позже» in sight (v0.99, audit W29): it was only a long press. */}
+            {canSend && (
+              <ActionIcon size={48} radius="xl" variant="light" aria-label={t('later.title')} disabled={!ready} onClick={() => setLater(true)} data-ask-later>
+                <IconClock size={20} />
+              </ActionIcon>
+            )}
           </Group>
         </div>
         <LazySheet opened={later}>{(o) => <SendLaterSheet opened={o} onClose={() => setLater(false)} n={who.size} onPick={(at) => void send(at)} />}</LazySheet>

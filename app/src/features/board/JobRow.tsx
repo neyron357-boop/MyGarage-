@@ -1,22 +1,5 @@
 import { Modal, Text } from '@mantine/core';
-import {
-  IconBrandWhatsapp,
-  IconBuildingFactory2,
-  IconCar,
-  IconCash,
-  IconCheck,
-  IconCircle,
-  IconCircleCheckFilled,
-  IconClock,
-  IconExternalLink,
-  IconFileInvoice,
-  IconFileTypePdf,
-  IconPackage,
-  IconRepeat,
-  IconTrash,
-  IconTruckDelivery,
-  type Icon,
-} from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconBuildingFactory2, IconCar, IconCash, IconCheck, IconCircle, IconCircleCheckFilled, IconClock, IconExternalLink, IconFileInvoice, IconFileTypePdf, IconPackage, IconRepeat, IconTrash, IconTruckDelivery, type Icon, IconPhone, IconListCheck } from '@tabler/icons-react';
 import { memo, useState, type CSSProperties, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -71,6 +54,8 @@ type RowProps = {
   picking?: boolean;
   picked?: boolean;
   onPick?: (orderId: string) => void;
+  /** «Выбрать несколько» from the card's menu (v0.99, audit Д1): picking starts with this one picked. */
+  onStartPick?: (orderId: string) => void;
   /** The tab of the board it is in (v0.70) — offered in its long-press menu. */
   status?: BoardStatus;
 };
@@ -96,10 +81,11 @@ export const JobRow = memo(
     a.pinned === z.pinned &&
     a.picking === z.picking &&
     a.picked === z.picked &&
+    a.onStartPick === z.onStartPick &&
     a.status === z.status,
 );
 
-function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, picking, picked, onPick, status }: RowProps) {
+function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, picking, picked, onPick, onStartPick, status }: RowProps) {
   const navigate = useNavigate();
   const lang = useLang();
   const { t } = useTranslation();
@@ -358,6 +344,35 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
       <LazySheet opened={menu}>
         {(o) => (
       <Modal opened={o} onClose={() => setMenu(false)} title={`№${b.order.number} · ${car}`.trim()}>
+        {/* The most frequent first (v0.99, audit Д11): a call and the chat — calling from the board was not possible at all. */}
+        {(b.customer.phone || wa) && (
+          <div className="action-tiles card-quick" data-card-quick>
+            {b.customer.phone && (
+              <a className="action-tile" href={`tel:${b.customer.phone}`} onClick={() => setMenu(false)} data-card-call>
+                <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
+                  <IconPhone size={23} stroke={1.9} aria-hidden />
+                </span>
+                <span>{t('board.call')}</span>
+              </a>
+            )}
+            {wa && (
+              <button type="button" className="action-tile" onClick={() => (setMenu(false), openWa())} data-card-wa>
+                <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
+                  <IconBrandWhatsapp size={23} stroke={1.9} aria-hidden />
+                </span>
+                <span>WhatsApp</span>
+              </button>
+            )}
+            {doc && (
+              <button type="button" className="action-tile" onClick={() => (setMenu(false), void openDoc())}>
+                <span className="tile-icon" style={{ '--c': 'var(--mantine-color-violet-6)' } as React.CSSProperties}>
+                  {doc === 'invoice' ? <IconFileInvoice size={23} stroke={1.9} aria-hidden /> : <IconFileTypePdf size={23} stroke={1.9} aria-hidden />}
+                </span>
+                <span>{t(doc === 'invoice' ? 'job.more.invoice' : 'job.more.quote')}</span>
+              </button>
+            )}
+          </div>
+        )}
         <List>
           <ListRow
             title={t('common.open')}
@@ -380,7 +395,31 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
               }}
             />
           )}
-          {/* The board's tab it is in (v0.70): one tap puts it in another. */}
+          {onStartPick && (
+            <ListRow
+              title={t('board.pickMany')}
+              left={<IconListCheck size={20} stroke={1.8} color="var(--mantine-color-cobalt-6)" />}
+              onClick={() => {
+                setMenu(false);
+                onStartPick(b.order.id);
+              }}
+              data-card-pick
+            />
+          )}
+          {swipe && (
+            <ListRow
+              title={swipe.label}
+              left={<swipe.icon size={20} stroke={1.8} color={`var(--mantine-color-${swipe.color}-6)`} />}
+              onClick={() => {
+                setMenu(false);
+                swipe.onCommit();
+              }}
+            />
+          )}
+        </List>
+        {/* The board's tab it is in (v0.70): one tap puts it in another — a group of its own, not actions (v0.99, audit Д11). */}
+        {status && <div className="group-title" style={{ marginTop: 16 }}>{t('board.tabOf')}</div>}
+        <List>
           {status &&
             BOARD_STATUSES.map((st) => {
               const sm = PHASE_META[STATUS_PHASE[st]];
@@ -397,16 +436,10 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
                 />
               );
             })}
-          {swipe && (
-            <ListRow
-              title={swipe.label}
-              left={<swipe.icon size={20} stroke={1.8} color={`var(--mantine-color-${swipe.color}-6)`} />}
-              onClick={() => {
-                setMenu(false);
-                swipe.onCommit();
-              }}
-            />
-          )}
+        </List>
+        {/* Away from the thumb, on its own (v0.99, audit Д11). */}
+        <div style={{ marginTop: 24 }}>
+        <List>
           <ListRow
             title={
               <Text span inherit c="red">
@@ -420,6 +453,7 @@ function JobRowView({ b, phase, cover, swipe, variant = 'card', dated, pinned, p
             }}
           />
         </List>
+        </div>
       </Modal>
         )}
       </LazySheet>

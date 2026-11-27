@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer, EstimateVersion, Order, OrderItem, SnapshotItem, Vehicle } from '../domain/types';
-import { invoiceTemplate, jobShareText, linesText, partNamesText, telegramChatUrl, versionMessage, whatsappUrl } from './messages';
+import { invoiceTemplate, jobShareText, linesText, partNamesText, quoteReminder, telegramChatUrl, versionMessage, whatsappUrl } from './messages';
 
 describe('quotation message', () => {
   it('names the discount once, right before the total', () => {
@@ -17,6 +17,11 @@ describe('quotation message', () => {
     const ctx = { customer: { name: 'Musa Khan' } as Customer, vehicle: { make: 'Nissan', model: 'Sunny', plate: { emirate: 'DXB', code: 'A', number: '12345' } } as Vehicle, order: { number: 7 } as Order, garageName: 'G' };
     const text = versionMessage(ctx, v);
     expect(text).toContain('• OIL CHANGE — 210.00 AED\n• BRAKE PADS — 63.00 AED\n\nDiscount 10%: -32.30 AED\nTotal: 240.70 AED');
+  });
+  it('a reminder is short: the job, its sum, how to answer (v0.99, audit С7)', () => {
+    const v = { number: 1, language: 'en', items: [], fixedGross: 24070, maxGross: 24070, recommendedGross: 0, validUntil: '2026-11-17T08:00:00.000Z' } as unknown as EstimateVersion;
+    const ctx = { customer: { name: 'Musa Khan' } as Customer, vehicle: { make: 'Nissan', model: 'Sunny', plate: { emirate: 'DXB', code: 'A', number: '12345' } } as Vehicle, order: { number: 7 } as Order, garageName: 'G' };
+    expect(quoteReminder(ctx, v)).toBe('Musa, a reminder about the estimate for your Nissan Sunny, job no. 7: 240.70 AED. If you agree, reply «Yes». Thank you!');
   });
 });
 
@@ -47,12 +52,12 @@ describe('the parts as text (copy)', () => {
 });
 
 describe('the job for the garage group', () => {
-  it('the car, the customer by name only, the lines with amounts and the total', () => {
+  it('the car, the customer by name only, the lines — no prices (v0.99, audit З35)', () => {
     const item = (o: Partial<OrderItem>) => ({ kind: 'labor', qty: 1, unitPriceFils: 0, vatRateBp: 500, approvalState: 'draft', ...o }) as OrderItem;
     const car = { make: 'Toyota', model: 'Camry', plate: { emirate: 'DXB', code: 'B', number: '213131' } } as Vehicle;
     const lines = [item({ titleEn: 'Oil change', unitPriceFils: 8000 }), item({ kind: 'part', titleEn: 'Brake pads', qty: 2, unitPriceFils: 5000 })];
     expect(jobShareText(car, { name: 'Nakash', type: 'individual' } as Customer, lines, 'ru')).toBe(
-      'Toyota Camry · Дубай B 213131\nКлиент: Nakash\n\n1. OIL CHANGE — 84,00 AED\n2. BRAKE PADS (2 × 52,50 AED) — 105,00 AED\n\nИтого: 189,00 AED (VAT 9,00 AED)',
+      'Toyota Camry · Дубай B 213131\nКлиент: Nakash\n\n1. OIL CHANGE\n2. BRAKE PADS × 2',
     );
     // A company by its name; no name — no line for it (and never the phone).
     expect(jobShareText(car, { name: 'Ali', type: 'company', companyName: 'Jaggie Trading' } as Customer, lines, 'en').split('\n')[1]).toBe('Customer: Jaggie Trading');

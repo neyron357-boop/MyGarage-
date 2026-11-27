@@ -69,6 +69,15 @@ export function PhaseTrack({ phase }: { phase: Phase }) {
 export function PhasePill({ phase, size = 'lg', filled }: { phase: Phase; size?: 'sm' | 'md' | 'lg'; /** Solid colour, white words (the job's own head). */ filled?: boolean }) {
   const { t } = useTranslation();
   const m = PHASE_META[phase];
+  // The job's own head (v0.99, audit О5): what is true now, as a dot and words — a solid capsule with a symbol read as
+  // a button that did nothing, and a green «Оплата» read as «paid».
+  if (filled)
+    return (
+      <span className="phase-state" style={{ '--phase': `var(--mantine-color-${m.color}-6)` } as React.CSSProperties} data-phase={phase}>
+        <span className="phase-state-dot" aria-hidden />
+        {t(`job.state.${phase}`)}
+      </span>
+    );
   return (
     <Badge color={m.color} variant={filled ? 'filled' : 'light'} size={size} className={filled ? 'phase-pill-filled' : undefined} leftSection={<m.icon size={size === 'sm' ? 12 : 15} stroke={2} />} style={{ flexShrink: 0 }}>
       {t(`job.phase.${phase}`)}

@@ -61,12 +61,27 @@ export async function supplierOfChat(chatId: string): Promise<string | undefined
   return s.id;
 }
 
-export async function askSuppliers(orderId: string, picks: AskPick[], x: { items: OrderItem[]; sheets: File[]; usedFiles: File[]; /** v0.91.7 (#76): sent then, not now (ms). */ after?: number }): Promise<{ asked: number; noNumber: string[] }> {
+export async function askSuppliers(
+  orderId: string,
+  picks: AskPick[],
+  x: {
+    items: OrderItem[];
+    sheets: File[];
+    usedFiles: File[];
+    /** v0.91.7 (#76): sent then, not now (ms). */
+    after?: number;
+    /**
+     * v0.99 (audit W28): the request's words were in front of the person when he tapped «Отправить» (the sheet shows them) —
+     * that tap is the one that sends (v0.84.4: seen and tapped); otherwise it waits in «Проверить и отправить».
+     */
+    seen?: boolean;
+  },
+): Promise<{ asked: number; noNumber: string[]; queued: boolean }> {
   const s = waAutoOf((await getSettings()).waAuto);
   const later = x.after && x.after > Date.now() + 30_000 ? x.after : undefined;
   // A server that does not keep a message until its time would send it now.
   if (later && !waStore().status?.later) throw new AppError('later.oldServer');
-  if (!picks.length) return { asked: 0, noNumber: [] };
+  if (!picks.length) return { asked: 0, noNumber: [], queued: false };
   if (picks.length > s.ask.max) throw new AppError('wa.err.tooManySuppliers', { n: s.ask.max });
   if (!x.items.length) throw new AppError('wa.err.noParts');
   // Suppliers only in WhatsApp (v0.91): of the base now — the request is kept on the job under them.
@@ -99,12 +114,12 @@ export async function askSuppliers(orderId: string, picks: AskPick[], x: { items
     asks.push(ask);
     items.push({ key, phone, gap: s.ask.gapSec, title: `#${order.number} · ${sup.name}`, parts: [{ text }, ...files], ask: { orderId, ask }, ...(later ? { after: later } : {}) });
   }
-  if (!items.length) return { asked: 0, noNumber };
-  const went = await queueWa(items);
+  if (!items.length) return { asked: 0, noNumber, queued: false };
+  const went = await queueWa(items, { confirmed: !!x.seen });
   // Kept on the job only once it went (audit 27/11): a request dropped in «Проверить и отправить» is not «asked» —
-  // `keepSentAsks` keeps it at «Отправить». Handed over already (no review on this device) — kept now.
+  // `keepSentAsks` keeps it at «Отправить». Handed over already (seen in the sheet, or no review on this device) — kept now.
   await keepSentAsks(items.filter((_, k) => went[k]?.state !== 'confirm'));
-  return { asked: asks.length, noNumber };
+  return { asked: asks.length, noNumber, queued: went.some((w) => w.state === 'confirm') };
 }
 
 /** The supplier requests among what really went (audit 27/11): each kept on its job, its answer looked for after it. */

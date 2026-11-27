@@ -64,6 +64,7 @@ import {
   waVoiceDraft,
   type VoiceDraft,
 } from '../../services/whatsapp';
+import { setUnreadMark } from '../../services/waMarks';
 import { canRecord, useRecorder } from '../../ui/recorder';
 import { peaksOfBlob, rateLabel, savedVoiceRate, saveVoiceRate, VOICE_RATES, type VoiceRate } from '../../ui/voice';
 import { WAVE_BARS } from '../../domain/waveform';
@@ -1258,7 +1259,7 @@ function Composer({ chatId, title, job, reply, replyName, onReplyDone, onSent, f
         </div>
       )}
       {input(gallery, { multiple: true, 'data-wa-file': '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-      {input(camera, { accept: 'image/*', capture: 'environment' })}
+      {input(camera, { accept: 'image/*,video/*', capture: 'environment' })}
       <SheetFor value={picked}>
         {(list, o) => (
           <FilesSheet
@@ -1442,10 +1443,16 @@ export function ChatThread({
   useEffect(() => showingChat(chatId), [chatId]);
 
   // Seen: the chat is in front, the app in sight — its unread goes, here and on the phone.
+  // v0.99 (audit W6): after two seconds on the screen — a chat opened for a moment keeps its unread (and the customer sees no
+  // blue ticks yet). The device's own «Непрочитано» mark goes as the chat is opened.
+  useEffect(() => setUnreadMark(chatId, false), [chatId]);
   useEffect(() => {
     if (!prefs.seen || !unread || !list) return;
     if (document.visibilityState !== 'visible' || (screen && !screen.front())) return;
-    void seenWa(chatId);
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === 'visible' && (!screen || screen.front())) void seenWa(chatId);
+    }, 2000);
+    return () => window.clearTimeout(timer);
   }, [chatId, unread, prefs.seen, list, screen]);
 
   // A phone (v0.84): the chat's wallpaper over the whole screen, the bar under it WhatsApp's; its height kept for the list.

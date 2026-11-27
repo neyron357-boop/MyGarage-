@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { garageNotes, GARAGE_NOTES } from '../../services/notes';
 import { PageHeader, PageSkeleton } from '../../ui/components';
-import { useScreenLiveQuery } from '../../ui/hooks';
+import { usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { NotesChat } from '../job/Notes';
 
 /**
@@ -12,10 +12,11 @@ import { NotesChat } from '../job/Notes';
 export function GarageNotesPage() {
   const { t } = useTranslation();
   const notes = useScreenLiveQuery(garageNotes, []);
+  const phone = usePhone();
   if (!notes) return <PageSkeleton />;
   return (
     <>
-      <PageHeader title={t('notes.title')} />
+      <PageHeader back={phone ? '/more' : undefined} title={t('notes.title')} />
       <div className="notes-page">
         <NotesChat orderId={GARAGE_NOTES} notes={notes} editable />
       </div>

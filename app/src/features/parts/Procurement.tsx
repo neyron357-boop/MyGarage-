@@ -1,8 +1,10 @@
-import { Button, Modal, SegmentedControl, Stack, Switch, TextInput } from '@mantine/core';
-import { IconArrowBackUp } from '@tabler/icons-react';
+import { Button, Modal, SegmentedControl, Stack, Switch, TextInput, Text } from '@mantine/core';
+import { IconArrowBackUp, IconCheck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { dubaiDate } from '../../domain/dates';
+import { formatAed } from '../../domain/money';
 import { db, uid } from '../../db/db';
 import { itemCostPaid, itemTitle } from '../../domain/items';
 import type { OrderItem, ProcurementStatus, SupplierReturn } from '../../domain/types';
@@ -45,8 +47,8 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
   const [retType, setRetType] = useState<SupplierReturn['refundType']>('money');
   useEffect(() => {
     if (!item) return;
-    // The next step is the likely one: needed → ordered, ordered → here.
-    setStatus(item.procurementStatus === 'needed' || !item.procurementStatus ? 'ordered' : item.procurementStatus === 'ordered' || item.procurementStatus === 'in_transit' ? 'received' : item.procurementStatus);
+    // v0.99 (audit Ч2): where the part is now — opened to fix a cost, «Сохранить» made it «Есть» while it was still coming.
+    setStatus(item.procurementStatus ?? 'needed');
     setSupplierId(item.supplierId);
     setCost(item.costPriceFils);
     setVat(item.purchaseVatFils);
@@ -68,6 +70,17 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
     }, 'common.saved');
   };
   const bought = ['ordered', 'in_transit', 'received'].includes(live.procurementStatus ?? '');
+  // The next step, a button of its own: needed → ordered, ordered / on its way → here.
+  const next: ProcurementStatus | null = status === 'needed' ? 'ordered' : status === 'ordered' || status === 'in_transit' ? 'received' : null;
+  const stepTo = (to: ProcurementStatus) =>
+    run(async () => {
+      await setProcurement(item.id, { status: to, supplierId: supplierId ?? '', costPriceFils: cost, purchaseVatFils: vat, expectedAt: expected, receipt: receipt?.file, paidCash });
+      await syncStage(item.orderId);
+      haptic(to === 'received' ? 'success' : 'light');
+      onClose();
+    }, 'common.saved');
+  const qty = item.qty || 1;
+  const day = (n: number) => dubaiDate(new Date(Date.now() + n * 86400_000).toISOString());
   return (
     <Modal opened onClose={onClose} title={itemTitle(item, lang)} classNames={{ content: 'sheet-grouped' }}>
       <Stack gap="lg">
@@ -89,9 +102,15 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
           <SupplierChips value={supplierId} onChange={setSupplierId} make={make} />
         </div>
         <div className="ios-group">
-          <FormRow label={t('qi.costShort')}>
-            <MoneyInput label={undefined} ariaLabel={t('parts.costPerUnit')} value={cost} onChange={setCost} />
+          {/* Per piece, without VAT — said on the field, with what it comes to for all of them (v0.99, audit Ч3). */}
+          <FormRow label={t('parts.costEachShort')}>
+            <MoneyInput label={undefined} ariaLabel={t('parts.costPerUnit')} value={cost} onChange={setCost} leftSection={qty !== 1 ? `${qty} ×` : undefined} />
           </FormRow>
+          {cost !== undefined && cost > 0 && qty !== 1 && (
+            <Text size="sm" c="dimmed" px="md" pb={8} className="tnum" data-cost-all>
+              {t('parts.costAll', { qty, sum: formatAed(Math.round(cost * qty)) })}
+            </Text>
+          )}
           <FormRow label={t('parts.vatShort')}>
             <MoneyInput label={undefined} ariaLabel={t('parts.purchaseVat')} value={vat} onChange={setVat} />
           </FormRow>
@@ -106,6 +125,16 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
             </FormRow>
           )}
         </div>
+        {(status === 'ordered' || status === 'in_transit') && (
+          // When it comes, one tap (v0.99, audit Ч4): the iPhone's calendar was three or four taps for «tomorrow».
+          <div className="chip-row wrap" style={{ marginTop: -8 }} data-comes-chips>
+            {[0, 1, 2].map((n) => (
+              <button key={n} type="button" className="chip" data-active={expected === day(n)} onClick={() => setExpected(day(n))}>
+                {t(`parts.comesIn.d${n}`)}
+              </button>
+            ))}
+          </div>
+        )}
         {cost !== undefined && cost > 0 && vat === undefined && (
           // Left empty, the seller's VAT is counted at the line's rate (v0.31); a part bought without it — one tap.
           <Button variant="subtle" size="compact-md" onClick={() => setVat(0)} style={{ alignSelf: 'flex-start' }}>
@@ -121,7 +150,12 @@ export function ProcurementModal({ item, onClose }: { item: OrderItem | null; on
             onRemove={() => setReceipt(undefined)}
           />
         )}
-        <Button size="lg" loading={busy} onClick={save}>
+        {next && (
+          <Button size="lg" color={next === 'received' ? 'green' : 'blue'} loading={busy} leftSection={<IconCheck size={20} />} onClick={() => void stepTo(next)} data-proc-next>
+            {t(next === 'received' ? 'parts.markReceived' : 'parts.markOrdered')}
+          </Button>
+        )}
+        <Button size="lg" variant={next ? 'default' : 'filled'} loading={busy} onClick={save}>
           {t('common.save')}
         </Button>
         {bought && !live.done && <ReturnTerms item={live} withProof={false} />}

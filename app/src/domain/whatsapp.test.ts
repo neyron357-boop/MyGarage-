@@ -97,8 +97,9 @@ describe('the list', () => {
 
   it('tabs: all without the archived, unread, customers, suppliers, groups', () => {
     const ids = (tab: Parameters<typeof filterChats>[1]['tab'], query = '') => filterChats(chats, { tab, query, people }).map((c) => c.id.split('@')[0]);
-    expect(ids('all')).toEqual(['971551112233', '971507776655', '120363000000000001', '971501234567']);
-    expect(ids('unread')).toEqual(['120363000000000001', '971501234567']);
+    // v0.99 (audit W3): a customer's unread chat first — above pinned and newer chats.
+    expect(ids('all')).toEqual(['971501234567', '971551112233', '971507776655', '120363000000000001']);
+    expect(ids('unread')).toEqual(['971501234567', '120363000000000001']);
     expect(ids('customers')).toEqual(['971501234567']);
     expect(ids('suppliers')).toEqual(['971507776655']);
     expect(ids('groups')).toEqual(['120363000000000001']);
@@ -344,19 +345,22 @@ describe('«Только гараж» and the statuses given by hand (v0.81)', (
 
   it('on — the garage’s chats (and oneself); off — every chat; a search keeps to it (v0.84); a service is among the suppliers', () => {
     const ids = (garageOnly: boolean, tab: 'all' | 'suppliers' | 'groups' = 'all', query = '') => filterChats(all, { tab, query, people, roles, garageOnly }).map((c) => c.id);
-    expect(ids(true)).toEqual([ali.id, tagged.id, workGroup.id, me.id]);
-    expect(ids(false)).toEqual(all.map((c) => c.id));
+    // v0.99 (audit W1): a new number not read yet stays in sight under «Только гараж» — first, a new customer may wait.
+    expect(ids(true)).toEqual([stranger.id, ali.id, tagged.id, workGroup.id, me.id]);
+    expect(ids(false)).toEqual([stranger.id, ...all.filter((c) => c !== stranger).map((c) => c.id)]);
+    // A muted chat is not a new number, however much it has unread.
+    expect(filterChats([...all, { ...stranger, id: '971509090909@c.us', phone: '971509090909', muted: true }], { tab: 'all', query: '', people, roles, garageOnly: true }).map((c) => c.id)).not.toContain('971509090909@c.us');
     expect(ids(true, 'suppliers')).toEqual([tagged.id]);
     expect(ids(true, 'groups')).toEqual([workGroup.id]);
-    // v0.84: a search keeps to the filter — the stranger is found with it off.
-    expect(ids(true, 'all', '55444')).toEqual([]);
+    // v0.99 (audit W7): a search goes through every chat, the filter or not.
+    expect(ids(true, 'all', '55444')).toEqual([stranger.id]);
     expect(ids(false, 'all', '55444')).toEqual([stranger.id]);
     // A number however it is typed: spaces, dashes, «+», «00», the local «0».
     expect(ids(true, 'all', '050 123-45-67')).toEqual([ali.id]);
     expect(ids(true, 'all', '+971 50 1234567')).toEqual([ali.id]);
     expect(ids(true, 'all', '00971501234567')).toEqual([ali.id]);
     // The unread of the chats shown.
-    expect(tabCounts(all, people, roles, true).all).toBe(1);
+    expect(tabCounts(all, people, roles, true).all).toBe(2);
     expect(tabCounts(all, people, roles, false).all).toBe(2);
   });
 });

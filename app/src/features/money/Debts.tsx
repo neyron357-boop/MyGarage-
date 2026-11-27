@@ -18,6 +18,11 @@ import { openWhatsApp } from '../../services/messages';
 import { debtInvoicesZip, statementPdf } from '../../services/debtDocs';
 import { openPdf } from '../../services/documents';
 import { removeEntry, restoreEntry } from '../../services/entries';
+import { askToSend } from '../../services/waConfirm';
+import { blobBase64 } from '../../services/waOutbox';
+import { waReady } from '../../services/whatsapp';
+import { tFor } from '../../i18n';
+import { useWaSel } from '../../ui/waSel';
 import { EmptyState, List, ListRow, Money, MoneyInput, PageSkeleton, PersonAvatar, PlateLine, undoToast } from '../../ui/components';
 import { DayPill } from '../../ui/DateFields';
 import { Fold } from '../../ui/Fold';
@@ -100,6 +105,25 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
   const paid = (papers ?? []).filter((m) => m.dueFils <= 0 && !owing.has(m.month)).reverse();
   const statement = () => run(async () => openPdf(await statementPdf(d.customer.id)));
   const archive = () => run(async () => shareOrDownload(await debtInvoicesZip(d.customer.id)));
+  // v0.99 (audit Ф35): the reminder in the customer's language with the statement — to «Проверить и отправить», where
+  // it is seen and sent by a tap (nothing goes by itself, v0.84.4).
+  const waOn = useWaSel(waReady);
+  const to = d.customer.whatsapp || d.customer.phone;
+  const remind = () =>
+    run(async () => {
+      const lng = d.customer.docLanguage ?? 'en';
+      const pdf = await statementPdf(d.customer.id);
+      const text = tFor(lng)('msg.debtReminder', { name: d.customer.name || d.customer.companyName || '', amount: formatAed(d.totalFils, lng) }).replace(/^, /, '');
+      askToSend([
+        {
+          key: `debt:${d.customer.id}:${Date.now()}`,
+          phone: to,
+          title: name,
+          parts: [{ text }, { data: await blobBase64(pdf.blob), name: pdf.filename, mime: 'application/pdf' }],
+        },
+      ]);
+      haptic('light');
+    });
   return (
     <List className={open ? "debt-card is-open" : "debt-card"}>
       <ListRow
@@ -200,6 +224,14 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           </span>
           <span>{t('debt.takeShort')}</span>
         </button>
+        {waOn && to && (
+          <button type="button" className="action-tile" disabled={busy} onClick={() => void remind()} data-debt-remind>
+            <span className="tile-icon" style={{ '--c': 'var(--mantine-color-green-6)' } as React.CSSProperties}>
+              <IconBrandWhatsapp size={21} stroke={1.9} aria-hidden />
+            </span>
+            <span>{t('debt.remind')}</span>
+          </button>
+        )}
         {/* Every month of its works (v0.69): open each, close a month, add a job forgotten. */}
         <button type="button" className="action-tile" data-debtor-months data-route={`/money/months?who=${d.customer.id}`} onClick={() => navigate(`/money/months?who=${d.customer.id}`)}>
           <span className="tile-icon" style={{ '--c': 'var(--mantine-color-indigo-6)' } as React.CSSProperties}>

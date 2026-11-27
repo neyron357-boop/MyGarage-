@@ -705,8 +705,20 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
   transform: translate3d(0, calc(100% + var(--bar-inset) + 24px), 0);
   opacity: 0;
 }
+/* v0.99 (audit О2): «＋» stands in the step bar's own row, to the right of the main button (a capsule and a circle) —
+   lifted over the bar it covered the right edge of the lines above it: a price, «×» of a payment screenshot,
+   «Отправить» of «Клиенту не сказано». Centred on the bar's 52-pt button; the bar leaves it its room. */
 html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plus'] > .screen-bottom > .sticky-bar) > .tab-bar-wrap {
-  transform: translate3d(0, calc(var(--bar-inset) - 80px - env(safe-area-inset-bottom, 0px)), 0);
+  transform: translate3d(0, calc(var(--bar-inset) + var(--app-bottom-h) / 2 - 36px - env(safe-area-inset-bottom, 0px)), 0);
+}
+html:not(.kb) .screen[data-tabbar='plus'] > .screen-bottom > .sticky-bar:not([data-full]) {
+  padding-right: calc(max(var(--bar-inset), env(safe-area-inset-right, 0px)) + var(--app-bottom-h) + 10px);
+}
+/* Picking lines — a mode of its own: «＋» steps aside, the bar's «Удалить · N» was under it. */
+.app-root:has(> .stack > .screen[data-role='top'] > .screen-bottom > .sticky-bar[data-full]) > .tab-bar-wrap > .tab-plus {
+  /* Scaled away on its own spring (not faded: it is glass — CLAUDE.md, no opacity on blurred glass). */
+  transform: scale(0);
+  pointer-events: none !important;
 }
 .screen[data-tabbar='plus'] .screen-body {
   padding-bottom: calc(var(--bar-zone) + 28px);
@@ -803,7 +815,7 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
   .qa-added-x {
     position: relative;
   }
-  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x, .car-check-pill, .qo-drop)::after {
+  :is(.mantine-Button-root[data-size^='compact'], .mantine-ActionIcon-root, .mantine-CloseButton-root, .mantine-InputClearButton-root, .stage-btn, .search-clear, .voice-rate, .jc-pin, .day-pill-input, .price-add, .price-tap-row, .qa-added-x, .car-check-pill, .qo-drop, .job-card-doc, .wa-extra-ask)::after {
     content: '';
     position: absolute;
     inset: -9px -5px;
@@ -1546,6 +1558,16 @@ html:not(.kb) .app-root:has(> .stack > .screen[data-role='top'][data-tabbar='plu
 .money-card[data-purse='cash'] {
   --mc-a: var(--mantine-color-green-6);
   --mc-b: var(--mantine-color-green-9);
+}
+/* The cash in the red (v0.99, audit Ф2): there is no minus in a drawer — something was typed wrong; orange says look. */
+.money-card[data-purse='cash'][data-negative] {
+  --mc-a: var(--mantine-color-orange-6);
+  --mc-b: var(--mantine-color-red-8);
+}
+.money-card-at {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.85;
 }
 /* A soft light from the top right, as on a card held to the light. */
 .money-card::after {
@@ -4844,16 +4866,146 @@ html.kb .viewer[data-typing] {
   text-align: start;
   padding: 0 4px;
 }
+/* The VIN typed in a light sheet (the job's VIN chip, v0.99) — the field was drawn for the dark photo view. */
+.vin-start .vin-type-field {
+  background: var(--app-fill);
+  box-shadow: none;
+}
+.vin-start .vin-type-field:focus-within {
+  box-shadow: inset 0 0 0 2px var(--mantine-color-cobalt-5);
+}
+.vin-start .vin-type-input {
+  color: var(--mantine-color-text);
+}
+.vin-start .vin-type-input::placeholder,
+.vin-start .vin-type-count,
+.vin-start .vin-type-card {
+  color: var(--mantine-color-dimmed);
+}
+.vin-start .vin-type-row .mantine-Button-root[data-variant='white'] {
+  background: var(--app-fill);
+}
+/* An emirate other than the garage's usual one (v0.99, audit П10): orange — seen, not slipped in. */
+.chip[data-active][data-odd] {
+  background: var(--mantine-color-orange-filled);
+  color: #fff;
+}
+.plate-codes {
+  margin-top: 10px;
+}
 .vin-type-row {
   display: grid;
   grid-template-columns: 1fr 1.4fr;
   gap: 10px;
 }
 
-/* Notifications: under the navigation bar, not over its buttons (‹, ×, …). No coloured stripe at the
-   side: a banner says it in its icon and words. */
-.mantine-Notifications-root[data-position^='top'] {
-  top: calc(env(safe-area-inset-top, 0px) + var(--app-nav-h) + 6px) !important;
+/* Notifications (v0.99, audit О1): at the bottom, where the thumb is, clear of the tab bar, a job's step bar and a
+   sheet's button — at the top they covered «‹», the job's number and a sheet's sum, and «Отменить» was a reach across
+   the screen. With the keyboard up the bottom is the keyboard: then at the top of what is seen. No coloured stripe at
+   the side: a banner says it in its icon and words. */
+.mantine-Notifications-root[data-position^='bottom'] {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px) !important;
+}
+html.kb .mantine-Notifications-root[data-position^='bottom'] {
+  bottom: auto !important;
+  top: calc(var(--vv-top, 0px) + 8px) !important;
+}
+html.desk .mantine-Notifications-root[data-position^='bottom'] {
+  bottom: 24px !important;
+}
+/* A banner fades in and out where it stands: sliding up from under the tab bar it lay over «＋» for its 260 ms and took
+   the press (a slide onto «Расход» right after «Отменить» opened nothing). */
+.mantine-Notifications-root[data-position^='bottom'] .mantine-Notification-root {
+  transform: none !important;
+}
+/* WhatsApp reconnecting (v0.99, audit W32): one orange line over the list, not a spinner instead of it. */
+.wa-reconnect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mantine-color-orange-8);
+  background: var(--mantine-color-orange-light);
+}
+.wa-reconnect > span {
+  flex: 1;
+  min-width: 0;
+}
+/* A chat marked unread on this device (v0.99, audit W6): WhatsApp's dot, without a number. */
+.wa-badge.wa-badge-dot {
+  min-width: 12px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+}
+/* The request's words, folded over «Отправить» (v0.99, audit W28). */
+.ask-text {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.ask-text > summary {
+  cursor: pointer;
+  color: var(--mantine-color-cobalt-6);
+  font-weight: 600;
+  padding: 6px 0;
+}
+.ask-text > pre {
+  margin: 4px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--app-press);
+}
+/* «Ждут отправки · N» (v0.99, audit W24): what waits in «Проверить и отправить», on every screen — a tap opens it. Above the
+   tab bar (or a job's step bar) on the left, out of the toasts' way; a desk — at the bottom left. */
+.wa-pending {
+  position: fixed;
+  left: max(var(--bar-inset, 21px), env(safe-area-inset-left, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 150px);
+  z-index: 190;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mantine-color-green-7);
+  background: var(--glass-bg-strong);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim), 0 0 0 0.5px var(--glass-edge);
+  cursor: pointer;
+}
+html.kb .wa-pending {
+  display: none;
+}
+html.desk .wa-pending {
+  bottom: 24px;
+  left: 24px;
+}
+/* «Отменить»: a whole 44-pt target in the cobalt of the app, not a word to aim at. */
+.undo-btn {
+  position: relative;
+  color: var(--mantine-color-cobalt-5);
+  font-weight: 700;
+  font-size: 15px;
+  white-space: nowrap;
+  min-height: 44px;
+  padding: 0 12px;
+  margin: -12px -8px -12px 0;
+  border-radius: 14px;
+}
+.undo-btn:active {
+  background: var(--app-press);
 }
 .mantine-Notification-root::before {
   display: none;
@@ -6117,9 +6269,25 @@ html.kb .viewer[data-typing] {
   flex-grow: 2.4;
   box-shadow: 0 0 10px -1px var(--phase);
 }
-/* The job's step in its own head: a solid capsule that glows a little. */
-.phase-pill-filled {
-  box-shadow: 0 6px 14px -8px var(--badge-bg), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+/* The job's state in its own head (v0.99, audit О5): a dot of the step's colour and what is true now — not a capsule
+   that looks like a button. */
+.phase-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--phase);
+  white-space: nowrap;
+}
+.phase-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--phase);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--phase) 22%, transparent);
 }
 /* The main button changes with the job's step: the new one settles in on a spring (a transform only —
    the glass buttons in the bar keep blurring what is under them). */
@@ -8406,6 +8574,13 @@ html.desk .mark-layer-body {
 .qa-new .qa-name {
   text-transform: none;
 }
+/* On the job already (v0.99, audit З22). */
+.qa-have {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mantine-color-green-7);
+}
 .qa-price {
   flex: none;
   font-size: 15px;
@@ -10688,11 +10863,15 @@ html.desk .wa-pane-foot {
   margin-top: 2px;
 }
 .wa-extra-ask {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 0;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  margin-top: 6px;
+  padding: 0 12px;
   border: 0;
-  background: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mantine-color-cobalt-6) 10%, transparent);
   font: inherit;
   font-size: 13px;
   font-weight: 600;

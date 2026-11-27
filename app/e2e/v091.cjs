@@ -311,14 +311,7 @@ async function playServer(page) {
   await shot('phone-06-ask-picked');
   await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
   await ask.waitFor({ state: 'detached', timeout: 8000 });
-  // Seen first (v0.85): «Проверить и отправить» — the person's «Отправить».
-  const confirmSheet = page.locator('[data-wa-confirm]');
-  await confirmSheet.waitFor({ timeout: 8000 });
-  await settle(400);
-  await shot('phone-07-confirm');
-  const all = confirmSheet.getByRole('button', { name: /^Отправить все/ });
-  if (await all.isVisible().catch(() => false)) await all.click();
-  else await confirmSheet.locator('.wa-ask').first().getByRole('button', { name: /^Отправить$/ }).click();
+  // v0.99 (audit W28): the request's words are in the sheet itself — its «Отправить» is the tap that sends (seen and tapped).
   for (let i = 0; i < 40 && !(await page.evaluate(() => window.__wa.out.length)); i++) await settle(200);
   const sent = await page.evaluate(async () => {
     const { db } = await import('/src/db/db.ts');

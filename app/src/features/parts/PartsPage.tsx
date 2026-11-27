@@ -22,7 +22,7 @@ import { formatPhone } from '../../domain/phone';
 import type { OrderItem } from '../../domain/types';
 import { syncStage } from '../../services/flow';
 import { closeReturn, setProcurement } from '../../services/parts';
-import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs } from '../../ui/components';
+import { EmptyState, List, ListRow, Money, PageHeader, PageSkeleton, PlateText, ScrollTabs, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { DataTable, type Column } from '../../ui/DataTable';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
@@ -80,11 +80,33 @@ export function PartsPage() {
 
   const step = async (i: OrderItem, status: 'ordered' | 'received') => {
     return run(async () => {
+      const before = i.procurementStatus ?? 'needed';
       await setProcurement(i.id, { status });
       await syncStage(i.orderId);
       haptic(status === 'received' ? 'success' : 'light');
+      // v0.99 (audit Ч1): a swipe in passing — «Отменить» puts the part (and its job) back.
+      undoToast(t(status === 'received' ? 'parts.receivedOne' : 'parts.orderedOne', { name: itemTitle(i, lang) }), t('common.undo'), () =>
+        void run(async () => {
+          await setProcurement(i.id, { status: before });
+          await syncStage(i.orderId);
+        }),
+      );
     });
   };
+  // Ч7: at the seller — all of his parts taken in one tap, with «Отменить».
+  const takeAll = (list: OrderItem[]) =>
+    run(async () => {
+      const before = list.map((i) => [i, i.procurementStatus ?? 'ordered'] as const);
+      for (const i of list) await setProcurement(i.id, { status: 'received' });
+      for (const id of new Set(list.map((i) => i.orderId))) await syncStage(id);
+      haptic('success');
+      undoToast(t('parts.takenAll', { n: list.length }), t('common.undo'), () =>
+        void run(async () => {
+          for (const [i, s] of before) await setProcurement(i.id, { status: s });
+          for (const id of new Set(list.map((i) => i.orderId))) await syncStage(id);
+        }),
+      );
+    });
   const row = (i: OrderItem) => {
     const o = byId.get(i.orderId);
     const v = o ? vById.get(o.vehicleId) : undefined;
@@ -220,7 +242,7 @@ export function PartsPage() {
 
   return (
     <>
-      <PageHeader title={t('nav.parts')} />
+      <PageHeader back={phone ? '/more' : undefined} title={t('nav.parts')} />
       <ScrollTabs
         value={tab}
         onChange={(v) => setParams({ tab: v }, { replace: true })}
@@ -255,13 +277,18 @@ export function PartsPage() {
                     </Text>
                   </div>
                   <Box ta="right">
-                    <div className="eyebrow">{t('parts.takeMoney')}</div>
+                    <div className="eyebrow">{t('parts.bringMoney')}</div>
                     <Text fz={20}>
                       <Money fils={money} display />
                     </Text>
                   </Box>
                 </Group>
                 <List>{list.map(row)}</List>
+                {list.length > 1 && (
+                  <Button mt="sm" fullWidth color="green" leftSection={<IconCheck size={18} />} onClick={() => void takeAll(list)} data-take-all>
+                    {t('parts.takeAll', { n: list.length })}
+                  </Button>
+                )}
                 {(s?.locationUrl || s?.phone) && (
                   <Group mt="sm" gap="xs">
                     {s?.locationUrl && (

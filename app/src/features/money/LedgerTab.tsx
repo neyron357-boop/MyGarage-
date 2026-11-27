@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dayHeading, formatDate, monthKey, monthLong, monthRange } from '../../domain/dates';
+import { dayHeading, dubaiDate, formatDate, monthKey, monthLong, monthRange } from '../../domain/dates';
 import { moved, noteBesides, periodTotals, type LedgerEntry, type Purse } from '../../domain/ledger';
 import { formatAed } from '../../domain/money';
 import type { ExpenseCategory } from '../../domain/types';
@@ -22,7 +22,7 @@ import { DataTable, type Column } from '../../ui/DataTable';
 import { CreditSheet } from './Debts';
 import { ShareEntryButton } from './ShareEntry';
 import { PaperLines } from './PaperLines';
-import { EntrySheet, IncomeChips, LinkPicker, PURSE_ICON, PursePicker, SplitParts, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
+import { EntrySheet, expenseCatOrder, IncomeChips, LinkPicker, PURSE_ICON, PursePicker, SplitParts, useIncomeCategories, useIncomeLabel, wayLabel, type EntryPreset } from './MoneyEntry';
 import { ExpenseOwedTo, OwedName } from './OwedTo';
 import { Proofs } from './Proofs';
 import { SheetFor } from '../../ui/lazy';
@@ -151,6 +151,34 @@ function CreditLeft({ expenseId }: { expenseId: string }) {
   );
 }
 
+/** Whose an operation is, under its sum (v0.99, audit Ф20): the job's plate, number and customer; to whom a credit was paid. */
+function EntryWho({ entry }: { entry: LedgerEntry }) {
+  const { t } = useTranslation();
+  const job = useScreenLiveQuery(async () => {
+    if (!entry.orderId) return null;
+    const o = await db.orders.get(entry.orderId);
+    if (!o) return null;
+    const [v, c] = await Promise.all([db.vehicles.get(o.vehicleId), db.customers.get(o.customerId)]);
+    return { number: o.number, plate: v?.plate, car: [v?.make, v?.model].filter(Boolean).join(' '), who: c ? (c.type === 'company' && c.companyName) || c.name : '' };
+  }, [entry.orderId]);
+  if (job)
+    return (
+      <Group gap={8} wrap="nowrap" mt={-6} data-entry-who>
+        {job.plate && <PlateText plate={job.plate} size="xs" />}
+        <Text size="sm" c="dimmed" lineClamp={1}>
+          {['№' + job.number, job.car, job.who || t('customer.noName')].filter(Boolean).join(' · ')}
+        </Text>
+      </Group>
+    );
+  if (entry.source === 'credit' && entry.owedTo)
+    return (
+      <Text size="sm" c="dimmed" mt={-6} data-entry-who>
+        → {entry.owedTo}
+      </Text>
+    );
+  return null;
+}
+
 /** A new sum for an operation: typed over the old one, saved with the check (or Enter); the same sum — nothing. */
 function AmountEdit({ fils, onSave, onCancel }: { fils: number; onSave: (fils: number) => void; onCancel: () => void }) {
   const { t } = useTranslation();
@@ -210,7 +238,15 @@ export function EntryDetails({
   const typed = (entry.source === 'expense' ? entry.expenseNote : entry.note) ?? '';
   const [note, setNote] = useState(typed);
   const signedFils = entry.kind === 'in' ? entry.amountFils : -entry.amountFils;
-  const change = (patch: EntryPatch) => run(() => updateEntry(ref, patch), 'common.saved');
+  // Every change says what it did, with «Отменить» back to what it was (v0.99, audit Ф19): a dirty finger on «Карта»
+  // while scrolling moved the money out of the cash, and «Сохранено» did not say so.
+  const undoable = (words: string, back: () => Promise<unknown>) => undoToast(words, t('common.undo'), () => void run(back));
+  const change = (patch: EntryPatch) =>
+    run(async () => {
+      await updateEntry(ref, patch);
+      if (patch.method) undoable(t('ledger.changedWay', { way: wayLabel(t, patch.method, entry.source === 'payment' ? 'in' : entry.kind) }), () => updateEntry(ref, { method: entry.method ?? 'cash' }));
+      else if (patch.date) undoable(t('ledger.changedDay', { day: formatDate(patch.date) }), () => updateEntry(ref, { date: entry.date }));
+    });
   const relink = (l: Links) =>
     run(() => (entry.source === 'income' ? updateIncome(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId }) : updateExpense(entry.id, { orderId: l.orderId, vehicleId: l.vehicleId, customerId: l.customerId })));
   const remove = () =>
@@ -257,6 +293,8 @@ export function EntryDetails({
               </Text>
             ))}
         </Group>
+        {/* Whose it is (v0.99, audit Ф20): a job's car, number and customer; a credit's payment — to whom. */}
+        <EntryWho entry={entry} />
         {/* The receipt and the proofs on top (v0.77, the owner: «фотографии чеков — сверху»), what the paper lists under them. */}
         <Proofs entry={entry} />
         {entry.lines && <PaperLines lines={entry.lines} />}
@@ -273,11 +311,36 @@ export function EntryDetails({
             {t('ledger.closingText', { actual: formatAed(entry.closing.actualFils), diff: formatAed(entry.closing.diffFils) })}
           </Text>
         )}
-        {relinkable && entry.source === 'income' && <IncomeChips value={entry.category} onChange={(category) => category !== entry.category && run(() => updateIncome(entry.id, { category }))} />}
+        {relinkable && entry.source === 'income' && (
+          <IncomeChips
+            value={entry.category}
+            onChange={(category) =>
+              category !== entry.category &&
+              run(async () => {
+                const was = entry.category;
+                await updateIncome(entry.id, { category });
+                if (was) undoable(t('ledger.changedCategory'), () => updateIncome(entry.id, { category: was }));
+              })
+            }
+          />
+        )}
         {relinkable && entry.source === 'expense' && (
           <div className="chip-row wrap">
-            {(cats ?? []).filter((c) => c.active).map((c) => (
-              <button key={c.id} type="button" className="chip" data-active={entry.category === c.id} onClick={() => run(() => updateExpense(entry.id, { categoryId: c.id }))}>
+            {(cats ?? []).filter((c) => c.active).sort(expenseCatOrder).map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className="chip"
+                data-active={entry.category === c.id}
+                onClick={() =>
+                  entry.category !== c.id &&
+                  run(async () => {
+                    const was = entry.category;
+                    await updateExpense(entry.id, { categoryId: c.id });
+                    if (was) undoable(t('ledger.changedCategory'), () => updateExpense(entry.id, { categoryId: was }));
+                  })
+                }
+              >
                 {lang === 'ru' ? c.nameRu : c.nameEn}
               </button>
             ))}
@@ -355,6 +418,8 @@ export function LedgerTab() {
   const rows = useMemo(() => {
     if (!data) return [];
     const query = q.trim().toLowerCase();
+    // v0.99 (audit Ф4): a sum as the keyboard types it — «90,72», «1 240» — is the same «90.72».
+    const sumQuery = /^[\d\s.,]+$/.test(query) ? query.replace(/\s/g, '').replace(',', '.') : '';
     return data.book.entries
       .filter((e) => e.date >= from && e.date <= to)
       .filter((e) => kind === 'all' || e.kind === kind)
@@ -364,6 +429,7 @@ export function LedgerTab() {
         const v = e.vehicleId ? data.vehicles.get(e.vehicleId) : undefined;
         const c = e.customerId ? data.customers.get(e.customerId) : undefined;
         const o = e.orderId ? data.orders.get(e.orderId) : undefined;
+        if (sumQuery && (e.amountFils / 100).toFixed(2).includes(sumQuery)) return true;
         return [label(e), e.note, e.owedTo, v?.plateSearch, v?.make, v?.model, c?.name, c?.companyName, o ? `№${o.number}` : '', (e.amountFils / 100).toFixed(2)].some((s) => s?.toLowerCase().includes(query));
       })
       .reverse();
@@ -373,6 +439,16 @@ export function LedgerTab() {
   // The sheet follows the entry as it changes (category, links); a cancelled one is gone.
   const open = opened ? book.entries.find((e) => e.id === opened.id && e.source === opened.source) : undefined;
   const totals = periodTotals(book.entries, from, to);
+  // v0.99 (audit Ф1): the card's figure is the cash at the end of the month shown (now, for this month) and the pill its
+  // start — it was today's cash over any month, and «начало» the start of the whole book.
+  const today = dubaiDate();
+  const thisMonth = to >= today;
+  const cashBy = (day: string, strict: boolean) => [...book.entries].reverse().find((e) => e.purse === 'cash' && (strict ? e.date < day : e.date <= day))?.cashAfter ?? book.cashStartFils;
+  const endCash = thisMonth ? book.cash : cashBy(to, false);
+  const startCash = cashBy(from, true);
+  // v0.99 (audit Ф3): a list filtered or searched says how many and what they come to.
+  const filtered = kind !== 'all' || purse !== 'all' || !!q.trim();
+  const foundSum = rows.filter(moved).reduce((s, e) => s + (e.kind === 'in' ? e.amountFils : -e.amountFils), 0);
   const days = new Map<string, LedgerEntry[]>();
   for (const r of rows) days.set(r.date, [...(days.get(r.date) ?? []), r]);
   // A day's sum: the money that moved (an expense taken on credit is a line of it, its sum is not — v0.58).
@@ -508,7 +584,7 @@ export function LedgerTab() {
             the opening balances), the balance large; under it the month in tiles, each named — cash, card, past the
             cash box (when the month has it) — money in over money out. The card keeps no balance — its money is only
             operations, in the list below (the user's call, v0.17). */}
-        <div className="money-card" data-purse="cash">
+        <div className="money-card" data-purse="cash" data-negative={endCash < 0 || undefined}>
           <UnstyledButton className="money-card-main tap amount-cell" onClick={() => setOpening(true)} aria-label={`${t('ledger.cashBalance')}: ${formatAed(book.cash, lang)} · ${t('ledger.opening')}`}>
             <div className="money-card-head">
               <span className="money-card-label">
@@ -516,13 +592,15 @@ export function LedgerTab() {
                 {t('ledger.cashBalance')}
               </span>
               <span className="money-card-start">
-                {t('ledger.start')} {formatAed(book.cashStartFils, lang, false)}
+                {t('ledger.start')} {formatAed(startCash, lang, false)}
                 <IconPencil size={12} stroke={2.2} aria-hidden />
               </span>
             </div>
             <div className="money-card-balance">
-              <Money fils={book.cash} display roll />
+              <Money fils={endCash} display roll />
             </div>
+            {!thisMonth && <span className="money-card-at">{t('ledger.atDay', { day: formatDate(to).slice(0, 5) })}</span>}
+            {endCash < 0 && <span className="money-card-at" data-cash-minus>{t('ledger.cashMinus')}</span>}
           </UnstyledButton>
           <div className="money-card-month">
             {/* Money past the cash box (v0.27: paid with the owner's own, taken by the owner) — a tile of its own, when the month has it. */}
@@ -582,6 +660,11 @@ export function LedgerTab() {
           })}
         </div>
         <SearchField placeholder={t('ledger.search')} value={q} onChange={setQ} />
+        {filtered && rows.length > 0 && (
+          <Text size="sm" fw={600} c="dimmed" className="tnum" data-ledger-found>
+            {t('ledger.found', { n: rows.length })} · <Money fils={foundSum} signed />
+          </Text>
+        )}
       </Stack>
 
       {rows.length === 0 ? (

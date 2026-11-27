@@ -180,12 +180,7 @@ async function playServer(page) {
   check(true, 'held — «Отправить позже» opened');
   await shot('phone-04-send-later');
   await later.locator('[data-later="in60"]').click();
-  // «Проверить и отправить»: the request shows its time; «Отправить» there hands it to the server with it.
-  const confirm = page.locator('[data-wa-ask-later]').first();
-  await confirm.waitFor({ timeout: 8000 });
-  check(/уйдёт в \d\d:\d\d/.test(await confirm.innerText()), 'the request to check says when it goes: ' + (await confirm.innerText()));
-  await shot('phone-05-confirm-later');
-  await page.locator('.mantine-Modal-content').filter({ has: page.locator('[data-wa-ask-later]') }).getByRole('button', { name: /^Отправить/ }).first().click();
+  // v0.99 (audit W28): the words were in the sheet — the time picked hands it to the server with it.
   await page.waitForFunction(() => window.__wa.out.length > 0, null, { timeout: 8000 });
   const out = await page.evaluate(() => window.__wa.out.map((x) => ({ key: x.key, after: x.after })));
   check(out[0].after && out[0].after > Date.now() + 50 * 60_000, 'handed to the server with its time (in an hour): ' + JSON.stringify(out.map((x) => x.key.split(':')[0])));

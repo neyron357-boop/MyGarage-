@@ -204,6 +204,7 @@ export function ServerCard() {
   const [leaving, setLeaving] = useState(false);
   const [moving, setMoving] = useState(false);
   const [making, setMaking] = useState(false);
+  const [mainWord, setMainWord] = useState('');
   // The garage's AI (v0.48): on the server or not.
   const [ai, setAi] = useState<Awaited<ReturnType<typeof aiStatus>>>();
   useEffect(() => {
@@ -290,15 +291,19 @@ export function ServerCard() {
       <LazySheet opened={moving}>{(o) => <AddressSheet opened={o} current={config.url} onClose={() => setMoving(false)} />}</LazySheet>
       <ConfirmModal
         opened={making}
-        onClose={() => setMaking(false)}
+        onClose={() => (setMaking(false), setMainWord(''))}
         title={t('sync.mainTitle')}
         confirmLabel={t('sync.mainMake')}
+        color="red"
+        waiting={mainWord.trim().toUpperCase() !== t('sync.mainWord')}
         onConfirm={async () => {
           void makeMain();
+          setMainWord('');
           return true;
         }}
       >
         <Text size="sm">{t('sync.mainText')}</Text>
+        <TextInput mt="md" aria-label={t('sync.mainWordAsk', { word: t('sync.mainWord') })} placeholder={t('sync.mainWord')} description={t('sync.mainWordAsk', { word: t('sync.mainWord') })} value={mainWord} onChange={(e) => setMainWord(e.currentTarget.value)} autoCapitalize="characters" autoComplete="off" data-main-word />
       </ConfirmModal>
       <ConfirmModal
         opened={leaving}

@@ -248,8 +248,14 @@ async function playServer(page) {
     await go(`#/orders/${job.id}`, 1200);
     await top().locator('.list-row', { hasText: 'BRAKE PADS FRONT' }).first().click();
     // (the line was agreed with the customer: its sheet opens its editor by «Изменить»)
-    const edit = page.getByRole('button', { name: /^(Изменить|Edit)$/ });
-    if (await edit.isVisible().catch(() => false)) await edit.click();
+    // v0.99 (audit З11): back to a draft only by a second tap that says so.
+    const edit = page.locator('[data-line-edit]');
+    if (await edit.isVisible().catch(() => false)) {
+      await edit.click();
+      // (the tap guard drops a second tap within 0.35 s on what changed under the finger)
+      await page.waitForTimeout(450);
+      await edit.click();
+    }
     await page.locator('[data-offer-wa]').first().waitFor({ timeout: 10000 });
     await page.locator('[data-offer-wa]').first().scrollIntoViewIfNeeded();
     await settle(400);

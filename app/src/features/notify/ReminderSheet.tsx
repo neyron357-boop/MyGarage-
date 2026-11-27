@@ -97,6 +97,7 @@ export function ReminderSheet({ opened, onClose, orderId, reminder }: { opened: 
             }
           }}
           maxLength={200}
+          enterKeyHint="done"
           data-autofocus
           autoComplete="off"
         />

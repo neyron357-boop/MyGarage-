@@ -155,6 +155,7 @@ async function playServer(page, phase) {
           return { ok: init.query.phone !== '971500009999', chat: known?.id ?? `${init.query.phone}@c.us` };
         }
         if (path === 'forward') return { ok: true };
+        if (path === 'outbox') return { ok: true, items: init.method === 'POST' ? init.body.items.map((x) => ({ key: x.key, state: 'sent', at: Date.now(), title: x.title })) : [], queued: 0, failed: 0, sent: 0 };
         if (path === 'delete') return { ok: true, msg: null };
         if (path === 'send' || path === 'file') {
           const chatId = path === 'send' ? init.body.chat : init.query.chat;
@@ -259,7 +260,8 @@ let current = null;
   // v0.81: «Только гараж» on by default — the customers', the supplier's and one's own chat; a stranger, a group the garage
   // does not write to, an old muted chat — not.
   const garage = await top().locator('.wa-row-name').allInnerTexts();
-  check(garage.length === 4 && !garage.includes('+971 52 444 0000') && !garage.includes('Garage team'), `v0.81: «Только гараж» lists the garage's chats only (${garage.join(' | ')})`);
+  // v0.99 (audit W1): a new number that wrote and is unread stays in sight — not a muted old one.
+  check(garage.length === 5 && garage.includes('+971 52 444 0000') && !garage.includes('Old muted chat') && !garage.includes('Garage team'), `v0.81: «Только гараж» lists the garage's chats only (${garage.join(' | ')})`);
   await shot('phone-06a-garage-only');
   // Off — every chat.
   await top().locator('.wa-list-tools .mantine-Switch-track').click();
@@ -307,11 +309,9 @@ let current = null;
   await top().getByRole('tab', { name: /^Все/ }).click();
   await top().locator('.search-field input').fill('archived');
   await settle(400);
-  check((await top().locator('.wa-row-name').count()) === 0 && (await top().locator('[data-wa-search-all]').first().isVisible()), 'v0.84: a search keeps to «Только гараж» — and offers the whole list');
+  // v0.99 (audit W7): a search goes through every chat, «Только гараж» or not — an archived one is found at once.
+  check((await top().locator('.wa-row-name').allInnerTexts()).join('|') === 'Archived one', 'v0.99: a search goes through the whole list, even under «Только гараж»');
   await shot('phone-06c-search-garage');
-  await top().locator('[data-wa-search-all]').first().click();
-  await settle(400);
-  check((await top().locator('.wa-row-name').allInnerTexts()).join('|') === 'Archived one', 'a search of the whole list finds an archived chat');
   await top().locator('.wa-list-tools .mantine-Switch-track').click();
   await settle(300);
   await top().locator('.search-field input').fill('052 444');
@@ -337,6 +337,8 @@ let current = null;
   check(await top().locator('.wa-quote').isVisible(), 'an answer shows what it answers');
   check((await top().locator('.wa-bubble b').first().innerText()) === 'Toyota Camry 2019', 'WhatsApp’s bold is bold');
   check(await top().locator('.wa-bubble a[href="https://maps.app.goo.gl/garage"]').isVisible(), 'a link is a link');
+  // v0.99 (audit W6): read on WhatsApp only once it stayed open 2 s (a chat glanced at stays unread).
+  await page.waitForFunction(() => window.__wa.asked.some((a) => a.path === 'seen'), null, { timeout: 5000 }).catch(() => undefined);
   check(await page.evaluate(() => window.__wa.asked.some((a) => a.path === 'seen')), 'opened, the chat is marked read on WhatsApp');
   await shot('phone-07-chat');
   {
@@ -580,9 +582,14 @@ let current = null;
   const S = await page.evaluate((name) => window.__wa.chats.find((c) => c.name === 'Parts seller')?.id, demo.supplier);
   const before5 = await page.evaluate(() => window.__wa.asked.length);
   await page.locator('[data-wa-quick-any] [data-wa-quick-doc="quote"]').first().click();
-  await page.getByText('Отправлено').first().waitFor({ timeout: 20000 });
-  const went5 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'file'), before5);
-  check(went5.length === 1 && went5[0].query.chat === S && went5[0].query.doc === '1' && /^Quotation/.test(went5[0].query.name), 'v0.80.3: a job found from a supplier’s chat — its quote went there as a PDF');
+  // v0.99 (audit W21): a quote with prices to a supplier's chat is seen first in «Проверить и отправить» — its PDF there.
+  const review5 = page.locator('[data-wa-confirm]');
+  await review5.locator('[data-wa-ask-file]').first().waitFor({ timeout: 20000 });
+  check(/^Quotation/.test((await review5.locator('[data-wa-ask-file]').first().innerText()).trim()), 'v0.99: a quote from a supplier’s chat waits in «Проверить и отправить» with its PDF');
+  await review5.locator('.wa-ask').first().getByRole('button', { name: /^Отправить$/ }).click();
+  await page.waitForFunction((n) => window.__wa.asked.slice(n).some((a) => a.path === 'outbox' && a.method === 'POST'), before5, { timeout: 20000 });
+  const went5 = await page.evaluate((n) => window.__wa.asked.slice(n).filter((a) => a.path === 'outbox' && a.method === 'POST').flatMap((a) => a.body.items), before5);
+  check(went5.length === 1 && went5[0].chat === S && /^Quotation/.test(went5[0].parts[0].name), 'v0.80.3: a job found from a supplier’s chat — its quote went there as a PDF, after «Отправить»');
 
   // 6. A new chat: someone the garage knows, or a number.
   await go('#/whatsapp');
@@ -619,7 +626,9 @@ let current = null;
   check(await page.locator('.tab-plus').isVisible(), 'v0.80: … «＋» stays');
   const plusBox = await page.locator('.tab-plus').boundingBox();
   const barBox = await top().locator('.screen-bottom .sticky-bar').boundingBox();
-  check(!!plusBox && !!barBox && plusBox.y + plusBox.height <= barBox.y + 1 && barBox.y + barBox.height >= 844 - 2, 'v0.80: … over the job’s own bar, which takes the bottom edge');
+  // v0.99 (audit О2): «＋» in the bar's own row, right of its buttons — over the bar it covered the lines above it.
+  const barRight = await top().locator('.screen-bottom .sticky-bar .mantine-Button-root').evaluateAll((els) => Math.max(...els.map((e) => e.getBoundingClientRect().right)));
+  check(!!plusBox && !!barBox && plusBox.y >= barBox.y - 2 && plusBox.y + plusBox.height <= barBox.y + barBox.height + 2 && plusBox.x >= barRight && barBox.y + barBox.height >= 844 - 2, `v0.99: … in the job’s own bar, beside its buttons (${JSON.stringify({ plusBox, barBox, barRight })})`);
   await shot('phone-14-job-full');
   // v0.90 (#71, the owner: «убрать отсюда WhatsApp… открытие чата клиента только через быстрые действия»): the job — its
   // two tabs; no WhatsApp button by the customer, no «Чат» in «…»; «＋» → «Чат» opens the chat in «WhatsApp».

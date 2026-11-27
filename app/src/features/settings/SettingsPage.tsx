@@ -60,7 +60,7 @@ import { blobToDataUrl } from '../../services/media';
 import { saveCategory, saveEmployee, saveSettings, saveTemplate } from '../../services/settings';
 import { ConfirmModal, List, ListRow, MoneyInput, PageHeader, PageSkeleton, ScrollTabs, StickyBar, Tip, PersonAvatar } from '../../ui/components';
 import { formatBytes, insecureContext, requestPersistence, useBackupAge, useStorageInfo } from '../../ui/device';
-import { useAction, useLang, useSettings } from '../../ui/hooks';
+import { useAction, useLang, usePhone, useSettings } from '../../ui/hooks';
 import { useInstall } from '../../ui/pwa';
 import { hasUnsaved, useMarkUnsaved } from '../../ui/unsaved';
 import { LazySheet } from '../../ui/lazy';
@@ -672,6 +672,7 @@ export function SettingsPage() {
   const { t } = useTranslation();
   const s = useSettings();
   const mobile = useMediaQuery('(max-width: 62em)', true, { getInitialValueInEffect: false });
+  const phone = usePhone();
   const [params, setParams] = useSearchParams();
   // An old or mistyped link opens the first tab, not an empty screen.
   const asked = params.get('tab') ?? 'business';
@@ -712,7 +713,7 @@ export function SettingsPage() {
   );
   return (
     <>
-      <PageHeader title={t('nav.settings')} />
+      <PageHeader back={phone ? '/more' : undefined} title={t('nav.settings')} />
       {mobile ? (
         <>
           <ScrollTabs value={tab} onChange={openTab} items={TABS.map((x) => ({ value: x.key, label: t(`settings.tab.${x.key}`) }))} />

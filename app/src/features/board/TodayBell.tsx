@@ -1,5 +1,6 @@
 import { ActionIcon, Modal } from '@mantine/core';
 import {
+  IconClockPause,
   IconAlarm,
   IconArrowBackUpDouble,
   IconCalendarTime,
@@ -39,7 +40,8 @@ import { doneReminder, openReminders, restoreReminder } from '../../services/rem
 import { customerMessage, loadPast, tasksFor } from '../../services/today';
 import { markCustomerDone, writeAllToday, type TodayMessage } from '../../services/todayBatch';
 import { waCan } from '../../services/whatsapp';
-import { EmptyState, Money, PlateText, undoToast } from '../../ui/components';
+import { EmptyState, Money, PlateText, UNDO_MS, undoToast } from '../../ui/components';
+import { snooze, unsnooze, useSnoozed, type SnoozeFor } from '../../ui/todaySnooze';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
@@ -77,6 +79,14 @@ const META = TASK_META;
  * manager now across all the cars (domain/today.ts), what is late first, in red. A tap on one opens its job (or the
  * message, for a customer); a customer's reminder not needed — its ×.
  */
+type Section = 'now' | 'today' | 'customers';
+/** «Сейчас» — late; «Сегодня» — the cars' own things and reminders; «Клиентам» — the calls to customers. */
+function sectionsOf(tasks: Task[]): [Section, Task[]][] {
+  const by: Record<Section, Task[]> = { now: [], today: [], customers: [] };
+  for (const x of tasks) by[x.late ? 'now' : CUSTOMER_KINDS.includes(x.kind) ? 'customers' : 'today'].push(x);
+  return (['now', 'today', 'customers'] as const).filter((k) => by[k].length).map((k) => [k, by[k]]);
+}
+
 export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBundle[] }) {
   const { t } = useTranslation();
   const lang = useLang();
@@ -100,10 +110,17 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
   }, [params, setParams]);
   const [send, setSend] = useState<{ request: SendRequest; customer: Customer; task: Task } | null>(null);
   const list = useAutoAnimate<HTMLDivElement>();
-  const tasks = useMemo(() => tasksFor(bundles, past, undefined, reminders), [bundles, past, reminders]);
+  // Put off for a while on this device (v0.99, audit Д25), or taken off a moment ago with «Отменить» still possible (Д24).
+  const snoozed = useSnoozed();
+  const [leaving, setLeaving] = useState<Set<string>>(() => new Set());
+  const all = useMemo(() => tasksFor(bundles, past, undefined, reminders), [bundles, past, reminders]);
+  const tasks = useMemo(() => all.filter((x) => !snoozed[x.key] && !leaving.has(x.key)), [all, snoozed, leaving]);
   const late = tasks.some((x) => x.late);
-  // How many things wait — on the app's icon too (the iPhone's badge).
-  useEffect(() => setBadge(tasks.length), [tasks.length]);
+  // The number on the bell and the app's icon (v0.99, audit Д26): what is late and the cars' own things — not the calls to
+  // customers («Как машина?», «Пора на ТО»), which kept it above zero always, so the eye stopped seeing it.
+  const counted = tasks.filter((x) => x.late || !CUSTOMER_KINDS.includes(x.kind)).length;
+  useEffect(() => setBadge(counted), [counted]);
+  const [snoozing, setSnoozing] = useState<Task | null>(null);
 
   const byOrder = new Map(bundles.map((b) => [b.order.id, b]));
   const vehicleOf = (task: Task) => byOrder.get(task.orderId ?? '')?.vehicle ?? past?.vehicles.get(task.vehicleId);
@@ -188,12 +205,31 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
       await writeAllToday(batch, dubaiDate());
       setOpen(false);
     });
-  const dismiss = (task: Task) =>
-    run(async () => {
-      await markDone(task);
-      haptic('light');
+  // «Не нужно» with «Отменить» (v0.99, audit Д24): out of the list at once, written after the toast is gone.
+  const dismiss = (task: Task) => {
+    haptic('light');
+    setLeaving((s) => new Set(s).add(task.key));
+    const timer = window.setTimeout(() => void run(() => markDone(task)), UNDO_MS);
+    undoToast(t('today.dismissed'), t('common.undo'), () => {
+      window.clearTimeout(timer);
+      setLeaving((s) => {
+        const n = new Set(s);
+        n.delete(task.key);
+        return n;
+      });
     });
+  };
+  const putOff = (task: Task, how: SnoozeFor) => {
+    snooze(task.key, how);
+    setSnoozing(null);
+    haptic('light');
+    undoToast(t(`today.snoozed.${how}`), t('common.undo'), () => unsnooze(task.key));
+  };
   const isCustomer = (task: Task) => CUSTOMER_KINDS.includes(task.kind);
+  const whoOf = (task: Task) => {
+    const c = customerOf(task);
+    return c ? (c.type === 'company' && c.companyName) || c.name : '';
+  };
   /** A reminder done from the list (a repeating one moves on to its next time), with «Отменить». */
   const done = (task: Task) =>
     run(async () => {
@@ -223,7 +259,20 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
       <Modal opened={open} onClose={() => setOpen(false)} title={t('today.title')}>
         {tasks.length ? (
           <div className="today-list" ref={list}>
-            {tasks.map((task) => {
+            {/* v0.99 (audit Д22): what is late first, then the cars' things, then the customers' — and «Написать всем» heads them. */}
+            {sectionsOf(tasks).flatMap(([section, list]) => [
+              <div key={`h-${section}`} className="group-title today-section" data-today-section={section}>
+                {t(`today.section.${section}`)} <span className="count">{list.length}</span>
+              </div>,
+              ...(section === 'customers' && batch.length > 1
+                ? [
+                    <button key="batch" type="button" className="today-add today-batch" onClick={writeAll} data-today-batch>
+                      <IconSend size={18} stroke={2.2} aria-hidden />
+                      {t('today.writeAll', { n: batch.length })}
+                    </button>,
+                  ]
+                : []),
+              ...list.map((task) => {
               const m = META[task.kind];
               const v = vehicleOf(task);
               const color = task.late ? 'red' : m.color;
@@ -243,8 +292,19 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
                   </span>
                   <span className="today-note-body">
                     <span className="today-note-text">{text(task)}</span>
-                    {v && <PlateText plate={v.plate} size="xs" />}
+                    {/* Which car and whose (v0.99, audit Д20): a plate alone had to be remembered. */}
+                    {v && (
+                      <span className="today-note-sub">
+                        <PlateText plate={v.plate} size="xs" />
+                        <span className="today-note-who">{[[v.make, v.model].filter(Boolean).join(' '), whoOf(task)].filter(Boolean).join(' · ')}</span>
+                      </span>
+                    )}
                   </span>
+                  {task.kind !== 'reminder' && !isCustomer(task) && (
+                    <ActionIcon variant="subtle" color="gray" size={34} radius="xl" aria-label={t('today.snooze')} onClick={(e) => (e.stopPropagation(), setSnoozing(task))} data-today-snooze>
+                      <IconClockPause size={18} />
+                    </ActionIcon>
+                  )}
                   {task.kind === 'debt' && task.amountFils ? (
                     <Money fils={task.amountFils} c="red.7" fw={600} />
                   ) : task.kind === 'reminder' ? (
@@ -260,18 +320,13 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
                   )}
                 </div>
               );
-            })}
+              }),
+            ])}
           </div>
         ) : (
           <EmptyState icon={IconBell} title={t('today.none')} />
         )}
-        {/* Audit 27/11: the customers' messages of the day in one go — all in «Проверить и отправить». */}
-        {batch.length > 1 && (
-          <button type="button" className="today-add today-batch" onClick={writeAll} data-today-batch>
-            <IconSend size={18} stroke={2.2} aria-hidden />
-            {t('today.writeAll', { n: batch.length })}
-          </button>
-        )}
+
         {/* A reminder of the manager's own, set where the day's things are seen (v0.74). */}
         <button type="button" className="today-add" onClick={() => setReminder({})} data-today-remind>
           <IconPlus size={18} stroke={2.4} aria-hidden />
@@ -279,6 +334,19 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
         </button>
       </Modal>
       <SheetFor value={reminder}>{(v, o) => <ReminderSheet opened={o} onClose={() => setReminder(null)} reminder={v.r} />}</SheetFor>
+      <SheetFor value={snoozing}>
+        {(task, o) => (
+          <Modal opened={o} onClose={() => setSnoozing(null)} title={t('today.snooze')}>
+            <div className="chip-row wrap" data-today-snooze-sheet>
+              {(['hour', 'evening', 'tomorrow'] as const).map((how) => (
+                <button key={how} type="button" className="chip" onClick={() => putOff(task, how)} data-snooze={how}>
+                  {t(`today.snoozeFor.${how}`)}
+                </button>
+              ))}
+            </div>
+          </Modal>
+        )}
+      </SheetFor>
       {send && (
         <SendDialog
           customer={send.customer}

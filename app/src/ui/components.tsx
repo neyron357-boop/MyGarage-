@@ -47,29 +47,47 @@ import { createPortal } from 'react-dom';
 
 /* ---------------- Toasts ---------------- */
 
+/** How long an «Отменить» stays (v0.99, audit О1: 5 s was gone before a tired thumb got there). */
+export const UNDO_MS = 8000;
+
+/** The undo of the last action while its toast is up — Ctrl+Z on a desk (`undoLast`). */
+let lastUndo: { id: string; until: number; run: () => void } | null = null;
+
+/** Ctrl+Z on a desk: the last action's «Отменить», while its toast is still up. */
+export function undoLast(): boolean {
+  const u = lastUndo;
+  if (!u || Date.now() > u.until) return false;
+  u.run();
+  return true;
+}
+
 /** A toast with an "Undo" button (for deletions that can be reverted). */
-export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => void, { replace = true }: { replace?: boolean } = {}) {
+export function undoToast(message: ReactNode, undoLabel: string, onUndo: () => void, { replace = true, undo = true }: { replace?: boolean; /** `false` — an action, not an undo (Ctrl+Z does not take it). */ undo?: boolean } = {}) {
   // Only the last action can be undone, at once (v0.23): one toast at a time otherwise queues it behind the one before
   // — whose «Отменить» would undo an older action over a newer one. A result that came by itself (`replace: false`)
   // waits its turn instead: it must not take away the undo of what the user just did.
   if (replace) notifications.clean();
   const id = `undo-${Date.now()}`;
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    if (lastUndo?.id === id) lastUndo = null;
+    onUndo();
+    notifications.hide(id);
+  };
+  if (undo && (replace || !lastUndo || Date.now() > lastUndo.until)) lastUndo = { id, until: Date.now() + UNDO_MS, run };
   notifications.show({
     id,
     color: 'dark',
-    autoClose: 5000,
+    autoClose: UNDO_MS,
+    className: 'undo-toast',
     message: (
       <Group justify="space-between" wrap="nowrap" gap="sm">
         <Text size="sm" style={{ minWidth: 0 }}>
           {message}
         </Text>
-        <UnstyledButton
-          onClick={() => {
-            onUndo();
-            notifications.hide(id);
-          }}
-          style={{ color: 'var(--mantine-color-cobalt-5)', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap' }}
-        >
+        <UnstyledButton className="undo-btn" onClick={run}>
           {undoLabel}
         </UnstyledButton>
       </Group>
@@ -974,9 +992,14 @@ export function Celebration() {
  * while typing). On a phone the bar belongs to its screen but sits outside its scroll view, so it is
  * at the very bottom from the first frame and moves with the screen; on a PC it closes the content.
  */
-export function StickyBar({ children }: { children: ReactNode }) {
+/** `full` — a mode of its own (picking lines): the bar takes the whole width, the job's «＋» steps aside (v0.99). */
+export function StickyBar({ children, full }: { children: ReactNode; full?: boolean }) {
   const screen = useScreen();
-  const bar = <div className="sticky-bar no-print">{children}</div>;
+  const bar = (
+    <div className="sticky-bar no-print" data-full={full || undefined}>
+      {children}
+    </div>
+  );
   return screen ? createPortal(bar, screen.bottom) : bar;
 }
 
@@ -1346,6 +1369,8 @@ type ConfirmProps = {
   onConfirm: () => Promise<unknown>;
   /** A second way to go (an action sheet of two): both full width, the sheet's × is the way back. */
   secondary?: { label: ReactNode; color?: string; onClick: () => Promise<unknown> };
+  /** Not yet (a word to type first, v0.99): the action stays off. */
+  waiting?: boolean;
 };
 
 /* Made only once it is first asked for (a job keeps several of these, mostly never opened). */
@@ -1363,6 +1388,7 @@ function ConfirmSheet({
   icon,
   onConfirm,
   secondary,
+  waiting,
 }: ConfirmProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<false | 'main' | 'second'>(false);
@@ -1418,7 +1444,7 @@ function ConfirmSheet({
         <Box>{children}</Box>
         {/* As an iPhone asks: the action across the sheet, in reach of the thumb; cancel quietly under it. */}
         <Stack gap={6}>
-          <Button size="lg" color={color} leftSection={icon} loading={busy === 'main'} data-autofocus onClick={() => void go('main', onConfirm)}>
+          <Button size="lg" color={color} leftSection={icon} loading={busy === 'main'} disabled={waiting} data-autofocus onClick={() => void go('main', onConfirm)}>
             {confirmLabel}
           </Button>
           <Button size="lg" variant="subtle" color="gray" className="confirm-cancel" onClick={onClose} disabled={!!busy}>

@@ -23,6 +23,7 @@ import type { TFunction } from 'i18next';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { notifications } from '@mantine/notifications';
 import { db } from '../../db/db';
 import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
 import { byMonths, debtQueue, historyKey, monthKeys, spread, type DebtJob, type DebtMonth, type HistoryDue } from '../../domain/debts';
@@ -39,9 +40,10 @@ import { loadDebtors } from '../../services/debts';
 import { addIncomeCategory, loadIncomeCategories, removeIncomeCategory, restoreIncomeCategory, saveIncomeCategory } from '../../services/incomeCategories';
 import { addIncome, moneyOf, type Links } from '../../services/ledger';
 import { addExpense, categoryMonthSpent } from '../../services/money';
+import { removeEntry } from '../../services/entries';
 import { CaptureButton } from '../../ui/CaptureButton';
 import { FormRow, Money, MoneyInput, PersonAvatar, PlateText, SelectCard, undoToast } from '../../ui/components';
-import { DateField } from '../../ui/DateFields';
+import { DayPill } from '../../ui/DateFields';
 import { Fold } from '../../ui/Fold';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
@@ -743,6 +745,13 @@ export function LinkedMoney({ link, by }: { link: Links; by: 'orderId' | 'vehicl
   );
 }
 
+/** The expense categories in one fixed order (v0.99, audit Ф11): the usual ones first, the garage's own after them. */
+const CAT_ORDER = ['parts', 'consumables', 'tools', 'salaries', 'rent', 'utilities', 'marketing', 'incidents', 'other'];
+export function expenseCatOrder(a: { code: string; nameRu: string }, b: { code: string; nameRu: string }): number {
+  const rank = (code: string) => (CAT_ORDER.indexOf(code) < 0 ? 50 : CAT_ORDER.indexOf(code));
+  return rank(a.code) - rank(b.code) || a.nameRu.localeCompare(b.nameRu);
+}
+
 export interface EntryPreset {
   kind?: 'in' | 'out';
   link?: Links;
@@ -766,15 +775,9 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const { t } = useTranslation();
   const lang = useLang();
   const { run, busy } = useAction();
-  // Categories the garage uses most come first (parts and consumables, usually).
-  const cats = useLiveQuery(async () => {
-    const [list, expenses] = await Promise.all([db.expenseCategories.filter((c) => c.active).toArray(), db.expenses.toArray()]);
-    const uses = new Map<string, number>();
-    for (const e of expenses) if (!e.voidedAt) uses.set(e.categoryId, (uses.get(e.categoryId) ?? 0) + 1);
-    const order = ['parts', 'consumables', 'tools', 'salaries', 'rent', 'utilities', 'marketing', 'incidents', 'other'];
-    const rank = (code: string) => (order.indexOf(code) < 0 ? 99 : order.indexOf(code));
-    return list.sort((a, b) => (uses.get(b.id) ?? 0) - (uses.get(a.id) ?? 0) || rank(a.code) - rank(b.code));
-  }, []);
+  // One fixed order of the categories (v0.99, audit Ф11): by use they moved from one day to the next, and the hand could
+  // not learn where «Запчасти» is. The same order in the operation's sheet (expenseCatOrder).
+  const cats = useLiveQuery(async () => (await db.expenseCategories.filter((c) => c.active).toArray()).sort(expenseCatOrder), []);
   const [kind, setKindState] = useState<'in' | 'out'>('out');
   const [amount, setAmount] = useState<number>();
   const [method, setMethod] = useState<ExpenseMethod>('cash');
@@ -796,6 +799,10 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const [spent, setSpent] = useState(0);
   // On credit (v0.61): whom the garage owes — to be said each time.
   const [owed, setOwed] = useState<OwedPick>();
+  // A tap on «Записать» with something missing: what (v0.99, audit Ф12). A debt payment over the debt: the second tap.
+  const [tried, setTried] = useState(false);
+  const [overOk, setOverOk] = useState(false);
+  const debtors = useLiveQuery(() => (opened && kind === 'in' ? loadDebtors() : undefined), [opened, kind]);
   // Money comes in by a way it can be counted: "on credit" is only a way to spend.
   const setKind = (k: 'in' | 'out') => {
     setKindState(k);
@@ -810,9 +817,11 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     setKind(preset?.debt ? 'in' : preset?.kind ?? 'out');
     setLink(preset?.link ?? {});
     setDebt(preset?.debt ?? {});
-    if (preset?.debt) setIncomeCat('debt');
-    // The sheet opens on real money; "on credit" is picked each time it is meant.
-    setMethod((m) => (m === 'credit' ? 'cash' : m));
+    // Each time from the start (v0.99, audit Ф10): cash and the usual category — the card of the last purchase made the next
+    // cash expense «Картой» silently, and the day's cash did not add up; «Оплата долга» stayed for the next income.
+    setIncomeCat(preset?.debt ? 'debt' : 'service');
+    setExpenseCat(undefined);
+    setMethod('cash');
     setParts(undefined);
     setTyped({});
     setAmount(preset?.amountFils ?? preset?.expense?.amountFils);
@@ -824,6 +833,8 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
     setOver('');
     setOwed(undefined);
     setMore(!!preset?.expense?.vendor || !!preset?.expense?.vatFils);
+    setTried(false);
+    setOverOk(false);
   }, [opened, preset]);
   useEffect(() => {
     if (!expenseCat && cats?.length) setExpenseCat(cats.find((c) => c.code === 'parts')?.id ?? cats[0].id);
@@ -848,14 +859,32 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
   const split = kind === 'out' && parts ? partsOf(amount, parts, typed) : undefined;
   // Something of it taken on credit: whom it is owed to is said before it is saved (v0.61).
   const onCredit = kind === 'out' && (parts ? parts.includes('credit') : method === 'credit');
-  const save = () =>
-    run(async () => {
+  // What stops the button, said (v0.99, audit Ф12): a grey «Записать» did nothing and did not say why.
+  const missing = !amount ? 'amount' : kind === 'out' && !expenseCat ? 'category' : kind === 'out' && !!parts && !split ? 'parts' : onCredit && !owed ? 'owed' : overLimit && !over.trim() ? 'over' : null;
+  // A debt payment more than all the customer owes (v0.99, audit Ф16): a typo 2500 for 250 is asked once more.
+  const owedAll = debtIn && debt.customerId ? debtors?.find((d) => d.customer.id === debt.customerId)?.totalFils : undefined;
+  const overDebt = owedAll !== undefined && (amount ?? 0) > owedAll ? (amount ?? 0) - owedAll : 0;
+  const save = () => {
+    if (missing) {
+      setTried(true);
+      haptic('warning');
+      return;
+    }
+    if (overDebt && !overOk) {
+      setOverOk(true);
+      haptic('warning');
+      return;
+    }
+    return run(async () => {
+      let undo: (() => Promise<unknown>) | undefined;
       if (kind === 'in') {
         const way = method === 'credit' ? 'cash' : method;
-        if (debtIn) await addIncome({ date, category: 'debt', amountFils: amount ?? 0, method: way, note, customerId: debt.customerId, orderId: debt.orderId, months: debt.months, keys: debt.keys });
-        else await addIncome({ date, category: incomeCat, amountFils: amount ?? 0, method: way, note, ...link });
-      } else
-        await addExpense({
+        const inc = debtIn
+          ? await addIncome({ date, category: 'debt', amountFils: amount ?? 0, method: way, note, customerId: debt.customerId, orderId: debt.orderId, months: debt.months, keys: debt.keys })
+          : await addIncome({ date, category: incomeCat, amountFils: amount ?? 0, method: way, note, ...link });
+        undo = () => removeEntry({ source: 'income', id: inc.id });
+      } else {
+        const ex = await addExpense({
           date,
           categoryId: expenseCat!,
           amountFils: amount ?? 0,
@@ -870,9 +899,16 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
           owedTo: onCredit ? owed : undefined,
           ...link,
         });
+        if (!split) undo = () => removeEntry({ source: 'expense', id: ex.id });
+      }
       haptic('success');
       onClose();
-    }, kind === 'in' ? 'ledger.savedIn' : 'ledger.savedOut');
+      // «Отменить» right after (v0.99, audit Ф18): a slip was a search through «Учёт» and «Удалить».
+      const words = t(kind === 'in' ? 'ledger.savedIn' : 'ledger.savedOut') + (amount ? ' · ' + formatAed(amount) : '');
+      if (undo) undoToast(words, t('common.undo'), () => void undo!());
+      else notifications.show({ color: 'green', message: words });
+    });
+  };
 
   return (
     <Modal opened={opened} onClose={onClose} title={t(kind === 'in' ? 'ledger.addIn' : 'ledger.addOut')}>
@@ -887,7 +923,21 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
             { value: 'out', label: t('ledger.out') },
           ]}
         />
-        <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
+        <MoneyInput label={t('common.amount')} value={amount} onChange={(v) => (setOverOk(false), setAmount(v))} autoFocus big error={tried && missing === 'amount' ? t('ledger.missing.amount') : undefined} />
+        {/* The day and the receipt right under the sum (v0.99, audit Ф9): the receipt was two taps away in a fold. */}
+        <Group gap="xs" wrap="nowrap">
+          <DayPill value={date} onChange={setDate} label={t('common.date')} />
+          {kind === 'out' && (
+            <CaptureButton variant={receipt ? 'filled' : 'light'} color={receipt ? 'green' : undefined} radius="xl" leftSection={<IconReceipt2 size={18} />} onFiles={(f) => setReceipt(f[0])} data-receipt-tile>
+              {receipt ? t('parts.receiptAttached') : t('parts.receiptPhoto')}
+            </CaptureButton>
+          )}
+        </Group>
+        {overDebt > 0 && (
+          <Text size="sm" fw={600} c="orange" data-over-debt>
+            {t('ledger.overDebt', { sum: formatAed(overDebt) })}
+          </Text>
+        )}
         <PursePicker value={method} onChange={setMethod} kind={kind} credit={kind === 'out'} parts={kind === 'out' ? parts : undefined} onParts={kind === 'out' ? setParts : undefined} />
         {kind === 'out' && parts && <SplitRows amountFils={amount} ways={parts} typed={typed} onTyped={setTyped} />}
         {onCredit && <OwedToField value={owed} onChange={setOwed} seller={vendor.trim() ? { kind: 'seller', name: vendor.trim() } : undefined} missing={!owed} />}
@@ -930,18 +980,18 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
         )}
         {kind === 'out' && preset?.expense?.lines && <PaperLines lines={preset.expense.lines} />}
         <TextInput label={t('ledger.note')} value={note} onChange={(e) => setNote(e.currentTarget.value)} />
-        <UnstyledButton onClick={() => setMore((m) => !m)}>
-          <Group gap={4} c="cobalt.6">
-            <Text size="sm" fw={600} c="cobalt.6">
-              {date === dubaiDate() ? t('ledger.today') : formatDate(date)}
-              {kind === 'out' ? ` · ${t('ledger.receiptVat')}` : ''}
-            </Text>
-            <IconChevronDown size={16} style={{ transform: more ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} />
-          </Group>
-        </UnstyledButton>
-        <Fold open={more}>
+        {kind === 'out' && (
+          <UnstyledButton onClick={() => setMore((m) => !m)}>
+            <Group gap={4} c="cobalt.6">
+              <Text size="sm" fw={600} c="cobalt.6">
+                {t('ledger.vendorVat')}
+              </Text>
+              <IconChevronDown size={16} style={{ transform: more ? 'rotate(180deg)' : undefined, transition: 'transform var(--dur-2) var(--ease-out)' }} />
+            </Group>
+          </UnstyledButton>
+        )}
+        <Fold open={more && kind === 'out'}>
           <Stack gap="sm">
-            <DateField label={t('common.date')} value={date} onChange={setDate} maxDate={dubaiDate()} />
             {kind === 'out' && (
               <>
                 <TextInput label={t('expense.vendor')} value={vendor} onChange={(e) => setVendor(e.currentTarget.value)} />
@@ -957,9 +1007,6 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
                     ) : undefined
                   }
                 />
-                <CaptureButton variant="light" leftSection={<IconReceipt2 size={18} />} onFiles={(f) => setReceipt(f[0])}>
-                  {receipt ? t('parts.receiptAttached') : t('parts.receiptPhoto')}
-                </CaptureButton>
               </>
             )}
           </Stack>
@@ -973,17 +1020,26 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
             description={t('expense.limitUsage', { spent: formatAed(spent + (amount ?? 0)), limit: formatAed(cat!.monthlyLimitFils) })}
           />
         )}
-        <Button
-          size="lg"
-          color={kind === 'in' ? 'green' : 'red'}
-          leftSection={kind === 'in' ? <IconArrowDownLeft size={20} /> : <IconArrowUpRight size={20} />}
-          loading={busy}
-          disabled={!amount || (kind === 'out' && !expenseCat) || (kind === 'out' && !!parts && !split) || (overLimit && !over.trim()) || (onCredit && !owed)}
-          onClick={save}
-        >
-          {t(kind === 'in' ? 'ledger.saveIn' : 'ledger.saveOut')}
-          {amount ? ` · ${formatAed(amount)}` : ''}
-        </Button>
+        {/* At the bottom in reach while the form scrolls (v0.99, audit Ф13); lit always — a tap says what is missing. */}
+        <div className="sheet-footer" style={{ '--sheet-bg': 'var(--mantine-color-body)' } as React.CSSProperties}>
+          {tried && missing && missing !== 'amount' && (
+            <Text size="sm" c="orange" fw={600} ta="center" mb={8} data-entry-missing>
+              {t(`ledger.missing.${missing}`)}
+            </Text>
+          )}
+          <Button
+            size="lg"
+            fullWidth
+            color={overDebt && overOk ? 'orange' : kind === 'in' ? 'green' : 'red'}
+            leftSection={kind === 'in' ? <IconArrowDownLeft size={20} /> : <IconArrowUpRight size={20} />}
+            loading={busy}
+            onClick={() => void save()}
+            data-entry-save
+          >
+            {t(kind === 'in' ? 'ledger.saveIn' : 'ledger.saveOut')}
+            {amount ? ' · ' + formatAed(amount) : ''}
+          </Button>
+        </div>
       </Stack>
     </Modal>
   );

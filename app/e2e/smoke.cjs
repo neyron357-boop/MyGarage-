@@ -140,7 +140,8 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await dlg.waitFor({ state: 'detached' });
   };
-  const step = async (name, fn) => { try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n').filter((l) => l.trim() && !/^=+/.test(l.trim())).slice(0, 4).join(' | ')); await shot('fail-' + name.replace(/\W+/g, '_')); throw e; } };
+  // ONLY=<words>: the demo and the steps whose name has them (debugging one step; the rest is skipped).
+  const step = async (name, fn) => { if (process.env.ONLY && !['board empty', 'load demo'].includes(name) && !name.includes(process.env.ONLY)) return; try { await fn(); console.log('OK  ', name); } catch (e) { console.log('FAIL', name, e.message.split('\n').filter((l) => l.trim() && !/^=+/.test(l.trim())).slice(0, 4).join(' | ')); await shot('fail-' + name.replace(/\W+/g, '_').slice(0, 60)); throw e; } };
 
   await step('board empty', async () => { await page.goto(BASE); await page.getByText('Мастерская', { exact: true }).first().waitFor(); await shot('01-board-empty'); });
   await step('load demo', async () => {
@@ -343,7 +344,11 @@ async function launchBrowser() {
       const line = activeInvoice(b.invoices).lines.find((l) => l.kind !== 'discount');
       return { due: bundleAmountDue(b), signed: b.debts[0].amountFils, onInvoice: line.description, name: itemTitle(work, b.order.docLanguage), gross: itemAmounts(work).gross };
     }, patrol);
+    // v0.99 (audit С26): a tap on a line of the invoice out opens nothing — «Изменить» is the tile under it.
     await front('.list-row').filter({ hasText: was.onInvoice }).first().click();
+    await page.waitForTimeout(300);
+    if (await dlg.count()) throw new Error('a tap on an invoice line opened ' + (await dlg.first().innerText()).slice(0, 60));
+    await front('.add-row').getByRole('button', { name: 'Изменить', exact: true }).click();
     await dlg.getByRole('button', { name: 'Изменить', exact: true }).click();
     await page.getByRole('button', { name: /^Готово ·/ }).waitFor();
     await front('.list-row').filter({ hasText: was.name }).first().click();
@@ -370,7 +375,7 @@ async function launchBrowser() {
       throw new Error('a job on credit changed: ' + JSON.stringify({ was, changed }));
     await page.getByRole('button', { name: /^Оплата ·/ }).click();
     await dlg.getByText('Карта', { exact: true }).click();
-    await dlg.getByRole('button', { name: 'Провести' }).click();
+    await dlg.locator('[data-pay-save]').click();
     await page.getByRole('button', { name: 'Возобновить' }).waitFor();
     const paid = await page.evaluate(async (id) => { const { loadOrderBundle } = await import('/src/services/orders.ts'); const b = await loadOrderBundle(id); return { stage: b.order.stage, debts: b.debts.map((d) => d.status) }; }, patrol);
     if (paid.stage !== 'closed' || paid.debts.join() !== 'paid') throw new Error('paid off: ' + JSON.stringify(paid));
@@ -456,7 +461,11 @@ async function launchBrowser() {
     await dlg.getByLabel('Сумма').fill('1000');
     await dlg.getByRole('radio', { name: 'В кредит' }).click();
     // v0.61: whom the garage owes is said before it is saved — here a person who paid for it, added in «Найти».
-    if (await dlg.getByRole('button', { name: /^Записать расход/ }).isEnabled()) throw new Error('a credit could be saved with nobody owed');
+    // v0.99 (audit Ф12): the button is lit — a tap says what is missing, and nothing is saved.
+    const exBefore = await page.evaluate(async () => (await import('/src/db/db.ts')).db.expenses.count());
+    await dlg.getByRole('button', { name: /^Записать расход/ }).click();
+    await dlg.locator('[data-entry-missing]').filter({ hasText: 'Укажите, кому должны' }).waitFor();
+    if ((await page.evaluate(async () => (await import('/src/db/db.ts')).db.expenses.count())) !== exBefore) throw new Error('a credit could be saved with nobody owed');
     await dlg.locator('[data-owed-field][data-missing]').waitFor();
     await dlg.locator('[data-owed-find]').click();
     await page.getByLabel('Кому должны: Имя').fill('Karim Lender');
@@ -587,7 +596,9 @@ async function launchBrowser() {
     const emptyMulkiya = await holdOn(page.getByRole('button', { name: 'Снять Mulkiya' }));
     if ((await emptyMulkiya.element().getAttribute('multiple')) === null) throw new Error('the Mulkiya from the photos takes both sides at once');
     await emptyMulkiya.setFiles([]);
-    const [vinChooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByRole('button', { name: 'Снять VIN' }).click()]);
+    // v0.99 (audit П24): the empty VIN chip opens its sheet — «Камера», «Из фото» or the VIN typed.
+    await page.getByRole('button', { name: 'Снять VIN' }).click();
+    const [vinChooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('[data-vin-camera]').click()]);
     await vinChooser.setFiles({ name: 'vin.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
     await page.getByRole('button', { name: 'Фото VIN' }).locator('img').waitFor();
     // A tap took it with the camera; a long press (a right click here) chooses one from the phone's photos.
@@ -754,7 +765,9 @@ async function launchBrowser() {
     if (await front('.list-row').filter({ hasText: 'LABOUR CHARGES' }).count()) throw new Error('v0.90: a labour charge beside the job’s own work');
     // No price yet (v0.81: «+ Цена» on its row): the quote cannot go.
     await front('.list-row').filter({ hasText: 'CABIN FILTER' }).first().locator('.price-add').waitFor();
-    if (!(await page.getByRole('button', { name: /^Клиенту/ }).isDisabled())) throw new Error('a line without a price must hold the quote');
+    // v0.99 (audit З6): the main button says the price is missing and how many — no grey «Клиенту».
+    await front('[data-price-missing]').filter({ hasText: 'Цена · 1' }).waitFor();
+    if (await page.getByRole('button', { name: /^Клиенту/ }).count()) throw new Error('a line without a price must hold the quote');
     if (await page.getByRole('button', { name: /Спросить запчасти/ }).count()) throw new Error('no ask-for-parts button on the job');
     // Its name opens its card: two of them, the cost, the price, ordered.
     await page.locator('.list-row').filter({ hasText: 'CABIN FILTER' }).first().click();
@@ -801,7 +814,7 @@ async function launchBrowser() {
     await page.getByText('320,50').first().waitFor(); // 220.50 + 100 without VAT
     if (await front('.list-row').filter({ hasText: 'LABOUR CHARGES' }).count()) throw new Error('v0.90: a labour charge came by itself');
     // A discount before the invoice: one tap rounds the total down.
-    await page.getByRole('button', { name: 'Скидка' }).click();
+    await page.getByRole('button', { name: 'Скидка на всё' }).click();
     await dlg.getByRole('button', { name: 'К оплате 320,00 AED' }).click();
     await dlg.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByRole('button', { name: 'Клиенту · 320,00 AED' }).waitFor();
@@ -824,7 +837,7 @@ async function launchBrowser() {
     await page.getByText(/INV-/).first().waitFor();
     // A discount after the invoice — «％» under the invoice's lines (v0.21; it was «…» → «Скидка»): a credit note and
     // a new invoice (10 % of 320.50 = 32.05).
-    await front('button.add-extra[aria-label="Скидка"]').click();
+    await front('button.add-extra[aria-label="Скидка на всё"]').click();
     await dlg.getByText('%', { exact: true }).click();
     await dlg.getByRole('button', { name: '10 %' }).click();
     await dlg.getByRole('button', { name: 'Оформить скидку' }).click();
@@ -839,15 +852,17 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).waitFor();
     await addLine('labor', 'Air filter clean', { price: 20 });
     await page.getByText('AIR FILTER CLEAN', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Согласен' }).click();
-    await page.getByRole('button', { name: /^Готово/ }).click();
+    // v0.99 (audit С16): the other lines agreed — «Готово» right beside «Клиенту», it agrees the new one in person (said).
+    await page.locator('[data-done-now]').click();
+    await dlg.locator('[data-agree-on-done]').waitFor();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: 'Оплата · 309,45 AED' }).waitFor(); // 288.45 + 20 + 5 % VAT
     await shot('32b-job-amended', true);
     await page.getByRole('button', { name: /^Оплата ·/ }).click();
-    await dlg.getByRole('button', { name: 'Провести' }).click();
+    await dlg.locator('[data-pay-save]').click();
     await page.getByRole('button', { name: 'Выдать' }).click();
-    await page.getByText('Закрыт').first().waitFor();
+    // v0.99: handed over — back on the board, «Выдана · Отменить».
+    await page.locator('.undo-toast').getByText(/Выдана/).waitFor();
     await shot('33-job-closed', true);
     // The board shows the cars by step; the closed one is gone from it.
     await page.goto(BASE + '#/');
@@ -872,7 +887,7 @@ async function launchBrowser() {
       await page.locator('.list-row').filter({ hasText: name }).first().waitFor();
     }
     await page.locator('.screen[data-role="top"] .nav-bar .mantine-ActionIcon-root').last().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Править' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Выбрать', exact: true }).click();
     await page.locator('.list-row').filter({ hasText: 'Wash' }).first().click();
     await page.locator('.list-row').filter({ hasText: 'Polish' }).first().click();
     await shot('30d-pick-lines');
@@ -966,7 +981,7 @@ async function launchBrowser() {
     await complaint.getByRole('button', { name: 'Сохранить' }).click();
     await complaintLine.getByText('Стук спереди при торможении').waitFor();
     // The job to the garage group (v0.13): the share sheet gets the car's photo and the text — the car, the
-    // customer by name only, the lines with their amounts.
+    // customer by name only, the lines — without prices (v0.99, audit З34: the group is the mechanics).
     await page.evaluate(() => {
       window.__shared = null;
       navigator.canShare = () => true;
@@ -975,7 +990,7 @@ async function launchBrowser() {
     await page.locator('.screen[data-role="top"]').getByRole('button', { name: 'Поделиться', exact: true }).click();
     const shared = await page.evaluate(() => window.__shared);
     // What the customer complains of goes with it (v0.17.2), under the name.
-    if (!shared || shared.files.length !== 1 || !/^Nissan Sunny/.test(shared.text) || !/Клиент: Сергей Иванов\nЖалоба: Стук спереди при торможении\n/.test(shared.text) || !/WASH/.test(shared.text) || !/Итого/.test(shared.text) || shared.text.includes('971'))
+    if (!shared || shared.files.length !== 1 || !/^Nissan Sunny/.test(shared.text) || !/Клиент: Сергей Иванов\nЖалоба: Стук спереди при торможении\n/.test(shared.text) || !/\n1\. POLISH\n2\. WASH/.test(shared.text) || /Итого|AED/.test(shared.text) || shared.text.includes('971'))
       throw new Error('the job shared to the group: ' + JSON.stringify(shared));
   });
   await step('v0.13: a job from an invoice PDF in one go', async () => {
@@ -1085,7 +1100,9 @@ async function launchBrowser() {
     const one = await car('17017', 'Nissan', 'Patrol');
     const label = await picture({ w: 1400, h: 900, ground: '#24403f', ink: '#e9f2f0', dust: 1500, tilt: 3, adds: true, vin: 'JN1TANY6?G0123456', lines: [['{VIN}', 330, 470, 64]] });
     await page.goto(BASE + '#/orders/' + one.id);
-    const [plate] = await Promise.all([page.waitForEvent('filechooser'), front('button[aria-label="Снять VIN"]').click()]);
+    // v0.99 (audit П24): the empty chip — its sheet, its «Камера».
+    await front('button[aria-label="Снять VIN"]').click();
+    const [plate] = await Promise.all([page.waitForEvent('filechooser'), page.locator('[data-vin-camera]').click()]);
     await plate.setFiles({ name: 'vin.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(label.jpeg, 'base64') });
     await front('.vin-chip[data-reading]').first().waitFor({ timeout: 15000 });
     await page.getByText(`Записано: ${label.vin} · 2016`).first().waitFor({ timeout: 90000 });
@@ -1236,13 +1253,11 @@ async function launchBrowser() {
     await dlg.waitFor({ state: 'hidden' });
     // "Оплата" → No payment: the car leaves, nothing owed — no payment, no debt.
     await page.getByRole('button', { name: /^Оплата ·/ }).click();
+    // v0.99: «Без оплаты» is no money only (the owner is a way of its own), and the button says so.
     await dlg.getByRole('button', { name: 'Без оплаты', exact: true }).click();
-    await dlg.getByRole('button', { name: 'Оплата у главного' }).waitFor();
     await page.waitForTimeout(500);
     await shot('33d-close-unpaid');
-    // Two ways: paid to the owner (the usual), or no money at all — here, no money.
-    await dlg.getByRole('button', { name: 'Денег не будет' }).click();
-    await dlg.getByRole('button', { name: 'Закрыть без оплаты' }).click();
+    await dlg.getByRole('button', { name: 'Закрыть · денег не будет' }).click();
     await dlg.waitFor({ state: 'hidden' });
     await page.getByText('Закрыт').first().waitFor();
     await page.locator('.list-row').filter({ hasText: 'Без оплаты' }).filter({ hasText: '210,00' }).first().waitFor();
@@ -1276,11 +1291,10 @@ async function launchBrowser() {
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: 'Оплата · 1 050,00 AED' }).waitFor();
     await page.getByRole('button', { name: /^Оплата ·/ }).click();
-    await dlg.getByRole('button', { name: 'Без оплаты', exact: true }).click();
-    // Paid to the owner is the one picked at first.
-    await dlg.getByRole('button', { name: 'Оплата у главного' }).and(page.locator('[data-active="true"]')).waitFor();
+    // v0.99: «Главному» — a way beside the money; nothing picked for it beforehand.
+    await dlg.getByRole('button', { name: 'Главному', exact: true }).click();
     await shot('33h-close-owner');
-    await dlg.getByRole('button', { name: 'Закрыть без оплаты' }).click();
+    await dlg.getByRole('button', { name: 'Закрыть · заплатил главному' }).click();
     await dlg.waitFor({ state: 'hidden' });
     await page.getByText('Закрыт').first().waitFor();
     if (await page.getByRole('button', { name: /^Оплата ·/ }).count()) throw new Error('a job paid to the owner still asks for payment');
@@ -1662,9 +1676,9 @@ async function launchBrowser() {
       await addLine('labor', name, { price: price });
       await front('.list-row').filter({ hasText: name }).first().waitFor();
     }
-    // The way of the job: six segments, the one it is on marked.
-    if ((await front('.phase-track > span').count()) !== 6) throw new Error('the phase track has six steps');
-    await front('.phase-track > span[data-now]').waitFor();
+    // v0.99 (audit З5, О5): on a phone the job's state is a dot and words — no six-segment track.
+    await front('.phase-state').waitFor();
+    if (await front('.phase-track').count()) throw new Error('the phase track is for a PC');
     const line = (name) => front('.list-row:not([data-ghost])').filter({ hasText: name }).first();
     // No swipe takes a line away (v0.83, the owner: «убрать свайп для удаления»): swiped left all the way, a draft stays
     // and no «Удалить» comes out.
@@ -1681,7 +1695,9 @@ async function launchBrowser() {
     // Agreed in person; a swipe right marks the work done, the line steps back.
     await page.getByRole('button', { name: 'Согласен' }).click();
     await page.locator('.screen[data-role="top"]').getByText('В работе').first().waitFor();
+    // v0.99 (audit З9): a long swipe only uncovers «Сделано» — its tap does it.
     await swipe(line('Oil change'), 1);
+    await line('Oil change').locator('.swipe-btn', { hasText: 'Сделано' }).click();
     await front('.list-row[data-done]').filter({ hasText: 'Oil change' }).waitFor();
     // An agreed line swiped left: nothing (v0.83) — it is taken off from its sheet.
     await swipe(line('Wheel alignment'), -1);
@@ -1692,7 +1708,7 @@ async function launchBrowser() {
     await page.getByRole('button', { name: /^Готово/ }).click();
     await dlg.getByRole('button', { name: 'Выписать инвойс' }).click();
     await page.getByRole('button', { name: /^Оплата ·/ }).click();
-    await dlg.getByRole('button', { name: 'Провести' }).click();
+    await dlg.locator('[data-pay-save]').click();
     await page.locator('.celebration').getByText('Оплачено').waitFor();
     await page.getByRole('button', { name: 'Выдать' }).click();
     await page.locator('.celebration').getByText('Выдана').waitFor();
@@ -1700,7 +1716,7 @@ async function launchBrowser() {
     await page.waitForTimeout(450);
     await page.screenshot({ path: `${SP}/shots/36c-celebration.png` });
     await shot('36c-handed-over');
-    await page.getByText('Закрыт').first().waitFor();
+    await page.locator('.undo-toast').getByText(/Выдана/).waitFor();
     // Tabs move like pages: a swipe to the left on Money opens the next tab, to the right — back.
     await page.goto(BASE + '#/money');
     const pageSwipe = (dir) =>
@@ -1784,13 +1800,13 @@ async function launchBrowser() {
       await addExpense({ date: dubaiDate(new Date().toISOString()), categoryId: cat.id, amountFils: 2646, vatFils: 0, method: 'cash', vendor: 'Proof Shop', note: 'Oil filter' });
     });
     await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Добавить пруф' }).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить фото' }).waitFor();
     await page.locator('input[data-photo-input="proof"]').setInputFiles([1, 2].map((n) => ({ name: `proof-${n}.png`, mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') })));
-    await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).nth(1).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Фото', exact: true }).nth(1).waitFor();
     await shot('25b-expense-proofs');
     await closeModal();
     await page.goto(BASE + '#/money?tab=book');
-    await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().getByLabel('Пруф').waitFor();
+    await page.locator('.list-row').filter({ hasText: 'Proof Shop' }).first().getByLabel('Фото', { exact: true }).waitFor();
     // The cash box: a movement opens as its line of the book — the expense, with the photos added there; money in
     // takes photos too (a sale for cash: the slip), and its line in the box gets the paperclip.
     await page.evaluate(async () => {
@@ -1800,17 +1816,17 @@ async function launchBrowser() {
     });
     await page.goto(BASE + '#/money?tab=cash');
     await front('.list-row.clickable').filter({ hasText: 'Proof Shop' }).first().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).nth(1).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Фото', exact: true }).nth(1).waitFor();
     await closeModal();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     await front('.list-row.clickable').filter({ hasText: 'Proof sale' }).first().click();
     await page.getByRole('dialog').getByText('Продажа', { exact: true }).first().waitFor();
-    await page.getByRole('dialog').getByRole('button', { name: 'Добавить пруф' }).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить фото' }).waitFor();
     await page.locator('input[data-photo-input="proof"]').setInputFiles({ name: 'slip.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
-    await page.getByRole('dialog').getByRole('button', { name: 'Пруф', exact: true }).first().waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: 'Фото', exact: true }).first().waitFor();
     await shot('24b-cash-proof');
     await closeModal();
-    await front('.list-row').filter({ hasText: 'Proof sale' }).first().getByLabel('Пруф').waitFor();
+    await front('.list-row').filter({ hasText: 'Proof sale' }).first().getByLabel('Фото', { exact: true }).waitFor();
     await page.goto(BASE + '#/reports');
     await page.getByText('Валовая прибыль').first().waitFor();
     await shot('26-reports', true);
@@ -1821,6 +1837,8 @@ async function launchBrowser() {
     await front('.list-row.clickable').first().click();
     const buy = page.getByRole('dialog');
     await buy.getByLabel('Закупка за ед. (без VAT)').waitFor();
+    // v0.99 (audit Ч2): the sheet opens where the part is (ordered) — the next step is its own button.
+    await buy.locator('[data-proc-next]').filter({ hasText: 'Получено' }).waitFor();
     await buy.locator('.group-title', { hasText: /^Возврат/ }).waitFor();
     await shot('27b-procurement');
     await page.locator('.mantine-Modal-close').first().click();
@@ -2068,7 +2086,7 @@ async function launchBrowser() {
     await front('button').filter({ hasText: /^Оплата/ }).first().click();
     await pickDay(dlg);
     await shot('23d-pay-job');
-    await dlg.getByRole('button', { name: /^Провести/ }).click();
+    await dlg.locator('[data-pay-save]').click();
     await dlg.waitFor({ state: 'detached' });
     const at = await page.evaluate(async (id) => {
       const { db } = await import('/src/db/db.ts');
@@ -3246,8 +3264,12 @@ async function launchBrowser() {
     });
     // (The chip knows whether the job has a photo a moment after the card shows: no camera before.)
     await page.waitForTimeout(300);
-    const [odo] = await Promise.all([page.waitForEvent('filechooser'), chip.click()]);
-    if (!(await odo.element().getAttribute('capture'))) throw new Error('a tap on the empty chip must open the camera');
+    // v0.99 (audit П22): a tap — the mileage's sheet (the number typed, or the camera there).
+    await chip.click();
+    const odoSheet = page.getByRole('dialog');
+    await odoSheet.getByLabel('Пробег, км').waitFor();
+    const [odo] = await Promise.all([page.waitForEvent('filechooser'), odoSheet.getByRole('button', { name: 'Фото пробега' }).click()]);
+    if (!(await odo.element().getAttribute('capture'))) throw new Error('«Фото пробега» must open the camera');
     await odo.setFiles({ name: 'odometer.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(dashboard, 'base64') });
     await front('.job-foot').getByRole('button', { name: 'Пробег' }).filter({ hasText: '123 456 км' }).waitFor({ timeout: 60000 });
     await page.getByText('Пробег с фото: 123 456 км').first().waitFor();
@@ -3527,7 +3549,9 @@ async function launchBrowser() {
     await page.getByLabel('Номер').pressSequentially('55443', { delay: 12 });
     await page.getByText(/Уже в работе: заказ №/).waitFor();
     await shot('46c-second-job');
-    await page.getByRole('button', { name: 'Принять' }).click();
+    // v0.99: opening the job in work is the main button; a second job — the second one.
+    await page.getByRole('button', { name: /^Открыть №/ }).waitFor();
+    await page.getByRole('button', { name: 'Второй заказ' }).click();
     await page.getByRole('button', { name: 'Добавить позицию', exact: true }).waitFor();
     const two = await page.evaluate(async (v) => (await (await import('/src/db/db.ts')).db.orders.where('vehicleId').equals(v).toArray()).length, made.vehicleId);
     if (two !== 2) throw new Error('a second job for the car in work: ' + two);
