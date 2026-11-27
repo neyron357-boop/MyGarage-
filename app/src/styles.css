@@ -10987,3 +10987,14 @@ html.desk .wa-pane-foot {
 .settings-tab:active {
   transform: scale(0.95);
 }
+
+/* The suggestion ↑ ↓ reached (v0.99, audit К20): Enter takes it. */
+.qa-row[data-cursor] {
+  background: var(--app-press);
+}
+
+/* Who the sum is (v0.99, audit Ф38). */
+.kpi-tab-who {
+  font-size: 13px;
+  color: var(--app-label-2, var(--mantine-color-dimmed));
+}

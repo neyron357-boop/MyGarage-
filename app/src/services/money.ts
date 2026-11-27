@@ -489,7 +489,7 @@ export async function addExpense(input: ExpenseInput): Promise<Expense> {
 
 // ---------- Salaries ----------
 
-export async function paySalary(input: { employeeId: string; month: string; kind: SalaryPayment['kind']; amountFils: number; method: PayMethod }): Promise<void> {
+export async function paySalary(input: { employeeId: string; month: string; kind: SalaryPayment['kind']; amountFils: number; method: PayMethod }): Promise<string> {
   if (!(input.amountFils > 0)) throw new AppError('err.amountRequired');
   const [emp, cat] = await Promise.all([db.employees.get(input.employeeId), db.expenseCategories.where('code').equals('salaries').first()]);
   if (!emp || !cat) throw new AppError('err.notFound');
@@ -503,6 +503,8 @@ export async function paySalary(input: { employeeId: string; month: string; kind
     note: `${input.kind} ${input.month}`,
   });
   await db.salaryPayments.add({ id: uid(), ...input, paidAt: nowIso(), expenseId: expense.id });
+  // Its expense: the payment's «Отменить» takes it away (with the salary record and the cash, `removeEntry`).
+  return expense.id;
 }
 
 export type { CashMovement };

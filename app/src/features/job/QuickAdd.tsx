@@ -101,6 +101,9 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
   const autoList = useMemo(() => (auto ? autoMatches(suggestions, query, 8, fixedName) : []), [auto, suggestions, query, fixedName]);
   const matches = useMemo(() => (auto ? autoList.map((m) => m.title) : quickMatches(set, query, 8)), [auto, autoList, set, query]);
   const kindOfMatch = useMemo(() => new Map(autoList.map((m) => [m.title, m.kind])), [autoList]);
+  // ↑ ↓ through the suggestions, Enter takes the one marked (v0.99, audit К20: a PC typed and then reached for the mouse).
+  const [cursor, setCursor] = useState(-1);
+  useEffect(() => setCursor(-1), [query]);
   const exact = auto ? (exactTitle(suggestions?.part, query) ?? exactTitle(suggestions?.work, query)) : exactTitle(set, query);
   const typed = lineName((auto && fixedName ? fixedName : query).trim());
   const typedGuess = useMemo(() => (auto && typed ? guessKind(typed, suggestions, !!dict?.known) : undefined), [auto, typed, suggestions, dict]);
@@ -291,7 +294,7 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               const side = sideOf(title);
               const k = auto ? kindOfMatch.get(title) : undefined;
               return (
-                <button key={title} type="button" role="option" aria-selected={title === exact} className="qa-row" data-side={side} onMouseDown={keep} onClick={() => add(title)}>
+                <button key={title} type="button" role="option" aria-selected={cursor >= 0 ? matches[cursor] === title : title === exact} data-cursor={matches[cursor] === title || undefined} className="qa-row" data-side={side} onMouseDown={keep} onClick={() => add(title)}>
                   <span className="qa-name">{title}</span>
                   {have.has(title.trim().toUpperCase()) && (
                     <span className="qa-have" data-qa-have>
@@ -356,9 +359,16 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
           rightSectionWidth={44}
           rightSectionPointerEvents="all"
           onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              if (!matches.length) return;
+              e.preventDefault();
+              setCursor((c) => (e.key === 'ArrowDown' ? Math.min(matches.length - 1, c + 1) : Math.max(-1, c - 1)));
+              return;
+            }
             if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
             e.preventDefault();
-            if (typed) add(exact ?? typed);
+            if (cursor >= 0 && matches[cursor]) add(matches[cursor]);
+            else if (typed) add(exact ?? typed);
           }}
         />
         {/* The kind, right above the keyboard: one tap — the keyboard stays. */}

@@ -23,7 +23,8 @@ import { loadCredits } from '../../services/debts';
 import { loadLedger } from '../../services/ledger';
 import { addCashMovement, cashState, closeCashDay, paySalary } from '../../services/money';
 import { proofIndex } from '../../services/proofs';
-import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar } from '../../ui/components';
+import { removeEntry } from '../../services/entries';
+import { EmptyState, List, ListRow, MediaImage, Money, MoneyInput, PageHeader, PageSkeleton, PlateText, ScrollTabs, Section, SelectCard, PersonAvatar, undoToast } from '../../ui/components';
 import { MonthField } from '../../ui/DateFields';
 import { useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { SheetFor } from '../../ui/lazy';
@@ -428,14 +429,20 @@ function SalariesTab() {
           );
         })}
       </List>
-      <Text size="xs" c="dimmed">
-        {t('salary.hint')}
-      </Text>
       <Modal opened={!!pay} onClose={() => setPay(null)} title={pay ? t(`salary.kind.${pay.kind}`) : ''}>
         <Stack>
           <MoneyInput label={t('common.amount')} value={amount} onChange={setAmount} autoFocus big />
           <MethodPicker value={method} onChange={setMethod} />
-          <Button size="lg" disabled={!amount} loading={busy} onClick={() => pay && run(async () => { await paySalary({ ...pay, month, amountFils: amount ?? 0, method }); setPay(null); }, 'common.saved')}>
+          <Button size="lg" disabled={!amount} loading={busy} onClick={() =>
+              pay &&
+              run(async () => {
+                const id = await paySalary({ ...pay, month, amountFils: amount ?? 0, method });
+                setPay(null);
+                // v0.99 (audit Ф50): paid — said with «Отменить», as any money written.
+                undoToast(t('salary.paidN', { sum: formatAed(amount ?? 0) }), t('common.undo'), () => void run(() => removeEntry({ source: 'expense', id })));
+              })
+            }
+          >
             {t('common.save')}
           </Button>
         </Stack>

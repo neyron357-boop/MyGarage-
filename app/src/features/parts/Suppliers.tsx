@@ -16,8 +16,8 @@ import { StarsPill } from '../job/SupplierAsk';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
 import { whatsappUrl } from '../../services/messages';
-import { saveSupplier, setSupplierCard } from '../../services/parts';
-import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField } from '../../ui/components';
+import { archiveSupplier, saveSupplier, setSupplierCard } from '../../services/parts';
+import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DataTable, type Column } from '../../ui/DataTable';
@@ -332,6 +332,25 @@ export function SupplierSheet({
         ) : (
           <Button size="lg" loading={busy} disabled={!v.name?.trim()} onClick={save}>
             {t('common.save')}
+          </Button>
+        )}
+        {v.id && !v.archivedAt && (
+          // Off the lists — with «Отменить» (v0.99, audit Ч20): nothing of it is deleted.
+          <Button
+            variant="subtle"
+            color="red"
+            onClick={() => {
+              const id = v.id!;
+              const name = v.name ?? '';
+              void run(async () => {
+                await archiveSupplier(id, true);
+                onClose();
+                undoToast(t('suppliers.offList', { name }), t('common.undo'), () => void archiveSupplier(id, false));
+              });
+            }}
+            data-supplier-off
+          >
+            {t('suppliers.takeOff')}
           </Button>
         )}
       </Stack>

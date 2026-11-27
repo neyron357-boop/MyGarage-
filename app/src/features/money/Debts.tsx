@@ -5,7 +5,7 @@ import { Fragment, memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dubaiDate, formatDate, monthLong } from '../../domain/dates';
+import { daysBetween, dubaiDate, formatDate, monthLong } from '../../domain/dates';
 import { byMonths, creditMonths, creditSince, spread, type Creditor, type DebtJob, type DebtMonth, type Debtor } from '../../domain/debts';
 import { creditEntry } from '../../domain/ledger';
 import { expenseNoteLine } from '../../domain/paperLines';
@@ -97,6 +97,8 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
   const jobs = d.cars.reduce((n, c) => n + c.jobs.length, 0);
   const before = d.history.reduce((n, m) => n + m.dues.length, 0);
   const late = d.cars.some((c) => c.jobs.some((j) => !!j.dueDate && j.dueDate < today));
+  // How long past the date the customer signed (v0.99, audit Ф37): said, not only a red dot.
+  const lateDays = lateBy(d, today);
   const monthly = byMonths(d.months);
   // Every month of its papers, read only once the card is opened (a card folded reads nothing more).
   const papers = useScreenLiveQuery(() => (open ? loadCustomerMonths(d.customer.id) : undefined), [open, d.customer.id]);
@@ -139,6 +141,7 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
           d.cars.length ? t('debt.cars', { count: d.cars.length }) : '',
           jobs ? t('debt.jobs', { count: jobs }) : '',
           before ? t('history.count', { count: before }) : '',
+          lateDays > 0 ? t('debt.lateDays', { n: lateDays }) : '',
         ]
           .filter(Boolean)
           .join(' · ')}
@@ -278,12 +281,22 @@ const DebtorCard = memo(function DebtorCard({ d, onPay }: { d: Debtor; onPay: (c
  * opens money in as a debt payment of that customer (spread over their jobs, the oldest first); a month (v0.62) — the
  * same with that month picked and what it owes offered.
  */
+/** Days past the latest promised date among the customer's jobs (0 — none overdue). */
+function lateBy(d: Debtor, today: string): number {
+  let most = 0;
+  for (const c of d.cars) for (const j of c.jobs) if (j.dueDate && j.dueDate < today) most = Math.max(most, daysBetween(j.dueDate, today));
+  return most;
+}
+
 export function DebtorList({ debtors }: { debtors: Debtor[] }) {
   const [pay, setPay] = useState<EntryPreset | null>(null);
+  // Overdue first, the longest overdue on top (v0.99, audit Ф37); the rest as they come — whoever owes most.
+  const today = dubaiDate();
+  const ordered = [...debtors].sort((a, b) => lateBy(b, today) - lateBy(a, today));
   return (
     <>
       <Stack gap="md" className="debt-cards">
-        {debtors.map((d) => (
+        {ordered.map((d) => (
           <DebtorCard key={d.customer.id} d={d} onPay={(customerId, m) => setPay(m ? { debt: { customerId, months: [m.month] }, amountFils: m.dueFils } : { debt: { customerId } })} />
         ))}
       </Stack>
@@ -734,11 +747,12 @@ export function DebtsOverview({ onEdge }: { onEdge?: (dir: 1 | -1) => void }) {
           >
             <span className="eyebrow">
               {label}
-              {n > 0 && <span className="count">{n}</span>}
             </span>
             <span className="value" style={fils > 0 ? { color: `var(--mantine-color-${color}-text, var(--mantine-color-${color}-6))` } : undefined}>
               <Money fils={fils} roll />
             </span>
+            {/* Who, in words under the sum (v0.99, audit Ф38): a bare «1» beside the label read as a count of something else. */}
+            {n > 0 && <span className="kpi-tab-who">{t(key === 'owed' ? 'debt.clientsN' : 'debt.toWhomN', { count: n })}</span>}
           </button>
         ))}
       </SimpleGrid>

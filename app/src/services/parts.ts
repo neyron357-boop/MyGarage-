@@ -12,6 +12,11 @@ import { logEvent } from './orders';
 import { importSupplierBook } from './supplierBook';
 import { stillGuessed } from './supplierTidy';
 
+/** Off the lists (v0.99, audit Ч20) — or back on them; its record, its lines and its money stay as they are. */
+export async function archiveSupplier(id: string, off: boolean): Promise<void> {
+  await db.suppliers.update(id, { archivedAt: off ? nowIso() : undefined });
+}
+
 export async function saveSupplier(given: Partial<Supplier> & { name: string }): Promise<Supplier> {
   if (!given.name.trim()) throw new AppError('err.nameRequired');
   // The number as the app keeps numbers (E.164): typed «050 123 4567», its WhatsApp opens (v0.24).

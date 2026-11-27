@@ -1144,7 +1144,8 @@ export function ContactTiles({ phone, whatsapp, telegram, whatsappHref }: { phon
   const { t } = useTranslation();
   const tiles: { href: string; icon: Icon; label: string; color: string; external: boolean }[] = [];
   if (whatsappHref || whatsapp || phone) tiles.push({ href: whatsappHref ?? whatsappUrl(whatsapp || phone, ''), icon: IconBrandWhatsapp, label: 'WhatsApp', color: 'green', external: true });
-  if (telegram || phone) tiles.push({ href: telegramChatUrl(phone, telegram), icon: IconBrandTelegram, label: 'Telegram', color: 'cobalt', external: true });
+  // Telegram only when it is written down (v0.99, audit Ч22): in the UAE a number is WhatsApp, rarely Telegram.
+  if (telegram) tiles.push({ href: telegramChatUrl(phone, telegram), icon: IconBrandTelegram, label: 'Telegram', color: 'cobalt', external: true });
   if (phone) tiles.push({ href: `tel:${phone}`, icon: IconPhone, label: t('customer.call'), color: 'green', external: false });
   if (!tiles.length) return null;
   return (

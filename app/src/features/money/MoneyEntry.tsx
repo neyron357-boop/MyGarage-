@@ -235,11 +235,7 @@ export function PursePicker({
           </button>
         )}
       </div>
-      {kind === 'out' && !parts && (value === 'card' || value === 'transfer') && (
-        <Text size="xs" c="dimmed">
-          {t('ledger.cardOutHint')}
-        </Text>
-      )}
+      {/* (v0.99, audit Ф15: no sentence under the chips — the card has no balance since v0.17, nothing to warn of.) */}
     </Stack>
   );
 }
@@ -912,7 +908,15 @@ export function EntrySheet({ opened, onClose, preset }: { opened: boolean; onClo
 
   return (
     <Modal opened={opened} onClose={onClose} title={t(kind === 'in' ? 'ledger.addIn' : 'ledger.addOut')}>
-      <Stack gap="md">
+      {/* Ctrl+Enter (⌘+Enter) — «Записать» from any field (v0.99, audit К34: a PC). */}
+      <Stack
+        gap="md"
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || busy) return;
+          e.preventDefault();
+          void save();
+        }}
+      >
         <SegmentedControl
           fullWidth
           value={kind}
