@@ -32,7 +32,7 @@ import { namedByParts, partNames, partsKey } from '../domain/labourName';
  * определения VIN.»): not to come back without his word.
  */
 
-export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request' | 'translate' | 'voice';
+export type AiPath = 'vin' | 'part-name' | 'receipt' | 'labour' | 'reply' | 'roles' | 'car' | 'request' | 'translate' | 'voice' | 'picture' | 'payment';
 type Transport = (path: AiPath, body: unknown) => Promise<unknown>;
 let transport: Transport | undefined;
 /** The server's part played by a test (and by the browser scenario). */
@@ -391,6 +391,40 @@ export async function aiVoiceText(id: string): Promise<{ text: string; english: 
   if (!aiOn() || !id) return undefined;
   try {
     return await askAi<{ text: string; english: string; from: string }>('voice', { id }, `voice:${id}`, 90_000);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Audit 27/11: a supplier's prices in a picture or a PDF from the chat (a price list, a screenshot of their system, a
+ * quotation) — written down by the garage's AI as lines, read then by the app's own rules (`parseReply`). Not kept.
+ */
+export async function aiPictureText(id: string): Promise<string | undefined> {
+  if (!aiOn() || !id) return undefined;
+  try {
+    return (await askAi<{ text: string }>('picture', { id }, `picture:${id}`, 60_000)).text?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What a customer's payment proof says (audit 27/11): only what is printed on it; the app checks it against what is due. */
+export interface AiPaymentShot {
+  isPayment: boolean;
+  amount: number;
+  currency: string;
+  date?: string;
+  reference?: string;
+  bank?: string;
+  /** «card» — a card slip; else a transfer. */
+  way?: string;
+  confidence: number;
+}
+export async function aiPaymentShot(id: string): Promise<AiPaymentShot | undefined> {
+  if (!aiOn() || !id) return undefined;
+  try {
+    return await askAi<AiPaymentShot>('payment', { id }, `payment:${id}`, 60_000);
   } catch {
     return undefined;
   }

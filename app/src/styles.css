@@ -7504,6 +7504,13 @@ html.desk .mark-layer-body {
 [data-mantine-color-scheme='dark'] .today-add {
   color: var(--mantine-color-cobalt-4);
 }
+/* Audit 27/11: the customers' messages of the day in one go — green, as WhatsApp. */
+.today-add.today-batch {
+  color: var(--mantine-color-green-filled);
+}
+[data-mantine-color-scheme='dark'] .today-add.today-batch {
+  color: var(--mantine-color-green-4);
+}
 /* A reminder's job, in its sheet: the plate, the car, the number — a tap opens the job. */
 .reminder-job {
   padding: 10px 12px;

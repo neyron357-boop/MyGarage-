@@ -12,6 +12,7 @@ import { AppError } from './errors';
 import { bundleAmountDue, loadOrderBundle } from './orders';
 import { getSettings, saveSettings } from './settings';
 import { keepSentBuys } from './supplierOrder';
+import { keepSentToday } from './todayBatch';
 import { keepSentAsks } from './waAsk';
 import { forgetAsks, waAsks, type WaAsk } from './waConfirm';
 import { blobBase64, queueWa, type OutItem, type OutPart } from './waOutbox';
@@ -95,6 +96,7 @@ export async function sendAsked(asks: WaAsk[]): Promise<void> {
   await rememberSent(asks.map((a) => a.item));
   await keepSentAsks(asks.map((a) => a.item));
   await keepSentBuys(asks.map((a) => a.item));
+  await keepSentToday(asks.map((a) => a.item));
 }
 
 /** What really went (v0.85: tapped «Отправить» after seeing it): kept on its job — not what was only prepared. */

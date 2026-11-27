@@ -25,6 +25,7 @@ import { DIRS, httpError } from './store.mjs';
  *        /api/ai/car {image}              — a car's make and model off a small photo (v0.89)
  *        /api/ai/request {texts, image?}  — a customer’s request in WhatsApp: the car and what is asked (v0.90)
  *        /api/ai/translate {text, to}, /api/ai/voice {id} — a chat message translated, a voice message written down
+ *        /api/ai/picture {id}, /api/ai/payment {id} — a supplier's prices in a picture; a customer's payment proof
  *                                         (audit 27/11; neither kept — the chat's words are never stored)
  *   GET  /api/push/key                   — this server's key for notifications, and whether this device takes them (v0.74, push.mjs)
  *   POST /api/push/subscribe {subscription} · /api/push/unsubscribe — this device takes notifications, or no more
@@ -232,6 +233,13 @@ export function createApi({ store, config, pairing, log, onSeen, events, cards, 
           if (parts[2] === 'request') return send(res, 200, await ai.request(body));
           // Audit 27/11: a message translated; a voice message (its bytes from the bridge on this computer) written down.
           if (parts[2] === 'translate') return send(res, 200, await ai.translate(body));
+          // Audit 27/11: a supplier's prices in a picture; a customer's payment proof — the picture from the bridge too.
+          if (parts[2] === 'picture' || parts[2] === 'payment') {
+            if (!wa?.mediaBytes) throw httpError(503, 'whatsapp is off');
+            const m = await wa.mediaBytes(String(body.id ?? ''));
+            const image = { type: m.type, data: m.bytes.toString('base64') };
+            return send(res, 200, parts[2] === 'picture' ? await ai.pictureText({ image }) : await ai.payment({ image }));
+          }
           if (parts[2] === 'voice') {
             if (!wa?.mediaBytes) throw httpError(503, 'whatsapp is off');
             const m = await wa.mediaBytes(String(body.id ?? ''));

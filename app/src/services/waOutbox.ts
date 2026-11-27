@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { PartAsk } from '../domain/types';
+import type { TodaySend } from './todayBatch';
 import { SyncError } from './sync/api';
 import { askToSend } from './waConfirm';
 import { keepOutbox, waCall, waCan, type OutboxFace } from './whatsapp';
@@ -39,6 +40,8 @@ export interface OutItem {
   ask?: { orderId: string; ask: PartAsk };
   /** An order to a supplier (audit 27/11): its lines «заказано» once it really went (`keepSentBuys`), never sent to the server. */
   buy?: { orderId: string; supplierId: string; lines: { itemId: string; costFils?: number }[]; expectedAt?: string };
+  /** A customer's message of «Сегодня» (audit 27/11): the thing leaves the list once it really went (`keepSentToday`), never sent to the server. */
+  today?: TodaySend;
   chat?: string;
   phone?: string;
   parts: OutPart[];
@@ -91,7 +94,7 @@ export async function queueWa(raw: OutItem[], { confirmed = false }: { confirmed
     askToSend(raw);
     return raw.map((it) => ({ key: it.key, state: 'confirm' as const }));
   }
-  const items = raw.map(({ note: _note, ask: _ask, buy: _buy, ...item }) => item);
+  const items = raw.map(({ note: _note, ask: _ask, buy: _buy, today: _today, ...item }) => item);
   try {
     const out: OutboxFace[] = [];
     // A few at a time: a request's sheets of diagrams make each item large.

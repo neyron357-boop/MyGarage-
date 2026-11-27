@@ -474,6 +474,7 @@ export const ru = {
   },
   // v0.81: быстрый лист «＋» заказа и «+ Цена».
   answer: { all: 'Согласен на всё', none: 'Отказ от всего', option: 'Вариант {{n}}', some: 'Да: {{agree}} · нет: {{refuse}}', agree: 'Согласовать', refuse: 'Отказ' },
+  payShot: { transfer: 'Перевод', card: 'Карта', record: 'Записать', onShot: 'на скрине {{sum}}', saved: 'Оплата записана' },
   buy: { title: 'Заказать', supplier: 'Поставщик', none: 'Нет деталей с ценами поставщиков', when: 'Когда', go: 'Заказать · {{n}}', whens: { soon: 'Заберём сейчас', evening: 'Сегодня 17:00', morning: 'Завтра 9:00', deliver: 'Привезите' }, kind: { oem: 'оригинал', aftermarket: 'копия', used: 'б/у' } },
   qa: { title: 'Добавить', addedN: 'Добавлено · {{n}}', undo: 'Убрать {{name}}', addTyped: 'Добавить «{{name}}»', add: 'Добавить', labor: 'Работа', kind: 'Что добавить', auto: 'Авто', autoPlaceholder: 'Запчасть, работа или услуга', fixed: 'исправлено', templates: 'Шаблоны', together: 'Часто вместе' },
   price: { add: 'Добавить цену', word: 'Цена', cost: 'Закупка', sell: 'Продажа' },
@@ -1931,6 +1932,7 @@ export const ru = {
     followUp: 'Как машина?',
     declined: 'В прошлый раз отказался — предложить снова',
     bookedTomorrow: 'Завтра в {{time}} — напомнить клиенту',
+    writeAll: 'Написать всем · {{n}}',
     service: 'Пора на ТО',
     notNeeded: 'Не нужно',
     more: 'Ещё {{n}}',

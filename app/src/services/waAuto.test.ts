@@ -325,6 +325,38 @@ describe('suppliers', () => {
     setAiTransport(undefined);
   });
 
+  it('audit 27/11: a supplier’s photo of the price list and a PDF quotation — written down by the AI, read by the rules', async () => {
+    const { o } = await job();
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+    const disc = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake disc front', unitPriceFils: 0 });
+    const supId = (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+    await recordLinkAsk(o.id, supId, [pads, disc], '*Toyota Hiace*\n\n1. BRAKE PADS FRONT\n2. BRAKE DISC FRONT');
+    const seen: string[] = [];
+    setAiTransport(async (path, body) => {
+      if (path === 'picture') {
+        const id = (body as { id: string }).id;
+        seen.push(id);
+        return { text: id.endsWith('P1') ? '1. brake pads front original 180' : '2. brake disc front 95' };
+      }
+      throw new Error('not played: ' + path);
+    });
+    chatMsgs['55512345678901@lid'] = [
+      // A photo with a caption of its own price — the rules read the caption, the picture is not asked about.
+      { id: 'false_55512345678901@lid_P0', chat: '55512345678901@lid', t: Date.now() + 3000, me: false, type: 'image', text: 'pads 175', ack: 0 } as never,
+      { id: 'false_55512345678901@lid_P1', chat: '55512345678901@lid', t: Date.now() + 5000, me: false, type: 'image', text: 'price', ack: 0 } as never,
+      { id: 'false_55512345678901@lid_P2', chat: '55512345678901@lid', t: Date.now() + 6000, me: false, type: 'document', text: '', ack: 0, file: { mime: 'application/pdf', size: 90_000 } } as never,
+    ];
+    await loadChats(true);
+    expect(await readReplies()).toBeGreaterThanOrEqual(2);
+    expect(seen).toEqual(['false_55512345678901@lid_P1', 'false_55512345678901@lid_P2']);
+    expect((await db.items.get(pads.id))!.offers?.some((x) => x.costFils === 18000 && x.ai)).toBe(true);
+    expect((await db.items.get(disc.id))!.offers?.map((x) => [x.costFils, !!x.ai])).toEqual([[9500, true]]);
+    // Read once: not asked again.
+    expect(await readReplies()).toBe(0);
+    expect(seen).toHaveLength(2);
+    setAiTransport(undefined);
+  });
+
   it('v0.86: an answer’s price is the line’s cost by default; «offers only» set — the cost is left to the manager', async () => {
     const { o: first } = await job();
     const pad1 = await addItem(first.id, { kind: 'part', block: 'A', titleEn: 'Brake pads', unitPriceFils: 0 });

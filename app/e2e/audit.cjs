@@ -75,8 +75,8 @@ async function launch() {
       await db.orders.update(corolla.id, { stage: 'closed', outcome: 'completed', closedAt: day(35), arrivedAt: day(36), createdAt: day(36) });
       const tomorrow = new Date(Date.now() + 86_400_000);
       const bookedFor = `${tomorrow.toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })}T06:00:00.000Z`;
-      await checkIn({ customerId: c.id, plate: plate(70000 + Math.floor(Math.random() * 9000)), make: 'Toyota', model: 'Hiace', name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', bookedFor });
-      return { jobId: second.id };
+      const hiace = await checkIn({ customerId: c.id, plate: plate(70000 + Math.floor(Math.random() * 9000)), make: 'Toyota', model: 'Hiace', name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', bookedFor });
+      return { jobId: second.id, corolla: corolla.id, hiace: hiace.id };
     });
 
     // 1. The Camry's second visit: what was declined on the first, a tap from this job.
@@ -248,6 +248,71 @@ async function launch() {
     }
     check(after[0] === 'ordered' && after[1] === 14000 && after[2] === buy.cheap, 'sent — the part «заказано» at Desert Spares, 140: ' + JSON.stringify(after));
 
+    // 4d. The customer sends a transfer screenshot after the invoice: on the job — «Перевод · 315.00 → Записать»; the
+    // tap records the payment with the screenshot as its proof.
+    const paid = await page.evaluate(async () => {
+      const { db } = await import('/src/db/db.ts');
+      const { checkIn } = await import('/src/services/orders.ts');
+      const { addItem } = await import('/src/services/estimate.ts');
+      const { quickInvoice } = await import('/src/services/money.ts');
+      const { setWaTransport, refreshWa } = await import('/src/services/whatsapp.ts');
+      const { SyncError } = await import('/src/services/sync/api.ts');
+      const { setAiTransport } = await import('/src/services/ai.ts');
+      const c = (await db.customers.toArray()).find((x) => x.name === 'Rashid Test');
+      const o = await checkIn({ customerId: c.id, plate: { emirate: 'DXB', code: 'Q', number: String(30000 + Math.floor(Math.random() * 9000)) }, make: 'Nissan', model: 'Sunny', name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', arrivedNow: true });
+      await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'AC SERVICE', qty: 1, unitPriceFils: 30000 });
+      await quickInvoice(o.id);
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 80;
+      const g = cv.getContext('2d');
+      g.fillStyle = '#e8f5ee';
+      g.fillRect(0, 0, 80, 80);
+      g.fillStyle = '#1a7f4b';
+      g.fillRect(10, 30, 60, 12);
+      const picture = cv.toDataURL('image/jpeg');
+      const chat = '971501239876@c.us';
+      setWaTransport(
+        async (q) => {
+          if (q === 'status') return { ok: true, available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 1 };
+          if (q === 'chats') return { chats: [{ id: chat, name: 'Rashid Test', group: false, phone: '971501239876', unread: 1, t: Date.now(), archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 1 };
+          if (q === 'number') return { ok: true, chat };
+          if (q === 'messages') return { messages: [{ id: 'e2e-pay-1', chat, t: Date.now() + 2000, me: false, type: 'image', text: '', ack: 0, file: { mime: 'image/jpeg', w: 80, h: 80 } }], more: false };
+          if (q === 'outbox') return { ok: true, items: [], queued: 0, failed: 0, sent: 0 };
+          throw new SyncError(404, 'not found');
+        },
+        () => picture,
+      );
+      await refreshWa();
+      setAiTransport(async (q) => {
+        if (q === 'payment') return { isPayment: true, amount: 315, currency: 'AED', date: '', reference: 'FT2611270042', bank: 'Emirates NBD', way: 'transfer', confidence: 0.93 };
+        if (q === 'part-name') return { fixed: '', english: '', isPart: true, kind: 'part', kindSure: 0.5, confidence: 0.5 };
+        if (q === 'labour') return { text: '' };
+        throw new Error('not played');
+      });
+      return o.id;
+    });
+    await page.goto(BASE + `#/orders/${paid}`);
+    const shotRow = top('.list-row').filter({ has: page.locator('[data-pay-shot]') });
+    await shotRow.waitFor({ timeout: 15000 });
+    check(/315[\s\S]*Перевод · \d\d\/\d\d · Emirates NBD/.test(await shotRow.innerText()), 'the transfer screenshot on the job: «315.00 · Перевод · Emirates NBD» — «Записать»');
+    await settle(600);
+    await shot('phone-10-pay-shot');
+    await shotRow.locator('[data-pay-shot-go]').click();
+    let rec = {};
+    for (let k = 0; k < 20; k++) {
+      rec = await page.evaluate(async (id) => {
+        const { db } = await import('/src/db/db.ts');
+        const pays = await db.payments.where('orderId').equals(id).toArray();
+        const proofs = pays[0] ? await db.media.where('ownerId').equals(pays[0].id).count() : 0;
+        return { pays: pays.map((x) => [x.method, x.amountFils, x.reference]), proofs };
+      }, paid);
+      if (rec.pays.length && rec.proofs) break;
+      await settle(500);
+    }
+    check(JSON.stringify(rec.pays) === JSON.stringify([['transfer', 31500, 'Emirates NBD · FT2611270042']]) && rec.proofs === 1, 'a tap — the transfer recorded, the screenshot its proof: ' + JSON.stringify(rec));
+    await settle(900);
+    await shot('phone-11-pay-shot-recorded');
+
     // 5. «Сегодня»: tomorrow's booking and the work declined a month ago — each a ready message.
     await page.goto(BASE + '#/');
     await top('.today-bell').click();
@@ -262,6 +327,35 @@ async function launch() {
     await offer.waitFor({ timeout: 8000 });
     check(true, 'the offer names the declined work: WIPER BLADES');
     await shot('phone-08-declined-offer');
+    await page.keyboard.press('Escape');
+    await offer.waitFor({ state: 'detached', timeout: 8000 });
+
+    // 5b. «Написать всем · N»: the day's customer messages in «Проверить и отправить» together; what went leaves «Сегодня».
+    await settle(500);
+    await top('.today-bell').click();
+    const all = page.locator('[data-today-batch]');
+    await all.waitFor({ timeout: 10000 });
+    check(/Написать всем · \d/.test(await all.innerText()), '«Сегодня»: ' + (await all.innerText()));
+    await shot('phone-12-today-batch');
+    await settle(500);
+    await all.click();
+    const morning = page.locator('.mantine-Modal-content').filter({ has: page.locator('[data-wa-confirm]') });
+    await morning.waitFor({ timeout: 10000 });
+    const words = (await morning.textContent()) ?? '';
+    check(words.includes('WIPER BLADES') && words.includes('tomorrow at'), 'the declined work and tomorrow’s booking — both in «Проверить и отправить»');
+    await settle(500);
+    await shot('phone-13-today-review');
+    await morning.getByRole('button', { name: /^Отправить все/ }).click();
+    let marks = [];
+    for (let k = 0; k < 20; k++) {
+      marks = await page.evaluate(async (x) => {
+        const { db } = await import('/src/db/db.ts');
+        return [!!(await db.orders.get(x.corolla)).declinedOfferedAt, !!(await db.orders.get(x.hiace)).bookingRemindedAt];
+      }, ids);
+      if (marks.every(Boolean)) break;
+      await settle(500);
+    }
+    check(marks.every(Boolean), 'sent — the declined offer and the booking reminder left «Сегодня»: ' + JSON.stringify(marks));
 
     check(errors.length === 0, 'no errors in the console' + (errors.length ? ': ' + errors.join(' | ') : ''));
     console.log('audit e2e: all passed');

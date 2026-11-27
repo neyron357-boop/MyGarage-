@@ -335,4 +335,29 @@ describe('audit 27/11: a message translated, a voice message written down — ne
     assert.equal(seen[1].body.contents[0].parts.at(-1).inline_data.mime_type, 'audio/m4a');
     await assert.rejects(ai.voice({ audio: { type: 'image/jpeg', data } }), /no voice/);
   });
+
+  it('a supplier’s picture written down as lines; a customer’s payment proof — what is printed; neither kept', async () => {
+    const { f, seen } = fake([
+      [/generateContent/, (_u, init) => (/payment's proof/.test(JSON.parse(init.body).contents[0].parts[0].text)
+        ? answer({ isPayment: true, amount: 1250, currency: 'AED', date: '2026-11-27', reference: 'FT2611270042', bank: 'Emirates NBD', confidence: 0.92 })
+        : answer({ text: '1. brake pads original 180\n2. disc copy 95' }))],
+    ]);
+    const ai = createAi({ dataDir: dir, env: { GEMINI_API_KEY: 'AQ.k-1234567890123456' }, fetchImpl: f });
+    const data = Buffer.alloc(900, 3).toString('base64');
+    const r = await ai.pictureText({ image: { type: 'image/jpeg', data } });
+    assert.equal(r.text, '1. brake pads original 180\n2. disc copy 95');
+    const parts = seen.at(-1).body.contents[0].parts;
+    assert.deepEqual(parts.slice(-2), [{ text: 'Picture 1:' }, { inline_data: { mime_type: 'image/jpeg', data } }]);
+    await ai.pictureText({ image: { type: 'image/jpeg', data } });
+    assert.equal(seen.filter((s) => s.url.includes('generateContent')).length, 2);
+    const p = await ai.payment({ image: { type: 'image/png', data } });
+    assert.equal(p.isPayment, true);
+    assert.equal(p.amount, 1250);
+    assert.equal(p.reference, 'FT2611270042');
+    await assert.rejects(ai.payment({ image: { type: 'audio/ogg', data } }), /no picture/);
+    await ai.pictureText({ image: { type: 'application/pdf', data } });
+    assert.equal(seen.at(-1).body.contents[0].parts.at(-1).inline_data.mime_type, 'application/pdf');
+    await assert.rejects(ai.payment({ image: { type: 'application/pdf', data } }), /no picture/);
+    await assert.rejects(ai.pictureText({ image: { type: 'image/jpeg', data: 'x' } }), /no picture/);
+  });
 });

@@ -16,6 +16,7 @@ import {
   IconKey,
   IconMessageCircle,
   IconPlus,
+  IconSend,
   IconShoppingCart,
   IconTruckDelivery,
   IconX,
@@ -25,7 +26,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db } from '../../db/db';
-import { dubaiTime, formatDate, hoursBetween, shortDuration } from '../../domain/dates';
+import { dubaiDate, dubaiTime, formatDate, hoursBetween, shortDuration } from '../../domain/dates';
 import { itemTitle } from '../../domain/items';
 import { CUSTOMER_KINDS, type Task, type TaskKind } from '../../domain/today';
 import type { Customer, Reminder, Supplier } from '../../domain/types';
@@ -33,7 +34,9 @@ import { simpleMessage } from '../../services/messages';
 import type { OrderBundle } from '../../services/orders';
 import { setBadge } from '../../services/push';
 import { doneReminder, openReminders, restoreReminder } from '../../services/reminders';
-import { customerMessage, loadPast, markBookingReminded, markDeclinedOffered, markFollowedUp, markServiceReminded, tasksFor } from '../../services/today';
+import { customerMessage, loadPast, tasksFor } from '../../services/today';
+import { markCustomerDone, writeAllToday, type TodayMessage } from '../../services/todayBatch';
+import { waCan } from '../../services/whatsapp';
 import { EmptyState, Money, PlateText, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { useAction, useLang, useScreenLiveQuery } from '../../ui/hooks';
@@ -144,29 +147,42 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
    * The customer's message, ready: "how is the car?" (with the review link to everyone, audit 27/11 — Google forbids
    * asking only the happy ones), "time for a service", the lines declined last time, tomorrow's booking.
    */
-  const write = (task: Task) => {
+  const prepare = (task: Task): { customer: Customer; request: SendRequest } | undefined => {
     const customer = customerOf(task);
     const vehicle = vehicleOf(task);
     const was = past?.past.find((p) => p.order.id === task.orderId);
     const order = byOrder.get(task.orderId ?? '')?.order ?? was?.order;
-    if (!customer || !vehicle || !order) return;
+    if (!customer || !vehicle || !order) return undefined;
     const settings = bundles[0]?.settings;
     const ctx = { customer, vehicle, order: order as never, garageName: settings?.name ?? '' };
     const docLang = customer.docLanguage;
     const msg = customerMessage(task, docLang, settings?.googleMapsUrl, was?.items ?? [], byOrder.get(task.orderId ?? '')?.order.bookedFor);
-    setSend({ task, customer, request: { text: simpleMessage(msg.tpl, ctx, docLang, msg.vars), template: msg.tpl, lang: docLang, orderId: task.orderId } });
+    return { customer, request: { text: simpleMessage(msg.tpl, ctx, docLang, msg.vars), template: msg.tpl, lang: docLang, orderId: task.orderId } };
+  };
+  const write = (task: Task) => {
+    const ready = prepare(task);
+    if (ready) setSend({ task, ...ready });
   };
   /** Sent, or not needed: the customer's thing leaves «Сегодня». */
-  const markDone = (task: Task) =>
-    task.kind === 'service'
-      ? markServiceReminded(task.vehicleId)
-      : !task.orderId
-        ? Promise.resolve()
-        : task.kind === 'declined'
-          ? markDeclinedOffered(task.orderId)
-          : task.kind === 'bookedTomorrow'
-            ? markBookingReminded(task.orderId)
-            : markFollowedUp(task.orderId);
+  const markDone = (task: Task) => markCustomerDone(task);
+  /**
+   * The morning's customer messages in one go (audit 27/11): each ready message — to «Проверить и отправить», all of
+   * them together; what went leaves the list there.
+   */
+  const batch: TodayMessage[] = waCan()
+    ? tasks.filter((task) => CUSTOMER_KINDS.includes(task.kind)).flatMap((task) => {
+        const ready = prepare(task);
+        const phone = ready?.customer.whatsapp || ready?.customer.phone;
+        if (!ready || !phone) return [];
+        const v = vehicleOf(task);
+        return [{ task, phone, text: ready.request.text, template: ready.request.template, lang: ready.request.lang, title: [ready.customer.name || ready.customer.companyName, [v?.make, v?.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ') }];
+      })
+    : [];
+  const writeAll = () =>
+    run(async () => {
+      await writeAllToday(batch, dubaiDate());
+      setOpen(false);
+    });
   const dismiss = (task: Task) =>
     run(async () => {
       await markDone(task);
@@ -243,6 +259,13 @@ export const TodayBell = memo(function TodayBell({ bundles }: { bundles: OrderBu
           </div>
         ) : (
           <EmptyState icon={IconBell} title={t('today.none')} />
+        )}
+        {/* Audit 27/11: the customers' messages of the day in one go — all in «Проверить и отправить». */}
+        {batch.length > 1 && (
+          <button type="button" className="today-add today-batch" onClick={writeAll} data-today-batch>
+            <IconSend size={18} stroke={2.2} aria-hidden />
+            {t('today.writeAll', { n: batch.length })}
+          </button>
         )}
         {/* A reminder of the manager's own, set where the day's things are seen (v0.74). */}
         <button type="button" className="today-add" onClick={() => setReminder({})} data-today-remind>

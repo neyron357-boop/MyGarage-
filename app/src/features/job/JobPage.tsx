@@ -150,6 +150,7 @@ import { QtyCheckList, QtyCheckSheet } from './QtyCheck';
 import { PhasePill, PhaseTrack, usePhaseGlow } from './phase';
 import { DeclinedBefore, PrevVisit } from './PrevVisit';
 import { CustomerAnswerRow } from './CustomerAnswer';
+import { PaymentShotRow } from './PaymentShot';
 import { ShareJobButton } from './ShareJob';
 import { ClientView } from './ClientView';
 import { lockForClient, useClientLock } from '../../ui/clientLock';
@@ -1410,6 +1411,8 @@ export function JobPage() {
               </Group>
             }
           />
+          {/* Audit 27/11: the customer's transfer screenshot in WhatsApp — a payment proposal, recorded by a tap. */}
+          {due > 0 && (phase === 'pay' || phase === 'out' || phase === 'debt') && <PaymentShotRow orderId={oid} phone={c?.whatsapp || c?.phone} dueFils={due} />}
           {/* Audit 27/11: the invoice told to the customer or not — said here, sent by hand (nothing goes by itself). */}
           {(phase === 'pay' || phase === 'out' || phase === 'debt') && (
             <ListRow

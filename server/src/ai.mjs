@@ -54,6 +54,10 @@ const P = {
     `Translate the WhatsApp message below into ${to === 'ru' ? 'Russian' : 'English'} for the manager of a car garage in the UAE. Keep numbers, prices, part numbers, car and part names as they are. "text": the translation; "from": the message's language (ISO 639-1); "text" is "" when the message is already in that language.`,
   voice: () =>
     `A WhatsApp voice message to a car garage in the UAE — a supplier with prices, a customer, a mechanic; English, Arabic, Hindi/Urdu, Russian or a mix. "text": what is said, word for word, numbers as digits; "english": the same in English ("" when it is English); "from": its language (ISO 639-1); "" for what cannot be heard.`,
+  pictureText: () =>
+    `A picture or PDF a supplier sent to a car garage in the UAE in answer to a parts request — a price list, a photo of parts with prices, a screenshot of their system, a quotation. "text": every line with a part and its price as written, one per line ("1. brake pads original 180"), numbers as digits; "" if no price is in it.`,
+  payment: () =>
+    `A picture a customer sent to a car garage in the UAE. isPayment: it is a payment's proof — a bank transfer's confirmation, a card slip, an Apple Pay / wallet receipt. amount: as printed (a number); currency: as printed (AED…); date: as printed, YYYY-MM-DD; reference: the transaction's reference / number; bank: the bank or app; way: "card" for a card slip / POS receipt, else "transfer". Only what is printed — "" or 0 for what is not; confidence 0..1.`,
   // v0.88 (the owner: «по VIN ИИ узнала… марку угадала, но модель неверная: верный Veloz, а ИИ написала Land Cruiser»): no
   // model named in the question — a light model with no thinking gave back the example; the VIN's parts said instead.
   vin: (vin, facts, built) =>
@@ -147,6 +151,14 @@ export function carFromFacts(facts) {
   const engine = [litres, cyl].filter(Boolean).join(' ');
   const title = (s) => s.toLowerCase().replace(/(^|[\s-])\p{L}/gu, (m) => m.toUpperCase());
   return { make: facts.make ? title(facts.make) : '', model: facts.model ? title(facts.model) : '', year: Number(facts.year) || undefined, engine, body };
+}
+
+/** A picture as the questions take it: JPEG, PNG or WebP (a supplier's quotation also as a PDF), base64, a sane size. */
+function picOf(image, { pdf = false } = {}) {
+  const type = String(image?.type ?? '').split(';')[0].trim().toLowerCase();
+  const data = String(image?.data ?? '');
+  if (!(/^image\/(jpeg|png|webp)$/.test(type) || (pdf && type === 'application/pdf')) || data.length < 500 || data.length > 6_000_000) throw httpError(400, 'no picture');
+  return { type, data };
 }
 
 export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl = fetch, now = () => Date.now(), store } = {}) {
@@ -535,6 +547,34 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
       const mime = type === 'audio/mp4' ? 'audio/m4a' : type;
       const { value, model } = await json(P.voice(), { type: 'object', properties: { text: { type: 'string' }, english: { type: 'string' }, from: { type: 'string' } }, required: ['text', 'english', 'from'] }, { kind: 'voice', audio: { type: mime, data }, thinking: 'minimal', timeout: 60_000 });
       return { text: String(value.text ?? ''), english: String(value.english ?? ''), from: String(value.from ?? ''), by: model };
+    },
+
+    /**
+     * Audit 27/11: a supplier's prices sent as a picture (a photo of a price list, a screenshot of their system) — its
+     * lines written down as text, read then by the app's own rules. A light model, low resolution; NOT kept.
+     */
+    async pictureText({ image } = {}) {
+      const pic = picOf(image, { pdf: true });
+      const { value, model } = await json(P.pictureText(), { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] }, { kind: 'picture', images: [pic], thinking: 'minimal', media: 'medium', timeout: 40_000 });
+      return { text: String(value.text ?? ''), by: model };
+    },
+
+    /**
+     * Audit 27/11: a customer's picture — is it a payment (a bank transfer's screenshot, a card slip): the amount, the
+     * currency, the day, the reference, the bank. Only what is printed; the app checks it against what is due. NOT kept.
+     */
+    async payment({ image } = {}) {
+      const pic = picOf(image);
+      const { value, model } = await json(
+        P.payment(),
+        {
+          type: 'object',
+          properties: { isPayment: { type: 'boolean' }, amount: { type: 'number' }, currency: { type: 'string' }, date: { type: 'string' }, reference: { type: 'string' }, bank: { type: 'string' }, way: { type: 'string' }, confidence: { type: 'number' } },
+          required: ['isPayment', 'amount', 'currency', 'confidence'],
+        },
+        { kind: 'payment', images: [pic], thinking: 'minimal', media: 'medium', timeout: 40_000 },
+      );
+      return { ...value, by: model };
     },
 
     /** v0.86: what the labour charge is for, by the job's parts and work (a light model; kept for the same parts). */

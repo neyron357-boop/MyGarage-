@@ -472,6 +472,7 @@ export const en: typeof ru = {
   },
   // v0.81: the job's quick «＋» sheet and «+ Price».
   answer: { all: 'Agrees to all', none: 'Refuses all', option: 'Option {{n}}', some: 'Yes: {{agree}} · no: {{refuse}}', agree: 'Agree', refuse: 'Refuse' },
+  payShot: { transfer: 'Transfer', card: 'Card', record: 'Record', onShot: 'on the screenshot {{sum}}', saved: 'Payment recorded' },
   buy: { title: 'Order', supplier: 'Supplier', none: 'No parts with suppliers’ prices', when: 'When', go: 'Order · {{n}}', whens: { soon: 'Collect now', evening: 'Today 17:00', morning: 'Tomorrow 9:00', deliver: 'Deliver' }, kind: { oem: 'original', aftermarket: 'copy', used: 'used' } },
   qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
@@ -1926,6 +1927,7 @@ export const en: typeof ru = {
     followUp: 'How is the car?',
     declined: 'Declined last time — offer again',
     bookedTomorrow: 'Tomorrow at {{time}} — remind the customer',
+    writeAll: 'Message all · {{n}}',
     service: 'Service due',
     notNeeded: 'Not needed',
     more: '{{n}} more',

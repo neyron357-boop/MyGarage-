@@ -13,6 +13,11 @@ import type { OutItem } from './waOutbox';
 import { dayFacts, sendDailySummary } from './dailySummary';
 import { checkIn } from './orders';
 import { ensureSeed } from './seed';
+import { setAiTransport } from './ai';
+import { quickInvoice } from './money';
+import { acceptPaymentShot, dismissPaymentShot, paymentShotOf } from './paymentShot';
+import { proofsOf } from './proofs';
+import { writeAllToday } from './todayBatch';
 
 /* The audit of 27/11/2026 (docs: «Аудит MyGarage»): what was ready in the code but not on the job, now on it. */
 
@@ -137,6 +142,121 @@ describe('the owner’s summary of the day', () => {
     const asks = waAsks();
     expect(asks.at(-1)!.item.key).toMatch(/^boss:daily:\d{4}-\d{2}-\d{2}$/);
     expect(asks.at(-1)!.item.parts[0].text).toContain('🚗');
+    setWaTransport(undefined);
+  });
+});
+
+describe('a payment from the customer’s screenshot', () => {
+  it('a transfer screenshot after the invoice → a proposal; the tap records it with the picture as proof; × — not again', async () => {
+    const { o } = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'BRAKE SERVICE', qty: 1, unitPriceFils: 125_000 });
+    await quickInvoice(o.id);
+    const shots = [{ id: 'S1', type: 'image', amount: 1312.5, isPayment: true }];
+    const asked: string[] = [];
+    setAiTransport(async (path, body) => {
+      if (path !== 'payment') throw new Error('not played: ' + path);
+      const id = (body as { id: string }).id;
+      asked.push(id);
+      const s = shots.find((x) => x.id === id)!;
+      return { isPayment: s.isPayment, amount: s.amount, currency: 'AED', date: '', reference: 'FT77', bank: 'ENBD', confidence: 0.9 };
+    });
+    setWaTransport(
+      async (path: string) => {
+        if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 0 };
+        if (path === 'chats') return { chats: [{ id: '971501234567@c.us', name: 'Ahmed', group: false, phone: '971501234567', unread: 1, t: Date.now(), archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 1 };
+        if (path === 'messages') return { messages: shots.map((x, k) => ({ id: x.id, chat: '971501234567@c.us', t: Date.now() + 1000 + k, me: false, type: x.type, text: '', ack: 0, file: { mime: 'image/jpeg' } })), more: false };
+        if (path === 'number') return { ok: true, chat: '971501234567@c.us' };
+        throw new Error('not played: ' + path);
+      },
+      () => 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==',
+    );
+    await refreshWa();
+    const p = await paymentShotOf(o.id);
+    expect(p).toMatchObject({ amountFils: 131_250, method: 'transfer', reference: 'ENBD · FT77', dueFils: 131_250 });
+    // Asked once: read again — from memory.
+    await paymentShotOf(o.id);
+    expect(asked).toEqual(['S1']);
+    const r = await acceptPaymentShot(p!);
+    expect(r).toEqual({ amountFils: 131_250, paidFull: true });
+    const pays = await db.payments.where('orderId').equals(o.id).toArray();
+    expect(pays.map((x) => [x.method, x.amountFils, x.reference])).toEqual([['transfer', 131_250, 'ENBD · FT77']]);
+    expect(await proofsOf(pays[0].id)).toHaveLength(1);
+    // Paid: nothing more to propose.
+    expect(await paymentShotOf(o.id)).toBeUndefined();
+    setAiTransport(undefined);
+    setWaTransport(undefined);
+  });
+
+  it('a picture that is not a payment proposes nothing (and is not asked about again); × keeps a payment from coming back', async () => {
+    const { o } = await job();
+    await addItem(o.id, { kind: 'labor', block: 'A', titleEn: 'AC SERVICE', qty: 1, unitPriceFils: 30_000 });
+    await quickInvoice(o.id);
+    let shot = { id: 'N1', isPayment: false, amount: 0 };
+    const asked: string[] = [];
+    setAiTransport(async (_path, body) => {
+      asked.push((body as { id: string }).id);
+      return { isPayment: shot.isPayment, amount: shot.amount, currency: 'AED', confidence: 0.9 };
+    });
+    setWaTransport(async (path: string) => {
+      if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 0 };
+      if (path === 'chats') return { chats: [{ id: '971501234567@c.us', name: 'Ahmed', group: false, phone: '971501234567', unread: 1, t: Date.now(), archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 1 };
+      if (path === 'messages') return { messages: [{ id: shot.id, chat: '971501234567@c.us', t: Date.now() + 1000, me: false, type: 'image', text: '', ack: 0 }], more: false };
+      if (path === 'number') return { ok: true, chat: '971501234567@c.us' };
+      throw new Error('not played: ' + path);
+    });
+    await refreshWa();
+    expect(await paymentShotOf(o.id)).toBeUndefined();
+    expect(await paymentShotOf(o.id)).toBeUndefined();
+    expect(asked).toEqual(['N1']);
+    shot = { id: 'N2', isPayment: true, amount: 300 };
+    const p = await paymentShotOf(o.id);
+    expect(p?.amountFils).toBe(30_000); // 315.00 due: the screenshot’s 300 — a part
+    await dismissPaymentShot(o.id, p!.msgId);
+    expect(await paymentShotOf(o.id)).toBeUndefined();
+    expect(await db.payments.where('orderId').equals(o.id).count()).toBe(0);
+    setAiTransport(undefined);
+    setWaTransport(undefined);
+  });
+});
+
+describe('the morning’s customer messages in one go', () => {
+  it('all to «Проверить и отправить»; what went leaves «Сегодня» and is in the customer’s messages; what was taken off stays', async () => {
+    const a = await job();
+    const b = a;
+    const sent: OutItem[] = [];
+    setWaTransport(async (path: string, init: WaCallInit) => {
+      if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 0, unread: 0 };
+      if (path === 'chats') return { chats: [], total: 0, unread: 0 };
+      if (path === 'outbox') {
+        const items = (init.body as { items: OutItem[] }).items;
+        sent.push(...items);
+        return { items: items.map((x) => ({ key: x.key, state: 'queued' })) };
+      }
+      throw new Error('not played: ' + path);
+    });
+    await refreshWa();
+    const task = (o: typeof a.o, kind: 'followUp' | 'declined') => ({ kind, key: kind + ':' + o.id, orderId: o.id, vehicleId: o.vehicleId, customerId: o.customerId, at: o.createdAt, late: false });
+    const n = await writeAllToday(
+      [
+        { task: task(a.o, 'followUp'), phone: '050 123 4567', text: 'Hello Ahmed! How is your Toyota Camry?', template: 'followUp', lang: 'en', title: 'Ahmed · Toyota Camry' },
+        { task: task(b.o, 'declined'), phone: '050 123 4567', text: 'Last time: brake discs.', template: 'declinedOffer', lang: 'en', title: 'Ahmed · Toyota Camry' },
+        { task: task(b.o, 'followUp'), phone: '', text: 'No number — not in it', template: 'followUp', lang: 'en', title: '' },
+      ],
+      '2026-11-27',
+    );
+    expect(n).toBe(2);
+    expect(sent).toHaveLength(0);
+    const asks = waAsks().filter((x) => x.item.key.startsWith('today:'));
+    expect(asks.map((x) => x.item.key)).toEqual([`today:followUp:${a.o.id}:2026-11-27`, `today:declined:${b.o.id}:2026-11-27`]);
+    // The second taken off in the review: only the first goes.
+    await sendAsked(asks.slice(0, 1));
+    expect(sent).toHaveLength(1);
+    expect((sent[0] as { today?: unknown }).today).toBeUndefined();
+    expect(sent[0].phone).toBe('971501234567');
+    expect((await db.orders.get(a.o.id))!.followedUpAt).toBeTruthy();
+    expect((await db.orders.get(b.o.id))!.declinedOfferedAt).toBeUndefined();
+    const msgs = await db.messages.where('customerId').equals(a.o.customerId).toArray();
+    expect(msgs.map((m) => [m.template, m.text, m.channel])).toEqual([['followUp', 'Hello Ahmed! How is your Toyota Camry?', 'whatsapp']]);
     setWaTransport(undefined);
   });
 });

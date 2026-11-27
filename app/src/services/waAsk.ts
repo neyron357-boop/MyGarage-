@@ -3,8 +3,8 @@ import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { withMarkup } from '../domain/money';
 import { askFor, kindOnly, netUnit, parseReply, type AskLine, type ParsedReply } from '../domain/supplierReply';
-import { aiReadReply, aiVoiceText, type AiReply } from './ai';
-import { kindOf } from '../domain/whatsapp';
+import { aiPictureText, aiReadReply, aiVoiceText, type AiReply } from './ai';
+import { kindOf, type WaMessage } from '../domain/whatsapp';
 import type { Order, OrderItem, PartAsk, PartOffer, Supplier, Vehicle } from '../domain/types';
 import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
 import { waAutoOf } from '../domain/waAuto';
@@ -244,9 +244,10 @@ async function readNow(phones?: string[]): Promise<number> {
     const seen = new Set(asks.flatMap((a) => (a.ask.replies ?? []).map((r) => r.id)));
     for (const raw of msgs) {
       if (raw.me || raw.t < first || seen.has(raw.id)) continue;
-      // Audit 27/11: an answer said aloud (a voice message up to 3 minutes) — heard by the garage's AI, then read as words.
-      const heard = !(raw.text ?? '').trim() && (kindOf(raw.type) === 'voice' || kindOf(raw.type) === 'audio') && (raw.file?.sec ?? 0) <= 180 ? await aiVoiceText(raw.id) : undefined;
-      const m = heard ? { ...raw, text: (heard.english || heard.text).trim() } : raw;
+      // Audit 27/11: an answer said aloud (a voice message up to 3 minutes) or shown (a photo of the price list, a
+      // screenshot of their system, a PDF quotation) — written down by the garage's AI, then read as words by the rules.
+      const heard = await heardOf(raw);
+      const m = heard ? { ...raw, text: heard } : raw;
       if (!(m.text ?? '').trim()) continue;
       const target = askFor({ t: m.t, text: m.text, quote: m.quote?.text }, asks.map((a) => ({ ...a.ask, at: Date.parse(a.ask.at), ref: a })));
       if (!target) continue;
@@ -278,6 +279,26 @@ async function readNow(phones?: string[]): Promise<number> {
     }
   }
   return priced;
+}
+
+/**
+ * The words of a supplier's answer that has none of its own (audit 27/11): a voice message (≤ 3 min) heard, a picture or a
+ * PDF quotation (≤ 4 MB) whose caption gives no price — written down by the AI (its caption first). Else nothing: the
+ * AI is asked only about such a message, once (`PartAsk.replies`).
+ */
+async function heardOf(raw: WaMessage): Promise<string | undefined> {
+  const kind = kindOf(raw.type);
+  const own = (raw.text ?? '').trim();
+  if (!own && (kind === 'voice' || kind === 'audio') && (raw.file?.sec ?? 0) <= 180) {
+    const h = await aiVoiceText(raw.id);
+    return h ? (h.english || h.text).trim() || undefined : undefined;
+  }
+  const pdf = kind === 'file' && /pdf/i.test(raw.file?.mime ?? '') && (raw.file?.size ?? 0) <= 4_000_000;
+  if ((kind === 'photo' || pdf) && !/\d/.test(own)) {
+    const seen = await aiPictureText(raw.id);
+    return seen ? [own, seen].filter(Boolean).join('\n') : undefined;
+  }
+  return undefined;
 }
 
 /** A request's lines, as the request lists them (the line's own order). */
