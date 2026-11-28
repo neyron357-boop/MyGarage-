@@ -56,6 +56,19 @@ describe('the copies (mirror.mjs)', () => {
     assert.equal(st.targets.length, 1);
     assert.equal(st.targets[0].error, '');
     assert.ok(st.targets[0].copied >= 10);
+    // nothing changed since: no new copy of the base (a quiet night takes no room); changed — a new one
+    let rev = 5;
+    const quiet = createMirror({ store: { ...store, lastRev: () => rev }, dataDir: data, log: () => {}, oneDrive: '', places: [] });
+    for (const f of fs.readdirSync(path.join(data, DIRS.backups, 'Каждый час'))) fs.rmSync(path.join(data, DIRS.backups, 'Каждый час', f));
+    await quiet.run();
+    const one = fs.readdirSync(path.join(data, DIRS.backups, 'Каждый час'));
+    assert.equal(one.length, 1);
+    fs.renameSync(path.join(data, DIRS.backups, 'Каждый час', one[0]), path.join(data, DIRS.backups, 'Каждый час', 'garage-2026-01-01-00.db'));
+    await quiet.run();
+    assert.deepEqual(fs.readdirSync(path.join(data, DIRS.backups, 'Каждый час')), ['garage-2026-01-01-00.db']);
+    rev = 6;
+    await quiet.run();
+    assert.equal(fs.readdirSync(path.join(data, DIRS.backups, 'Каждый час')).length, 2);
     // the OneDrive only when turned on
     assert.equal(st.oneDriveOn, false);
     m.setOneDrive(false);

@@ -69,12 +69,24 @@ export function createMirror({ store, dataDir, log, oneDrive = process.env.OneDr
   function hourly() {
     const dir = path.join(dataDir, DIRS.backups, 'Каждый час');
     fs.mkdirSync(dir, { recursive: true });
+    const list = () =>
+      fs
+        .readdirSync(dir)
+        .filter((f) => /^garage-\d{4}-\d{2}-\d{2}-\d{2}\.db$/.test(f))
+        .sort();
+    // Only when the base changed since the last copy (the owner: «не заполнится ли память ПК?»): a quiet night or a day off
+    // takes no room, and the 48 kept reach further back.
+    const rev = store.lastRev?.();
+    const last = list().at(-1);
+    if (last && rev !== undefined && String(rev) === store.metaGet('mirror.hourRev')) {
+      state.hourly = path.join(dir, last);
+      state.hourlyAt = fs.statSync(state.hourly).mtime.toISOString();
+      return state.hourly;
+    }
     const target = path.join(dir, `garage-${hourStamp()}.db`);
     if (!fs.existsSync(target)) store.snapshot(target);
-    const old = fs
-      .readdirSync(dir)
-      .filter((f) => /^garage-\d{4}-\d{2}-\d{2}-\d{2}\.db$/.test(f))
-      .sort();
+    if (rev !== undefined) store.metaSet('mirror.hourRev', String(rev));
+    const old = list();
     for (const f of old.slice(0, Math.max(0, old.length - HOURS_KEPT))) fs.rmSync(path.join(dir, f), { force: true });
     state.hourly = target;
     state.hourlyAt = new Date().toISOString();
