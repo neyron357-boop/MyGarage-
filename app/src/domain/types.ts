@@ -854,6 +854,11 @@ export interface OrderItem {
   /** The cost was put by the AI from a supplier's WhatsApp answer (v0.86): shown with the AI's mark. */
   costAi?: true;
   /**
+   * The cost (and the customer's price, by the markup) as a supplier's answer put them (v1.04, «ALL PRICES NOT SAME» —
+   * the supplier's corrected prices stayed behind the first ones): while the line still has them, a newer answer moves them.
+   */
+  costBy?: { offer: string; fils: number; price?: number };
+  /**
    * Left by the AI's search for the part's number (v0.48–v0.84: the numbers it found, their catalogues' word) — gone
    * v0.85 by the owner's decision. Records may still hold it; nothing reads or writes it now (kept as data, no migration).
    */
@@ -992,7 +997,8 @@ export interface PartAsk {
   items: string[];
   /** The words sent (its car line and VIN tell which request an answer quotes). */
   text: string;
-  via: 'server' | 'link';
+  /** `chat` (v1.04): asked by hand in the supplier's chat (the car and the lines named), found when its answer came. */
+  via: 'server' | 'link' | 'chat';
   /** The server's outbox key (sent by the server). */
   key?: string;
   used?: boolean;

@@ -11,7 +11,7 @@ import { addMedia } from './media';
 import { addExpense, addPayment, quickInvoice } from './money';
 import { checkIn } from './orders';
 import { ensureSeed } from './seed';
-import { askSuppliers, readReplies, recordLinkAsk } from './waAsk';
+import { askSuppliers, readReplies, recordLinkAsk, resetWaReplies } from './waAsk';
 import { saveWaAuto, sendAsked, sendClientReport, sendExpenseToBoss, sendWorkReport, setCustomerGroup, setWaAutoDelays, startWaAuto } from './waAuto';
 import { updateExpense } from './ledger';
 import type { OutItem } from './waOutbox';
@@ -57,6 +57,7 @@ beforeEach(async () => {
   chatMsgs = {};
   tapping = true;
   resetWaAsks();
+  resetWaReplies();
   setWaTransport(async (path: string, init: WaCallInit) => {
     if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 0 };
     if (path === 'chats') return { chats: [{ id: '55512345678901@lid', name: 'Noor Parts', group: false, phone: '971507776655', unread: 0, t: 1, archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 0 };
@@ -485,6 +486,88 @@ describe('suppliers', () => {
     } finally {
       setAiTransport(undefined);
     }
+  });
+});
+
+describe('a supplier’s chat read as a conversation (v1.04)', () => {
+  const CHAT = '55512345678901@lid';
+  const VIN1 = 'JTDBR32E000000001';
+  const VIN2 = 'JN8AY2NY000000002';
+  let n = 0;
+  const msg = (me: boolean, t: number, text: string, quote?: WaMessage): WaMessage => ({ id: `${me}_${CHAT}_M${++n}`, chat: CHAT, t, me, type: 'chat', text, ack: 0, ...(quote ? { quote: { id: quote.id.split('_')[2], type: 'chat', text: quote.text, me: quote.me } } : {}) });
+  /** A second car of the garage (another customer, another plate) with its VIN. */
+  const car = async (vin: string, plate: string, make: string, model: string) => {
+    const c = await createCustomer({ name: `Owner ${plate}`, phone: `050 765 ${plate}`, preferredChannel: 'whatsapp', docLanguage: 'en', type: 'individual' });
+    const o = await checkIn({ customerId: c.id, plate: { emirate: 'DXB', code: 'M', number: plate }, make, model, name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', arrivedNow: true });
+    await db.vehicles.update(o.vehicleId, { vin });
+    return o;
+  };
+  const supplier = async () => (await db.suppliers.add({ id: uid(), name: 'Noor Parts', phone: '+971507776655' } as never)) as string;
+
+  it('the price after «Here cap coming» is the cap’s, not the request sent last; read again once that job is closed — put nowhere', async () => {
+    const one = await car(VIN1, '1001', 'Toyota', 'Corolla');
+    const two = await car(VIN2, '1002', 'Nissan', 'Patrol');
+    const cap = await addItem(one.id, { kind: 'part', block: 'A', titleEn: 'Radiator cap', unitPriceFils: 0 });
+    const bottle = await addItem(one.id, { kind: 'part', block: 'A', titleEn: 'Radiator bottle', unitPriceFils: 0 });
+    const arm = await addItem(two.id, { kind: 'part', block: 'A', titleEn: 'Lower arm complete', unitPriceFils: 0 });
+    const sup = await supplier();
+    const req1 = `*Toyota Corolla*\nVIN: ${VIN1}\n\n1. RADIATOR CAP\n2. RADIATOR BOTTLE`;
+    const req2 = `*Nissan Patrol*\nVIN: ${VIN2}\n\n1. LOWER ARM COMPLETE`;
+    await recordLinkAsk(one.id, sup, [cap, bottle], req1);
+    await recordLinkAsk(two.id, sup, [arm], req2);
+    const at = Date.now() + 5000;
+    const here = msg(true, at + 3000, 'Here cap coming');
+    chatMsgs[CHAT] = [msg(true, at, req1), msg(true, at + 1000, req2), here, msg(false, at + 4000, '20+TAX DUP', here)];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect((await db.items.get(cap.id))!.offers?.map((x) => [x.kind, x.costFils, !!x.unsure])).toEqual([['aftermarket', 2000, false]]);
+    expect((await db.items.get(bottle.id))!.offers).toBeUndefined();
+    expect((await db.items.get(arm.id))!.offers).toBeUndefined();
+    // The first job closed: its answer is not read onto the other one (until v1.04 it was — the last request sent).
+    await db.orders.update(one.id, { stage: 'closed' });
+    resetWaReplies();
+    expect(await readReplies()).toBe(0);
+    expect((await db.items.get(arm.id))!.offers).toBeUndefined();
+    expect((await db.orders.get(two.id))!.asks![0].replies).toBeUndefined();
+  });
+
+  it('the supplier’s prices said again replace his first ones; the cost they put follows; a cost typed by hand stays', async () => {
+    const one = await car(VIN1, '1003', 'Toyota', 'Corolla');
+    const pads = await addItem(one.id, { kind: 'part', block: 'A', titleEn: 'Front brake pads', unitPriceFils: 0 });
+    const sup = await supplier();
+    await recordLinkAsk(one.id, sup, [pads], `*Toyota Corolla*\nVIN: ${VIN1}\n\n1. FRONT BRAKE PADS`);
+    const at = Date.now() + 5000;
+    chatMsgs[CHAT] = [msg(false, at, '275')];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect((await db.items.get(pads.id))!.costPriceFils).toBe(27500);
+    chatMsgs[CHAT].push(msg(false, at + 1000, 'ALL PRICES NOT SAME'), msg(false, at + 2000, '230'));
+    expect(await readReplies()).toBe(1);
+    const p = (await db.items.get(pads.id))!;
+    expect(p.offers?.map((x) => x.costFils)).toEqual([23000]);
+    expect(p.costPriceFils).toBe(23000);
+    await updateItem(pads.id, { costPriceFils: 25000 });
+    chatMsgs[CHAT].push(msg(false, at + 3000, '220'));
+    expect(await readReplies()).toBe(1);
+    const q = (await db.items.get(pads.id))!;
+    expect([q.costPriceFils, q.offers?.map((x) => x.costFils)]).toEqual([25000, [22000]]);
+  });
+
+  it('asked by hand in the chat — the car’s VIN and a line of an open job: its answer goes on that job, kept as a request', async () => {
+    const one = await car(VIN1, '1004', 'Toyota', 'Corolla');
+    const two = await car(VIN2, '1005', 'Nissan', 'Patrol');
+    const arm = await addItem(two.id, { kind: 'part', block: 'A', titleEn: 'Lower arm complete', unitPriceFils: 0 });
+    const pads = await addItem(one.id, { kind: 'part', block: 'A', titleEn: 'Front brake pads', unitPriceFils: 0 });
+    const sup = await supplier();
+    // The supplier was asked through the app for the second car only.
+    await recordLinkAsk(two.id, sup, [arm], `*Nissan Patrol*\nVIN: ${VIN2}\n\n1. LOWER ARM COMPLETE`);
+    const at = Date.now() + 5000;
+    chatMsgs[CHAT] = [msg(true, at, `Toyota Corolla\nVIN ${VIN1}\n\n1. FRONT BRAKE PADS`), msg(false, at + 2000, '180 org')];
+    await loadChats(true);
+    expect(await readReplies()).toBe(1);
+    expect((await db.items.get(pads.id))!.offers?.map((x) => [x.kind, x.costFils])).toEqual([['oem', 18000]]);
+    expect((await db.items.get(arm.id))!.offers).toBeUndefined();
+    expect((await db.orders.get(one.id))!.asks).toMatchObject([{ via: 'chat', supplierId: sup, items: [pads.id], replies: [{ lines: 1 }] }]);
   });
 });
 

@@ -149,6 +149,8 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
     next.ownName = typedOwnName(item, next, await db.items.where('orderId').equals(item.orderId).toArray());
   // A cost typed by hand is no longer the AI's (v0.86).
   if ('costPriceFils' in patch && !('costAi' in patch) && item.costAi && patch.costPriceFils !== item.costPriceFils) next.costAi = undefined;
+  // …and no longer a supplier's answer's to move (v1.04).
+  if ('costPriceFils' in patch && !('costBy' in patch) && item.costBy && patch.costPriceFils !== item.costPriceFils) next.costBy = undefined;
   await db.items.update(id, next);
   await syncLabourNames(item.orderId);
   // A part's offers (a supplier's answer read, a price typed on it): into the price book (v0.91.7).

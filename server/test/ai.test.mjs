@@ -258,6 +258,25 @@ describe('v0.86: the labour line, a supplier’s answer, who chats are — light
     assert.deepEqual(r, { ask: 'a2', lines: [{ n: 1, offers: [{ price: 185, kind: 'oem', brand: '', na: false }] }], vat: 'excl' });
   });
 
+  it('v1.04: the chat’s talk before an answer and the line it was about go in the question; what is no price is said', async () => {
+    let asked = '';
+    const { f } = fake([
+      [
+        /generateContent/,
+        (url, init) => {
+          asked = String(init.body);
+          return answer({ ask: 'A', lines: [{ n: 1, offers: [{ price: 20, kind: 'aftermarket', brand: '', na: false }] }], vat: 'excl' });
+        },
+      ],
+    ]);
+    const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-rc-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });
+    const r = await ai.reply({ text: 'twenty plus tax dup', asks: [{ id: 'A', car: 'Toyota Corolla', lines: ['RADIATOR CAP', 'RADIATOR BOTTLE'] }], context: ['G: Here cap coming', 'S: [photo]'], focus: [1] });
+    assert.equal(r.ask, 'A');
+    assert.match(asked, /G: Here cap coming/);
+    assert.match(asked, /about line 1\./);
+    assert.match(asked, /never a price/);
+  });
+
   it('says who chats are; a role it was not asked for is left out', async () => {
     const { f } = fake([[/generateContent/, () => answer({ chats: [{ id: 'c1', role: 'supplier', confidence: 0.9 }, { id: 'zz', role: 'customer', confidence: 1 }, { id: 'c2', role: 'boss', confidence: 1 }] })]]);
     const ai = createAi({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'mg-ai-c-')), env: { GEMINI_API_KEY: 'k' }, fetchImpl: f });

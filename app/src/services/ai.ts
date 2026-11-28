@@ -450,10 +450,12 @@ export async function aiVoiceLines(voice: Blob): Promise<{ text: string; lines: 
   return askAi<{ text: string; lines: SaidLine[] }>('lines', { audio: { type: voice.type || 'audio/webm', data: btoa(s) } }, 'lines', 90_000);
 }
 
-export async function aiReadReply(text: string, quote: string, asks: { id: string; car: string; lines: string[] }[]): Promise<AiReply | undefined> {
+export async function aiReadReply(text: string, quote: string, asks: { id: string; car: string; lines: string[] }[], extra: { context?: string[]; focus?: number[] } = {}): Promise<AiReply | undefined> {
   if (!aiOn() || !asks.length) return undefined;
   try {
-    return await askAi<AiReply>('reply', { text, quote, asks }, `reply:${asks[0].id}`, 40_000);
+    // v1.04: the chat's talk before it («G:» the garage, «S:» the supplier) and the lines it was about — a server before
+    // v1.04 reads without them.
+    return await askAi<AiReply>('reply', { text, quote, asks, ...(extra.context?.length ? { context: extra.context } : {}), ...(extra.focus?.length ? { focus: extra.focus } : {}) }, `reply:${asks[0].id}:${text.slice(0, 40)}`, 40_000);
   } catch {
     return undefined;
   }

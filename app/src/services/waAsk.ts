@@ -1,10 +1,11 @@
-import { db, uid } from '../db/db';
+import { db, uid, whereAnyOf } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { itemTitle, lineName } from '../domain/items';
 import { withMarkup } from '../domain/money';
-import { askFor, kindOnly, netUnit, parseReply, type AskLine, type ParsedReply } from '../domain/supplierReply';
+import { kindOnly, netUnit, numbersSaid, parseReply, type AskLine, type ParsedReply } from '../domain/supplierReply';
+import { focusIndexes, namesLine, readThreads, type Thread, type ThreadJob } from '../domain/supplierThread';
 import { aiPictureText, aiReadReply, aiVoiceText, type AiReply } from './ai';
-import { kindOf, type WaMessage } from '../domain/whatsapp';
+import { kindOf, msgKey, type WaMessage } from '../domain/whatsapp';
 import type { Order, OrderItem, PartAsk, PartOffer, Supplier, Vehicle } from '../domain/types';
 import { enteredPrice, priceFromEntered, vatModeOf } from '../domain/vat';
 import { waAutoOf } from '../domain/waAuto';
@@ -148,7 +149,6 @@ async function keepAsks(orderId: string, asks: PartAsk[]) {
 
 /* ---------- The answers ---------- */
 
-/** Requests still worth reading answers to: five days, a job not closed. */
 /**
  * The numbers asked and not yet past their five days (v0.80.2): a message from anyone else is not a supplier's answer —
  * nothing is read for it. Kept a minute (a busy account writes every few seconds); a new request puts it aside at once.
@@ -156,15 +156,71 @@ async function keepAsks(orderId: string, asks: PartAsk[]) {
 let askPhones: { at: number; set: Set<string> } | undefined;
 async function openAskPhones(): Promise<Set<string>> {
   if (askPhones && Date.now() - askPhones.at < 60_000) return askPhones.set;
-  const set = new Set((await openAsks()).map((x) => x.ask.phone));
+  const set = new Set(asksOf(await openOrders()).map((x) => x.ask.phone));
   askPhones = { at: Date.now(), set };
   return set;
 }
 
-async function openAsks(): Promise<{ order: Order; ask: PartAsk }[]> {
-  const orders = await db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
+const openOrders = () => db.orders.where('stage').noneOf(['closed', 'cancelled']).toArray();
+
+/** Requests still worth reading answers to: five days, a job not closed. */
+function asksOf(orders: Order[]): { order: Order; ask: PartAsk }[] {
   const since = Date.now() - 5 * 24 * 60 * 60_000;
   return orders.flatMap((order) => (order.asks ?? []).filter((a) => Date.parse(a.at) > since).map((ask) => ({ order, ask })));
+}
+
+/** The open jobs as a supplier's chat is read against them (v1.04): their cars, their lines a supplier is asked about. */
+async function threadJobs(orders: Order[]): Promise<ThreadJob[]> {
+  const [vehicles, items] = await Promise.all([db.vehicles.bulkGet([...new Set(orders.map((o) => o.vehicleId))]), whereAnyOf(db.items, 'orderId', orders.map((o) => o.id))]);
+  const car = new Map(vehicles.filter((v): v is Vehicle => !!v).map((v) => [v.id, v]));
+  return orders.map((o) => {
+    const v = car.get(o.vehicleId);
+    return {
+      orderId: o.id,
+      vin: v?.vin?.trim().toUpperCase() || undefined,
+      make: v?.make,
+      model: v?.model,
+      lines: items
+        .filter((i) => i.orderId === o.id && i.kind !== 'labor' && i.kind !== 'discount')
+        .map((i) => ({ id: i.id, name: lineName((i.titleEn || i.titleRu || '').trim()), open: (!i.procurementStatus || i.procurementStatus === 'needed') && !i.customerSupplied })),
+    };
+  });
+}
+
+/**
+ * The messages this device has decided on and put nowhere (v1.04): not read again — a message with digits would ask the
+ * AI each time. Eight days, on the device (what was put on a job is kept on the job: `PartAsk.replies`).
+ */
+const READ_KEY = 'mygarage.waAsk.read';
+let readMemo: Map<string, number> | undefined;
+function readHere(): Map<string, number> {
+  if (readMemo) return readMemo;
+  readMemo = new Map();
+  try {
+    for (const [id, t] of Object.entries(JSON.parse(localStorage.getItem(READ_KEY) ?? '{}') as Record<string, number>)) readMemo.set(id, t);
+  } catch {
+    // no storage (tests): this run only
+  }
+  return readMemo;
+}
+function keepRead() {
+  const memo = readHere();
+  const since = Date.now() - 8 * 24 * 60 * 60_000;
+  for (const [id, t] of memo) if (t < since) memo.delete(id);
+  try {
+    localStorage.setItem(READ_KEY, JSON.stringify(Object.fromEntries(memo)));
+  } catch {
+    // no storage
+  }
+}
+/** Tests: every device starts with nothing decided. */
+export function resetWaReplies() {
+  readMemo = new Map();
+  try {
+    localStorage.removeItem(READ_KEY);
+  } catch {
+    // no storage
+  }
 }
 
 /** The lines a reply priced, by job — for the notice («Цены от … — 2 позиции»). */
@@ -231,13 +287,24 @@ export function readReplies(phones?: string[]): Promise<number> {
   return reading;
 }
 
+type Open = { order: Order; ask: PartAsk };
+
+/**
+ * v1.04 (the owner: «ИИ не понимает контекста ответов поставщиков и присваивает большинство из них к не тем заказам»): a
+ * supplier's chat is read as the conversation it is (domain/supplierThread.ts) — each of their messages goes to the request
+ * the talk before it was about, or nowhere; until v1.04 a message without a quote went to the request sent last, and,
+ * once its job was closed, was read again onto another one.
+ */
 async function readNow(phones?: string[]): Promise<number> {
   const settings = await getSettings();
   const s = waAutoOf(settings.waAuto);
   if (!s.ask.read || !waReady()) return 0;
-  const open = await openAsks();
-  const byPhone = new Map<string, { order: Order; ask: PartAsk }[]>();
-  for (const x of open) if (!phones || phones.includes(x.ask.phone)) byPhone.set(x.ask.phone, [...(byPhone.get(x.ask.phone) ?? []), x]);
+  const orders = await openOrders();
+  const byPhone = new Map<string, Open[]>();
+  for (const x of asksOf(orders)) if (!phones || phones.includes(x.ask.phone)) byPhone.set(x.ask.phone, [...(byPhone.get(x.ask.phone) ?? []), x]);
+  if (!byPhone.size) return 0;
+  const jobs = await threadJobs(orders);
+  const memo = readHere();
   let priced = 0;
   for (const [phone, asks] of byPhone) {
     let chat = chatOfPhone(phone)?.id;
@@ -250,59 +317,159 @@ async function readNow(phones?: string[]): Promise<number> {
       }
     }
     if (!chat) continue;
-    let msgs;
+    let msgs: WaMessage[];
     try {
-      msgs = await fetchChatMessages(chat, 60);
+      msgs = (await fetchChatMessages(chat, 100)).sort((a, b) => a.t - b.t);
     } catch {
       continue;
     }
-    const first = Math.min(...asks.map((a) => Date.parse(a.ask.at))) - 60_000;
+    const threads = readThreads(
+      msgs.map((m) => ({ id: m.id, t: m.t, me: m.me, text: m.text, quote: m.quote ? { id: m.quote.id, text: m.quote.text } : undefined })),
+      asks.map((x) => ({ id: x.ask.id, orderId: x.order.id, at: Date.parse(x.ask.at), text: x.ask.text, items: x.ask.items })),
+      jobs,
+    );
     const seen = new Set(asks.flatMap((a) => (a.ask.replies ?? []).map((r) => r.id)));
+    const supplierId = [...asks].sort((a, b) => Date.parse(b.ask.at) - Date.parse(a.ask.at))[0].ask.supplierId;
     for (const raw of msgs) {
-      if (raw.me || raw.t < first || seen.has(raw.id)) continue;
+      if (raw.me || seen.has(raw.id) || memo.has(raw.id)) continue;
+      const th = threads.get(raw.id);
+      const x = th?.ask ? asks.find((a) => a.ask.id === th.ask) : th?.chat ? byHand(th.chat, orders, phone, supplierId) : undefined;
+      // About no request of ours (another car, parts asked by hand of no open job, nothing said before it): put nowhere.
+      if (!x || raw.t < Date.parse(x.ask.at) - 60_000) continue;
       // Audit 27/11: an answer said aloud (a voice message up to 3 minutes) or shown (a photo of the price list, a
       // screenshot of their system, a PDF quotation) — written down by the garage's AI, then read as words by the rules.
       const heard = await heardOf(raw);
       const m = heard ? { ...raw, text: heard } : raw;
       if (!(m.text ?? '').trim()) continue;
-      const target = askFor({ t: m.t, text: m.text, quote: m.quote?.text }, asks.map((a) => ({ ...a.ask, at: Date.parse(a.ask.at), ref: a })));
-      if (!target) continue;
-      // A list numbered past that request's parts answers another one to the same supplier (the newest that fits).
-      const others = asks.filter((a) => a !== target.ref && Date.parse(a.ask.at) <= m.t + 60_000).sort((a, b) => Date.parse(b.ask.at) - Date.parse(a.ask.at));
-      let got = -1;
-      // The app's own rules found no price in it, in any of this supplier's requests (v0.86): the AI reads it — which
-      // request, which line, what price (a light model, only for such a message).
-      const read = await aiFallback(m, [target.ref, ...others]);
-      if (read) got = await applyReply(read.x.order.id, read.x.ask.id, m, settings, s, false, read.parsed);
-      // A voice answer read by the rules: its prices still came through the AI's ears — marked so (`PartOffer.ai`).
-      if (!read && heard)
-        for (const x of [target.ref, ...others]) {
-          const { lines } = await linesOf(x);
-          const v = await db.vehicles.get(x.order.vehicleId);
-          const parsed = parseReply(m.text, lines, { make: v?.make });
-          if (!parsed.lines.length) continue;
-          got = await applyReply(x.order.id, x.ask.id, m, settings, s, false, { ...parsed, ai: true });
-          if (got >= 0) break;
-        }
-      if (!read && !heard)
-        for (const x of [target.ref, ...others]) {
-          got = await applyReply(x.order.id, x.ask.id, m, settings, s, true);
-          if (got >= 0) break;
-        }
-      if (got < 0) got = await applyReply(target.ref.order.id, target.ref.ask.id, m, settings, s, false);
-      priced += Math.max(0, got);
+      const got = await answer(x, { id: m.id, t: m.t, text: m.text ?? '', quote: m.quote?.text }, th, settings, s, { heard: !!heard, context: contextOf(msgs, threads, raw) });
+      if (got === undefined) {
+        memo.set(raw.id, raw.t);
+        continue;
+      }
+      seen.add(raw.id);
+      priced += got;
       // v0.97: the prices told at once — the supplier, the car, the lines with their prices.
-      if (got > 0)
-        for (const x of [target.ref, ...others])
-          if (await pricesNews(x, m.id).catch(() => false)) {
-            // v0.98: a request's job priced whole — its quote is ready to go.
-            void quoteNews(x.order.id).catch(() => false);
-            break;
-          }
-      seen.add(m.id);
+      if (got > 0) {
+        const now = await db.orders.get(x.order.id);
+        const ask = now?.asks?.find((a) => a.id === x.ask.id);
+        if (now && ask && (await pricesNews({ order: now, ask }, m.id).catch(() => false))) void quoteNews(now.id).catch(() => false);
+      }
     }
   }
+  keepRead();
   return priced;
+}
+
+/** A request asked by hand in the chat (v1.04): kept on its job only once its answer gives something. */
+function byHand(c: NonNullable<Thread['chat']>, orders: Order[], phone: string, supplierId: string): Open | undefined {
+  const order = orders.find((o) => o.id === c.orderId);
+  if (!order) return undefined;
+  const id = `c:${msgKey(c.msg).slice(-16)}:${supplierId}`;
+  const kept = order.asks?.find((a) => a.id === id);
+  return { order, ask: kept ?? { id, supplierId, phone, at: new Date(c.at).toISOString(), items: c.items, text: c.text, via: 'chat' } };
+}
+
+/** The talk of the message's own thread just before it (the AI's context): a few lines, who said each. */
+function contextOf(msgs: WaMessage[], threads: Map<string, Thread>, m: WaMessage): string[] {
+  const th = threads.get(m.id);
+  const key = th?.ask ?? th?.chat?.msg;
+  if (!key) return [];
+  const before = msgs.filter((x) => x.t <= m.t && x.id !== m.id).slice(-30);
+  return before
+    .filter((x) => {
+      const t = threads.get(x.id);
+      return (t?.ask ?? t?.chat?.msg) === key;
+    })
+    .slice(-6)
+    .map((x) => `${x.me ? 'G' : 'S'}: ${(x.text ?? '').trim().replace(/\s+/g, ' ').slice(0, 140) || `[${kindOf(x.type)}]`}`);
+}
+
+/**
+ * One message of a supplier read for the request its thread is (v1.04): by the rules, with what the talk before it was
+ * about; the AI only when the rules placed nothing and it has digits (then with the talk, and only prices it says).
+ * `undefined` — nothing for this request (nothing kept, not read again here).
+ */
+async function answer(
+  x: Open,
+  m: { id: string; t: number; text: string; quote?: string },
+  th: Thread | undefined,
+  settings: Awaited<ReturnType<typeof getSettings>>,
+  s: ReturnType<typeof waAutoOf>,
+  o: { heard: boolean; context: string[] },
+): Promise<number | undefined> {
+  const order = await db.orders.get(x.order.id);
+  if (!order) return undefined;
+  const stored = order.asks?.find((a) => a.id === x.ask.id);
+  if (stored?.replies?.some((r) => r.id === m.id)) return 0;
+  const { lines, car } = await linesOf({ order, ask: x.ask });
+  const v = await db.vehicles.get(order.vehicleId);
+  const focus = focusIndexes(th, x.ask.items);
+  let parsed: ParsedReply & { ai?: true } = parseReply(m.text, lines, { make: v?.make, focus });
+  // A list longer than this request: another request's answer.
+  if (parsed.other) return undefined;
+  if (o.heard) {
+    parsed = { ...parsed, ai: true };
+    // A voice message with only «no have» in it and no line named (the card machine, the account): not about the parts.
+    if (parsed.lines.length && parsed.lines.every((l) => l.offers.every((of) => of.na)) && !lines.some((l) => namesLine(m.text, l.name))) parsed = { ...parsed, lines: [] };
+  }
+  // The app's own rules placed nothing and there are digits in it (v0.86): the AI reads it — with the talk before it.
+  if (!parsed.lines.length && !o.heard && /\d/.test(m.text)) parsed = (await aiRead(m, lines, car, focus, o.context)) ?? parsed;
+  if (!stored) {
+    // Asked by hand: kept on the job only for an answer that gives something.
+    if (!parsed.lines.length) return undefined;
+    await keepAsks(order.id, [x.ask]);
+  }
+  return applyReply(order.id, x.ask.id, m, parsed, settings, s);
+}
+
+/** A request's lines, as the request lists them (the line's own order). */
+async function linesOf(x: { order: Order; ask: PartAsk }): Promise<{ items: OrderItem[]; lines: AskLine[]; car: string }> {
+  const items = (await db.items.bulkGet(x.ask.items)).filter((i): i is OrderItem => !!i);
+  const ordered = x.ask.items.map((id) => items.find((i) => i.id === id)).filter((i): i is OrderItem => !!i);
+  const v = await db.vehicles.get(x.order.vehicleId);
+  return { items, lines: askLines(ordered), car: [v?.make, v?.model].filter(Boolean).join(' ') };
+}
+
+/**
+ * The AI's reading of a supplier's message (v0.86, the owner: «если поставщик дал цены, ИИ должен понимать, к какому заказу
+ * относится, и в этом заказе заполнять цены закупок, но чтобы я понимал, что ИИ это заполнил»): only a message with digits
+ * in which the rules placed nothing. v1.04 — the request is the one the chat's talk says (the AI does not choose among
+ * jobs), the AI sees that talk and what it was about, and a price it gives is taken only when the message says that
+ * number (one piece's, or the line's quantity's) — kept as read by the AI (`PartOffer.ai`, `OrderItem.costAi`).
+ */
+async function aiRead(m: { text: string; quote?: string }, lines: AskLine[], car: string, focus: number[] | undefined, context: string[]): Promise<(ParsedReply & { ai: true }) | undefined> {
+  const id = 'A';
+  const r = await aiReadReply(m.text, m.quote ?? '', [{ id, car, lines: lines.map((l) => `${l.name}${l.qty > 1 ? ` × ${l.qty}` : ''}`) }], { context, focus: focus?.map((i) => i + 1) });
+  if (!r || r.ask !== id || !r.lines.length) return undefined;
+  const said = numbersSaid(m.text);
+  const says = (p: number, qty: number) => said.some((n) => Math.abs(n - p) < 0.01 || Math.abs(n - p * qty) < 0.01);
+  const kept: AiReply = {
+    ...r,
+    lines: r.lines
+      .filter((l) => l.n >= 1 && l.n <= lines.length)
+      .map((l) => ({ ...l, offers: l.offers.filter((of) => of.na || (of.price >= 1 && says(of.price, lines[l.n - 1].qty || 1))) }))
+      .filter((l) => l.offers.length),
+  };
+  return kept.lines.length ? { ...fromAi(kept), ai: true } : undefined;
+}
+
+/** The AI's lines as the rules give theirs. */
+function fromAi(r: AiReply): ParsedReply {
+  const vat = r.vat === 'incl' ? 'gross' : r.vat === 'excl' ? 'net' : 'unsaid';
+  return {
+    lines: r.lines.map((l) => ({
+      index: l.n - 1,
+      offers: l.offers.map((o) => ({
+        kind: o.kind || 'aftermarket',
+        kindSaid: !!o.kind,
+        unitFils: o.na ? undefined : Math.round(o.price * 100),
+        vat,
+        brand: o.brand || undefined,
+        na: o.na || undefined,
+      })),
+    })),
+    unmatched: [],
+  };
 }
 
 /**
@@ -325,72 +492,20 @@ async function heardOf(raw: WaMessage): Promise<string | undefined> {
   return undefined;
 }
 
-/** A request's lines, as the request lists them (the line's own order). */
-async function linesOf(x: { order: Order; ask: PartAsk }): Promise<{ items: OrderItem[]; lines: AskLine[]; car: string }> {
-  const items = (await db.items.bulkGet(x.ask.items)).filter((i): i is OrderItem => !!i);
-  const ordered = x.ask.items.map((id) => items.find((i) => i.id === id)).filter((i): i is OrderItem => !!i);
-  const v = await db.vehicles.get(x.order.vehicleId);
-  return { items, lines: askLines(ordered), car: [v?.make, v?.model].filter(Boolean).join(' ') };
-}
-
 /**
- * The AI's reading of a supplier's message (v0.86, the owner: «если поставщик дал цены, ИИ должен понимать, к какому заказу
- * относится, и в этом заказе заполнять цены закупок, но чтобы я понимал, что ИИ это заполнил»): only a message with digits
- * in which the rules found no line of any of the supplier's requests; the request it answers and its lines' prices, as
- * the rules would give them — kept as read by the AI (`PartOffer.ai`, `OrderItem.costAi`).
+ * One message of a supplier put on the request it answers: its prices as offers, its words kept with the request.
+ * v1.04: a newer answer of the supplier for a line replaces his earlier offer of the same kind («ALL PRICES NOT SAME» and
+ * the list again), and a cost (and the customer's price) the answers put follows it while nobody has changed it.
  */
-async function aiFallback(m: { text: string; quote?: { text?: string } }, cands: { order: Order; ask: PartAsk }[]): Promise<{ x: { order: Order; ask: PartAsk }; parsed: ParsedReply & { ai: true } } | undefined> {
-  if (!/\d/.test(m.text)) return undefined;
-  const list = cands.slice(0, 4);
-  const read = await Promise.all(list.map(linesOf));
-  for (const [k, x] of list.entries()) {
-    const v = await db.vehicles.get(x.order.vehicleId);
-    if (parseReply(m.text, read[k].lines, { make: v?.make }).lines.length) return undefined;
-  }
-  const r = await aiReadReply(
-    m.text,
-    m.quote?.text ?? '',
-    list.map((x, k) => ({ id: x.ask.id, car: read[k].car, lines: read[k].lines.map((l) => `${l.name}${l.qty > 1 ? ` × ${l.qty}` : ''}`) })),
-  );
-  const x = r?.ask ? list.find((c) => c.ask.id === r.ask) : undefined;
-  if (!r || !x || !r.lines.length) return undefined;
-  return { x, parsed: { ...fromAi(r), ai: true } };
-}
-
-/** The AI's lines as the rules give theirs. */
-function fromAi(r: AiReply): ParsedReply {
-  const vat = r.vat === 'incl' ? 'gross' : r.vat === 'excl' ? 'net' : 'unsaid';
-  return {
-    lines: r.lines.map((l) => ({
-      index: l.n - 1,
-      offers: l.offers.map((o) => ({
-        kind: o.kind || 'aftermarket',
-        kindSaid: !!o.kind,
-        unitFils: o.na ? undefined : Math.round(o.price * 100),
-        vat,
-        brand: o.brand || undefined,
-        na: o.na || undefined,
-      })),
-    })),
-  } as ParsedReply;
-}
-
-/**
- * One message of a supplier put on the job it answers: its prices as offers, its words kept with the request. `strict`
- * — a message that answers another request is left (−1): the caller tries the supplier's other requests. `given` — read
- * already (by the AI, v0.86): put as it is.
- */
-async function applyReply(orderId: string, askId: string, m: { id: string; t: number; text: string }, settings: Awaited<ReturnType<typeof getSettings>>, s: ReturnType<typeof waAutoOf>, strict = false, given?: ParsedReply & { ai?: true }): Promise<number> {
+async function applyReply(orderId: string, askId: string, m: { id: string; t: number; text: string }, parsed: ParsedReply & { ai?: true }, settings: Awaited<ReturnType<typeof getSettings>>, s: ReturnType<typeof waAutoOf>): Promise<number> {
   const order = await db.orders.get(orderId);
   const ask = order?.asks?.find((a) => a.id === askId);
   if (!order || !ask || ask.replies?.some((r) => r.id === m.id)) return 0;
-  const vehicle = await db.vehicles.get(order.vehicleId);
   const items = (await db.items.bulkGet(ask.items)).filter((i): i is OrderItem => !!i);
-  const lines = askLines(ask.items.map((id) => items.find((i) => i.id === id)).filter((i): i is OrderItem => !!i));
-  const parsed = given ?? parseReply(m.text, lines, { make: vehicle?.make });
-  const ai = !!given?.ai;
-  if (parsed.other && strict) return -1;
+  const ai = !!parsed.ai;
   const kind = parsed.lines.length ? undefined : kindOnly(m.text);
+  // When each earlier answer on this job was said (an offer older than this message may be replaced by it).
+  const said = new Map((order.asks ?? []).flatMap((a) => (a.replies ?? []).map((r) => [r.id, Date.parse(r.at)] as const)));
   let priced = 0;
   const short = m.id.slice(-10);
   for (const [n, itemId] of ask.items.entries()) {
@@ -404,29 +519,37 @@ async function applyReply(orderId: string, askId: string, m: { id: string; t: nu
     const line = parsed.lines.find((l) => l.index === n);
     // «na» to the whole request: only for the parts this supplier has not answered.
     if (line && !(parsed.naAll && offers.some(mine))) {
-      offers = offers.filter((o) => o.msg !== m.id);
-      offers.push(...line.offers.map((o, k) => offerOf(o, { msg: m.id, supplierId: ask.supplierId, n: `wa:${short}:${n}:${k}`, vat: s.ask.vat, vatBp: item.vatRateBp || settings.vatRateBp, ai })));
+      const fresh = line.offers.map((o, k) => offerOf(o, { msg: m.id, supplierId: ask.supplierId, n: `wa:${short}:${n}:${k}`, vat: s.ask.vat, vatBp: item.vatRateBp || settings.vatRateBp, ai }));
+      const older = (o: PartOffer) => o.supplierId === ask.supplierId && !!o.msg && o.msg !== m.id && (said.get(o.msg) ?? 0) <= m.t && fresh.some((f) => f.kind === o.kind);
+      offers = offers.filter((o) => o.msg !== m.id && !older(o));
+      offers.push(...fresh);
       if (line.offers.some((o) => !o.na && !o.pending)) priced++;
     }
     if (JSON.stringify(offers) === before) continue;
     const patch: Partial<OrderItem> = { offers };
-    // As set: the line's cost (and its supplier) from the best offer — only on a line without a cost yet, not bought yet.
+    // As set: the line's cost (and its supplier) from the best offer — on a line without a cost yet, or whose cost the
+    // answers put and nobody changed since (v1.04); not bought yet.
     const best = bestOffer(offers, s.ask.prefer);
-    const free = item.costPriceFils === undefined && (!item.procurementStatus || item.procurementStatus === 'needed') && !item.customerSupplied;
+    const byAnswers = !!item.costBy && item.costPriceFils === item.costBy.fils;
+    const free = (item.costPriceFils === undefined || byAnswers) && (!item.procurementStatus || item.procurementStatus === 'needed') && !item.customerSupplied;
     // v0.98: a job of a request (its autopilot) takes the customer's price too — the quote is to be ready by itself.
     const prices = order.fromChat ? 'price' : s.ask.prices;
-    if (best && free && (prices === 'cost' || prices === 'price')) {
+    if (best && best.costFils !== undefined && free && (prices === 'cost' || prices === 'price') && (best.costFils !== item.costPriceFils || best.id !== item.costBy?.offer)) {
       patch.costPriceFils = best.costFils;
       patch.supplierId = best.supplierId;
       // Put by the AI's reading: said so on the line (v0.86).
-      if (best.ai) patch.costAi = true;
-      // …and the customer's price by the garage's markup — a draft line without a price only.
-      if (prices === 'price' && item.approvalState === 'draft' && !item.unitPriceFils && best.costFils !== undefined) {
+      patch.costAi = best.ai ? true : undefined;
+      const by: NonNullable<OrderItem['costBy']> = { offer: best.id, fils: best.costFils };
+      // …and the customer's price by the garage's markup — a draft line without a price, or with the one the answers put.
+      const priceByAnswers = item.costBy?.price !== undefined && item.unitPriceFils === item.costBy.price;
+      if (prices === 'price' && item.approvalState === 'draft' && (!item.unitPriceFils || priceByAnswers)) {
         const rate = item.vatRateBp || settings.vatRateBp;
         const mode = vatModeOf(item, settings.pricesIncludeVat);
         const net = withMarkup(best.costFils, settings.defaultMarkupBp);
         Object.assign(patch, priceFromEntered(enteredPrice({ unitPriceFils: net }, rate, mode), rate, mode));
+        by.price = patch.unitPriceFils;
       }
+      patch.costBy = by;
     }
     try {
       await updateItem(item.id, patch);

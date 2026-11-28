@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { askFor, kindOnly, netUnit, parseReply, type AskLine, type ParsedReply } from './supplierReply';
+import { kindOnly, netUnit, numbersSaid, parseReply, type AskLine, type ParsedReply } from './supplierReply';
 
 /*
  * The suppliers' answers in the formats the garage's own suppliers use (read in its WhatsApp, v0.79) — every car,
@@ -143,19 +143,44 @@ describe('words of the answer', () => {
   });
 });
 
-describe('which request an answer is to', () => {
-  const H = 3600_000;
-  const asks = [
-    { id: 'a1', at: 10 * H, text: '*Toyota Camry 2019*\nVIN: 4T1B11HK5KU000004\n\n1. BRAKE PADS' },
-    { id: 'a2', at: 20 * H, text: '*Nissan Patrol 2020*\nVIN: JN8AY2NY5L9000005\n\n1. AIR FILTER' },
-  ];
-  it('the one it quotes, the one whose VIN it names, else the last one before it', () => {
-    expect(askFor({ t: 30 * H, text: '1. BRAKE PADS 180', quote: '*Toyota Camry 2019* VIN: 4T1B11HK5KU000004  1. BRAKE' }, asks)?.id).toBe('a1');
-    expect(askFor({ t: 30 * H, text: '4T1B11HK5KU000004\n1. BRAKE PADS 180' }, asks)?.id).toBe('a1');
-    expect(askFor({ t: 30 * H, text: '95' }, asks)?.id).toBe('a2');
-    expect(askFor({ t: 15 * H, text: '95' }, asks)?.id).toBe('a1');
-    expect(askFor({ t: 5 * H, text: '95' }, asks)).toBeUndefined();
-    expect(askFor({ t: 20 * H + 4 * 24 * H, text: '95' }, asks)).toBeUndefined();
+describe('v1.04: what the garage’s suppliers wrote that was read wrong (28/11, made-up parts and prices)', () => {
+  it('a set priced part by part is one price, their sum; «a+b=c» — c', () => {
+    expect(short(parseReply('150+80+75+80', ask(['ENGINE MOUNT FULL SET'])))).toEqual({ 0: ['aftermarket? 385 unsaid «150+80+75+80»'] });
+    expect(short(parseReply('MARKED CLIPS   55+35\n\n+VAT  ON ORDER TOMORROW', ask(['MARKED CLIPS'])))).toEqual({ 0: ['aftermarket? 90 net «55+35»'] });
+    expect(short(parseReply('60+40=100', ask(['CV BOOT KIT'])))).toEqual({ 0: ['aftermarket? 100 unsaid «60+40=100»'] });
+  });
+
+  it('not prices: sizes, our quantity echoed, a percentage, «2 types», a bill', () => {
+    expect(parseReply('which size need??? std/0.50/0.25', ask(['CONNECTING ROD BEARING 12PCS'])).lines).toEqual([]);
+    expect(short(parseReply('SHOCK MOUNTING FRONT BOTH × 2....265', ask(['SHOCK MOUNTING FRONT BOTH', 2])))).toEqual({ 0: ['aftermarket? 265 unsaid'] });
+    expect(parseReply('Boss, two point something is percentage, 2 point something percentage for the card machine', ask(['AXLE BOOT'])).lines).toEqual([]);
+    expect(parseReply('2 type showing', ask(['GEAR FILTER'])).lines).toEqual([]);
+    expect(parseReply('CAN YOU SEND ME RECIPE FOR 358 PLZ', ask(['FRONT BRAKE PADS'])).lines).toEqual([]);
+    // «TRANSFER CASE» is a part, not money sent
+    expect(short(parseReply('TRANSFER CASE OIL 95', ask(['TRANSFER CASE OIL'])))).toEqual({ 0: ['aftermarket? 95 unsaid'] });
+  });
+
+  it('«140X× 2», «AFTER MARKET» in two words, «ONLY TOMORROW» is when, not «none»', () => {
+    expect(short(parseReply('5. REAR SHOCK ABSORBERS LEFT AND RIGHT 140X× 2', ask(['A'], ['B'], ['C'], ['D'], ['REAR SHOCK ABSORBERS LEFT AND RIGHT', 2])))).toEqual({ 4: ['aftermarket? 140 x2 unsaid'] });
+    expect(short(parseReply('295+TAX AFTER MARKET', ask(['AC EVAPORATOR ORIGINAL'])))).toEqual({ 0: ['aftermarket 295 net'] });
+    expect(parseReply('ONLY TOMORROW', ask(['RADIATOR BOTTLE'])).lines).toEqual([]);
+    expect(short(parseReply('ONLY HONDA', ask(['RADIATOR BOTTLE'])))).toEqual({ 0: ['NA «ONLY HONDA»'] });
+  });
+
+  it('what the talk was about (`focus`): a bare price or «na» is that line’s; words naming a part are not put there', () => {
+    const lines = ask(['RADIATOR CAP'], ['RADIATOR BOTTLE']);
+    expect(short(parseReply('20+TAX DUP', lines, { focus: [0] }))).toEqual({ 0: ['aftermarket 20 net'] });
+    expect(short(parseReply('MME000001  NOT AVL', lines, { focus: [1] }))).toEqual({ 1: ['NA'] });
+    // without it — as before: a bare price is nobody's, «na» is the whole request's
+    expect(parseReply('20+TAX DUP', lines).lines).toEqual([]);
+    expect(short(parseReply('NOT AVL', lines))).toEqual({ 0: ['NA'], 1: ['NA'] });
+    const three = ask(['RADIATOR CAP'], ['GEAR FILTER'], ['TRANSMISSION OIL COOLER']);
+    expect(parseReply('GEAR OIL 240 ORG', three, { focus: [0] }).lines).toEqual([]);
+  });
+
+  it('the numbers a message says (what the AI may take a price from)', () => {
+    expect(numbersSaid('95x2 nsk').sort((a, b) => a - b)).toEqual([2, 95, 190]);
+    expect(numbersSaid('150+80+75+80')).toContain(385);
   });
 });
 

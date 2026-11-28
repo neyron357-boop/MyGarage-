@@ -14,9 +14,27 @@ import { roundFils } from './money';
  *   - one price for a one-part request:            «40» · «60  1 LITER»
  *   - none:                                        «NOT AVAILABLE» · «no have» · «Soryy out of stock» · «na» · «21606-00X0B----NA»
  *   - the kind alone, in a message of its own:     «original»
+ *   - (v1.04, the garage's chats 28/11) a set priced part by part: «150+80+75+80» (385, one price) · «55+35 +VAT»;
+ *     not prices: «std/0.50/0.25» (sizes), «× 2....265» (our quantity — the price is 265), «2 point something percentage»
  *
  * What is not sure is not guessed: a line that cannot be told which part it is about is left as words (`unmatched`).
+ * Which request a message is about — domain/supplierThread.ts (the chat read as a conversation).
  */
+
+/** The numbers a message says (prices, quantities, sums of a set): what the AI's reading of it may take a price from. */
+export function numbersSaid(text: string): number[] {
+  const t = clean(text);
+  const out = new Set<number>();
+  for (const m of t.matchAll(/\d{1,3}(?:,\d{3})+|\d{1,7}(?:[.,]\d{1,2})?/g)) out.add(num(m[0]));
+  for (const x of atoms(t)) {
+    out.add(x.a);
+    if (x.b !== undefined) {
+      out.add(x.a * x.b);
+      out.add(x.b);
+    }
+  }
+  return [...out].filter((n) => n > 0);
+}
 
 export type OfferKind = 'oem' | 'aftermarket' | 'used';
 
@@ -81,7 +99,10 @@ const USED = /^(used|second|2nd|scrap|secondhand|бу)$/i;
 const BRANDS = new Set(
   'ngk denso bosch valeo aisin kyb tokico mobil shell castrol total motul liqui moly mann mahle sakura febi lemforder trw brembo akebono nisshinbo mintex ctr 555 gates dayco contitech skf ntn nsk koyo fag hella osram philips varta acdelco motorcraft mopar moog sachs exedy luk valvoline petronas adnoc eneos idemitsu toyota nissan honda mitsubishi hyundai kia mazda lexus suzuki subaru isuzu ford chevrolet gmc jeep renault peugeot mg infiniti'.split(' '),
 );
-const NA = /\b(n\/?a|not\s*(?:available|availabl|avl|avail|in\s*stock)|no\s*(?:have|stock|stok|available)|out\s*of\s*stock|nil|finished|only\s+\w+\s*$)\b/i;
+/** A maker of parts or a car's make (a line's «KYB», «GEAR OIL NISSAN NS-3» — not what the part is). */
+export const brandWord = (w: string): boolean => BRANDS.has(w.toLowerCase());
+// «ONLY HONDA» is none for this car; «ONLY TOMORROW» is when (v1.04, read in the garage's chats)
+const NA = /\b(n\/?a|not\s*(?:available|availabl|avl|avail|in\s*stock)|no\s*(?:have|stock|stok|available)|out\s*of\s*stock|nil|finished|only\s+(?!tomorrow|today|now|tonight|morning|evening|after|original|orginal|org|genuine|dup|dupl|duplicate|copy|used|one|1)\w+\s*$)\b/i;
 const PENDING = /\b(checking|will\s+check|let\s+me\s+check|check(?:ing)?\s+and\s+(?:tell|update))\b/i;
 const ACK = /^(ok(?:ay)?|okk?|sent|yes|yeah|sure|done|noted|thanks?|thank\s+you|👍|✅)[.!\s]*$/i;
 const UNIT = /^\s*(l|lt|ltr|ltrs|liter|litre|liters|litres|litr|ml|pcs?|pieces?|psc|nos|hours?|hrs?|days?|mins?|minutes?|kg|g|mm|cm|inch|v|w|amp|ah|k)\b/i;
@@ -91,6 +112,11 @@ const clean = (s: string) =>
     .replace(/\r/g, '')
     .replace(/[‒-―−]/g, '-')
     .replace(/×/g, 'x')
+    // v1.04 (read in the garage's chats): «140X× 2» — the sign typed twice; «× 2....265» — dots part the price as dashes do;
+    // «295+TAX AFTER MARKET» — one word
+    .replace(/(\d)\s*x\s*x\s*(?=\d)/gi, '$1x')
+    .replace(/\bafter\s*-?\s*market\b/gi, 'aftermarket')
+    .replace(/\.{2,}/g, ' --- ')
     .replace(/[*_~]{1,2}(?=\S)([^\n*_~]+?)[*_~]{1,2}/g, '$1');
 
 const tokens = (s: string) =>
@@ -125,6 +151,8 @@ interface Atom {
   a: number;
   b?: number;
   vat?: 'net' | 'gross';
+  /** A set's parts priced one by one, as the supplier wrote them («150+80+75+80»): `a` is their sum. */
+  sum?: string;
 }
 
 const num = (s: string) => {
@@ -137,7 +165,17 @@ const num = (s: string) => {
 function atoms(text: string): Atom[] {
   const out: Atom[] = [];
   // «50+50=100»: a unit's price said as many times as the parts, and their sum.
-  const t = text.replace(/\b(\d{1,6})(?:\s*\+\s*\1)+\s*=\s*\d{1,7}\b/g, (m, a: string) => `${a}x${m.split('=')[0].split('+').length}`);
+  let t = text.replace(/\b(\d{1,6})(?:\s*\+\s*\1)+\s*=\s*\d{1,7}\b/g, (m, a: string) => `${a}x${m.split('=')[0].split('+').length}`);
+  // v1.04: «150+80+75+80» for an engine mount set, «55+35» for two clips — the parts of one line priced one by one: the
+  // line's price is their sum (until v1.04 — four options, the cheapest, 75, put as the set's cost). «a+b=c» — c. Each
+  // term a price (two digits and more), not «+» for VAT. The text keeps its length: the words around keep their places.
+  const sums = new Map<number, string>();
+  t = t.replace(/(?<![\d.,])(\d{2,6})((?:\s*\+\s*\d{2,6})+)(\s*=\s*(\d{1,7}))?(?![\d.,])/g, (m: string, a: string, more: string, _eq: string, total: string, at: number) => {
+    const terms = [a, ...more.split('+').slice(1)].map((x) => Number(x.trim()));
+    const sum = total ? Number(total) : terms.reduce((x, y) => x + y, 0);
+    sums.set(at, m.replace(/\s+/g, ''));
+    return String(sum).padEnd(m.length, ' ');
+  });
   const re = /(\d{1,3}(?:,\d{3})+|\d{1,6}(?:[.,]\d{1,2})?)(?:\s*[x*]\s*(\d{1,4}(?:[.,]\d{1,2})?))?(?![\p{L}\p{N}-]|[.,]\d)(\s*\+\s*(?:vat|tax)\b|\s*\+(?![\s\d]*\d)|\s*(?:incl\.?|including|with)\s*(?:vat|tax)\b)?/giu;
   for (let m = re.exec(t); m; m = re.exec(t)) {
     const before = t.slice(0, m.index);
@@ -151,12 +189,17 @@ function atoms(text: string): Atom[] {
     }
     // a quantity, a size, a time — not a price: «4 LITR», «1 HOUR», «DOT 3», «500ml» (attached ones never match)
     if (!m[2] && UNIT.test(after)) continue;
+    // v1.04: «2 point something is percentage» (a voice message about a card machine), «10 spare parts»
+    if (!m[2] && /^\s*(%|percent|per\s*cent|point|parts?\b|items?\b|spare|types?\b|kinds?\b|options?\b|brands?\b|models?\b|sizes?\b|o'?\s*clock|am\b|pm\b|times?\b)/i.test(after)) continue;
     if (/\b(dot|no|#|qty|quantity|year|model)\s*$/i.test(before)) continue;
     const a = num(m[1]);
     const b = m[2] ? num(m[2]) : undefined;
-    if (!(a > 0)) continue;
+    // v1.04: «std/0.50/0.25» — a bearing's sizes, not prices of half a dirham
+    if (!(a >= 1)) continue;
+    // «× 2....265»: our quantity echoed before the price — not a price itself
+    if (!m[2] && Number.isInteger(a) && a <= 12 && /\bx\s*$/i.test(before)) continue;
     const vatWord = (m[3] ?? '').toLowerCase();
-    out.push({ at: m.index, end: m.index + m[0].length, a, b, vat: vatWord ? (/incl|including|with/.test(vatWord) ? 'gross' : 'net') : undefined });
+    out.push({ at: m.index, end: m.index + m[0].length, a, b, vat: vatWord ? (/incl|including|with/.test(vatWord) ? 'gross' : 'net') : undefined, sum: sums.get(m.index) });
   }
   return out;
 }
@@ -257,10 +300,12 @@ function offersOf(text: string, ctx: { qty: number; wants?: OfferKind; make?: st
   // A brand name «555» is a number too: not a price when a kind's words are around it only.
   const d = daysOf(t);
   const n = note(t, ws, [...used], found, ctx.name);
-  for (const o of offers) {
+  offers.forEach((o, k) => {
     if (d !== undefined) o.days = d;
-    if (n) o.note = n;
-  }
+    // a set priced part by part: the parts' prices kept with the sum
+    const said = [found[k].sum, n].filter(Boolean).join(' ');
+    if (said) o.note = said.slice(0, 80);
+  });
   return offers;
 }
 
@@ -296,7 +341,7 @@ function naNote(t: string): string {
 const SKIP = new Set(['LEFT', 'RIGHT', 'AND', 'FRONT', 'REAR', 'SIDE', 'THE', 'FOR', 'WITH', 'SET', 'FULL', 'ORIGINAL', 'GENUINE', 'PCS', 'LTR', 'X']);
 
 /** The part a free line names by a word of its own («gasket 85» → VALVE COVER GASKET); none — or two — say nothing. */
-function byName(line: string, ask: AskLine[]): number | undefined {
+function byName(line: string, ask: AskLine[], any = false): number | undefined {
   const lt = new Set(tokens(line).filter((w) => w.length >= 3 && !/^\d+$/.test(w)));
   let best = -1;
   let score = 0;
@@ -309,6 +354,8 @@ function byName(line: string, ask: AskLine[]): number | undefined {
       tie = false;
     } else if (s === score && s > 0) tie = true;
   });
+  // `any`: does the line name any of the parts at all (two of them alike too)
+  if (any) return score > 0 ? best : undefined;
   return score > 0 && !tie ? best : undefined;
 }
 
@@ -350,11 +397,14 @@ export function kindOnly(text: string): OfferKind | undefined {
  * A supplier's message read against the request it answers: for each part — its offers (price, kind, VAT, when, a
  * note) or «not available». `make` — the car's make (its own brand is the original).
  */
-export function parseReply(text: string, ask: AskLine[], opts: { make?: string } = {}): ParsedReply {
+export function parseReply(text: string, ask: AskLine[], opts: { make?: string; focus?: number[] } = {}): ParsedReply {
   const out: ParsedReply = { lines: [], unmatched: [] };
   if (!ask.length) return out;
   const all = clean(text);
   if (ACK.test(all.trim())) return { ...out, ack: true };
+  // v1.04: «CAN YOU SEND ME RECIPE FOR 358 PLZ», bank details — the money of a bill, not a part's price
+  // («TRANSFER CASE OIL» is a part)
+  if (/\b(receipts?|recipe|reciept|invoices?|bills?|payments?|iban|bank|balance|paid|account\s*(?:no|number|details))\b|\btransfer(?:red)?\s+(?:the|money|amount|it|from|to)\b/i.test(all)) return { ...out, unmatched: [all.trim()] };
   const raw = all.split('\n').map((l) => l.trim());
   // What holds for the whole message: «+TAX» or «ORIGINAL» on a line of its own.
   const lines: string[] = [];
@@ -406,7 +456,15 @@ export function parseReply(text: string, ask: AskLine[], opts: { make?: string }
       else left.push(l);
     }
     const allNa = left.length && left.every((l) => !atoms(l).length && (NA.test(l) || /\bsor+y\b/i.test(l)));
-    if (left.length && !byIndex.size && allNa && left.length === 1) {
+    // v1.04: what the talk before it was about (our «Here cap coming», «Brother check radiator bottle» — services/waAsk.ts
+    // from domain/supplierThread.ts): a bare price or «na» is about those lines, not the whole request.
+    // Only a line that names no part goes there («GEAR OIL 240» after «Here cap coming» is not the cap's).
+    const focus = opts.focus?.filter((i) => i >= 0 && i < ask.length);
+    const bare = left.every((l) => byName(l, ask, true) === undefined);
+    if (left.length && !byIndex.size && focus?.length && bare && (left.length === focus.length || (allNa && left.length === 1))) {
+      if (left.length === focus.length) left.forEach((l, k) => add(focus[k], offersOf(l, ctx(focus[k]))));
+      else focus.forEach((i) => add(i, offersOf(left[0], ctx(i))));
+    } else if (left.length && !byIndex.size && allNa && left.length === 1) {
       // «NOT AVAILABLE» to the whole request
       ask.forEach((_, i) => add(i, offersOf(left[0], ctx(i))));
       out.naAll = true;
@@ -432,39 +490,5 @@ export function netUnit(o: Pick<ReplyOffer, 'unitFils' | 'vat'>, assume: 'net' |
 }
 
 /* ---------- Which request an answer is to ---------- */
-
-export interface AskRef {
-  id: string;
-  at: number;
-  /** The request's words as sent (its car line, its VIN). */
-  text: string;
-}
-
-const vinOf = (s: string) => /\b([A-HJ-NPR-Z0-9]{17})\b/i.exec(s)?.[1]?.toUpperCase();
-const firstLine = (s: string) =>
-  clean(s)
-    .split('\n')
-    .map((l) => l.trim())
-    .find(Boolean)
-    ?.toUpperCase() ?? '';
-
-/**
- * The request a message answers, of those sent to this supplier before it: the one it quotes (its VIN, its car line),
- * the one whose VIN it names, else the last one sent before it (three days at most).
- */
-export function askFor<T extends AskRef>(msg: { t: number; text: string; quote?: string }, asks: T[], maxAge = 3 * 24 * 60 * 60_000): T | undefined {
-  const before = asks.filter((a) => a.at <= msg.t + 60_000).sort((a, b) => b.at - a.at);
-  const quoteVin = msg.quote ? vinOf(msg.quote) : undefined;
-  if (msg.quote) {
-    const q = firstLine(msg.quote);
-    const hit = before.find((a) => (quoteVin && vinOf(a.text) === quoteVin) || (q && firstLine(a.text) === q));
-    if (hit) return hit;
-  }
-  const vin = vinOf(msg.text);
-  if (vin) {
-    const hit = before.find((a) => vinOf(a.text) === vin);
-    if (hit) return hit;
-  }
-  const last = before[0];
-  return last && msg.t - last.at <= maxAge ? last : undefined;
-}
+// v1.04: read from the chat as a conversation — domain/supplierThread.ts (until v1.04 `askFor`: the quote, the VIN, else
+// the last request sent; the main supplier gets most requests, and that put most answers on the wrong jobs).

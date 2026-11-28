@@ -84,12 +84,15 @@ fixed: the same words in the same order and language, only spelling put right (k
     `Garage invoice, UAE. Parts on the job: ${parts.join('; ')}.${work.length ? ` Other work on it: ${work.join('; ')}.` : ''}
 Write what the labour charge is for, as on a garage invoice: a verb and the parts, e.g. "REPLACE FRONT BRAKE PADS & DISCS", "OVERHAUL GEARBOX, REPLACE ATF FILTER". English capitals, at most 70 characters, no prices, no "LABOR CHARGE".`,
   // v0.86: a supplier's WhatsApp answer read when the app's own rules found no prices in it.
-  reply: (text, quote, asks) =>
+  // v1.04 (the owner: «ИИ не понимает контекста ответов поставщиков… ошибочно понимает, где цена, а где количество»): the
+  // chat's talk before the message (the app tells which request it is from the chat itself) and what that talk was about;
+  // what is a price and what is not, as the garage's suppliers write.
+  reply: (text, quote, asks, context = [], focus = []) =>
     `A UAE auto-parts supplier wrote to a garage on WhatsApp. The garage's requests to this supplier (lines numbered):
 ${asks.map((a, k) => `${String.fromCharCode(65 + k)}) ${a.car || 'car'}: ${a.lines.map((l, n) => `${n + 1}. ${l}`).join('; ')}`).join('\n')}
-The supplier's message${quote ? ` (a reply to: "${quote.slice(0, 300)}")` : ''}:
+${context.length ? `The chat about it just before, oldest first ("G:" the garage, "S:" the supplier):\n${context.map((c) => `  ${c.slice(0, 160)}`).join('\n')}\n` : ''}${focus.length ? `The garage's last words there were about line${focus.length > 1 ? 's' : ''} ${focus.join(', ')}.\n` : ''}The supplier's message${quote ? ` (a reply to: "${quote.slice(0, 300)}")` : ''}:
 """${text.slice(0, 2000)}"""
-ask: the letter of the request it answers ("" if it gives no prices or answers none). lines: each line it answers — n (line number), offers: each price it says for it — price (AED, one piece, as written), kind ("oem" original/genuine, "aftermarket" copy/duplicate/brand, "used", "" if not said), brand ("" if none), na (true: not available). vat: "incl" if the prices include VAT, "excl" if VAT is on top, "" if not said. Only what the message says.`,
+ask: the letter of the request it answers ("" if it gives no prices or answers none). lines: each line it gives a price or "not available" for — n (line number; a bare price or "na" is about the line the talk was about), offers: each price it says for it — price (AED for ONE piece: "95x2" or "2x95" for two pieces is 95; parts of a set added up, "150+80+75+80", is 385 for the line), kind ("oem" original/genuine, "aftermarket" copy/duplicate/brand, "used", "" if not said), brand ("" if none), na (true: not available). A size (0.25, std, 4L), a quantity, a part number, a phone or account number, a percentage, a time or a day is never a price; a question or a remark with no price gives no lines. vat: "incl" if the prices include VAT, "excl" if VAT is on top ("+", "+VAT", "+TAX"), "" if not said. Only what the message says.`,
   // v0.86: who a chat is to the garage, by its name and its last words. v0.91 (the owner: «на какие марки авто она часто
   // отвечает»): and the car makes a supplier deals with. v0.91.2 (the owner: «ИИ очень плохо анализировал чаты — те, что ни к
   // чему и не к гаражу, он присвоил статус клиента или поставщика»; measured on made-up chats: a friend's own car problem —
@@ -640,7 +643,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     },
 
     /** v0.86: a supplier's answer the app's rules could not read — which request, which line, what price. */
-    async reply({ text, quote = '', asks = [] } = {}) {
+    async reply({ text, quote = '', asks = [], context = [], focus = [] } = {}) {
       text = String(text ?? '').trim();
       const list = (Array.isArray(asks) ? asks : []).slice(0, 4).map((a) => ({
         id: String(a?.id ?? ''),
@@ -648,11 +651,14 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
         lines: (Array.isArray(a?.lines) ? a.lines : []).slice(0, 25).map((l) => String(l).slice(0, 80)),
       }));
       if (!text || !list.length || !list.some((a) => a.lines.length)) throw httpError(400, 'nothing to read');
-      const key = createHash('sha1').update(JSON.stringify([text, String(quote).slice(0, 300), list])).digest('hex');
-      return cached(`reply:${key}`, 'reply', async () => {
+      // v1.04: the talk before it (a few lines) and the lines it was about.
+      const talk = (Array.isArray(context) ? context : []).slice(-6).map((c) => String(c).slice(0, 160));
+      const about = (Array.isArray(focus) ? focus : []).map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 25).slice(0, 10);
+      const key = createHash('sha1').update(JSON.stringify([text, String(quote).slice(0, 300), list, ...(talk.length || about.length ? [talk, about] : [])])).digest('hex');
+      return cached(`reply:2:${key}`, 'reply', async () => {
         const offer = { type: 'object', properties: { price: { type: 'number' }, kind: { type: 'string' }, brand: { type: 'string' }, na: { type: 'boolean' } }, required: ['price', 'kind', 'na'] };
         const { value } = await json(
-          P.reply(text, String(quote), list),
+          P.reply(text, String(quote), list, talk, about),
           {
             type: 'object',
             properties: { ask: { type: 'string' }, lines: { type: 'array', items: { type: 'object', properties: { n: { type: 'number' }, offers: { type: 'array', items: offer } }, required: ['n', 'offers'] } }, vat: { type: 'string' } },
