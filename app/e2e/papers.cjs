@@ -253,6 +253,21 @@ const READS = {
     return r ? r.why.map((w) => w.kind) : [];
   }, jobId);
   check(why.includes('sold') && why.includes('boughtFor'), '«Поставщики» of the job: it sold this part for Toyota — ' + JSON.stringify(why));
+  // v1.05.1: under the job's line — bought before for this model, who and for how much.
+  const note = top('[data-bought-before]').first();
+  await note.waitFor({ timeout: 8000 });
+  const noteText = await note.innerText();
+  check(/Брали у Al Noor/.test(noteText) && /175/.test(noteText), `under the line: «${noteText}»`);
+  await shot('phone-09-bought-before');
+  // «Поставщики»: the one who sold it for this model picked at once, «Брали … для Hiace · 175».
+  await top('button.add-extra[aria-label="Поставщики"]').click();
+  const noorRow = page.locator('.ask-row[data-ask-supplier]', { hasText: 'Al Noor' }).first();
+  await noorRow.waitFor({ timeout: 8000 });
+  await settle(700);
+  await shot('phone-10-ask-picked');
+  const rowText = await noorRow.innerText();
+  check((await noorRow.getAttribute('aria-pressed')) === 'true' && /Брали .* для Hiace/.test(rowText) && /175/.test(rowText), `the seller of it picked at once: «${rowText.replace(/s+/g, ' ')}»`);
+  await page.keyboard.press('Escape');
   await phoneCtx.close();
 
   /* ---------- The PC ---------- */

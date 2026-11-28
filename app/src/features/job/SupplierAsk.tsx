@@ -1,9 +1,10 @@
 import { ActionIcon, Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconBrandWhatsapp, IconCircle, IconCircleCheckFilled, IconClock, IconCopy, IconSend, IconStarFilled } from '@tabler/icons-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { itemTitle } from '../../domain/items';
+import { formatAed } from '../../domain/money';
 import { shownStars, type Ranked, type SupplierKnow, type Why } from '../../domain/supplierRank';
 import { partsType } from '../../domain/supplierTidy';
 import type { OrderItem, Supplier } from '../../domain/types';
@@ -69,12 +70,22 @@ export function SupplierAskSheet({ b, opened, onClose }: { b: OrderBundle; opene
   const [who, setWho] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
   // Opened: the parts still to buy (else all of them), nobody picked yet.
+  const preset = useRef(false);
   useEffect(() => {
     if (!opened) return;
     setParts(null);
     setWho(new Set());
     setQuery('');
+    preset.current = false;
   }, [opened]);
+  // v1.05.1 (the owner: «у этого поставщика уже я покупал… сразу же отправлял запрос к этому поставщику»): those who sold
+  // this part for this very model are picked at once (three at most, with a number) — «Отправить» is still the manager's tap.
+  useEffect(() => {
+    if (!opened || !data || preset.current) return;
+    preset.current = true;
+    const bought = data.parts.filter((r) => r.supplier.mark !== 'off' && !!r.supplier.phone && r.why.some((w) => w.kind === 'sold' && !!w.model)).slice(0, 3);
+    if (bought.length) setWho(new Set(bought.map((r) => r.supplier.id)));
+  }, [opened, data]);
   const lines = data?.partLines ?? [];
   const toBuy = lines.filter((i) => !i.procurementStatus || i.procurementStatus === 'needed');
   const picked = parts ?? new Set((toBuy.length ? toBuy : lines).map((i) => i.id));
@@ -241,6 +252,10 @@ function whyWords(r: Ranked, t: (k: string, o?: Record<string, unknown>) => stri
   const out: string[] = [];
   // v0.91.6: one of the garage's main suppliers — said first.
   if (r.why.some((w) => w.kind === 'top')) out.push(t('ask.top'));
+  // v1.05.1: bought from it before — this part for this very model (its last price), or such a part.
+  const sold = r.why.find((w): w is Extract<Why, { kind: 'sold' }> => w.kind === 'sold');
+  if (sold?.model) out.push([t('ask.soldFor', { part: sold.part, model: sold.model }), sold.fils ? formatAed(sold.fils) : ''].filter(Boolean).join(' · '));
+  else if (sold) out.push(t('ask.sold', { part: sold.part }));
   if (r.why.some((w) => w.kind === 'onJob')) out.push(t('suppliers.why.onJob'));
   const make = r.why.find((w): w is Extract<Why, { kind: 'make' | 'answers' | 'aiMake' | 'boughtFor' }> => w.kind === 'make' || w.kind === 'answers' || w.kind === 'aiMake' || w.kind === 'boughtFor');
   if (make) out.push(make.kind === 'answers' ? t('ask.answersFor', { make: make.make, n: make.n }) : make.make);

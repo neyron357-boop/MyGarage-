@@ -71,7 +71,7 @@ export function studyDue(chat: { t: number }, fact: { studiedAt?: string; deepAt
 const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** Model names that are words of their own too («spark» plug, «seal», «charger», «crown» wheel): not a make by themselves. */
-const NOT_MODELS = new Set(
+export const NOT_MODELS = new Set(
   'rush crown echo kicks accent venue soul city jazz pilot passport edge escape territory fusion focus groove spark express terrain journey compass navigator corsair master expert boxer partner symbol swift alto legacy ascent whale preface hunter dashing seal tang dolphin shark ghost phantom dawn spectre roma tipo rapid rosa falcon oyster dost cooper transit neon caliber charger golf logan talisman jumpy superb canter'.split(
     ' ',
   ),
@@ -79,7 +79,7 @@ const NOT_MODELS = new Set(
 /** Makes that are words too («tank», «mini»): only with a model. */
 const NOT_MAKES = new Set(['tank', 'mini']);
 /** How people write makes in chats. */
-const ALIASES: Record<string, string> = {
+export const ALIASES: Record<string, string> = {
   benz: 'Mercedes-Benz',
   mercedes: 'Mercedes-Benz',
   merc: 'Mercedes-Benz',

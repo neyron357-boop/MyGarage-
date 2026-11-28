@@ -289,6 +289,7 @@ export async function notePaperPrices(id: string): Promise<number> {
             {
               id: `paper:${id}:${k}`,
               part,
+              name: l.name,
               ...(l.make ? { make: l.make } : {}),
               ...(l.model ? { model: l.model } : {}),
               supplierId: p.supplierId,

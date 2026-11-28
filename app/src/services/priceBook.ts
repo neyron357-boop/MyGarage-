@@ -78,3 +78,31 @@ export async function priceHintsFor(itemId: string): Promise<{ hints: PriceHint[
   const hints = priceHints(points, { part, make: vehicle?.make, model: vehicle?.model, vin: vehicle?.vin, itemId });
   return { hints, suppliers: new Map(sups.map((s) => [s.id, s])) };
 }
+
+/**
+ * v1.05.1 (the owner: «если тот же автомобиль, та же деталь — подсказывать: ты покупал у этого поставщика за такую цену»): the
+ * job's parts with no cost yet that the garage bought before for this very car's model (or this VIN) — a supplier's paper
+ * invoice's price, the latest: who, for how much, when. Shown under the line.
+ */
+export async function boughtBeforeFor(orderId: string): Promise<Map<string, { supplier: string; supplierId: string; fils: number; at: string }>> {
+  const out = new Map<string, { supplier: string; supplierId: string; fils: number; at: string }>();
+  const order = await db.orders.get(orderId);
+  if (!order) return out;
+  const items = (await db.items.where('orderId').equals(orderId).toArray()).filter(
+    (i) => i.kind === 'part' && i.costPriceFils === undefined && (!i.procurementStatus || i.procurementStatus === 'needed') && !i.customerSupplied,
+  );
+  if (!items.length) return out;
+  const points = await db.priceBook.where('id').startsWith('paper:').toArray();
+  if (!points.length) return out;
+  const [vehicle, sups] = await Promise.all([db.vehicles.get(order.vehicleId), db.suppliers.toArray()]);
+  if (!vehicle?.model && !vehicle?.vin) return out;
+  const names = new Map(sups.map((s) => [s.id, s.name]));
+  for (const i of items) {
+    const part = lineName((i.titleEn || i.titleRu || '').trim());
+    if (!part) continue;
+    const near = priceHints(points, { part, make: vehicle.make, model: vehicle.model, vin: vehicle.vin, itemId: i.id }, 5).filter((h) => h.near >= 2 && h.point.supplierId);
+    const best = near.sort((a, b) => b.point.at.localeCompare(a.point.at))[0];
+    if (best) out.set(i.id, { supplier: names.get(best.point.supplierId!) ?? '', supplierId: best.point.supplierId!, fils: best.point.costFils!, at: best.point.at });
+  }
+  return out;
+}

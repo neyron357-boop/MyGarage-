@@ -124,7 +124,15 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
                 >
                   <span className="price-hint-who">{hints.suppliers.get(p.supplierId ?? '')?.name ?? t('priceBook.someone')}</span>
                   <Money fils={p.costFils!} />
-                  <span className="chip-note">{[t(p.kind === 'oem' ? 'priceBook.oem' : p.kind === 'used' ? 'priceBook.used' : 'priceBook.copy'), p.brand, t(`priceBook.hintNear.${near}`), p.via === 'paper' ? `${t('papers.paperWord')} ${p.at.slice(5, 7)}/${p.at.slice(0, 4)}` : ''].filter(Boolean).join(' · ')}</span>
+                  <span className="chip-note">
+                    {(p.via === 'paper'
+                      ? // bought (v1.05.1): the line as its invoice printed it, the car, the month
+                        [p.name, t(`priceBook.hintNear.${near}`), `${t('papers.paperWord')} ${p.at.slice(5, 7)}/${p.at.slice(0, 4)}`]
+                      : [t(p.kind === 'oem' ? 'priceBook.oem' : p.kind === 'used' ? 'priceBook.used' : 'priceBook.copy'), p.brand, t(`priceBook.hintNear.${near}`)]
+                    )
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                 </button>
               ))}
             </div>

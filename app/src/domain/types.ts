@@ -962,6 +962,8 @@ export interface PricePoint {
   /** A job's line — none ('') for a paper's line. */
   orderId: string;
   itemId: string;
+  /** v1.05.1: the line as the paper printed it («CAMRY HIBRID FAN MOTOR XFM»): its car's variant, its brand. */
+  name?: string;
   /** v1.05: the paper invoice it is from (`SupplierPaper`), its number. */
   paper?: string;
   invoiceNo?: string;

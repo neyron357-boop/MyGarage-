@@ -1,5 +1,5 @@
 import { CAR_CATALOG, canonicalMake } from './carCatalog';
-import { makesInText } from './chatStudy';
+import { ALIASES, makesInText, NOT_MODELS } from './chatStudy';
 import { dubaiDate } from './dates';
 import { lineName } from './items';
 import { printedDate, receiptExpense, type ReceiptRead } from './receipt';
@@ -52,8 +52,93 @@ export function paperDate(read: Pick<ReceiptRead, 'dateText' | 'date' | 'dateSur
   return { sure: false };
 }
 
+/* ---------- The car a line names (v1.05.1) ---------- */
+
+/*
+ * The owner (28/11, two of the garage's invoices): «почти всегда они пишут название автомобиля вместе с названием детали в
+ * одной строке: SANTAFE AC VALVE … — это к Санта-Фе; CAMRY HIBRID FAN MOTOR … — фан-мотор для Камри». A line is read as a
+ * person reads it: the model's name (the catalogue's, written together or apart — «SANTAFE», «SANTA FE»; its own last word —
+ * «PRADO»; «LC200»), the make it is of; the rest is the part. A model that is an everyday word («ACCENT», «ROSA», «CANTER»)
+ * or a short one («RX», «i10») counts only as the line's first word — that is where these papers write the car.
+ */
+const keyOf = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+/** Models that are words of parts too («SPARK PLUG», «MASTER CYLINDER», «PILOT BEARING», «CROWN PINION»): never a car here. */
+const PART_LIKE = new Set(['spark', 'master', 'seal', 'pilot', 'crown', 'charger', 'cooper', 'express', 'partner', 'expert', 'boxer', 'shark', 'ghost', 'phantom']);
+type ModelHit = { make: string; model: string; first: boolean };
+let modelIdx: Map<string, ModelHit[]> | undefined;
+function modelIndex(): Map<string, ModelHit[]> {
+  if (modelIdx) return modelIdx;
+  const out = new Map<string, ModelHit[]>();
+  const add = (k: string, v: ModelHit) => {
+    if (k.length < 2 || /^\d+$/.test(k)) return;
+    const was = out.get(k) ?? [];
+    if (!was.some((x) => x.make === v.make && x.model === v.model)) out.set(k, [...was, v]);
+  };
+  for (const [make, models] of Object.entries(CAR_CATALOG))
+    for (const model of models) {
+      const k = keyOf(model);
+      if (PART_LIKE.has(k)) continue;
+      add(k, { make, model, first: k.length < 4 || NOT_MODELS.has(model.toLowerCase()) });
+      // «PRADO» for «Land Cruiser Prado»: the last word of a longer name, when it is a word of its own
+      const words = model.split(/\s+/);
+      if (words.length > 1) {
+        const last = keyOf(words[words.length - 1]);
+        if (last.length >= 4 && !/\d/.test(last)) add(last, { make, model, first: true });
+      }
+    }
+  modelIdx = out;
+  return out;
+}
+const MAKE_WORDS = (() => {
+  const m = new Map<string, string>();
+  for (const make of Object.keys(CAR_CATALOG)) m.set(keyOf(make), make);
+  for (const [k, make] of Object.entries(ALIASES)) m.set(keyOf(k), make);
+  return m;
+})();
+
+/** The car a line (or a paper's car line) names, and which of its words are the car's. */
+export function carOfLine(text?: string): { make?: string; model?: string; words: number[] } {
+  const words = (text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const idx = modelIndex();
+  const made = new Set<string>();
+  const mine: number[] = [];
+  words.forEach((w, i) => {
+    const m = MAKE_WORDS.get(w);
+    if (m && !(w === 'mini' || w === 'tank')) {
+      made.add(m);
+      mine.push(i);
+    }
+  });
+  for (let i = 0; i < words.length; i++) {
+    // «LC200», «LC300», «LC76» — a Land Cruiser
+    if (/^lc\d{2,3}$/.test(words[i])) return { make: 'Toyota', model: 'Land Cruiser', words: [...mine, i] };
+    for (const n of [3, 2, 1]) {
+      if (i + n > words.length) continue;
+      const hits = (idx.get(words.slice(i, i + n).join('')) ?? []).filter((h) => (!h.first || i === 0 || made.has(h.make)) && (!made.size || made.has(h.make)));
+      if (!hits.length) continue;
+      const makes = new Set(hits.map((h) => h.make));
+      if (makes.size > 1) continue;
+      const at = Array.from({ length: n }, (_, k) => i + k);
+      // one model, or several of one make («Cruiser» of two) — the make alone
+      return hits.length === 1 ? { make: hits[0].make, model: hits[0].model, words: [...mine, ...at] } : { make: hits[0].make, words: [...mine, ...at] };
+    }
+  }
+  if (made.size === 1) return { make: [...made][0], words: mine };
+  return { words: [] };
+}
+
+/** A line's part without its car (and «HYBRID», a year): «TUCSON AC EXPANSION VALVE QWE» → «AC EXPANSION VALVE QWE». */
+export function partWithoutCar(text: string): string {
+  const car = carOfLine(text);
+  // the same words carOfLine counts (letters and digits), in their own case
+  const toks = text.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  return lineName(toks.filter((w, i) => !car.words.includes(i) && !/^(hybrid|hibrid|hyb)$/i.test(w) && !/^(19|20)\d{2}$/.test(w)).join(' '));
+}
+
 /** The car some words name: the make (one only), and its model of the catalogue when the words name one. */
 export function carOfText(text?: string): { make?: string; model?: string } {
+  const line = carOfLine(text);
+  if (line.make) return { make: line.make, ...(line.model ? { model: line.model } : {}) };
   if (!text?.trim()) return {};
   const makes = makesInText(text);
   if (makes.length !== 1) return {};
@@ -118,13 +203,18 @@ export function paperFields(read: ReceiptRead, today = dubaiDate()): PaperFields
   const car = String(read.carText ?? '').trim().slice(0, 80) || undefined;
   const paperCar = carOfText(car);
   const lines: PaperItem[] = x.items.map((i) => {
-    const own = carOfText(i.car);
+    // The line's own car (v1.05.1): the AI's reading of it, else the line's own words («SANTAFE AC VALVE»), else the paper's.
+    const said = carOfText(i.car);
+    const own = said.make ? said : carOfText(i.name);
     const make = own.make ?? paperCar.make;
     const model = own.make && own.make !== paperCar.make ? own.model : own.model ?? paperCar.model;
-    const k = lineKind(i.name, make);
+    const brand = i.brand;
+    const k = lineKind(brand ? `${i.name} ${brand}` : i.name, make);
+    // What the part is: the AI's name for it, else the line without its car — never with the car's words in it.
+    const part = partWithoutCar(i.part || i.name);
     return {
       name: i.name,
-      ...(i.part ? { part: lineName(i.part) } : {}),
+      ...(part ? { part } : {}),
       ...(i.partNumber ? { partNumber: i.partNumber } : {}),
       qty: i.qty,
       ...(i.unitNetFils !== undefined ? { unitFils: i.unitNetFils } : {}),
@@ -133,7 +223,7 @@ export function paperFields(read: ReceiptRead, today = dubaiDate()): PaperFields
       ...(model ? { model } : {}),
       kind: k.kind,
       ...(k.said ? {} : { unsure: true as const }),
-      ...(k.brand ? { brand: k.brand } : {}),
+      ...(brand || k.brand ? { brand: brand ?? k.brand } : {}),
     };
   });
   const net = x.amountFils - x.vatFils;

@@ -27,6 +27,9 @@ export interface BoughtLine {
   title: string;
   /** Its name as shown (what was bought: «Брали: …»). */
   name?: string;
+  /** v1.05.1: the car's model, and what one piece cost (the line's cost, the invoice's price). */
+  model?: string;
+  fils?: number;
   /** v1.05: off a supplier's paper invoice (`orderId` is the paper's): a purchase, not a job. */
   paper?: true;
 }
@@ -51,6 +54,7 @@ const NONE: SupplierUse = { jobs: 0, papers: 0, lines: 0, makeJobs: {}, returns:
 export const buys = (u: Pick<SupplierUse, 'jobs' | 'papers'>) => u.jobs + u.papers;
 
 const makeKey = (m?: string) => (m ? canonicalMake(m).toLowerCase() : '');
+const modelKey = (m?: string) => (m ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 export function supplierUse(lines: BoughtLine[], returns: { supplierId?: string }[] = []): Map<string, SupplierUse> {
   const jobs = new Map<string, Set<string>>();
@@ -180,7 +184,8 @@ export function rankSuppliers(list: Supplier[], use: Map<string, SupplierUse>, n
 export type Why =
   | { kind: 'onJob' }
   | { kind: 'boughtFor'; make: string; jobs: number }
-  | { kind: 'sold'; part: string; times: number }
+  /** It sold such a part (v1.05.1: for this very model — `model`, its last price `fils`). */
+  | { kind: 'sold'; part: string; times: number; model?: string; fils?: number }
   | { kind: 'make'; make: string }
   | { kind: 'sells'; part: string }
   /** The manager's mark (v0.71): good — first, silent — does not answer, last. */
@@ -205,6 +210,8 @@ export interface Ranked {
 
 export interface JobNeeds {
   make?: string;
+  /** v1.05.1: the car's model — a part sold for this very model counts most. */
+  model?: string;
   /** The job's parts (or service lines for contractors): their shown name and what is searched. */
   parts: { name: string; title: string }[];
   /** Suppliers already on its lines (picked, offered, handed to). */
@@ -231,13 +238,14 @@ function speaksOf(part: ReturnType<typeof partTerms>, x: Indexed): boolean {
  */
 export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, history: BoughtLine[], job: JobNeeds, now: string, know?: Map<string, SupplierKnow>, top?: Map<string, number>): Ranked[] {
   const make = makeKey(job.make);
+  const model = modelKey(job.model);
   const parts = job.parts.map((p) => ({ name: p.name, terms: partTerms(p.title) })).filter((p) => p.terms.length);
   // What each supplier sold before, prepared once.
-  const sold = new Map<string, { x: Indexed; name?: string }[]>();
+  const sold = new Map<string, { x: Indexed; name?: string; make?: string; model?: string; fils?: number }[]>();
   for (const l of history) {
     let a = sold.get(l.supplierId);
     if (!a) sold.set(l.supplierId, (a = []));
-    a.push({ x: indexText(l.title), name: l.name });
+    a.push({ x: indexText(l.title), name: l.name, make: l.make, model: l.model, fils: l.fils });
   }
   // Taken off by the manager (v0.71): not in a job's list (`offOf` — folded under it).
   const ranked = list.filter((s) => s.mark !== 'off').map((s): Ranked => {
@@ -269,15 +277,27 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
     }
     const theirs = sold.get(s.id) ?? [];
     let partsSold = 0;
+    let carSold = 0;
     let firstSold: Why | undefined;
+    let forCar: Why | undefined;
     for (const p of parts) {
       const same = theirs.filter((h) => speaksOf(p.terms, h.x));
       if (!same.length) continue;
       partsSold++;
+      // v1.05.1 (the owner: «такой же деталь для такого же автомобиля — ты покупал у этого поставщика»): for this very model.
+      const mine = model ? same.filter((h) => modelKey(h.model) === model && (!make || !h.make || makeKey(h.make) === make)) : [];
+      if (mine.length) {
+        carSold++;
+        const last = mine[mine.length - 1];
+        forCar ??= { kind: 'sold', part: last.name || p.name, times: mine.length, model: job.model, ...(last.fils ? { fils: last.fils } : {}) };
+      }
       // What they sold (its own name, the latest), else the job's part.
       firstSold ??= { kind: 'sold', part: same.at(-1)!.name || p.name, times: same.length };
     }
-    if (firstSold) {
+    if (forCar) {
+      score += Math.min(120, 60 * carSold) + Math.min(20, 10 * partsSold);
+      why.push(forCar);
+    } else if (firstSold) {
       score += Math.min(40, 20 * partsSold);
       why.push(firstSold);
     }

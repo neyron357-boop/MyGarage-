@@ -502,7 +502,7 @@ export const en: typeof ru = {
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
-  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', queuedReview: 'Check and send · {{n}}', best: 'Best · {{n}}', textTitle: 'The request', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}', top: 'Main' },
+  ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', queuedReview: 'Check and send · {{n}}', best: 'Best · {{n}}', textTitle: 'The request', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}', top: 'Main', soldFor: 'Bought {{part}} for {{model}}', sold: 'Bought: {{part}}' },
   // v1.05: the multi-scanner of the suppliers' old invoices.
   papers: {
     title: 'Supplier invoices',
@@ -1275,6 +1275,8 @@ export const en: typeof ru = {
     reissued: 'Done: credit note {{credit}}, new invoice {{invoice}}',
   },
   job: {
+    // v1.05.1: this part for this model was bought before (a supplier's invoice).
+    boughtBefore: 'Bought from {{who}} · {{price}}',
     // v0.81: the quote's state in the job.
     quoteUnsent: 'Quote not sent',
     readyUntold: 'Customer not told',

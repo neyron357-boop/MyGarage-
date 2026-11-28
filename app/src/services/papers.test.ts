@@ -142,6 +142,43 @@ describe('the suppliers’ paper invoices read in bulk (v1.05)', () => {
     expect(await notePaperPrices(a.id)).toBe(2);
   });
 
+  it('v1.05.1: the car in the line («SANTAFE AC EXPANSION VALVE QWE»): a Santa Fe job’s line says who sold it and for how much, that seller comes first with it', async () => {
+    READS.E = {
+      isReceipt: true,
+      vendor: 'Desert Star Spare Parts LLC',
+      vendorTrn: '100000000000005',
+      kind: 'parts',
+      invoiceNo: '97001',
+      dateText: '10-Nov-2026',
+      date: '2026-11-10',
+      items: [{ name: 'SANTAFE AC EXPANSION VALVE QWE', part: 'AC EXPANSION VALVE', car: 'SANTAFE', brand: 'QWE', qty: 1, unitPrice: 85, total: 89.25 }],
+      subtotal: 85,
+      vat: 4.25,
+      total: 89.25,
+      confidence: 0.9,
+    };
+    // Another seller sold the same valve for another model.
+    READS.F = { isReceipt: true, vendor: 'Blue Gulf Auto Parts', vendorTrn: '100000000000006', kind: 'parts', invoiceNo: '5501', dateText: '01-Nov-2026', date: '2026-11-01', items: [{ name: 'TUCSON AC EXPANSION VALVE', part: 'AC EXPANSION VALVE', car: 'TUCSON', qty: 1, unitPrice: 70, total: 73.5 }], subtotal: 70, vat: 3.5, total: 73.5, confidence: 0.9 };
+    await addPapers([photo('E'), photo('F')]);
+    await readPapers();
+    const star = (await db.suppliers.toArray()).find((s) => /desert/i.test(s.name))!;
+    const point = (await db.priceBook.where('id').startsWith('paper:').toArray()).find((p) => p.supplierId === star.id)!;
+    expect([point.part, point.make, point.model, point.brand, point.costFils, point.name]).toEqual(['AC EXPANSION VALVE', 'Hyundai', 'Santa Fe', 'QWE', 8500, 'SANTAFE AC EXPANSION VALVE QWE']);
+    const c = await createCustomer({ name: 'Omar', phone: '050 765 4321', preferredChannel: 'whatsapp', docLanguage: 'en', type: 'individual' });
+    const o = await checkIn({ customerId: c.id, plate: { emirate: 'DXB', code: 'K', number: '22222' }, make: 'Hyundai', model: 'Santa Fe', name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', arrivedNow: true });
+    const valve = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'AC expansion valve', unitPriceFils: 0 });
+    const { boughtBeforeFor } = await import('./priceBook');
+    expect((await boughtBeforeFor(o.id)).get(valve.id)).toMatchObject({ supplier: 'Desert Star Spare Parts LLC', fils: 8500 });
+    const job = (await suppliersForJob(o.id, 'en'))!;
+    const first = job.parts[0];
+    expect(first.supplier.id).toBe(star.id);
+    expect(first.why.find((w) => w.kind === 'sold')).toMatchObject({ model: 'Santa Fe', fils: 8500 });
+    const other = job.parts.find((r) => /blue gulf/i.test(r.supplier.name))!;
+    expect(other.why.find((w) => w.kind === 'sold')).not.toHaveProperty('model');
+    delete READS.E;
+    delete READS.F;
+  });
+
   it('not read (no server): kept, read again later; a picture that is no invoice is said so', async () => {
     down = true;
     await addPapers([photo('A'), photo('N')]);

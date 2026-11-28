@@ -120,7 +120,7 @@ function PricesSheet({ g, suppliers, onClose }: { g: PriceGroup | null; supplier
                   {p.ai && <AiMark size={12} label={t('ai.offerByAi')} />}
                 </span>
               }
-              subtitle={[t(KIND_WORD[p.kind]) + (p.unsure ? '?' : ''), p.via === 'paper' ? [t('papers.paperWord'), p.invoiceNo ? `№${p.invoiceNo}` : ''].filter(Boolean).join(' ') : '', p.brand, [p.make, p.model, p.year].filter(Boolean).join(' '), p.vin ? `VIN …${p.vin.slice(-6)}` : '', dayWord(p.at)].filter(Boolean).join(' · ')}
+              subtitle={[t(KIND_WORD[p.kind]) + (p.unsure ? '?' : ''), p.via === 'paper' ? [p.name, t('papers.paperWord'), p.invoiceNo ? `№${p.invoiceNo}` : ''].filter(Boolean).join(' ') : '', p.brand, [p.make, p.model, p.year].filter(Boolean).join(' '), p.vin ? `VIN …${p.vin.slice(-6)}` : '', dayWord(p.at)].filter(Boolean).join(' · ')}
               right={p.na || p.costFils === undefined ? <Text size="sm" c="dimmed">{t('priceBook.na')}</Text> : <Money fils={p.costFils} />}
             />
           ))}

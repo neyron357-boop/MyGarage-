@@ -101,6 +101,8 @@ import { celebrate } from '../../ui/motion';
 import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from '../../ui/hooks';
+import { useCalmQuery } from '../../ui/calmQuery';
+import { boughtBeforeFor } from '../../services/priceBook';
 import { useDesk, useDeskHotkeys, useDeskPane } from '../../ui/desk';
 import { openTwin, useTwin } from '../../ui/deskTwin';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
@@ -721,6 +723,10 @@ export function JobPage() {
   const expenses = useScreenLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
   // «Запчасти» in the money book: the job's expenses there bought its parts — counted once with them (v0.31).
   const partsCat = useScreenLiveQuery(async () => (await db.expenseCategories.where('code').equals('parts').first())?.id ?? '', []);
+  // v1.05.1: a part with no cost yet that the garage bought before for this very car's model (a supplier's invoice) — who and
+  // for how much, under the line (read calmly: the price book grows as invoices are read).
+  const partsKey = (b?.items ?? []).filter((i) => i.kind === 'part' && i.costPriceFils === undefined).map((i) => `${i.id}:${i.titleEn ?? i.titleRu ?? ''}`).join('|');
+  const boughtBefore = useCalmQuery(['priceBook', 'suppliers'], () => (id && partsKey ? boughtBeforeFor(id) : Promise.resolve(new Map())), [id, partsKey]);
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
@@ -1002,6 +1008,11 @@ export function JobPage() {
         ),
         outNote(i),
         whoNote(i),
+        boughtBefore?.get(i.id) && i.costPriceFils === undefined && (
+          <span key="bought" className="bought-before" data-bought-before={i.id}>
+            {t('job.boughtBefore', { who: boughtBefore.get(i.id)!.supplier, price: formatAed(boughtBefore.get(i.id)!.fils) })}
+          </span>
+        ),
         i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : '',
       ])}
       right={

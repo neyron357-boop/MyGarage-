@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { carOfText, expenseOf, lineKind, paperDate, paperDoubts, paperFields, paperStats, twinOf } from './papers';
+import { carOfLine, carOfText, expenseOf, lineKind, paperDate, paperDoubts, paperFields, paperStats, partWithoutCar, twinOf } from './papers';
 import type { SupplierPaper } from './types';
 
 /*
@@ -17,6 +17,54 @@ describe('an old paper’s day', () => {
     expect(paperDate({ dateText: '', date: '2027-12-20' }, TODAY)).toEqual({ date: undefined, sure: false });
     expect(paperDate({ dateText: '', date: '2015-01-01' }, TODAY)).toEqual({ sure: false });
     expect(paperDate({}, TODAY)).toEqual({ sure: false });
+  });
+});
+
+describe('v1.05.1: the car a line names, as the garage’s suppliers write it (the model first)', () => {
+  it('the model in the line — written together or apart, its own last word, «LC200»; an everyday-word model only first', () => {
+    expect(carOfLine('SANTAFE AC EXPANSION VALVE QWE')).toMatchObject({ make: 'Hyundai', model: 'Santa Fe' });
+    expect(carOfLine('SANTA FE AC VALVE')).toMatchObject({ make: 'Hyundai', model: 'Santa Fe' });
+    expect(carOfLine('CAMRY HIBRID COOLING FAN ZRT')).toMatchObject({ make: 'Toyota', model: 'Camry' });
+    expect(carOfLine('PRADO SHOCK ABSORBER REAR')).toMatchObject({ make: 'Toyota', model: 'Land Cruiser Prado' });
+    expect(carOfLine('LC200 BRAKE PAD FRONT')).toMatchObject({ make: 'Toyota', model: 'Land Cruiser' });
+    expect(carOfLine('ACCENT HEADLIGHT LH')).toMatchObject({ make: 'Hyundai', model: 'Accent' });
+    // «accent» further in is a word, not the car
+    expect(carOfLine('HEADLIGHT ACCENT TRIM').make).toBeUndefined();
+    expect(carOfLine('NISSAN SUNNY GEAR FILTER')).toMatchObject({ make: 'Nissan', model: 'Sunny' });
+    expect(carOfLine('OIL FILTER').make).toBeUndefined();
+  });
+  it('the part is the line without its car (and «HYBRID», a year)', () => {
+    expect(partWithoutCar('SANTAFE AC EXPANSION VALVE QWE')).toBe('AC EXPANSION VALVE QWE');
+    expect(partWithoutCar('CAMRY HIBRID COOLING FAN ZRT')).toBe('COOLING FAN ZRT');
+    expect(partWithoutCar('TOYOTA CAMRY 2018 RADIATOR HOSE')).toBe('RADIATOR HOSE');
+    expect(partWithoutCar('FAN MOTOR')).toBe('FAN MOTOR');
+  });
+  it('a paper of such lines: each line its own car, its part without it, its brand apart', () => {
+    const f = paperFields(
+      {
+        isReceipt: true,
+        vendor: 'Desert Star Spare Parts LLC',
+        kind: 'parts',
+        invoiceNo: '97001',
+        dateText: '10-Nov-2026',
+        date: '2026-11-10',
+        items: [
+          // as the garage's AI read a real one: the car apart, the part apart, the code apart
+          { name: 'CAMRY HIBRID COOLING FAN ZRT', part: 'COOLING FAN', car: 'CAMRY HIBRID', brand: 'ZRT', qty: 2, unitPrice: 140, total: 294 },
+          // the phone's reading: only the line — its car and part from its own words
+          { name: 'SANTAFE AC EXPANSION VALVE QWE', qty: 1, unitPrice: 65, total: 68.25 },
+        ],
+        subtotal: 345,
+        vat: 17.25,
+        total: 362.25,
+        confidence: 0.9,
+      },
+      TODAY,
+    );
+    expect(f.lines.map((l) => [l.part, l.make, l.model, l.brand, l.unitFils, l.kind])).toEqual([
+      ['COOLING FAN', 'Toyota', 'Camry', 'ZRT', 14000, 'aftermarket'],
+      ['AC EXPANSION VALVE QWE', 'Hyundai', 'Santa Fe', undefined, 6500, 'aftermarket'],
+    ]);
   });
 });
 

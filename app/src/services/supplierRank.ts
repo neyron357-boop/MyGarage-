@@ -24,15 +24,16 @@ export async function boughtLines(): Promise<BoughtLine[]> {
   const orders = await db.orders.bulkGet(orderIds);
   const vehicleOf = new Map(orders.filter((o) => !!o).map((o) => [o!.id, o!.vehicleId]));
   const vehicles = await db.vehicles.bulkGet([...new Set(vehicleOf.values())]);
-  const makeOf = new Map(vehicles.filter((v): v is Vehicle => !!v).map((v) => [v.id, v.make]));
+  const carOf = new Map(vehicles.filter((v): v is Vehicle => !!v).map((v) => [v.id, v]));
   const out: BoughtLine[] = [];
   for (const i of items) {
     // Orders gone with their job (deleted) say nothing any more.
     if (!vehicleOf.has(i.orderId)) continue;
-    const make = makeOf.get(vehicleOf.get(i.orderId)!);
+    const car = carOf.get(vehicleOf.get(i.orderId)!);
+    const make = car?.make;
     const at = i.orderedAt ?? i.receivedAt ?? i.outsource?.sentAt ?? i.createdAt;
     const who = i.kind === 'part' ? i.supplierId : i.outsource?.supplierId ?? i.supplierId;
-    if (who) out.push({ supplierId: who, orderId: i.orderId, at, make, title: titleOf(i), name: lineName(i.titleEn || i.titleRu || '', i.kind) || undefined });
+    if (who) out.push({ supplierId: who, orderId: i.orderId, at, make, model: car?.model || undefined, fils: i.costPriceFils || undefined, title: titleOf(i), name: lineName(i.titleEn || i.titleRu || '', i.kind) || undefined });
   }
   // v1.05: what the suppliers' paper invoices say was bought (a paper is a purchase of its own, its lines with its car).
   const papers = await db.papers.where('state').anyOf(['done', 'look']).toArray();
@@ -42,7 +43,7 @@ export async function boughtLines(): Promise<BoughtLine[]> {
     for (const l of p.lines ?? []) {
       const name = partOfLine(l);
       if (!name) continue;
-      out.push({ supplierId: p.supplierId, orderId: `paper:${p.id}`, at, make: l.make ?? p.make, title: [l.name, l.part, l.partNumber, l.brand].filter(Boolean).join(' '), name, paper: true });
+      out.push({ supplierId: p.supplierId, orderId: `paper:${p.id}`, at, make: l.make ?? p.make, model: l.model ?? (l.make && l.make !== p.make ? undefined : p.model), fils: l.unitFils, title: [l.name, l.part, l.partNumber, l.brand].filter(Boolean).join(' '), name, paper: true });
     }
   }
   return out.sort((a, b) => a.at.localeCompare(b.at));
@@ -193,8 +194,8 @@ export async function suppliersForJob(orderId: string, lang: Lang): Promise<{ pa
   const doers = withChats.filter((s) => !!s.service);
   const marked = (list: Ranked[]) => list.map((r) => (chatOf.has(r.supplier.id) ? { ...r, chat: chatOf.get(r.supplier.id) } : r));
   return {
-    parts: marked(rankForJob(sellers, use, history, { make: vehicle?.make, parts: partLines.map(named), onJob }, now, know, topOf)),
-    contractors: handed.length ? marked(rankForJob(doers, use, history, { make: vehicle?.make, parts: handed.map(named), onJob }, now, know, topOf)) : [],
+    parts: marked(rankForJob(sellers, use, history, { make: vehicle?.make, model: vehicle?.model, parts: partLines.map(named), onJob }, now, know, topOf)),
+    contractors: handed.length ? marked(rankForJob(doers, use, history, { make: vehicle?.make, model: vehicle?.model, parts: handed.map(named), onJob }, now, know, topOf)) : [],
     // Taken off the list by the manager (v0.71): folded under it, to bring back.
     off: all.filter((s) => s.mark === 'off').sort((a, b) => a.name.localeCompare(b.name)),
     partLines,

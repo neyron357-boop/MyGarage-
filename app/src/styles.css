@@ -11220,3 +11220,7 @@ button.supplier-papers .supplier-stats {
 .supplier-papers-makes {
   font-size: 13px;
 }
+/* v1.05.1: under a part line — bought before for this very model (who, for how much), from a supplier's invoice. */
+.bought-before {
+  color: var(--mantine-color-teal-7);
+}
