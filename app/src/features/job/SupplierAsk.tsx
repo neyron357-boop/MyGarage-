@@ -255,6 +255,8 @@ function whyWords(r: Ranked, t: (k: string, o?: Record<string, unknown>) => stri
   // v1.05.1: bought from it before — this part for this very model (its last price), or such a part.
   const sold = r.why.find((w): w is Extract<Why, { kind: 'sold' }> => w.kind === 'sold');
   if (sold?.model) out.push([t('ask.soldFor', { part: sold.part, model: sold.model }), sold.fils ? formatAed(sold.fils) : ''].filter(Boolean).join(' · '));
+  // v1.06: for this make (no model said on its invoice, or another model of it)
+  else if (sold?.make) out.push([t('ask.soldFor', { part: sold.part, model: sold.make }), sold.fils ? formatAed(sold.fils) : ''].filter(Boolean).join(' · '));
   else if (sold) out.push(t('ask.sold', { part: sold.part }));
   if (r.why.some((w) => w.kind === 'onJob')) out.push(t('suppliers.why.onJob'));
   const make = r.why.find((w): w is Extract<Why, { kind: 'make' | 'answers' | 'aiMake' | 'boughtFor' }> => w.kind === 'make' || w.kind === 'answers' || w.kind === 'aiMake' || w.kind === 'boughtFor');
@@ -262,6 +264,8 @@ function whyWords(r: Ranked, t: (k: string, o?: Record<string, unknown>) => stri
   const seen = r.know?.seen;
   if (seen?.replyMin !== undefined && seen.answered >= 2) out.push(t('ask.replies', { time: replyTime(t, seen.replyMin) }));
   if (partsType(s) === 'used') out.push(t('ask.used'));
+  // v1.06: how much the garage bought from it — its invoices said in so many words («12 инвойсов»)
+  if (r.use.papers) out.push(`${r.use.papers} ${t('papers.papersWord', { count: r.use.papers })}`);
   if (r.use.jobs && out.length < 3) out.push(t('suppliers.jobs', { count: r.use.jobs }));
   return out.slice(0, 4).join(' · ');
 }
@@ -277,7 +281,7 @@ function SupplierPick({ r, on, onTap, link }: { r: Ranked; on: boolean; onTap: (
   const chat = r.chat ?? chatIdOf(s.phone);
   return (
     <div className="ask-row-wrap">
-      <button type="button" className="ask-row" aria-pressed={on} onClick={onTap} data-ask-supplier={s.id} data-ask-chat-only={r.chat ? true : undefined} data-ask-top={r.why.some((w) => w.kind === 'top') || undefined}>
+      <button type="button" className="ask-row" aria-pressed={on} onClick={onTap} data-ask-supplier={s.id} data-ask-chat-only={r.chat ? true : undefined} data-ask-top={r.why.some((w) => w.kind === 'top') || undefined} data-ask-sold={r.why.find((w): w is Extract<Why, { kind: 'sold' }> => w.kind === 'sold')?.model ? 'model' : r.why.find((w): w is Extract<Why, { kind: 'sold' }> => w.kind === 'sold')?.make ? 'make' : undefined}>
         {on ? <IconCircleCheckFilled size={22} className="ask-check" data-on aria-hidden /> : <IconCircle size={22} stroke={1.6} className="ask-check" aria-hidden />}
         {chat ? <WaAvatar id={chat} name={s.name} size={36} /> : <PersonAvatar name={s.name} size={36} />}
         <span className="ask-row-main">

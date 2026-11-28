@@ -11224,3 +11224,95 @@ button.supplier-papers .supplier-stats {
 .bought-before {
   color: var(--mantine-color-teal-7);
 }
+
+/* v1.06: the history's prices of a part on the job — under its name, a row of chips (who, how much, which car, when); the one
+   on the line in teal. Its own row under the line's words; never cut: the supplier shortened, the rest whole. */
+.hist-offers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  width: 100%;
+}
+.chip.hist-offer {
+  /* two lines: who; how much, for which car, when */
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  max-width: 100%;
+  text-align: left;
+  height: auto;
+  min-height: 44px;
+  padding: 5px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  color: var(--mantine-color-teal-8);
+  background: var(--mantine-color-teal-light);
+}
+.chip.hist-offer[data-near='1'] {
+  color: var(--app-label-2);
+  background: var(--app-fill, rgba(120, 120, 128, 0.12));
+}
+.chip.hist-offer[data-active] {
+  color: #fff;
+  background: var(--mantine-color-teal-filled);
+}
+.chip.hist-offer .chip-note {
+  color: inherit;
+  opacity: 0.75;
+  margin-left: 2px;
+  white-space: nowrap;
+}
+.hist-offer-top,
+.hist-offer-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+.hist-offer-who {
+  max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+/* v1.06: a suggestion bought for this car before — the car and from whom, in teal (its make only — grey). */
+.qa-bought {
+  /* a line of its own under the row */
+  text-transform: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-basis: 100%;
+  order: 9;
+  margin-top: -2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mantine-color-teal-7);
+}
+.qa-bought[data-qa-bought='1'] {
+  color: var(--app-label-2);
+}
+.qa-row[data-bought] {
+  flex-wrap: wrap;
+}
+.qa-bought-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* v1.06: «Брали по инвойсам» above the suppliers searched — the line as printed, whole (two lines at most). */
+.bought-search .bought-hit-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-weight: 600;
+}

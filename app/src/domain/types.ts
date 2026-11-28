@@ -861,6 +861,11 @@ export interface OrderItem {
    */
   costBy?: { offer: string; fils: number; price?: number };
   /**
+   * v1.06: its cost taken from the garage's history (a part bought before for this car — a paper invoice, or a supplier's word on
+   * another job): the record (`PricePoint`), its cost, and the customer's price it put by the markup. Typed by hand — gone.
+   */
+  costFrom?: { point: string; fils: number; price?: number; at?: string };
+  /**
    * Left by the AI's search for the part's number (v0.48–v0.84: the numbers it found, their catalogues' word) — gone
    * v0.85 by the owner's decision. Records may still hold it; nothing reads or writes it now (kept as data, no migration).
    */
@@ -971,6 +976,8 @@ export interface PricePoint {
   qty?: number;
   /** v1.05.2: the other models the paper's line fits («RIO/ACCENT/VELOSTR»: «Hyundai Accent», «Hyundai Veloster»). */
   fits?: string[];
+  /** v1.06: a service's line on the paper (an alignment, a disc skimmed, a part fitted): what work cost — no part's price. */
+  service?: true;
   updatedAt: string;
   _t?: number;
 }
@@ -996,6 +1003,8 @@ export interface PaperItem {
   /** v1.05.2: every other model the line names («RIO/ACCENT/VELOSTR»), and what the AI said of it (its words are tidied again by newer rules). */
   fits?: { make: string; model: string }[];
   said?: { part?: string; car?: string; brand?: string; kind?: 'oem' | 'aftermarket' | 'used' };
+  /** v1.06: work done, not a part (an alignment, «… SKIMMING», «… FITTING»): kept, not offered as a part's price. */
+  service?: true;
 }
 
 /**
@@ -1029,6 +1038,8 @@ export interface SupplierPaper {
   dateSure?: boolean;
   /** The day set or accepted by a person (v1.05.2): the suppliers' numbering does not move it. */
   dateBy?: 'hand';
+  /** «Не дубль» (v1.06): a person said it is a paper of its own — the sweep of twins never makes it one again. */
+  alone?: true;
   totalFils?: number;
   vatFils?: number;
   method?: Expense['method'];

@@ -1,5 +1,5 @@
 import { ActionIcon, Button, Group, Loader, Modal, SegmentedControl, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
-import { IconBrandWhatsapp, IconCamera, IconMapPin, IconPhone, IconPinFilled, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
+import { IconBrandWhatsapp, IconCamera, IconHistory, IconMapPin, IconPhone, IconPinFilled, IconPlus, IconStar, IconStarFilled, IconTruck } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,13 +13,15 @@ import { dayShort, formatDate } from '../../domain/dates';
 import { formatAed } from '../../domain/money';
 import { supplierPaperStats } from '../../services/papers';
 import { suppliersRanked } from '../../services/supplierRank';
+import { askAgain, askAgainText, searchBoughtParts } from '../../services/priceBook';
+import { waCan } from '../../services/whatsapp';
 import { replyTime, SupplierProfile } from '../whatsapp/WaParts';
 import { StarsPill } from '../job/SupplierAsk';
 import type { Supplier } from '../../domain/types';
 import { supplierChatLink } from '../../domain/supplierBook';
 import { whatsappUrl } from '../../services/messages';
 import { archiveSupplier, saveSupplier, setSupplierCard } from '../../services/parts';
-import { ContactTiles, EmptyState, FormRow, List, ListRow, SearchField, undoToast } from '../../ui/components';
+import { ContactTiles, EmptyState, FormRow, List, ListRow, Money, SearchField, undoToast } from '../../ui/components';
 import { haptic } from '../../ui/haptics';
 import { typedOnly, useAction, useLang, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { DataTable, type Column } from '../../ui/DataTable';
@@ -409,7 +411,7 @@ function PaperBlock({ supplierId, onOpen }: { supplierId: string; onOpen: () => 
  * A supplier's row on the phone (v0.60.1): drawn again only when its supplier, area or jobs change — a list of a thousand
  * drawn as it is scrolled does not draw the rows above again each time it grows.
  */
-const SupplierRow = memo(function SupplierRow({ s, area, jobs, know, top, onOpen }: { s: Supplier; area?: string; jobs: number; know?: SupplierKnow; top?: boolean; onOpen: (s: Supplier) => void }) {
+const SupplierRow = memo(function SupplierRow({ s, area, jobs, papers, know, top, onOpen }: { s: Supplier; area?: string; jobs: number; papers?: number; know?: SupplierKnow; top?: boolean; onOpen: (s: Supplier) => void }) {
   const { t } = useTranslation();
   return (
     <ListRow
@@ -425,6 +427,8 @@ const SupplierRow = memo(function SupplierRow({ s, area, jobs, know, top, onOpen
         [
           area ?? '',
           jobs ? t('suppliers.jobs', { count: jobs }) : '',
+          // v1.06: its invoices read — how much the garage bought from it before the app
+          papers ? `${papers} ${t('papers.papersWord', { count: papers })}` : '',
           s.service ? t('suppliers.contractor') : partsType(s) ? t(`suppliers.cond.${partsType(s)}`) : '',
           s.makes?.join(', '),
           s.parts,
@@ -456,6 +460,72 @@ const SupplierRow = memo(function SupplierRow({ s, area, jobs, know, top, onOpen
 });
 
 /**
+ * The parts bought, searched (v1.06, the owner: «в поиске поставщиков любую запчасть из истории инвойсов… передний бампер
+ * Toyota Land Cruiser… у этого поставщика уже куплена была… заново могу запрос дать ему для точности»): a part and a car typed —
+ * the invoices' lines that fit, this car first: the line as printed, who, for how much (one piece, without VAT), when; a tap —
+ * the supplier's card; «Спросить» — the question to it in «Проверить и отправить» (sent only by the manager's tap).
+ */
+function BoughtSearch({ found, onOpen }: { found?: Awaited<ReturnType<typeof searchBoughtParts>>; onOpen: (s: Supplier) => void }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const { run } = useAction();
+  if (!found?.hits.length) return null;
+  const hits = found.hits.slice(0, 12);
+  return (
+    <div className="bought-search" data-bought-search={found.hits.length}>
+      <div className="group-title">
+        {t('suppliers.bought.title')}
+        <span className="count">{found.hits.length}</span>
+      </div>
+      <List>
+        {hits.map(({ point: p, near }) => {
+          const sup = found.suppliers.get(p.supplierId ?? '');
+          return (
+            <ListRow
+              key={p.id}
+              onClick={sup ? () => onOpen(sup) : undefined}
+              left={<IconHistory size={20} stroke={1.9} color={near >= 2 ? 'var(--mantine-color-teal-6)' : 'var(--app-label-2)'} aria-hidden />}
+              title={<span className="bought-hit-name">{p.name || p.part}</span>}
+              subtitle={[sup?.name ?? t('priceBook.someone'), [p.make, p.model].filter(Boolean).join(' ') || t('suppliers.bought.noCar'), `${p.at.slice(5, 7)}/${p.at.slice(0, 4)}`, p.kind === 'oem' ? t('priceBook.oem') : ''].filter(Boolean).join(' · ')}
+              right={
+                <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
+                  <Money fils={p.costFils!} />
+                  {sup?.phone && (
+                    <ActionIcon
+                      variant="light"
+                      color="green"
+                      size={36}
+                      radius="xl"
+                      aria-label={t('suppliers.bought.ask')}
+                      data-bought-ask={p.id}
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        if (!waCan()) {
+                          window.open(whatsappUrl(sup.phone!, askAgainText(p, found.car)), '_blank', 'noopener');
+                          return;
+                        }
+                        void run(() => askAgain(p, found.car));
+                      }}
+                    >
+                      <IconBrandWhatsapp size={19} />
+                    </ActionIcon>
+                  )}
+                </Group>
+              }
+            />
+          );
+        })}
+      </List>
+      {found.hits.length > hits.length && (
+        <Text c="dimmed" size="sm" ta="center" mt={6}>
+          {t('suppliers.bought.more', { n: found.hits.length - hits.length, lang })}
+        </Text>
+      )}
+    </div>
+  );
+}
+
+/**
  * The supplier list: a search over names, makes and what they sell; a tap opens the card, the phone
  * and WhatsApp are one tap from the row; one's own list comes in from Excel or CSV. The most used and best rated first
  * (v0.38), each with its stars and how many jobs it supplied.
@@ -471,6 +541,8 @@ export function SuppliersTab() {
   const phone = usePhone();
   const lang = useLang();
   const filter = useSupplierFilter(all);
+  // v1.06: the parts bought, searched with the same words (a part, a car)
+  const bought = useScreenLiveQuery(() => (q.trim().length >= 3 ? searchBoughtParts(q) : Promise.resolve(undefined)), [q]);
   // Found by its name, makes, what it sells — or its number as said here (050…); by region, make and kind (v0.60).
   const list = (all ?? []).filter((s) => filter.pass(s) && supplierMatches(s, q, s.service ? t('suppliers.contractor') : ''));
   const regionOfS = (s: Supplier) => filter.facts.regions.get(s.id);
@@ -535,6 +607,8 @@ export function SuppliersTab() {
     { key: 'makes', label: t('desk.col.makes'), cell: (s) => <span className="dt-clip">{s.service ? t('suppliers.contractor') : s.makes?.join(', ')}</span>, sort: (s) => (s.service ? t('suppliers.contractor') : s.makes?.join(', ') ?? '') },
     { key: 'parts', label: t('desk.col.part'), cell: (s) => <span className="dt-clip">{s.parts}</span>, sort: (s) => s.parts ?? '', muted: true },
     { key: 'jobs', label: t('desk.col.jobs'), cell: (s) => useOf(ranked!.use, s.id).jobs || '', sort: (s) => useOf(ranked!.use, s.id).jobs, desc: true, align: 'right', width: 100 },
+    // v1.06: its invoices read
+    { key: 'papers', label: t('papers.short'), cell: (s) => useOf(ranked!.use, s.id).papers || '', sort: (s) => useOf(ranked!.use, s.id).papers, desc: true, align: 'right', width: 100 },
     { key: 'contact', label: '', cell: (s) => contact(s, 34), align: 'right', width: 150 },
   ];
   return (
@@ -566,6 +640,8 @@ export function SuppliersTab() {
           </div>
         </div>
       )}
+      {/* v1.06: a part (and a car) searched — who sold it to the garage, for how much, when; asked again in one tap */}
+      <BoughtSearch found={bought} onOpen={setEdit} />
       {all.length > 6 && <SupplierFilters all={all} api={filter} />}
       {all.length === 0 ? (
         <EmptyState icon={IconTruck} title={t('parts.noSuppliers')} />
@@ -580,14 +656,14 @@ export function SuppliersTab() {
             </div>
         <List>
           {g.rows.map((s) => (
-            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} know={ranked!.know.get(s.id)} top={ranked!.top.suppliers.has(s.id)} onOpen={setEdit} />
+            <SupplierRow key={s.id} s={s} area={regionOfS(s)?.area} jobs={useOf(ranked!.use, s.id).jobs} papers={useOf(ranked!.use, s.id).papers} know={ranked!.know.get(s.id)} top={ranked!.top.suppliers.has(s.id)} onOpen={setEdit} />
           ))}
         </List>
           </div>
         ))
       )}
       {phone && shown.more()}
-      {list.length === 0 && all.length > 0 && (
+      {list.length === 0 && all.length > 0 && !bought?.hits.length && (
         <Text c="dimmed" ta="center" size="sm">
           {t('suppliers.notFound')}
         </Text>

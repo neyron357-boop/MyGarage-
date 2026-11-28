@@ -1,7 +1,8 @@
 import { lineName } from './items';
 import { labourWords, plainLabour } from './labourName';
 import type { TogetherHint } from './together';
-import type { ApprovalState, Lang } from './types';
+import type { ApprovalState, Lang, PricePoint } from './types';
+import { withMarkup } from './money';
 
 /*
  * The lines offered for one-tap adding, and the price each is offered at (v0.68, the user: «подсказки должны быть
@@ -32,6 +33,11 @@ export interface Suggestion {
   from: PriceFrom;
   /** The day of the line the price is from (YYYY-MM-DD); none — the price list. */
   at?: string;
+  /**
+   * v1.06: bought before for this car (a supplier's paper invoice — `historyOffers`): the record, one piece's cost without VAT,
+   * from whom, when, how near its car is (2 — the model, 1 — the make). A line added from it takes this cost.
+   */
+  bought?: { point: string; fils: number; supplierId: string; who: string; at: string; near: number };
 }
 export type Suggestions = { list: Map<string, Suggestion>; top: string[] };
 /** Per sheet: work (the labour charges), parts, services; `work` — every line that is not a part (the job's chips). */
@@ -163,4 +169,35 @@ export function buildSuggestions(lines: HistLine[], jobs: Map<string, HistJob>, 
     part: pack(maps.part),
     work: pack(maps.work),
   };
+}
+
+/**
+ * v1.06 (the owner: «в подсказках, когда набираю деталь… из истории бралось… детали, которые уже были в истории для этого
+ * автомобиля, чтобы значок автомобиля был в подсказке»): the parts the garage bought for this car (its model — 2, its make — 1;
+ * the suppliers' paper invoices) among a job's part suggestions — on a title of the history, said beside it; a title only
+ * bought, offered with its cost at the markup as the customer's price. The newest of the nearest per title.
+ */
+export function withBought(part: Suggestions, points: PricePoint[], ctx: Pick<PriceContext, 'make' | 'model'>, markupBp: number, who: Map<string, string>): Suggestions {
+  if (!ctx.make) return part;
+  const make = ctx.make.toLowerCase();
+  const model = ctx.model?.toLowerCase();
+  const best = new Map<string, NonNullable<Suggestion['bought']>>();
+  for (const p of points) {
+    if (p.via !== 'paper' || !p.supplierId || p.service || !p.costFils) continue;
+    const fits = (p.fits ?? []).map((f) => f.toLowerCase());
+    const near = model && (p.model?.toLowerCase() === model || fits.includes(`${make} ${model}`)) ? 2 : p.make?.toLowerCase() === make || fits.some((f) => f.startsWith(`${make} `)) ? 1 : 0;
+    if (!near) continue;
+    const title = lineName(p.part.trim());
+    if (!title) continue;
+    const had = best.get(title);
+    if (had && (had.near > near || (had.near === near && had.at >= p.at))) continue;
+    best.set(title, { point: p.id, fils: p.costFils, supplierId: p.supplierId, who: who.get(p.supplierId) ?? '', at: p.at, near });
+  }
+  if (!best.size) return part;
+  const list = new Map(part.list);
+  for (const [title, b] of best) {
+    const had = list.get(title);
+    list.set(title, had ? { ...had, bought: b } : { titleRu: '', titleEn: title, price: withMarkup(b.fils, markupBp), uses: 1, from: b.near >= 2 ? 'model' : 'make', at: b.at.slice(0, 10), bought: b });
+  }
+  return { list, top: part.top };
 }

@@ -47,6 +47,8 @@ const page = `<!doctype html>
 <div class="card" id="wa">…</div>
 <h2>Устройства</h2>
 <div class="card" id="devices">…</div>
+<h2>Копии</h2>
+<div class="card" id="copies">…</div>
 <h2>Где данные</h2>
 <div class="card"><div class="mono" id="folder">…</div><p class="dim" style="margin:8px 0 0">Фото и видео, документы (инвойсы, сметы, акты), база и её ежедневные копии — всё в этой папке.</p></div>
 </main>
@@ -73,6 +75,7 @@ async function load() {
   document.getElementById('tunnel').innerHTML = tunnelHtml(s.tunnel, s.relay);
   if (!aiTyping) document.getElementById('ai').innerHTML = aiHtml(s.ai);
   document.getElementById('push').innerHTML = pushHtml(s.push);
+  document.getElementById('copies').innerHTML = copiesHtml(s.mirror, s.lastBackup);
   // (The QR is the same picture until WhatsApp renews it: not drawn again each time — it would blink.)
   if (!s.wa || s.wa.phase !== 'qr' || s.wa.qrAt !== waQr) document.getElementById('wa').innerHTML = waHtml(s.wa);
   waQr = s.wa && s.wa.phase === 'qr' ? s.wa.qrAt : 0;
@@ -98,6 +101,19 @@ function tunnelHtml(t, r) {
         '<div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="setTunnel(1)">Включить</button><button class="ghost" onclick="askTunnel(false)">Отмена</button></div>'
       : '<button onclick="askTunnel(true)">Включить доступ из интернета</button>');
 }
+// The copies (v1.06, mirror.mjs): the base every hour and every day here; a second copy on a disk or in the OneDrive.
+function copiesHtml(m, day) {
+  if (!m) return '<span class="dim">—</span>';
+  const names = { onedrive: 'OneDrive', drive: 'Диск' };
+  let h = '<div class="row"><span>База — каждый час</span><span>' + (m.hourlyAt ? '<span class="ok">● ' + esc(when(m.hourlyAt)) + '</span> · последние ' + m.hours : '<span class="dim">через минуту после запуска</span>') + '</span></div>' +
+    '<div class="row"><span>База — каждый день</span><span>' + esc(day || '—') + '</span></div>';
+  for (const t of m.targets) h += '<div class="row"><span>' + esc(names[t.kind] || t.kind) + '<br><span class="dim mono">' + esc(t.dir) + '</span></span><span>' + (t.error ? '<span class="bad">не вышло: ' + esc(t.error) + '</span>' : '<span class="ok">● ' + esc(when(t.okAt)) + '</span>' + (t.copied > 1 ? ' · новых файлов ' + (t.copied - 1) : '')) + '</span></div>';
+  if (!m.targets.length) h += '<div class="row"><span>Вторая копия</span><span class="bad">нет — всё только на этом диске</span></div>';
+  h += '<p class="dim" style="margin:8px 0 12px">Вторая копия (база, фото, видео, документы — без служебного) обновляется сама каждый час: на флешке или внешнем диске — создайте на нём папку <span class="mono">' + esc(m.folder) + '</span>; в OneDrive — кнопкой ниже (копия в облаке Microsoft, бесплатно до 5 ГБ).</p>';
+  if (m.oneDrive) h += m.oneDriveOn ? '<button class="ghost" onclick="setCopies(0)">Выключить копию в OneDrive</button>' : '<button onclick="setCopies(1)">Включить копию в OneDrive</button>';
+  return h;
+}
+async function setCopies(on) { await fetch('mirror?onedrive=' + on, { method: 'POST' }); load(); }
 // Notifications on the phones (v0.74, push.mjs): who takes them, what is planned, when the last one went.
 function pushHtml(p) {
   if (!p) return '<span class="dim">—</span>';
@@ -181,7 +197,7 @@ async function copyLink() {
 load(); setInterval(load, 3000);
 </script></body></html>`;
 
-export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push, wa }) {
+export function createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push, wa, mirror }) {
   return async function admin(req, res) {
     const url = new URL(req.url, 'http://local');
     const json = (body) => {
@@ -209,10 +225,16 @@ export function createAdmin({ store, config, pairing, publicUrl, tunnel, events,
         ai: ai?.status() ?? null,
         push: push?.status() ?? null,
         wa: wa?.status() ?? null,
+        mirror: mirror?.status() ?? null,
         ...store.counts(),
       });
     }
     if (req.method === 'POST' && url.pathname === '/code') return json(pairing.issue());
+    // v1.06: the second copy in the owner's OneDrive — turned on and off only here, on this computer.
+    if (req.method === 'POST' && url.pathname === '/mirror' && mirror) {
+      mirror.setOneDrive(url.searchParams.get('onedrive') === '1');
+      return json({ ok: true });
+    }
     // Access from any network: only the owner turns it on, here on this computer.
     if (req.method === 'POST' && url.pathname === '/tunnel' && tunnel && config.tunnelExe) {
       const on = url.searchParams.get('on') === '1';

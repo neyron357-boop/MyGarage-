@@ -7,6 +7,7 @@ import { createAi } from './ai.mjs';
 import { createApi, createPairing } from './api.mjs';
 import { createCards } from './cards.mjs';
 import { createEvents } from './events.mjs';
+import { createMirror } from './mirror.mjs';
 import { createPush } from './push.mjs';
 import { createRelay } from './relay.mjs';
 import { loadConfig, VERSION } from './config.mjs';
@@ -117,13 +118,18 @@ api.listen(config.port, config.host, () => {
   // A permanent address (Docker and Tailscale, or given): the devices have it from the start.
   if (config.publicUrl) relay?.publish(config.publicUrl);
 });
-const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push, wa }));
+// v1.06: the base every hour, and a second copy of everything on a disk or the OneDrive (mirror.mjs).
+const mirror = createMirror({ store, dataDir: config.dataDir, log });
+const admin = createServer(createAdmin({ store, config, pairing, publicUrl, tunnel, events, relay, ai, push, wa, mirror }));
 admin.listen(config.adminPort, config.adminHost, () => log(`this computer's page: http://localhost:${config.adminPort}`));
 
 askTailscale();
 setInterval(askTailscale, 5 * 60_000).unref();
 backupNow();
 setInterval(backupNow, 60 * 60_000).unref();
+// The copies a minute after the start (the phones first), then every hour.
+setTimeout(() => void mirror.run(), 60_000).unref();
+setInterval(() => void mirror.run(), 60 * 60_000).unref();
 // Photos kept before v0.41.3 get their card (a third of the bytes for the board and the viewer).
 cards.later(3000);
 setInterval(() => cards.later(0), 30 * 60_000).unref();

@@ -1,6 +1,6 @@
 import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
-import { carOfText, dateByNumbers, expenseOf, lineOf, PAPER_V, paperDoubts, paperFields, paperStats, partOfLine, setGarageModels, twinOf, type PaperFields, type PaperStats } from '../domain/papers';
+import { carOfText, dateByNumbers, expenseOf, lineOf, PAPER_V, paperDoubts, paperFields, paperStats, partOfLine, setGarageModels, twinOf, twinSweep, type PaperFields, type PaperStats } from '../domain/papers';
 import type { ReceiptRead } from '../domain/receipt';
 import { sellerKey } from '../domain/suppliers';
 import type { PricePoint, Supplier, SupplierPaper } from '../domain/types';
@@ -133,7 +133,12 @@ export function startPaperReader() {
   // v1.05.2: the papers read by older rules — tidied once (no AI), a while after the start.
   setTimeout(() => void tidyPapers().catch(() => undefined), 12_000);
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && kick(1500));
-  setInterval(() => document.visibilityState === 'visible' && kick(0), 5 * 60_000);
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    kick(0);
+    // v1.06: the same paper read on two devices at once — told a twin once both readings are here
+    void tidyPapers().catch(() => undefined);
+  }, 5 * 60_000);
 }
 
 /**
@@ -305,18 +310,35 @@ async function yearsByNumbers(supplierId: string): Promise<number> {
  */
 export async function tidyPapers(): Promise<number> {
   const old = (await db.papers.toArray()).filter((p) => (p.v ?? 1) < PAPER_V && (p.state === 'done' || p.state === 'look' || p.state === 'twin'));
-  if (!old.length) return 0;
+  if (!old.length) {
+    await sweepTwins();
+    return 0;
+  }
   await garageModels();
   for (const p of old) {
     const paperCar = carOfText(p.car);
     const lines = (p.lines ?? []).map((l) =>
-      lineOf({ name: l.name, part: l.said?.part ?? l.part, car: l.said?.car, brand: l.said?.brand ?? l.brand, kind: l.said?.kind, partNumber: l.partNumber, qty: l.qty, unitFils: l.unitFils, totalFils: l.totalFils }, paperCar),
+      lineOf({ name: l.name, part: l.said?.part ?? l.part, car: l.said?.car, brand: l.said?.brand ?? l.brand, kind: l.said?.kind, partNumber: l.partNumber, qty: l.qty, unitFils: l.unitFils, totalFils: l.totalFils }, paperCar, p.kind),
     );
     await db.papers.update(p.id, { lines, make: paperCar.make, model: paperCar.model, v: PAPER_V, updatedAt: nowIso() });
     await notePaperPrices(p.id);
   }
   for (const supplierId of new Set(old.map((p) => p.supplierId).filter((x): x is string => !!x))) await yearsByNumbers(supplierId);
+  await sweepTwins();
   return old.length;
+}
+
+/**
+ * The same paper read twice (v1.06, domain/papers.ts `twinSweep`: two devices read one photo at once) — the poorer reading a
+ * twin of the better one, its prices out of the book; «Не дубль» brings it back. Every device keeps the same one.
+ */
+export async function sweepTwins(): Promise<number> {
+  const twins = twinSweep(await db.papers.toArray());
+  for (const [id, keep] of twins) {
+    await db.papers.update(id, { state: 'twin', twinOf: keep, updatedAt: nowIso() });
+    await notePaperPrices(id);
+  }
+  return twins.size;
 }
 
 /** The garage's own cars' models (one the catalogue lacks — «XA» — read in the lines too). */
@@ -358,6 +380,8 @@ export async function notePaperPrices(id: string): Promise<number> {
               ...(l.partNumber ? { partNumber: l.partNumber } : {}),
               qty: l.qty,
               ...(l.fits?.length ? { fits: l.fits.map((x) => `${x.make} ${x.model}`) } : {}),
+              // v1.06: work done, not a part — kept, never offered as a part's price
+              ...(l.service ? { service: true as const } : {}),
               updatedAt: now,
             },
           ];
@@ -416,7 +440,7 @@ export async function settlePaper(id: string): Promise<void> {
 export async function notTwin(id: string): Promise<void> {
   const p = await db.papers.get(id);
   if (p?.state !== 'twin') return;
-  await db.papers.update(id, { state: paperDoubts(p).length ? 'look' : 'done', twinOf: undefined, updatedAt: nowIso() });
+  await db.papers.update(id, { state: paperDoubts(p).length ? 'look' : 'done', twinOf: undefined, alone: true, updatedAt: nowIso() });
   await notePaperPrices(id);
 }
 

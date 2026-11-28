@@ -56,7 +56,9 @@ export function quickMatches(set: Suggestions | undefined, query: string, limit 
     const own = normalizeText(title);
     // As typed from its first letter, as typed somewhere, or found through the dictionary.
     const begins = own.startsWith(typed) || normalizeText(s.titleEn ?? '').startsWith(typed) || normalizeText(s.titleRu ?? '').startsWith(typed) ? 2 : own.includes(typed) ? 1 : 0;
-    scored.push({ title, score: begins * 1_000_000 + (s.price > 0 ? NEAR[s.from] * 10_000 : 0) + Math.min(s.uses, 9_999) });
+    // v1.06: bought for this car before (an invoice) — as near as this car's own; for its make — as the same make's
+    const near = Math.max(s.price > 0 ? NEAR[s.from] : 0, s.bought ? (s.bought.near >= 2 ? NEAR.car : NEAR.make) : 0);
+    scored.push({ title, score: begins * 1_000_000 + near * 10_000 + Math.min(s.uses, 9_999) });
   }
   scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
   return pairSides(

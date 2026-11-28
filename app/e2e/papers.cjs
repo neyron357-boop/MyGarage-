@@ -253,12 +253,42 @@ const READS = {
     return r ? r.why.map((w) => w.kind) : [];
   }, jobId);
   check(why.includes('sold') && why.includes('boughtFor'), '«Поставщики» of the job: it sold this part for Toyota — ' + JSON.stringify(why));
-  // v1.05.1: under the job's line — bought before for this model, who and for how much.
-  const note = top('[data-bought-before]').first();
-  await note.waitFor({ timeout: 8000 });
-  const noteText = await note.innerText();
-  check(/Брали у Al Noor/.test(noteText) && /175/.test(noteText), `under the line: «${noteText}»`);
-  await shot('phone-09-bought-before');
+  // v1.06: under the job's line — the history's prices for this car (a tap — its cost); «Цены из истории · N» above the lines.
+  const chip = top('[data-hist-offers] .hist-offer').first();
+  await chip.waitFor({ timeout: 8000 });
+  const chipText = await chip.innerText();
+  check(/Al Noor/.test(chipText) && /175/.test(chipText) && /Hiace/.test(chipText), `under the line, the history's price: «${chipText.replace(/\s+/g, ' ')}»`);
+  await shot('phone-09-history-prices');
+  check((await top('[data-hist-fill]').count()) === 1, '«Цены из истории · 1» above the lines');
+  await top('[data-hist-put]').click();
+  await settle(900);
+  const priced = await page.evaluate(async (id) => {
+    const { db } = await import('/src/db/db.ts');
+    const i = (await db.items.where('orderId').equals(id).toArray()).find((x) => x.kind === 'part');
+    return { cost: i?.costPriceFils, price: i?.unitPriceFils, from: !!i?.costFrom };
+  }, jobId);
+  check(priced.cost === 17500 && priced.price > 17500 && priced.from, '«Поставить»: the cost 175 and the customer’s price by the markup — ' + JSON.stringify(priced));
+  check((await top('[data-hist-offers] .hist-offer[data-active]').count()) === 1, 'the price taken marked under the line');
+  await shot('phone-09b-history-set');
+  await page.locator('.mantine-Notification-root button', { hasText: 'Отменить' }).first().click();
+  await settle(900);
+  const undone = await page.evaluate(async (id) => {
+    const { db } = await import('/src/db/db.ts');
+    const i = (await db.items.where('orderId').equals(id).toArray()).find((x) => x.kind === 'part');
+    return i?.costPriceFils === undefined && !i?.costFrom;
+  }, jobId);
+  check(undone, '«Отменить» — the cost gone again');
+  // v1.06: the suggestions — the part bought for this car, said with a car
+  await top('[data-add-line]').click();
+  await settle(600);
+  await page.keyboard.type('brake');
+  const bought = page.locator('.qa-row .qa-bought').first();
+  await bought.waitFor({ timeout: 8000 });
+  const boughtText = await bought.innerText();
+  check(/Al Noor/.test(boughtText) && /175/.test(boughtText) && (await bought.getAttribute('data-qa-bought')) === '2', `the suggestion bought for this car: «${boughtText}»`);
+  await shot('phone-09c-suggestion-bought');
+  await page.keyboard.press('Escape');
+  await settle(500);
   // «Поставщики»: the one who sold it for this model picked at once, «Брали … для Hiace · 175».
   await top('button.add-extra[aria-label="Поставщики"]').click();
   const noorRow = page.locator('.ask-row[data-ask-supplier]', { hasText: 'Al Noor' }).first();
@@ -268,6 +298,17 @@ const READS = {
   const rowText = await noorRow.innerText();
   check((await noorRow.getAttribute('aria-pressed')) === 'true' && /Брали .* для Hiace/.test(rowText) && /175/.test(rowText), `the seller of it picked at once: «${rowText.replace(/s+/g, ' ')}»`);
   await page.keyboard.press('Escape');
+  await settle(500);
+  // v1.06: «Поставщики» searched by a part and a car — who sold it to the garage, for how much; «Спросить снова».
+  await page.goto(BASE + '#/parts?tab=suppliers&q=' + encodeURIComponent('brake pads hiace'));
+  // (a fresh start on that address: the suppliers' screen of step 5 is still in the stack, its search empty)
+  await page.reload();
+  const hit = page.locator('[data-bought-search] .list-row').first();
+  await hit.waitFor({ timeout: 10000 });
+  await settle(600);
+  await shot('phone-11-bought-search');
+  const hitText = await hit.innerText();
+  check(/BRAKE/i.test(hitText) && /Al Noor/.test(hitText) && /Hiace/.test(hitText) && /175/.test(hitText), `the parts bought searched: «${hitText.replace(/\s+/g, ' ')}»`);
   await phoneCtx.close();
 
   /* ---------- The PC ---------- */

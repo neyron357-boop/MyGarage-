@@ -127,7 +127,7 @@ export function PriceSheet({ b, item, opened, onClose, service }: { b: OrderBund
                   <span className="chip-note">
                     {(p.via === 'paper'
                       ? // bought (v1.05.1): the line as its invoice printed it, the car, the month
-                        [p.name, t(`priceBook.hintNear.${near}`), `${t('papers.paperWord')} ${p.at.slice(5, 7)}/${p.at.slice(0, 4)}`]
+                        [p.name, near === 0 && !p.make ? t('suppliers.bought.noCar') : t(`priceBook.hintNear.${near}`), `${t('papers.paperWord')} ${p.at.slice(5, 7)}/${p.at.slice(0, 4)}`]
                       : [t(p.kind === 'oem' ? 'priceBook.oem' : p.kind === 'used' ? 'priceBook.used' : 'priceBook.copy'), p.brand, t(`priceBook.hintNear.${near}`)]
                     )
                       .filter(Boolean)

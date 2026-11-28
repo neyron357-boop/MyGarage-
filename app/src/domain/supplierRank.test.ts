@@ -29,24 +29,25 @@ describe('suppliers by what was bought from them (v0.38)', () => {
     expect(order.indexOf('busy')).toBeLessThan(order.indexOf('alpha'));
   });
 
-  it('for a job: already on it, then who sold such a part for this make, then who declares the make', () => {
+  it('for a job: who sold this part for this make (v1.06: before the one already on it), already on it, then who declares the make', () => {
     const history = [line('pads', 'o1', 'FRONT BRAKE PADS'), line('pads', 'o2', 'BRAKE PADS REAR'), line('other', 'o3', 'HEADLIGHT', 'Nissan')];
     const use = supplierUse(history);
     const list = [sup('pads'), sup('declared', { makes: ['Toyota'] }), sup('other', { makes: ['Nissan'] }), sup('picked'), sup('none')];
     const job = { make: 'toyota', parts: [{ name: 'КОЛОДКИ ПЕРЕДНИЕ', title: 'Колодки передние' }], onJob: new Set(['picked']) };
     const r = rankForJob(list, use, history, job, NOW);
     // Every one of them (v0.91, #74), those that fit first.
-    expect(r.map((x) => x.supplier.id).slice(0, 3)).toEqual(['picked', 'pads', 'declared']);
+    expect(r.map((x) => x.supplier.id).slice(0, 3)).toEqual(['pads', 'picked', 'declared']);
     expect(r).toHaveLength(5);
     // Russian «колодки» found the English «pads» they sold; two jobs for this make.
-    expect(r[1].why).toEqual([
+    expect(r[0].why).toEqual([
       { kind: 'boughtFor', make: 'Toyota', jobs: 2 },
-      { kind: 'sold', part: 'КОЛОДКИ ПЕРЕДНИЕ', times: 2 },
+      // v1.06: the very part — the front pads, not the rear ones
+      { kind: 'sold', part: 'КОЛОДКИ ПЕРЕДНИЕ', times: 1, make: 'Toyota', same: true },
     ]);
     expect(r[2].why).toEqual([{ kind: 'make', make: 'Toyota' }]);
     // What they sold is shown by its own name when it has one.
     const named = rankForJob(list, use, [...history, { ...line('pads', 'o4', 'Brake pads front'), name: 'BRAKE PADS FRONT' }], job, NOW);
-    expect(named[1].why[1]).toEqual({ kind: 'sold', part: 'BRAKE PADS FRONT', times: 3 });
+    expect(named[0].why[1]).toEqual({ kind: 'sold', part: 'BRAKE PADS FRONT', times: 2, make: 'Toyota', same: true });
   });
 
   it('what they sell, as written on their card, counts; a part given back counts against', () => {

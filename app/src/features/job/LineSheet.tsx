@@ -4,11 +4,12 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { db, uid } from '../../db/db';
+import { getSettings } from '../../services/settings';
 import { daysBetween, dubaiDate, shiftDay } from '../../domain/dates';
 import { itemAmounts, itemCostPaid, itemTitle, lineName } from '../../domain/items';
 import { formatAed, roundFils, withMarkup } from '../../domain/money';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf, type VatMode } from '../../domain/vat';
-import { buildSuggestions, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
+import { buildSuggestions, withBought, type HistJob, type PriceContext, type PriceListLine, type Suggestion, type Suggestions, type SuggestionSet } from '../../domain/linePrices';
 import type { JobTemplate, OrderItem, Outsource, PartOffer, RelatedRule } from '../../domain/types';
 import { buildTogether } from '../../domain/together';
 import { aiAfterLine } from '../../services/ai';
@@ -113,8 +114,11 @@ async function suggestionSources(): Promise<Sources> {
 
 async function loadSuggestions(ctx: PriceContext): Promise<SuggestionSet> {
   const { priceList, items, jobs, templates, rules } = await suggestionSources();
+  // v1.06: the parts bought for this car (the suppliers' invoices) — said in the suggestions, a car beside them.
+  const [bought, sups, settings] = await Promise.all([db.priceBook.where('id').startsWith('paper:').toArray(), db.suppliers.toArray(), getSettings()]);
+  const set = buildSuggestions(items, jobs, priceList, ctx);
   // What usually goes together (audit 27/11): the garage's own jobs, then the starter rules.
-  return { ...buildSuggestions(items, jobs, priceList, ctx), together: buildTogether(items, ctx.lang, rules, templates) };
+  return { ...set, part: withBought(set.part, bought, ctx, settings.defaultMarkupBp, new Map(sups.map((s) => [s.id, s.name]))), together: buildTogether(items, ctx.lang, rules, templates) };
 }
 
 /** Where a suggestion's price is from, as a mark beside it: this car, this customer (nothing for the rest). */

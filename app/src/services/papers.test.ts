@@ -8,7 +8,10 @@ import { addItem } from './estimate';
 import { addExpense } from './money';
 import { checkIn } from './orders';
 import { addPapers, loadPapers, notePaperPrices, paperToExpense, readPapers, removePaper, rereadFailed, resetPaperReader, setPaperDate, supplierPaperStats, tidyPapers } from './papers';
-import { priceHintsFor } from './priceBook';
+import { askAgainText, historyOffersFor, priceFromHistory, priceHintsFor, searchBoughtParts, undoHistoryPrices } from './priceBook';
+import { getSettings } from './settings';
+import { updateItem } from './estimate';
+import { withMarkup } from '../domain/money';
 import { ensureSeed } from './seed';
 import { suppliersForJob, suppliersRanked } from './supplierRank';
 
@@ -177,6 +180,41 @@ describe('the suppliers’ paper invoices read in bulk (v1.05)', () => {
     expect(other.why.find((w) => w.kind === 'sold')).not.toHaveProperty('model');
     delete READS.E;
     delete READS.F;
+  });
+
+  it('v1.06: a Hiace job’s parts priced from the history — up to three prices under each, «Цены из истории» takes this model’s newest, «Отменить» puts it back; the parts bought searched', async () => {
+    await addPapers([photo('A'), photo('B')]);
+    await readPapers();
+    const noor = (await db.suppliers.toArray()).find((s) => /noor/i.test(s.name))!;
+    const c = await createCustomer({ name: 'Omar', phone: '050 765 4321', preferredChannel: 'whatsapp', docLanguage: 'en', type: 'individual' });
+    const o = await checkIn({ customerId: c.id, plate: { emirate: 'DXB', code: 'K', number: '33333' }, make: 'Toyota', model: 'Hiace', name: c.name, phone: c.phone, docLanguage: 'en', complaint: '', arrivedNow: true });
+    const pads = await addItem(o.id, { kind: 'part', block: 'A', titleEn: 'Brake pads front', unitPriceFils: 0 });
+    const offers = await historyOffersFor(o.id);
+    // the newest first (June's 175 before February's 180 — one per supplier and kind)
+    expect(offers.get(pads.id)?.offers.map((x) => [x.supplier, x.fils, x.near, x.bought])).toEqual([['Al Noor Auto Spare Parts LLC', 17500, 2, true]]);
+    const had = await priceFromHistory(o.id);
+    expect(had.size).toBe(1);
+    const priced = (await db.items.get(pads.id))!;
+    const s = await getSettings();
+    expect([priced.costPriceFils, priced.supplierId, priced.unitPriceFils, priced.costFrom?.fils]).toEqual([17500, noor.id, withMarkup(17500, s.defaultMarkupBp), 17500]);
+    // a cost typed by hand is no longer the history's
+    await updateItem(pads.id, { costPriceFils: 16000 });
+    expect((await db.items.get(pads.id))!.costFrom).toBeUndefined();
+    // «Отменить» touches only a line the history's price is still on
+    await undoHistoryPrices(had);
+    expect((await db.items.get(pads.id))!.costPriceFils).toBe(16000);
+    await updateItem(pads.id, { costPriceFils: undefined });
+    const again = await priceFromHistory(o.id);
+    await undoHistoryPrices(again);
+    // the customer's price was there before (the first one's) — it stays; the cost goes
+    const back = (await db.items.get(pads.id))!;
+    expect([back.costPriceFils, back.costFrom, back.unitPriceFils]).toEqual([undefined, undefined, withMarkup(17500, s.defaultMarkupBp)]);
+    // «Поставщики» → the search: the part and the car typed
+    const found = await searchBoughtParts('front brake pads toyota hiace');
+    expect(found.car).toEqual({ make: 'Toyota', model: 'Hiace' });
+    // one per supplier, part and car — its newest
+    expect(found.hits.map((h) => [h.point.costFils, h.near])).toEqual([[17500, 2]]);
+    expect(askAgainText(found.hits[0].point, found.car)).toContain('*FRONT BRAKE PADS* for Toyota Hiace');
   });
 
   it('v1.05.2: papers learnt by older rules tidied once — each line’s cars, part and kind again, the year by the supplier’s numbering (not a day set by hand), their prices again', async () => {

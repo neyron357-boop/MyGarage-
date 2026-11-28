@@ -1,6 +1,6 @@
 import { ActionIcon, Modal, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconArrowUp, IconBuildingStore, IconMicrophone, IconPackage, IconPlayerStopFilled, IconPlus, IconSearch, IconSparkles, IconTool, IconX, type Icon } from '@tabler/icons-react';
+import { IconArrowUp, IconBuildingStore, IconCar, IconMicrophone, IconPackage, IconPlayerStopFilled, IconPlus, IconSearch, IconSparkles, IconTool, IconX, type Icon } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +15,7 @@ import { matchPartName } from '../../domain/partsVocab';
 import { enteredPrice, priceFromEntered, rateFor, vatModeOf } from '../../domain/vat';
 import { aiAfterLine, aiOn, aiVoiceLines, type SaidLine } from '../../services/ai';
 import { addItem, addTemplate, ensureLabourLine } from '../../services/estimate';
+import { takeHistoryPrice } from '../../services/priceBook';
 import { removeLines, syncStage } from '../../services/flow';
 import type { OrderBundle } from '../../services/orders';
 import { haptic } from '../../ui/haptics';
@@ -137,6 +138,8 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
           ? { unitPriceFils: s.price, unitGrossFils: s.gross, ...(s.rate !== undefined ? { vatRateBp: s.rate } : {}) }
           : {};
       const item = await addItem(b.order.id, { kind: lineKind, block: 'A', qty: heard?.qty && heard.qty > 1 ? heard.qty : 1, ...titles, ...price, ...(guess && !guess.sure ? { autoKind: true as const } : {}) });
+      // v1.06: bought for this car before (an invoice) — its cost and supplier on the line, as a tap on its price would put them.
+      if (s?.bought && lineKind === 'part') await takeHistoryPrice(item.id, s.bought.point);
       // A job's first part brings its labour charge (v0.90, #70): last of the lines, named and priced by itself.
       await ensureLabourLine(b.order.id);
       await syncStage(b.order.id);
@@ -294,8 +297,15 @@ export function QuickAddSheet({ b, kind, opened, onClose, suggestions }: { b: Or
               const side = sideOf(title);
               const k = auto ? kindOfMatch.get(title) : undefined;
               return (
-                <button key={title} type="button" role="option" aria-selected={cursor >= 0 ? matches[cursor] === title : title === exact} data-cursor={matches[cursor] === title || undefined} className="qa-row" data-side={side} onMouseDown={keep} onClick={() => add(title)}>
+                <button key={title} type="button" role="option" aria-selected={cursor >= 0 ? matches[cursor] === title : title === exact} data-cursor={matches[cursor] === title || undefined} className="qa-row" data-side={side} data-bought={s.bought ? true : undefined} onMouseDown={keep} onClick={() => add(title)}>
                   <span className="qa-name">{title}</span>
+                  {/* v1.06: bought for this car (its model — the car in teal, its make — grey): from whom, for how much — a line of its own under the row */}
+                  {s.bought && (
+                    <span className="qa-bought" data-qa-bought={s.bought.near}>
+                      <IconCar size={14} stroke={2.2} aria-hidden />
+                      <span className="qa-bought-text">{t('qa.bought', { who: s.bought.who || t('priceBook.someone'), price: formatAed(s.bought.fils, uiLang, false) })}</span>
+                    </span>
+                  )}
                   {have.has(title.trim().toUpperCase()) && (
                     <span className="qa-have" data-qa-have>
                       {t('qa.have')}

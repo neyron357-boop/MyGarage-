@@ -498,13 +498,14 @@ export const en: typeof ru = {
   },
   payShot: { transfer: 'Transfer', card: 'Card', record: 'Record', onShot: 'on the screenshot {{sum}}', saved: 'Payment recorded' },
   buy: { title: 'Order', supplier: 'Supplier', none: 'No parts with suppliers’ prices', when: 'When', go: 'Order · {{n}}', whens: { soon: 'Collect now', evening: 'Today 17:00', morning: 'Tomorrow 9:00', deliver: 'Deliver' }, kind: { oem: 'original', aftermarket: 'copy', used: 'used' } },
-  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together', voice: 'Dictate', stop: 'Done', listening: 'Speak… {{time}}', hearing: 'The AI is listening…', voiceNone: 'Not heard — say it again', have: '✓ on the job' },
+  qa: { title: 'Add', addedN: 'Added · {{n}}', undo: 'Remove {{name}}', addTyped: 'Add «{{name}}»', add: 'Add', labor: 'Labor', kind: 'What to add', auto: 'Auto', autoPlaceholder: 'A part, work or a service', fixed: 'fixed', templates: 'Templates', together: 'Often together', voice: 'Dictate', stop: 'Done', listening: 'Speak… {{time}}', hearing: 'The AI is listening…', voiceNone: 'Not heard — say it again', have: '✓ on the job', bought: 'bought from {{who}} · {{price}}' },
   price: { add: 'Add a price', word: 'Price', cost: 'Cost', sell: 'Sell' },
   // v0.82: a line's own discount; the job's «Suppliers» sheet.
   lineOff: { title: 'Discount', amount: 'Amount', amountLabel: 'Discount, AED' },
   ask: { title: 'Suppliers', parts: 'Parts', who: 'To', search: 'Find a supplier', noParts: 'No parts', noSuppliers: 'Nobody found', send: 'Send · {{n}}', noWa: 'WhatsApp is not linked', sent: 'Sent to suppliers: {{n}}', queuedReview: 'Check and send · {{n}}', best: 'Best · {{n}}', textTitle: 'The request', noNumber: 'No number: {{names}}', used: 'used', answersFor: '{{make}} · answered {{n}}', replies: 'answers in ~{{time}}', top: 'Main', soldFor: 'Bought {{part}} for {{model}}', sold: 'Bought: {{part}}' },
   // v1.05: the multi-scanner of the suppliers' old invoices.
   papers: {
+    short: 'Invoices',
     title: 'Supplier invoices',
     open: 'Supplier invoices',
     read: 'read',
@@ -1275,6 +1276,7 @@ export const en: typeof ru = {
     reissued: 'Done: credit note {{credit}}, new invoice {{invoice}}',
   },
   job: {
+    hist: { fill: 'Prices from history · {{n}}', fillNote: 'As bought for this car', put: 'Set', done: 'Prices from history: {{n}}', one: 'Cost from history: {{who}} · {{price}}', told: 'quote' },
     // v1.05.1: this part for this model was bought before (a supplier's invoice).
     boughtBefore: 'Bought from {{who}} · {{price}}',
     // v0.81: the quote's state in the job.
@@ -2633,6 +2635,7 @@ export const en: typeof ru = {
     another: 'Diagram',
   },
   suppliers: {
+    bought: { title: 'Bought before', noCar: 'car not said', ask: 'Ask again', more: '{{n}} more — narrow the search' },
     region: 'Region',
     area: 'Area',
     allRegions: 'All regions',

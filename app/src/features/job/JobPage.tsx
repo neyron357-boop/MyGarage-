@@ -102,7 +102,7 @@ import { useLongPress } from '../../ui/longPress';
 import { useSortable } from '../../ui/sortable';
 import { useAction, useLang, useOrderBundle, usePhone, useScreenLiveQuery } from '../../ui/hooks';
 import { useCalmQuery } from '../../ui/calmQuery';
-import { boughtBeforeFor } from '../../services/priceBook';
+import { historyOffersFor, priceFromHistory, takeHistoryPrice, undoHistoryPrices, type HistoryOffer } from '../../services/priceBook';
 import { useDesk, useDeskHotkeys, useDeskPane } from '../../ui/desk';
 import { openTwin, useTwin } from '../../ui/deskTwin';
 import { SendDialog, type SendRequest } from '../../ui/SendDialog';
@@ -226,6 +226,46 @@ const TILE_COLOR: Record<string, string> = {
  * Under the job's lines: work, a part, a service as tiles — the symbol on its colour, the word under it, as the
  * "…" tiles — then the extras (the discount, the copy, a change after the invoice) as narrow tiles beside them.
  */
+/**
+ * The history's prices of a part (v1.06): who, for how much, for which car, when — bought (a paper invoice) or told; the one
+ * on the line marked. A tap does not open the line.
+ */
+function HistoryChips({ item, offers, model, make, onTake }: { item: OrderItem; offers: HistoryOffer[]; model?: string; make?: string; onTake: (o: HistoryOffer) => void }) {
+  const { t } = useTranslation();
+  return (
+    <span className="hist-offers" data-hist-offers={item.id} onClick={(e) => e.stopPropagation()}>
+      {offers.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          className="chip hist-offer"
+          data-active={item.costFrom?.point === o.id || undefined}
+          data-near={o.near}
+          data-hist-offer={o.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTake(o);
+          }}
+        >
+          {/* two lines: who; how much, for which car, when */}
+          <span className="hist-offer-top">
+            {o.near >= 2 ? <IconCar size={14} stroke={2.2} aria-hidden /> : <IconHistory size={14} stroke={2.2} aria-hidden />}
+            <span className="hist-offer-who">{o.supplier || t('priceBook.someone')}</span>
+          </span>
+          <span className="hist-offer-sub">
+            <Money fils={o.fils} />
+            <span className="chip-note">
+              {[o.near >= 2 ? model : make, o.bought ? `${o.at.slice(5, 7)}/${o.at.slice(2, 4)}` : t('job.hist.told'), o.kind === 'oem' ? t('priceBook.oem') : '']
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          </span>
+        </button>
+      ))}
+    </span>
+  );
+}
+
 function AddBar({ onAdd, flush, children }: { onAdd: (kind: QuickKind) => void; flush?: boolean; children?: ReactNode }) {
   const { t } = useTranslation();
   const desk = useDesk();
@@ -723,10 +763,33 @@ export function JobPage() {
   const expenses = useScreenLiveQuery(() => (id ? db.expenses.where('orderId').equals(id).toArray() : []), [id]);
   // «Запчасти» in the money book: the job's expenses there bought its parts — counted once with them (v0.31).
   const partsCat = useScreenLiveQuery(async () => (await db.expenseCategories.where('code').equals('parts').first())?.id ?? '', []);
-  // v1.05.1: a part with no cost yet that the garage bought before for this very car's model (a supplier's invoice) — who and
-  // for how much, under the line (read calmly: the price book grows as invoices are read).
-  const partsKey = (b?.items ?? []).filter((i) => i.kind === 'part' && i.costPriceFils === undefined).map((i) => `${i.id}:${i.titleEn ?? i.titleRu ?? ''}`).join('|');
-  const boughtBefore = useCalmQuery(['priceBook', 'suppliers'], () => (id && partsKey ? boughtBeforeFor(id) : Promise.resolve(new Map())), [id, partsKey]);
+  // v1.05.1 → v1.06: a part with no cost yet — what the garage paid (a supplier's invoice) or was told for it for this car before,
+  // up to three prices under the line, a tap — its cost (read calmly: the price book grows as invoices are read).
+  const partsKey = (b?.items ?? [])
+    .filter((i) => i.kind === 'part' && (i.costPriceFils === undefined || !!i.costFrom))
+    .map((i) => `${i.id}:${i.titleEn ?? i.titleRu ?? ''}:${i.costFrom?.point ?? ''}`)
+    .join('|');
+  const history = useCalmQuery(['priceBook', 'suppliers'], () => (id && partsKey ? historyOffersFor(id) : Promise.resolve(new Map<string, { offers: HistoryOffer[]; best?: string }>())), [id, partsKey]);
+  // «Цены из истории · N»: the parts without a cost that have a price bought for this very car.
+  const fromHistory = [...(history?.entries() ?? [])].filter(([itemId, o]) => !!o.best && b?.items.find((i) => i.id === itemId)?.costPriceFils === undefined).length;
+
+  const takeFromHistory = (i: OrderItem, o: HistoryOffer) =>
+    void run(async () => {
+      haptic('selection');
+      const had = await takeHistoryPrice(i.id, o.id);
+      if (!had) return;
+      await syncStage(i.orderId);
+      undoToast(t('job.hist.one', { who: o.supplier || t('priceBook.someone'), price: formatAed(o.fils) }), t('common.undo'), () => void run(async () => (await updateItem(i.id, had), await syncStage(i.orderId))));
+    });
+  const fillFromHistory = () =>
+    void run(async () => {
+      if (!id) return;
+      const had = await priceFromHistory(id);
+      if (!had.size) return;
+      await syncStage(id);
+      haptic('success');
+      undoToast(t('job.hist.done', { n: had.size }), t('common.undo'), () => void run(async () => (await undoHistoryPrices(had), await syncStage(id))));
+    });
 
   const orderId = b?.order.id;
   const phase: Phase | undefined = b ? phaseOf(b) : undefined;
@@ -1008,10 +1071,9 @@ export function JobPage() {
         ),
         outNote(i),
         whoNote(i),
-        boughtBefore?.get(i.id) && i.costPriceFils === undefined && (
-          <span key="bought" className="bought-before" data-bought-before={i.id}>
-            {t('job.boughtBefore', { who: boughtBefore.get(i.id)!.supplier, price: formatAed(boughtBefore.get(i.id)!.fils) })}
-          </span>
+        // v1.06: the history's prices of this part for this car — a tap, its cost (and the customer's price by the markup).
+        !picking && editable && history?.get(i.id) && (
+          <HistoryChips key="hist" item={i} offers={history.get(i.id)!.offers} model={b.vehicle?.model} make={b.vehicle?.make} onTake={(o) => takeFromHistory(i, o)} />
         ),
         i.vatRateBp === 0 && !i.customerSupplied ? t('item.noVat') : '',
       ])}
@@ -1624,6 +1686,23 @@ export function JobPage() {
             {(phase === 'wait' || sentOptions.length > 0) && <CustomerAnswerRow orderId={oid} phone={c?.whatsapp || c?.phone} />}
             {/* v0.98: a request's autopilot — its one next step (ask the suppliers, the quote ready). */}
             {(phase === 'booked' || phase === 'look' || phase === 'price') && b.order.fromChat && <AutopilotRow b={b} onSend={toClient} />}
+            {/* v1.06 (the owner's dream): every part priced from what the garage paid for it for this car — the quote without waiting. */}
+            {editable && fromHistory > 0 && (
+              <ListRow
+                left={<IconHistory size={20} stroke={1.9} color="var(--mantine-color-teal-6)" aria-hidden />}
+                title={
+                  <Text span inherit fw={600} data-hist-fill={fromHistory}>
+                    {t('job.hist.fill', { n: fromHistory })}
+                  </Text>
+                }
+                subtitle={t('job.hist.fillNote')}
+                right={
+                  <Button variant="light" color="teal" size="compact-md" onClick={fillFromHistory} data-hist-put>
+                    {t('job.hist.put')}
+                  </Button>
+                }
+              />
+            )}
             <FirstRows rows={lines.map(row)} />
             {discounts.length > 0 && discountRow(discounts[0], itemTitle(discounts[0], docLang), discounts.reduce((a, i) => a + itemAmounts(i).gross, 0), editable ? () => setDiscountOpen(true) : undefined)}
             {refusedLines.map(row)}

@@ -487,6 +487,11 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
     return true;
   }
 
+  /** A copy of the base, whole, into a file (v1.06: the hourly copies and the second ones — mirror.mjs). */
+  function snapshot(target) {
+    db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+  }
+
   const metaGet = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value;
   const metaSet = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(k, v);
 
@@ -507,7 +512,7 @@ export function openStore(dataDir, { keepBackups = 30, log = () => {} } = {}) {
   const aiCachePrune = (olderThan) => db.prepare('DELETE FROM ai_cache WHERE at < ?').run(Number(olderThan)).changes;
   const aiCacheCount = () => Number(db.prepare('SELECT COUNT(*) AS n FROM ai_cache').get().n);
 
-  return { dataDir, push, pull, replace, reserveNumbers, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, metaGet, metaSet, aiCacheGet, aiCachePut, aiCachePrune, aiCacheCount, close: () => db.close() };
+  return { dataDir, push, pull, replace, reserveNumbers, renumber, mainDevice, photosWithoutCard, mediaKey, mediaDevice, counts, lastRev: () => rev, record, addDevice, deviceOf, devices, relayDevices, revoke, keepFile, file, backup, snapshot, metaGet, metaSet, aiCacheGet, aiCachePut, aiCachePrune, aiCacheCount, close: () => db.close() };
 }
 
 export function httpError(status, message) {

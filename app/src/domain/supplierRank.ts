@@ -1,4 +1,5 @@
 import { canonicalMake } from './carCatalog';
+import { carWordsOf, partName, partSimilarity, type PartName } from './partMatch';
 import { chatMakes, rateSeen, seenOf, type ChatRating, type ChatSeen, type KnownMake } from './chatStudy';
 import { expandToken, indexText, matchToken, tokenize, type Indexed } from './search';
 import type { ChatFact, Supplier } from './types';
@@ -186,8 +187,11 @@ export function rankSuppliers(list: Supplier[], use: Map<string, SupplierUse>, n
 export type Why =
   | { kind: 'onJob' }
   | { kind: 'boughtFor'; make: string; jobs: number }
-  /** It sold such a part (v1.05.1: for this very model — `model`, its last price `fils`). */
-  | { kind: 'sold'; part: string; times: number; model?: string; fils?: number }
+  /**
+   * It sold such a part (v1.05.1: for this very model — `model`, its last price `fils`; v1.06: for this make — `make`; `same` —
+   * the very part, not only a word of it).
+   */
+  | { kind: 'sold'; part: string; times: number; model?: string; make?: string; fils?: number; same?: true }
   | { kind: 'make'; make: string }
   | { kind: 'sells'; part: string }
   /** The manager's mark (v0.71): good — first, silent — does not answer, last. */
@@ -243,12 +247,17 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
   const model = modelKey(job.model);
   const parts = job.parts.map((p) => ({ name: p.name, terms: partTerms(p.title) })).filter((p) => p.terms.length);
   // What each supplier sold before, prepared once.
-  const sold = new Map<string, { x: Indexed; name?: string; make?: string; model?: string; models?: string[]; fils?: number }[]>();
+  const cars = new Set(carWordsOf(job.make, job.model));
+  const named = parts.map((p) => partName(p.name, cars));
+  const sold = new Map<string, { x: Indexed; pn: PartName; name?: string; make?: string; model?: string; models?: string[]; fils?: number }[]>();
   for (const l of history) {
     let a = sold.get(l.supplierId);
     if (!a) sold.set(l.supplierId, (a = []));
-    a.push({ x: indexText(l.title), name: l.name, make: l.make, model: l.model, models: l.models, fils: l.fils });
+    a.push({ x: indexText(l.title), pn: partName(l.name || l.title, cars), name: l.name, make: l.make, model: l.model, models: l.models, fils: l.fils });
   }
+  type Sold = NonNullable<ReturnType<typeof sold.get>>[number];
+  const sameModel = (h: Sold) => !!model && ((modelKey(h.model) === model && (!make || !h.make || makeKey(h.make) === make)) || !!h.models?.some((m) => modelKey(m) === model));
+  const sameMake = (h: Sold) => !!make && makeKey(h.make) === make;
   // Taken off by the manager (v0.71): not in a job's list (`offOf` — folded under it).
   const ranked = list.filter((s) => s.mark !== 'off').map((s): Ranked => {
     const u = useOf(use, s.id);
@@ -257,10 +266,12 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
     let score = standing(s, u, now, k);
     // Marked good — first, whatever else; marked silent — last (v0.71, «самые хорошие наверху»).
     if (s.mark === 'good') {
-      score += 1000;
+      // v1.06: above the main ones and those that sold the part for this make — below only the one that sold it for this very car
+      score += 2000;
       why.push({ kind: 'good' });
     } else if (s.mark === 'silent') {
-      score -= 1000;
+      // last whatever it sold (v1.06: the history is worth up to 3000)
+      score -= 5000;
       why.push({ kind: 'silent' });
     }
     // The garage's main suppliers (v0.91.6): first, as the manager's own good ones — among them, the best fit for this job.
@@ -280,27 +291,42 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
     const theirs = sold.get(s.id) ?? [];
     let partsSold = 0;
     let carSold = 0;
+    let makeSold = 0;
+    let anySold = 0;
     let firstSold: Why | undefined;
+    let makeWhy: Why | undefined;
     let forCar: Why | undefined;
-    for (const p of parts) {
-      const same = theirs.filter((h) => speaksOf(p.terms, h.x));
-      if (!same.length) continue;
+    parts.forEach((p, k) => {
+      // The very part (domain/partMatch.ts, 0.9: «FRONT BUMPER» is not «BUMPER BRACKET» — a piece of it is 0.85), else one speaking of it.
+      const same = theirs.filter((h) => partSimilarity(named[k], h.pn) >= 0.9);
+      const like = same.length ? same : theirs.filter((h) => speaksOf(p.terms, h.x));
+      if (!like.length) return;
       partsSold++;
-      // v1.05.1 (the owner: «такой же деталь для такого же автомобиля — ты покупал у этого поставщика»): for this very model.
-      const mine = model ? same.filter((h) => (modelKey(h.model) === model && (!make || !h.make || makeKey(h.make) === make)) || !!h.models?.some((m) => modelKey(m) === model)) : [];
+      // v1.05.1/v1.06 (the owner: «первыми те поставщики, у которых уже в истории есть такой же автомобиль, такая же деталь»):
+      // the very part for this very model, then for this make, then for any car.
+      const mine = same.filter(sameModel);
+      const ours = mine.length ? [] : same.filter(sameMake);
       if (mine.length) {
         carSold++;
         const last = mine[mine.length - 1];
-        forCar ??= { kind: 'sold', part: last.name || p.name, times: mine.length, model: job.model, ...(last.fils ? { fils: last.fils } : {}) };
-      }
+        forCar ??= { kind: 'sold', part: last.name || p.name, times: mine.length, model: job.model, same: true, ...(last.fils ? { fils: last.fils } : {}) };
+      } else if (ours.length) {
+        makeSold++;
+        const last = ours[ours.length - 1];
+        makeWhy ??= { kind: 'sold', part: last.name || p.name, times: ours.length, make: canonicalMake(job.make!), same: true, ...(last.fils ? { fils: last.fils } : {}) };
+      } else if (same.length) anySold++;
       // What they sold (its own name, the latest), else the job's part.
-      firstSold ??= { kind: 'sold', part: same.at(-1)!.name || p.name, times: same.length };
-    }
+      firstSold ??= { kind: 'sold', part: like.at(-1)!.name || p.name, times: like.length, ...(same.length ? { same: true as const } : {}) };
+    });
+    // Above the main ones (v1.06): the part bought from it for this very car is the surest answer there is.
     if (forCar) {
-      score += Math.min(120, 60 * carSold) + Math.min(20, 10 * partsSold);
+      score += 3000 + 300 * (carSold - 1) + 100 * makeSold + 20 * anySold;
       why.push(forCar);
+    } else if (makeWhy) {
+      score += 1500 + 150 * (makeSold - 1) + 20 * anySold;
+      why.push(makeWhy);
     } else if (firstSold) {
-      score += Math.min(40, 20 * partsSold);
+      score += anySold ? 200 + 50 * (anySold - 1) : Math.min(40, 20 * partsSold);
       why.push(firstSold);
     }
     const declared = make && s.makes?.some((m) => makeKey(m) === make);

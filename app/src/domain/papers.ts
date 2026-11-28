@@ -341,6 +341,11 @@ export function carOfText(text?: string): { make?: string; model?: string } {
 
 /* ---------- Original or copy ---------- */
 
+/** Car makers whose name is a word of parts too («COOLANT TANK», «OIL FILTER MINI», «SEAT COVER», v1.06): never a maker in a line. */
+const WORD_MAKERS = new Set(['tank', 'mini', 'seat', 'smart', 'genesis', 'lotus', 'jet', 'great', 'wall']);
+/** A car maker's own name (not a shortening — «MIT» is the car; not a part's word — «TANK»). */
+const makerWord = (w: string) => !WORD_MAKERS.has(keyOf(w)) && !!CAR_CATALOG[canonicalMake(w)] && keyOf(canonicalMake(w)) === keyOf(w);
+
 const OEM_WORDS = /\b(genuine|geniune|genuin|genune|original|orginal|oem|org)\b/i;
 const COPY_WORDS = /\b(duplicate|dupl?|copy|aftermarket|after\s*market|taiwan|china|commercial)\b/i;
 const USED_WORDS = /\b(used|second\s*hand|scrap)\b/i;
@@ -360,7 +365,7 @@ export function lineKind(name: string, opts: { brand?: string; make?: string } |
   const code = said === 'G' || said === 'D' ? said : last === 'G' || last === 'D' ? last : '';
   // a maker's own name (not a shortening — «MIT» is the car), not the car the line is for (a maker followed by its model)
   const car = carsOfLine(name);
-  const isMaker = (w: string) => !!CAR_CATALOG[canonicalMake(w)] && keyOf(canonicalMake(w)) === keyOf(w);
+  const isMaker = (w: string) => makerWord(w);
   const carMake = (w: string) => isMaker(w) && toks.some((t, i) => keyOf(t) === keyOf(w) && car.words.includes(i) && car.models.includes(i + 1));
   // the AI's brand — not «G»/«D» (kind codes), not «genuine» (a kind), not the line's car
   const ai = said && said !== 'G' && said !== 'D' && !OEM_WORDS.test(said) && !COPY_WORDS.test(said) && !carMake(said) ? said : undefined;
@@ -379,11 +384,14 @@ export function lineKind(name: string, opts: { brand?: string; make?: string } |
  * AI's word for its car, else the paper's car), its part (the AI's name for it, else its own words — shorthand written out,
  * no car), its kind and brand. Used when a paper is read and when papers read before are tidied again (`PAPER_V`).
  */
-export function lineOf(l: { name: string; part?: string; car?: string; brand?: string; kind?: PaperItem['kind']; partNumber?: string; qty: number; unitFils?: number; totalFils?: number }, paperCar: { make?: string; model?: string }): PaperItem {
+export function lineOf(l: { name: string; part?: string; car?: string; brand?: string; kind?: PaperItem['kind']; partNumber?: string; qty: number; unitFils?: number; totalFils?: number }, paperCar: { make?: string; model?: string }, paperKind?: SupplierPaper['kind']): PaperItem {
   const own = carsOfLine(l.name);
   const said = l.car ? carsOfLine(l.car) : undefined;
   const best = own.make ? own : said?.make ? said : undefined;
-  const make = best?.make ?? paperCar.make;
+  // the line's own car, the AI's word for it, the paper's car — else a car maker as its brand («OIL FILTER … NISSAN», v1.06)
+  const k0 = lineKind(l.name, { brand: l.brand });
+  const byBrand = !best?.make && !paperCar.make && k0.brand && makerWord(k0.brand) ? canonicalMake(k0.brand) : undefined;
+  const make = best?.make ?? paperCar.make ?? byBrand;
   const model = best?.make ? (best.model ?? (best.make === paperCar.make ? paperCar.model : undefined)) : paperCar.model;
   const fits = [...(own.fits ?? []), ...(said?.fits ?? [])].filter((f, i, all) => all.findIndex((x) => x.make === f.make && keyOf(x.model) === keyOf(f.model)) === i && !(f.make === make && keyOf(f.model) === keyOf(model ?? '')));
   // the line's own words first; what the AI read of its kind when they say nothing
@@ -403,12 +411,14 @@ export function lineOf(l: { name: string; part?: string; car?: string; brand?: s
     kind: k.kind,
     ...(k.said ? {} : { unsure: true as const }),
     ...(k.brand ? { brand: k.brand } : {}),
+    ...(isWorkLine(l.name, paperKind) || isWorkLine(part ?? '', paperKind) ? { service: true as const } : {}),
     ...(l.part || l.car || l.brand || l.kind ? { said: { ...(l.part ? { part: l.part } : {}), ...(l.car ? { car: l.car } : {}), ...(l.brand ? { brand: l.brand } : {}), ...(l.kind ? { kind: l.kind } : {}) } } : {}),
   };
 }
 
 /** The version of the reading rules a paper was learnt by: one learnt by older rules is tidied again (services/papers.ts). */
-export const PAPER_V = 2;
+/** 3 (v1.06): a car maker as the brand gives the make; work lines said so; the same paper read twice on two devices told. */
+export const PAPER_V = 3;
 
 /* ---------- The day by its number ---------- */
 
@@ -472,7 +482,8 @@ export function paperFields(read: ReceiptRead, today = dubaiDate()): PaperFields
   const { date, sure } = paperDate(read, today);
   const car = String(read.carText ?? '').trim().slice(0, 80) || undefined;
   const paperCar = carOfText(car);
-  const lines: PaperItem[] = x.items.map((i) => lineOf({ name: i.name, part: i.part, car: i.car, brand: i.brand, kind: i.kind, partNumber: i.partNumber, qty: i.qty, unitFils: i.unitNetFils, totalFils: i.lineNetFils }, paperCar));
+  const paperKind: SupplierPaper['kind'] = x.kind === 'parts' || x.kind === 'service' ? x.kind : 'other';
+  const lines: PaperItem[] = x.items.map((i) => lineOf({ name: i.name, part: i.part, car: i.car, brand: i.brand, kind: i.kind, partNumber: i.partNumber, qty: i.qty, unitFils: i.unitNetFils, totalFils: i.lineNetFils }, paperCar, paperKind));
   const net = x.amountFils - x.vatFils;
   const sum = lines.reduce((s, l) => s + (l.totalFils ?? 0), 0);
   const near = (a: number, b: number) => a > 0 && b > 0 && Math.abs(a - b) <= Math.max(200, Math.round(b * 0.02));
@@ -593,4 +604,38 @@ export function paperStats(papers: Pick<SupplierPaper, 'state' | 'date' | 'total
     parts: [...parts.values()].sort((a, b) => b.times - a.times || b.lastAt.localeCompare(a.lastAt)).map(({ lastAt: _, ...x }) => x),
     makes: [...makes.entries()].map(([make, n]) => ({ make, n })).sort((a, b) => b.n - a.n || a.make.localeCompare(b.make)),
   };
+}
+
+/* ---------- Work on a paper, and the same paper twice (v1.06) ---------- */
+
+/**
+ * Work done, not a part (the first 428 papers: a tyre shop's «JOB-WHEEL ALIGNMENT», a lathe's «BRAKE DISC SKIMMING», «… OPENING &
+ * FITTING», «… WELDING»): its price is what the work cost, never a part's. A service paper's lines — unless a part is plainly
+ * named with no work word.
+ */
+const WORK = /^JOB\b|\b(ALIGNMENT|BALANCING|BALANCE|SKIMMING|SKIM|WELDING|WELD|FITTING|OPENING|LABOU?R|REPAIR(ING)?|SERVICE|SERVICING|CHARGES?|REWIND(ING)?|OVERHAUL(ING)?|MACHINING|PAINTING|DENTING|TOWING|RECOVERY|DIAGNOS\w*|PROGRAMMING|CODING|INSTALLATION|TOP\s*UP|REGAS|RE-GAS)\b/i;
+export function isWorkLine(name: string, paperKind?: SupplierPaper['kind']): boolean {
+  if (WORK.test(name)) return true;
+  return paperKind === 'service' && !/\b(ASSY|ASSEMBLY|FILTER|PAD|PADS|BELT|BEARING|BUSH|HOSE|GASKET|SEAL|OIL|TYRE|TIRE|BATTERY|BULB|SENSOR|PUMP|DISC|ROTOR)\b/i.test(name);
+}
+
+/**
+ * The same paper read twice (v1.06: four pairs among the first 428 — two devices read the same photo at once, neither saw the
+ * other): of the same seller and number (or day and sum) — `twinOf` — one is kept: the one whose lines add up, then the one with
+ * more lines, the older, the smaller id; every device keeps the same one. The others → their twin (id → the one kept).
+ */
+export function twinSweep<T extends Pick<SupplierPaper, 'id' | 'supplierId' | 'vendor' | 'invoiceNo' | 'date' | 'totalFils' | 'state' | 'adds' | 'lines' | 'createdAt' | 'alone'>>(papers: T[]): Map<string, string> {
+  const live = papers.filter((p) => p.state === 'done' || p.state === 'look');
+  const better = (a: T, b: T) => Number(b.adds !== false) - Number(a.adds !== false) || (b.lines?.length ?? 0) - (a.lines?.length ?? 0) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id);
+  const ordered = [...live].sort(better);
+  const out = new Map<string, string>();
+  const kept: T[] = [];
+  for (const p of ordered) {
+    // by itself, surer than at reading: the same number and the same day or sum (a number again a year on is another paper)
+    // «Не дубль» said by a person: never one again
+    const twin = p.alone ? undefined : twinOf(p, kept.filter((k) => k.date === p.date || (!!k.totalFils && k.totalFils === p.totalFils)));
+    if (twin) out.set(p.id, twin.id);
+    else kept.push(p);
+  }
+  return out;
 }

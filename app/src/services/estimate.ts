@@ -151,6 +151,8 @@ export async function updateItem(id: string, patch: Partial<OrderItem>): Promise
   if ('costPriceFils' in patch && !('costAi' in patch) && item.costAi && patch.costPriceFils !== item.costPriceFils) next.costAi = undefined;
   // …and no longer a supplier's answer's to move (v1.04).
   if ('costPriceFils' in patch && !('costBy' in patch) && item.costBy && patch.costPriceFils !== item.costPriceFils) next.costBy = undefined;
+  // …and no longer the history's (v1.06).
+  if ('costPriceFils' in patch && !('costFrom' in patch) && item.costFrom && patch.costPriceFils !== item.costPriceFils) next.costFrom = undefined;
   await db.items.update(id, next);
   await syncLabourNames(item.orderId);
   // A part's offers (a supplier's answer read, a price typed on it): into the price book (v0.91.7).
