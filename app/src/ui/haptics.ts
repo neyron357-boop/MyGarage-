@@ -155,6 +155,10 @@ const TAPPABLE = [
   'button.mantine-UnstyledButton-root.choice-card',
   'button.chip',
   'button.price-tap',
+  // v1.05: the multi-scanner's paper (its seller, its photo) and a supplier's invoices on its card
+  'button.papers-seller',
+  'button.papers-photo',
+  'button.supplier-papers',
   // v0.81: a draft line's «+ Цена» and its price; the quick sheet's kinds, hints and «×».
   'button.price-add',
   'button.price-tap-row',

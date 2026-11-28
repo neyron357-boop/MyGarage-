@@ -1,8 +1,9 @@
 import { db } from '../db/db';
 import { nowIso } from '../domain/dates';
 import { byPosition, itemTitle, lineName } from '../domain/items';
+import { partOfLine } from '../domain/papers';
 import { rateSeen, seenOf } from '../domain/chatStudy';
-import { knowOf, pickTop, rankForJob, rankSuppliers, relevance, supplierUse, useOf, type BoughtLine, type Ranked, type SupplierKnow, type SupplierUse, type TopCandidate } from '../domain/supplierRank';
+import { buys, knowOf, pickTop, rankForJob, rankSuppliers, relevance, supplierUse, useOf, type BoughtLine, type Ranked, type SupplierKnow, type SupplierUse, type TopCandidate } from '../domain/supplierRank';
 import type { ChatFact, Lang, OrderItem, Supplier, Vehicle } from '../domain/types';
 import { chatIdOf, chatRole, waDigits, type ChatRoles, type WaChat, type Who } from '../domain/whatsapp';
 import { AppError } from './errors';
@@ -32,6 +33,17 @@ export async function boughtLines(): Promise<BoughtLine[]> {
     const at = i.orderedAt ?? i.receivedAt ?? i.outsource?.sentAt ?? i.createdAt;
     const who = i.kind === 'part' ? i.supplierId : i.outsource?.supplierId ?? i.supplierId;
     if (who) out.push({ supplierId: who, orderId: i.orderId, at, make, title: titleOf(i), name: lineName(i.titleEn || i.titleRu || '', i.kind) || undefined });
+  }
+  // v1.05: what the suppliers' paper invoices say was bought (a paper is a purchase of its own, its lines with its car).
+  const papers = await db.papers.where('state').anyOf(['done', 'look']).toArray();
+  for (const p of papers) {
+    if (!p.supplierId) continue;
+    const at = p.date ? `${p.date}T08:00:00.000Z` : p.createdAt;
+    for (const l of p.lines ?? []) {
+      const name = partOfLine(l);
+      if (!name) continue;
+      out.push({ supplierId: p.supplierId, orderId: `paper:${p.id}`, at, make: l.make ?? p.make, title: [l.name, l.part, l.partNumber, l.brand].filter(Boolean).join(' '), name, paper: true });
+    }
   }
   return out.sort((a, b) => a.at.localeCompare(b.at));
 }
@@ -110,12 +122,12 @@ export async function loadTop(given?: { facts: ChatFact[]; suppliers: Supplier[]
     if (!sup && role !== 'supplier' && role !== 'service' && f.pin !== 'on') continue;
     const seen = seenOf(f.turns, now);
     const rating = rateSeen(seen);
-    list.push({ key: f.id, score: relevance(seen, sup ? useOf(use, sup.id).jobs : 0, rating), pin: f.pin, bad: !!rating && rating.score < -10 });
+    list.push({ key: f.id, score: relevance(seen, sup ? buys(useOf(use, sup.id)) : 0, rating), pin: f.pin, bad: !!rating && rating.score < -10 });
     of.set(f.id, { chat: f.id, supplier: sup?.id });
     if (sup) counted.add(sup.id);
   }
   for (const s of sups) {
-    const jobs = useOf(use, s.id).jobs;
+    const jobs = buys(useOf(use, s.id));
     if (counted.has(s.id) || !jobs) continue;
     const key = chatIdOf(s.phone) || `s:${s.id}`;
     list.push({ key, score: relevance(undefined, jobs) });
@@ -131,7 +143,7 @@ export async function loadTop(given?: { facts: ChatFact[]; suppliers: Supplier[]
 }
 
 /** The tables the main suppliers are read from (`useCalmQuery`). */
-export const TOP_TABLES = ['chatFacts', 'suppliers', 'items', 'supplierReturns', 'settings', 'customers', 'employees'];
+export const TOP_TABLES = ['chatFacts', 'suppliers', 'items', 'supplierReturns', 'settings', 'customers', 'employees', 'papers'];
 
 /** Every supplier in the base with what was bought from it — the main ones first (v0.91.6), then most used and best rated. */
 export async function suppliersRanked(): Promise<{ list: Supplier[]; use: Map<string, SupplierUse>; know: Map<string, SupplierKnow>; top: TopSuppliers }> {

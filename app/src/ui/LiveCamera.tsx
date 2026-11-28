@@ -18,6 +18,7 @@ export function LiveCamera({
   onShot,
   onClose,
   overlay,
+  burst,
 }: {
   label: string;
   /** The photo (taken here, or picked from the phone): the camera has gone and its step in the history with it. */
@@ -25,6 +26,11 @@ export function LiveCamera({
   onClose: () => void;
   /** What is shown over the picture while it is live (v0.33: the plate read off the frames) — and the shutter for it. */
   overlay?: (video: HTMLVideoElement | null, live: boolean, shoot: () => void) => ReactNode;
+  /**
+   * One after another (v1.05, the suppliers' paper invoices): each shot goes to `onShot` and the camera stays; the phone's
+   * photos — many at once; «Готово» (with how many so far) closes it.
+   */
+  burst?: { count: number };
 }) {
   const { t } = useTranslation();
   const video = useRef<HTMLVideoElement>(null);
@@ -132,9 +138,10 @@ export function LiveCamera({
     release();
   };
   const picked = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.currentTarget.files?.[0];
+    const files = [...(e.currentTarget.files ?? [])];
     e.currentTarget.value = '';
-    if (file) leave(file);
+    if (burst) return files.forEach((f) => onShot(f));
+    if (files[0]) leave(files[0]);
   };
 
   useEffect(() => {
@@ -150,7 +157,11 @@ export function LiveCamera({
     haptic('medium');
     setFlash((n) => n + 1);
     try {
-      leave(await captureFrame(v));
+      const file = await captureFrame(v);
+      if (!burst) return leave(file);
+      onShot(file);
+      // the next sheet a moment later (the shutter does not take two of one)
+      window.setTimeout(() => setBusy(false), 350);
     } catch {
       setBusy(false);
     }
@@ -169,7 +180,7 @@ export function LiveCamera({
 
   return createPortal(
     <div className="cam" role="dialog" aria-modal="true" aria-label={label} data-phase={phase}>
-      <input ref={photos} type="file" accept="image/*" hidden data-cam-photos onChange={picked} />
+      <input ref={photos} type="file" accept={burst ? 'image/*,application/pdf' : 'image/*'} multiple={!!burst} hidden data-cam-photos onChange={picked} />
       <input ref={system} type="file" accept="image/*" capture="environment" hidden data-cam-system onChange={picked} />
       <div className="cam-top">
         <button type="button" className="cam-icon" onClick={() => finish()} aria-label={t('camera.close')}>
@@ -218,7 +229,14 @@ export function LiveCamera({
         <button type="button" className="cam-shutter" onClick={() => void shoot()} disabled={phase !== 'live' || busy} aria-label={t('camera.shoot')}>
           <span />
         </button>
-        <div className="cam-side cam-side-end" />
+        <div className="cam-side cam-side-end">
+          {burst && (
+            <button type="button" className="cam-done" onClick={() => finish()} data-cam-done={burst.count}>
+              {t('camera.done')}
+              {burst.count > 0 && <span className="cam-done-n tnum">{burst.count}</span>}
+            </button>
+          )}
+        </div>
       </div>
     </div>,
     document.body,

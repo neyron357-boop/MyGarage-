@@ -4530,6 +4530,37 @@ html.kb .screen-bottom > .sticky-bar {
 .cam-side-end {
   justify-content: flex-end;
 }
+/* v1.05: «Готово» of the camera shooting one paper after another, and how many so far. */
+.cam-done {
+  position: relative;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+}
+.cam-done:active {
+  transform: scale(0.95);
+}
+.cam-done-n {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 12px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  color: #000;
+  background: #fff;
+}
 .cam-photos {
   width: 52px;
   height: 52px;
@@ -10842,9 +10873,23 @@ html.desk .wa-pane-foot {
   align-items: baseline;
   gap: 6px;
   max-width: 100%;
+  /* v1.05: who and how much on top, what kind, which car and when (an invoice's month) under it — never cut */
+  flex-wrap: wrap;
+  row-gap: 2px;
+  height: auto;
+  min-height: 44px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  white-space: normal;
+  text-align: left;
+}
+.chip.price-hint .chip-note {
+  flex-basis: 100%;
+  margin-left: 0;
 }
 .price-hint-who {
-  max-width: 140px;
+  flex-shrink: 0;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10997,4 +11042,181 @@ html.desk .wa-pane-foot {
 .kpi-tab-who {
   font-size: 13px;
   color: var(--app-label-2, var(--mantine-color-dimmed));
+}
+
+/* ---------- v1.05: «Инвойсы поставщиков» — the multi-scanner (features/money/Papers.tsx) ---------- */
+.papers-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.papers-big {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-rounded);
+}
+.papers-big .tnum {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+}
+.papers-big-of {
+  font-size: 17px;
+  color: var(--mantine-color-dimmed);
+}
+.papers-reading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--mantine-color-cobalt-6);
+}
+.papers-new {
+  color: var(--mantine-color-green-7);
+  font-weight: 600;
+}
+.papers-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background: var(--app-press);
+  color: var(--mantine-color-dimmed);
+}
+.papers-row-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.papers-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  min-height: 20px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+  background: var(--app-press);
+}
+.papers-tag[data-tone='new'] {
+  color: var(--mantine-color-green-7);
+  background: var(--mantine-color-green-light);
+}
+.papers-tag[data-tone='look'] {
+  color: var(--mantine-color-orange-7);
+  background: var(--mantine-color-orange-light);
+}
+.papers-tag[data-tone='bad'] {
+  color: var(--mantine-color-red-7);
+  background: var(--mantine-color-red-light);
+}
+.papers-photo {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.papers-pdf {
+  height: 120px;
+  border-radius: 16px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  font-weight: 700;
+  color: var(--mantine-color-red-6);
+  background: var(--app-press);
+}
+button.ios-row.papers-seller {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.papers-seller-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.papers-seller-sub {
+  flex-basis: 100%;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--mantine-color-dimmed);
+}
+.papers-seller-change {
+  font-size: 15px;
+  color: var(--mantine-color-cobalt-6);
+}
+.papers-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 15px;
+  color: var(--mantine-color-dimmed);
+}
+.papers-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 17px;
+  font-weight: 600;
+}
+/* The supplier's card: what its invoices taught, a tap — its invoices. */
+button.supplier-papers {
+  width: 100%;
+  border: 0;
+  padding: 12px 16px;
+  border-radius: var(--radius-group);
+  background: var(--app-group, var(--mantine-color-body));
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+}
+button.supplier-papers .supplier-stats {
+  padding: 0;
+}
+.supplier-papers-often {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 15px;
+}
+.supplier-papers-label {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--mantine-color-dimmed);
+}
+.supplier-papers-price,
+.supplier-papers-makes {
+  color: var(--mantine-color-dimmed);
+}
+.supplier-papers-makes {
+  font-size: 13px;
 }

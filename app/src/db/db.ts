@@ -3,6 +3,7 @@ import type {
   Addendum,
   ChatFact,
   PricePoint,
+  SupplierPaper,
   CashClosing,
   CashMovement,
   Claim,
@@ -103,6 +104,8 @@ export class GarageDB extends Dexie {
   chatFacts!: Table<ChatFact, string>;
   /** v0.91.7: every price a supplier said, with its car (services/priceBook.ts). */
   priceBook!: Table<PricePoint, string>;
+  /** v1.05: the suppliers' paper invoices read by the multi-scanner (services/papers.ts) — knowledge, not money. */
+  papers!: Table<SupplierPaper, string>;
   /** Invoices given before this app, read off their PDFs (v0.45): the customer's reports read them, money here does not. */
   historyInvoices!: Table<HistoryInvoice, string>;
   /** The rows of the monthly summaries that came with them (v0.45): the garage's own check. */
@@ -243,6 +246,10 @@ export class GarageDB extends Dexie {
     // v0.91.7: the price book — what the suppliers said, part by part, car by car.
     this.version(13).stores({
       priceBook: 'id, part, make, supplierId, at, itemId, _t',
+    });
+    // v1.05: the suppliers' paper invoices read by the multi-scanner — a new table only.
+    this.version(14).stores({
+      papers: 'id, hash, supplierId, state, date, _t',
     });
     installGuards(this);
     installSyncHooks(this);

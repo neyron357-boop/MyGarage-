@@ -3,6 +3,7 @@ import {
   IconArrowDownLeft,
   IconArrowUpRight,
   IconCashRegister,
+  IconFiles,
   IconLock,
   IconPaperclip,
   IconPlus,
@@ -252,6 +253,7 @@ function CashTab() {
 
 function ExpensesTab({ addOpen }: { addOpen: boolean }) {
   const { t } = useTranslation();
+  const openPapers = useNavigate();
   const lang = useLang();
   const [open, setOpen] = useState(addOpen);
   const [shown, setShown] = useState<string | null>(null);
@@ -286,6 +288,10 @@ function ExpensesTab({ addOpen }: { addOpen: boolean }) {
       <MonthField value={month} onChange={setMonth} />
       <Button size="md" color="red" variant="light" leftSection={<IconPlus size={20} />} onClick={() => setOpen(true)}>
         {t('expense.add')}
+      </Button>
+      {/* v1.05: the suppliers' paper invoices read in bulk — what they teach, not money. */}
+      <Button size="md" variant="default" leftSection={<IconFiles size={20} />} onClick={() => openPapers('/money/papers')} data-route="/money/papers" data-open-papers>
+        {t('papers.open')}
       </Button>
       <Box className="surface" p="md">
         <Group justify="space-between" mb="md">

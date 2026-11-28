@@ -64,9 +64,9 @@ export interface ReceiptScan {
   failed?: 'ai' | 'amount' | 'kind' | 'unsure';
 }
 
-/** The picture as the server takes it: a JPEG no longer than 1600 px (a receipt's figures stay legible; a few hundred KB). */
-async function picture(file: File): Promise<{ type: string; data: string }> {
-  const small = (await shrinkPhoto(file, 1600).catch(() => undefined)) ?? file;
+/** The picture as the server takes it: a JPEG no longer than 1600 px (a receipt's figures stay legible; a few hundred KB); a PDF as it is (v1.05). */
+export async function picture(file: Blob, side = 1600): Promise<{ type: string; data: string }> {
+  const small = (await shrinkPhoto(file, side).catch(() => undefined)) ?? file;
   const bytes = new Uint8Array(await small.arrayBuffer());
   let bin = '';
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -138,9 +138,9 @@ export async function likelyJobsFor(e: Expense): Promise<JobOption[]> {
     });
 }
 
-/** The seller already in the base: the same phone or name (v0.24), or the same name without its company words. */
-async function knownSeller(fields: ReceiptExpense): Promise<Supplier | undefined> {
-  if (!supplierFromReceipt(fields)) return undefined;
+/** The seller already in the base: its TRN or e-mail, the same phone or name (v0.24), or the same name without its company words. */
+export async function knownSeller(fields: Pick<ReceiptExpense, 'vendor' | 'vendorPhone' | 'vendorTrn' | 'vendorEmail' | 'kind'>): Promise<Supplier | undefined> {
+  if ((fields.kind !== 'parts' && fields.kind !== 'service') || (fields.vendor ?? '').replace(/[^\p{L}\p{N}]/gu, '').length < 3) return undefined;
   const list = await db.suppliers.filter((s) => !s.archivedAt).toArray();
   const key = sellerKey(fields.vendor ?? '');
   const byPaper = list.find((s) => {
@@ -192,7 +192,7 @@ export const receiptTrace: { on?: (step: string, data: unknown) => void } = {};
  * (domain/receiptText.ts : the sum proven by the paper, the date read alike twice). The garage's own name
  * and TRN are the buyer's; its suppliers are known by their TRN, e-mail, phone, name.
  */
-async function readOnPhone(file: File): Promise<PaperRead | undefined> {
+export async function readOnPhone(file: File): Promise<PaperRead | undefined> {
   try {
     const { readDocument } = await import('./vinReader');
     const [settings, suppliers] = await Promise.all([getSettings(), db.suppliers.filter((x) => !x.archivedAt).toArray()]);

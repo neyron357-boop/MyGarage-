@@ -728,7 +728,9 @@ export type MediaOwner =
   /** A supplier's business card (both sides). */
   | 'supplier'
   /** A job note's photo or voice message. */
-  | 'note';
+  | 'note'
+  /** A supplier's paper invoice read by the multi-scanner (v1.05). */
+  | 'paper';
 
 export interface Media {
   id: string;
@@ -953,12 +955,85 @@ export interface PricePoint {
   unsure?: true;
   /** Read by the AI. */
   ai?: true;
-  /** From a WhatsApp answer (its message), or typed on the line. */
-  via: 'wa' | 'hand';
-  /** When it was said. */
+  /** From a WhatsApp answer (its message), typed on the line, or (v1.05) a supplier's paper invoice. */
+  via: 'wa' | 'hand' | 'paper';
+  /** When it was said (a paper's — its day). */
   at: string;
+  /** A job's line — none ('') for a paper's line. */
   orderId: string;
   itemId: string;
+  /** v1.05: the paper invoice it is from (`SupplierPaper`), its number. */
+  paper?: string;
+  invoiceNo?: string;
+  partNumber?: string;
+  qty?: number;
+  updatedAt: string;
+  _t?: number;
+}
+
+/** A line of a supplier's paper invoice as the garage names it (v1.05). */
+export interface PaperItem {
+  /** As printed (capitals). */
+  name: string;
+  /** The part alone in the usual English words (the AI's reading): what the price book and the rating go by. */
+  part?: string;
+  partNumber?: string;
+  qty: number;
+  /** One piece's price without VAT (fils), when the paper gives it. */
+  unitFils?: number;
+  totalFils?: number;
+  /** The car the line (or the paper) names. */
+  make?: string;
+  model?: string;
+  kind: 'oem' | 'aftermarket' | 'used';
+  /** The kind is not said on the paper. */
+  unsure?: true;
+  brand?: string;
+}
+
+/**
+ * A supplier's paper invoice read by the multi-scanner (v1.05, the owner: «сотни инвойсов от разных поставщиков… обучить
+ * приложение»): knowledge, not money — no expense is written by it. Its photo — `media` (owner `paper`, slot `receipt`).
+ */
+export interface SupplierPaper {
+  id: string;
+  /** The photo's own hash: the same photo twice is one paper. */
+  hash: string;
+  mediaId: string;
+  /**
+   * waiting — taken, not read yet · reading — a device reads it · done — read and learnt · look — read, something to look at
+   * (`paperDoubts`) · twin — the same paper as `twinOf` · failed — could not be read (`why`).
+   */
+  state: 'waiting' | 'reading' | 'done' | 'look' | 'twin' | 'failed';
+  why?: 'notPaper' | 'noAi' | 'unread' | 'noFile';
+  /** The device that took it (its photo is there until the server has it). */
+  device?: string;
+  /** How many times a reading was begun (a device that went away mid-way — another takes it over). */
+  tries?: number;
+  readingAt?: string;
+  by?: 'ai' | 'phone';
+  supplierId?: string;
+  /** The seller as printed. */
+  vendor?: string;
+  /** The supplier was added to the base off this paper. */
+  added?: true;
+  invoiceNo?: string;
+  date?: string;
+  dateSure?: boolean;
+  totalFils?: number;
+  vatFils?: number;
+  method?: Expense['method'];
+  kind?: 'parts' | 'service' | 'other';
+  car?: string;
+  make?: string;
+  model?: string;
+  lines?: PaperItem[];
+  /** The lines add up to the paper's sum. */
+  adds?: boolean;
+  twinOf?: string;
+  /** The expense it already is (scanned by «Расход» or typed). */
+  expenseId?: string;
+  createdAt: string;
   updatedAt: string;
   _t?: number;
 }

@@ -107,10 +107,10 @@ For each chat decide what it is TO THIS GARAGE, only by its name and what is wri
 makes: for a supplier, the car makes it sells parts for when its name or words say so (e.g. ["Toyota","Lexus"]; "American" — ["Ford","Chevrolet","GMC","Dodge","Jeep"]); [] otherwise. confidence: 0..1 that the role is right.
 ${chats.map((c) => `${c.key}${c.known ? ` (known ${c.known})` : ''} — "${c.name}": ${c.texts.length ? c.texts.map((t) => `"${t.slice(0, 160)}"`).join(' / ') : '(no messages)'}`).join('\n')}`,
   receipt: () =>
-    `A photo of a supplier's invoice or receipt in the UAE (amounts in AED; VAT 5 %). The garage is the buyer; read the seller's paper exactly as printed.
-Return: isReceipt (an invoice/receipt/bill at all); vendor (the seller's name as printed, not the buyer's); vendorTrn; vendorPhone (a mobile first, "" if none); vendorAddress (a few words, "" if none); kind — "parts" (car parts, accessories, oils, consumables), "service" (a workshop's or contractor's bill for work: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo;
+    `A photo (or a PDF) of a supplier's invoice or receipt in the UAE (amounts in AED; VAT 5 %). The garage is the buyer; read the seller's paper exactly as printed.
+Return: isReceipt (an invoice/receipt/bill at all); vendor (the seller's name as printed, not the buyer's); vendorTrn; vendorPhone (a mobile first, "" if none); vendorEmail ("" if none); vendorAddress (a few words, "" if none); kind — "parts" (car parts, accessories, oils, consumables), "service" (a workshop's or contractor's bill for work: paint, alignment, machining, towing, car wash), "fuel", "food" or "other"; invoiceNo;
 dateText — the document's date exactly as printed ("18-Nov-2026", "17/11/26"; "" if none); date — that date as YYYY-MM-DD: UAE papers write the day first (05/11/2026 is 5 November); read every digit of day, month and year — a stamp or a fold may cover some; dateSure — false if any digit of the date is hidden or unclear;
-items — each {name (as printed), part (the usual English name of the part alone: no brand, car, years, sizes, side or quantity — "TAIL LIGHT COVER", "MUD FLAP", "ATF PAN GASKET"), car (the car make/model the line names, "" if none), partNumber ("" if none), qty, unitPrice, total (as printed)};
+items — every line printed, none left out and none twice, each {name (as printed), part (the usual English name of the part alone: no brand, car, years, sizes, side or quantity — "TAIL LIGHT COVER", "MUD FLAP", "ATF PAN GASKET"), car (the car make/model the line names, "" if none), partNumber ("" if none), qty, unitPrice, total (as printed)};
 subtotal (before VAT, "" if not printed); vat (as printed, 0 if the paper says none, "" if not printed); total (the amount to pay incl. VAT); paymentMethod ("cash", "card", "transfer", "credit" when it says credit / sales credit / unpaid / due, "" if not said); carText (car model, plate, chassis or VIN on the paper, "" if none); confidence 0..1.
 Numbers as numbers; never invent a value the paper does not show.`,
 };
@@ -444,9 +444,10 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
     async receipt({ image } = {}) {
       const type = String(image?.type ?? '');
       const data = String(image?.data ?? '');
-      if (!/^image\/(jpeg|png|webp)$/.test(type) || data.length < 1000 || data.length > 8_000_000) throw httpError(400, 'no picture');
+      // v1.05: a PDF invoice too (the multi-scanner of the suppliers' papers)
+      if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(type) || data.length < 1000 || data.length > 8_000_000) throw httpError(400, 'no picture');
       const hash = createHash('sha256').update(data).digest('hex');
-      return cached(`receipt:3:${hash}`, 'receipt', async () => {
+      return cached(`receipt:4:${hash}`, 'receipt', async () => {
         const { value, model } = await json(
           P.receipt(),
           {
@@ -456,6 +457,7 @@ export function createAi({ dataDir, env = process.env, log = () => {}, fetchImpl
               vendor: { type: 'string' },
               vendorTrn: { type: 'string' },
               vendorPhone: { type: 'string' },
+              vendorEmail: { type: 'string' },
               vendorAddress: { type: 'string' },
               kind: { type: 'string', enum: ['parts', 'service', 'fuel', 'food', 'other'] },
               invoiceNo: { type: 'string' },

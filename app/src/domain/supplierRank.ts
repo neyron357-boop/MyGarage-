@@ -27,11 +27,15 @@ export interface BoughtLine {
   title: string;
   /** Its name as shown (what was bought: «Брали: …»). */
   name?: string;
+  /** v1.05: off a supplier's paper invoice (`orderId` is the paper's): a purchase, not a job. */
+  paper?: true;
 }
 
 export interface SupplierUse {
   /** Jobs it supplied (or worked on). */
   jobs: number;
+  /** v1.05: its paper invoices read (purchases before the app, or never put on a job). */
+  papers: number;
   /** Lines bought from it. */
   lines: number;
   /** Jobs per make (canonical, lower case). */
@@ -41,25 +45,30 @@ export interface SupplierUse {
   returns: number;
 }
 
-const NONE: SupplierUse = { jobs: 0, lines: 0, makeJobs: {}, returns: 0 };
+const NONE: SupplierUse = { jobs: 0, papers: 0, lines: 0, makeJobs: {}, returns: 0 };
+
+/** Jobs and paper invoices alike: how much the garage bought from it. */
+export const buys = (u: Pick<SupplierUse, 'jobs' | 'papers'>) => u.jobs + u.papers;
 
 const makeKey = (m?: string) => (m ? canonicalMake(m).toLowerCase() : '');
 
 export function supplierUse(lines: BoughtLine[], returns: { supplierId?: string }[] = []): Map<string, SupplierUse> {
   const jobs = new Map<string, Set<string>>();
+  const papers = new Map<string, Set<string>>();
   const byMake = new Map<string, Map<string, Set<string>>>();
   const out = new Map<string, SupplierUse>();
   const get = (id: string) => {
     let u = out.get(id);
-    if (!u) out.set(id, (u = { jobs: 0, lines: 0, makeJobs: {}, returns: 0 }));
+    if (!u) out.set(id, (u = { jobs: 0, papers: 0, lines: 0, makeJobs: {}, returns: 0 }));
     return u;
   };
   for (const l of lines) {
     const u = get(l.supplierId);
     u.lines++;
     if (!u.lastAt || l.at > u.lastAt) u.lastAt = l.at;
-    let js = jobs.get(l.supplierId);
-    if (!js) jobs.set(l.supplierId, (js = new Set()));
+    const into = l.paper ? papers : jobs;
+    let js = into.get(l.supplierId);
+    if (!js) into.set(l.supplierId, (js = new Set()));
     js.add(l.orderId);
     const m = makeKey(l.make);
     if (!m) continue;
@@ -70,6 +79,7 @@ export function supplierUse(lines: BoughtLine[], returns: { supplierId?: string 
     mj.add(l.orderId);
   }
   for (const [id, js] of jobs) get(id).jobs = js.size;
+  for (const [id, ps] of papers) get(id).papers = ps.size;
   for (const [id, bm] of byMake) for (const [m, js] of bm) get(id).makeJobs[m] = js.size;
   for (const r of returns) if (r.supplierId) get(r.supplierId).returns++;
   return out;
@@ -147,7 +157,7 @@ function standing(s: Supplier, u: SupplierUse, now: string, k?: SupplierKnow): n
   const stars = starsOf(s);
   let score = stars ? (stars - 3) * 10 : 0;
   score += k?.rating?.score ?? 0;
-  score += Math.min(20, 6 * Math.log2(1 + u.jobs));
+  score += Math.min(20, 6 * Math.log2(1 + buys(u)));
   if (u.lastAt) {
     const days = (Date.parse(now) - Date.parse(u.lastAt)) / DAY;
     score += days <= 30 ? 8 : days <= 120 ? 4 : 0;
@@ -294,9 +304,9 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
     }
     return { supplier: s, score, use: u, why, ...(k ? { know: k } : {}) };
   });
-  ranked.sort((a, b) => b.score - a.score || b.use.jobs - a.use.jobs || a.supplier.name.localeCompare(b.supplier.name));
+  ranked.sort((a, b) => b.score - a.score || buys(b.use) - buys(a.use) || a.supplier.name.localeCompare(b.supplier.name));
   return ranked;
 }
 
 /** A supplier with a reason to be asked for this job (on it, its make, its part, its stars, how it answers). */
-export const fitOf = (r: Ranked): boolean => r.why.length > 0 || r.use.jobs > 0 || !!starsOf(r.supplier) || !!r.know?.rating;
+export const fitOf = (r: Ranked): boolean => r.why.length > 0 || buys(r.use) > 0 || !!starsOf(r.supplier) || !!r.know?.rating;

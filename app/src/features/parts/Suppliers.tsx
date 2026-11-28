@@ -3,13 +3,15 @@ import { IconBrandWhatsapp, IconCamera, IconMapPin, IconPhone, IconPinFilled, Ic
 import { useLiveQuery } from 'dexie-react-hooks';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { db, uid } from '../../db/db';
 import { CAR_MAKES, canonicalMake, POPULAR_MAKES } from '../../domain/carCatalog';
 import { formatPhone, normalizePhone } from '../../domain/phone';
 import { alreadyInBase, cardName, phonesInText, supplierMatches } from '../../domain/suppliers';
 import { starsOf, useOf, type SupplierKnow } from '../../domain/supplierRank';
-import { dayShort } from '../../domain/dates';
+import { dayShort, formatDate } from '../../domain/dates';
+import { formatAed } from '../../domain/money';
+import { supplierPaperStats } from '../../services/papers';
 import { suppliersRanked } from '../../services/supplierRank';
 import { replyTime, SupplierProfile } from '../whatsapp/WaParts';
 import { StarsPill } from '../job/SupplierAsk';
@@ -151,6 +153,8 @@ export function SupplierSheet({
             )}
           </div>
         )}
+        {/* What its paper invoices taught (v1.05): how many, the money, since when, what it sold most, for which makes. */}
+        {v.id && <PaperBlock supplierId={v.id} onOpen={onClose} />}
         {/* What its WhatsApp chat taught (v0.91): how it answers the garage's requests. */}
         {know && know.seen.turns + know.seen.open > 0 && (
           <div className="supplier-stats" data-supplier-wa>
@@ -355,6 +359,49 @@ export function SupplierSheet({
         )}
       </Stack>
     </Modal>
+  );
+}
+
+/**
+ * What a supplier's paper invoices taught (v1.05, the multi-scanner): how many, for how much, the last one, what it sold
+ * most (its last price), for which makes — a tap, its invoices.
+ */
+function PaperBlock({ supplierId, onOpen }: { supplierId: string; onOpen: () => void }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const st = useLiveQuery(() => supplierPaperStats(supplierId), [supplierId]);
+  if (!st?.papers) return null;
+  const go = () => {
+    onOpen();
+    navigate(`/money/papers?supplier=${supplierId}`);
+  };
+  return (
+    <button type="button" className="supplier-papers" onClick={go} data-supplier-papers={st.papers} data-route={`/money/papers?supplier=${supplierId}`}>
+      <span className="supplier-stats">
+        <span>
+          <b className="tnum">{st.papers}</b> {t('papers.papersWord', { count: st.papers })}
+        </span>
+        <span>{t('papers.cardTotal', { sum: formatAed(st.totalFils) })}</span>
+        {st.lastAt && (
+          <span>
+            <b>{formatDate(st.lastAt)}</b>
+          </span>
+        )}
+      </span>
+      {st.parts.length > 0 && (
+        <span className="supplier-papers-often">
+          <span className="supplier-papers-label">{t('papers.often')}</span>
+          {st.parts.slice(0, 5).map((p) => (
+            <span key={p.part} className="supplier-papers-part">
+              {p.part}
+              {p.times > 1 && <span className="tnum"> ×{p.times}</span>}
+              {p.lastFils !== undefined && <span className="supplier-papers-price"> · {formatAed(p.lastFils)}</span>}
+            </span>
+          ))}
+        </span>
+      )}
+      {st.makes.length > 0 && <span className="supplier-papers-makes">{st.makes.slice(0, 6).map((m) => `${m.make} ×${m.n}`).join(' · ')}</span>}
+    </button>
   );
 }
 

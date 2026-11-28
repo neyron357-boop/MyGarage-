@@ -35,6 +35,7 @@ import { CustomersPage } from './features/customers/CustomersPage';
 import { VehiclePage } from './features/customers/VehiclePage';
 import { MoneyPage } from './features/money/MoneyPage';
 import { DebtPaymentsPage } from './features/money/DebtPayments';
+import { PapersPage } from './features/money/Papers';
 import { CustomerMonthsPage } from './features/money/CustomerMonths';
 import { JobPage } from './features/job/JobPage';
 import { MorePage } from './features/more/MorePage';
@@ -104,6 +105,7 @@ function AppRoutes({ location }: { location: Location }) {
       <Route path="/parts" element={<PartsPage />} />
       <Route path="/money" element={<MoneyPage />} />
       <Route path="/money/payments" element={<DebtPaymentsPage />} />
+      <Route path="/money/papers" element={<PapersPage />} />
       <Route path="/money/months" element={<CustomerMonthsPage />} />
       <Route path="/reports" element={<ReportsPage />} />
       <Route path="/settings" element={<SettingsPage />} />

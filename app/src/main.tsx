@@ -23,6 +23,7 @@ import { startNotifyPlan } from './services/notify';
 import { startPush } from './services/push';
 import { startSync } from './services/sync/engine';
 import { startWaAsk, startWaAutomation } from './services/waStart';
+import { startPaperReader } from './services/papers';
 
 /** The Mini App owns vertical swipes inside its webview. Telegram's header still handles dismissal. */
 function prepareTelegramGestures() {
@@ -91,6 +92,8 @@ async function start() {
   // The garage's WhatsApp by itself (v0.79): reports, the outbox kept here, the suppliers' answers read.
   startWaAutomation();
   startWaAsk();
+  // v1.05: the suppliers' paper invoices taken in are read on by themselves (the multi-scanner).
+  startPaperReader();
   // Notifications (v0.74): the plan of what to remind of follows the data; a notification tapped opens its job.
   startNotifyPlan();
   startPush();
