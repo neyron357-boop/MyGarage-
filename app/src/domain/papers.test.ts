@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { carOfLine, carOfText, expenseOf, lineKind, paperDate, paperDoubts, paperFields, paperStats, partWithoutCar, twinOf } from './papers';
+import { carOfLine, carOfText, carsOfLine, dateByNumbers, expenseOf, lineKind, lineOf, paperDate, paperDoubts, paperFields, paperStats, partWithoutCar, setGarageModels, twinOf } from './papers';
 import type { SupplierPaper } from './types';
 
 /*
@@ -172,5 +172,81 @@ describe('what a supplier’s papers say of it', () => {
       { make: 'Toyota', n: 2 },
       { make: 'Nissan', n: 1 },
     ]);
+  });
+});
+
+describe('v1.05.2: what the first papers taught (every line here made up)', () => {
+  it('every car a line fits — a list of models, a name a letter off, a short make, a make and its number', () => {
+    const c = carsOfLine('CONDENSER RIO/ACCENT/VELOSTR 2010-2018');
+    expect([c.make, c.model]).toEqual(['Kia', 'Rio']);
+    expect(c.fits).toEqual([
+      { make: 'Kia', model: 'Rio' },
+      { make: 'Hyundai', model: 'Accent' },
+      { make: 'Hyundai', model: 'Veloster' },
+    ]);
+    expect(carOfLine('ELENTRA SHOCK ABSORBER FRT')).toMatchObject({ make: 'Hyundai', model: 'Elantra' });
+    expect(carOfLine('SPROTAGE ENG MOUNTING')).toMatchObject({ make: 'Kia', model: 'Sportage' });
+    expect(carOfLine('MIT ASX AC FILTER')).toMatchObject({ make: 'Mitsubishi', model: 'ASX' });
+    expect(carOfLine('MAZDA 6 BRAKE PAD')).toMatchObject({ make: 'Mazda', model: 'Mazda6' });
+    // a part word that is a model somewhere is the part
+    expect(carOfLine('SPARK PLUG IRIDIUM').make).toBeUndefined();
+    expect(carOfLine('CLUTCH MASTER CYLINDER').make).toBeUndefined();
+  });
+  it('a model the catalogue lacks — read when it is one of the garage’s own cars', () => {
+    expect(carOfLine('ZQ WIPER BLADE').make).toBeUndefined();
+    setGarageModels([{ make: 'Toyota', model: 'ZQ' }, { make: 'Nobody', model: 'Zz' }]);
+    try {
+      expect(carOfLine('ZQ WIPER BLADE')).toMatchObject({ make: 'Toyota', model: 'ZQ' });
+      // short: only where the papers write the car
+      expect(carOfLine('WIPER BLADE ZQ').make).toBeUndefined();
+    } finally {
+      setGarageModels([]);
+    }
+  });
+  it('the part written out: shorthand, misspellings, the years and the kind’s code gone', () => {
+    expect(partWithoutCar('RD LANCER 2008-2016 G')).toBe('RADIATOR');
+    expect(partWithoutCar('COC ASSY HIACE')).toBe('CLUTCH OPERATING CYLINDER ASSY');
+    expect(partWithoutCar('CON ROD BEARING STD')).toBe('CONNECTING ROD BEARING STD');
+    expect(partWithoutCar('CON HONDA CIVIC 07-09 (KOYO)')).toBe('CONDENSER (KOYO)');
+    expect(partWithoutCar('FRT BRK PAID COROLLA D')).toBe('FRONT BRAKE PAD');
+    expect(partWithoutCar('AC COMPARASSOR TUCSON')).toBe('AC COMPRESSOR');
+    expect(partWithoutCar('A/C HOSE 1/2"')).toBe('AC HOSE 1/2"');
+    expect(partWithoutCar('THARMOSTAT GENIUNE')).toBe('THERMOSTAT');
+  });
+  it('original or copy as the papers say: «… G», «… D», a maker as the brand — not the car the line is for', () => {
+    expect(lineKind('BRAKE PAD FRONT G')).toMatchObject({ kind: 'oem', said: true });
+    expect(lineKind('BRAKE PAD FRONT D')).toMatchObject({ kind: 'aftermarket', said: true });
+    expect(lineKind('BRAKE PAD FRONT', { brand: 'G' })).toMatchObject({ kind: 'oem', said: true });
+    expect(lineKind('OIL FILTER 90915 TOYOTA', 'Toyota')).toMatchObject({ kind: 'oem', brand: 'TOYOTA' });
+    // the car's make is not its brand
+    expect(lineKind('MAZDA 6 BRAKE PAD', { brand: 'MAZDA' })).toEqual({ kind: 'aftermarket', said: false });
+    expect(lineKind('HONDA CIVIC CONDENSER KOYO', { brand: 'HONDA' })).toMatchObject({ kind: 'aftermarket', said: true });
+    expect(lineKind('ENGINE OIL HONDA')).toMatchObject({ kind: 'oem', brand: 'HONDA' });
+  });
+  it('the AI’s word for the kind — only where the line’s own words say nothing', () => {
+    expect(lineOf({ name: 'OIL COOLER', kind: 'oem', qty: 1 }, {})).toMatchObject({ kind: 'oem', said: { kind: 'oem' } });
+    expect(lineOf({ name: 'OIL COOLER', kind: 'oem', qty: 1 }, {}).unsure).toBeUndefined();
+    expect(lineOf({ name: 'OIL COOLER D', kind: 'oem', qty: 1 }, {}).kind).toBe('aftermarket');
+    expect(lineOf({ name: 'OIL COOLER', qty: 1 }, {})).toMatchObject({ kind: 'aftermarket', unsure: true });
+    // its cars: the line's own, every one
+    expect(lineOf({ name: 'CONDENSER RIO/ACCENT', qty: 1 }, { make: 'Toyota', model: 'Hiace' })).toMatchObject({ make: 'Kia', model: 'Rio', fits: [{ make: 'Hyundai', model: 'Accent' }] });
+  });
+  it('the year by the supplier’s numbering: a faint 6 read as 4 among November’s papers', () => {
+    const others = [
+      { id: 'a', supplierId: 's', invoiceNo: '5100', date: '2026-11-20', dateSure: true, state: 'done' as const },
+      { id: 'b', supplierId: 's', invoiceNo: '4300', date: '2026-08-02', dateSure: true, state: 'done' as const },
+      { id: 'c', supplierId: 'other', invoiceNo: '5121', date: '2023-01-01', dateSure: true, state: 'done' as const },
+    ];
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: 'INV-5120', date: '2024-11-25' }, others)).toBe('2026-11-25');
+    // the same year, another supplier, a number far off, a neighbour not sure: as read
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: '5120', date: '2026-10-25' }, others)).toBeUndefined();
+    expect(dateByNumbers({ id: 'p', supplierId: 'x', invoiceNo: '5120', date: '2024-11-25' }, others)).toBeUndefined();
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: '9999', date: '2024-11-25' }, others)).toBeUndefined();
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: '5120', date: '2024-11-25' }, others.map((o) => ({ ...o, dateSure: false })))).toBeUndefined();
+    // one neighbour alone, or neighbours of two years: as read (the neighbour may be the misread one)
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: '5120', date: '2024-11-25' }, others.slice(0, 1))).toBeUndefined();
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: '5120', date: '2024-11-25' }, [...others, { id: 'd', supplierId: 's', invoiceNo: '5121', date: '2024-11-26', dateSure: true, state: 'done' as const }])).toBeUndefined();
+    // a year apart with the same months is a real year apart — kept
+    expect(dateByNumbers({ id: 'p', supplierId: 's', invoiceNo: '5120', date: '2025-05-25' }, others)).toBeUndefined();
   });
 });

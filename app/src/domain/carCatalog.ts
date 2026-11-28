@@ -6,7 +6,7 @@ export const CAR_CATALOG: Record<string, string[]> = {
   Toyota: [
     'Land Cruiser', 'Land Cruiser Prado', 'Land Cruiser 70', 'Camry', 'Corolla', 'Corolla Cross', 'Yaris', 'Yaris Cross', 'RAV4', 'Fortuner', 'Hilux',
     'Hiace', 'Coaster', 'Avalon', 'Rush', 'Raize', 'Innova', 'Sequoia', 'Tundra', 'Tacoma', '4Runner', 'FJ Cruiser', 'Highlander', 'Granvia',
-    'C-HR', 'Crown', 'Supra', 'GR86', '86', 'Previa', 'Avanza', 'Veloz', 'Urban Cruiser', 'bZ4X', 'Echo',
+    'C-HR', 'Crown', 'Supra', 'GR86', '86', 'Previa', 'Sienna', 'Avanza', 'Veloz', 'Urban Cruiser', 'bZ4X', 'Echo',
   ],
   Nissan: [
     'Patrol', 'Patrol Safari', 'Patrol Pickup', 'Sunny', 'Altima', 'Maxima', 'Sentra', 'Kicks', 'X-Trail', 'Pathfinder', 'Armada', 'Navara',

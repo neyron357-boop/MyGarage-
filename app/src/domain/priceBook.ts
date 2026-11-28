@@ -110,6 +110,10 @@ export interface PriceHint {
  * this car first, then the same model, the same make, any; the newest first within; «not available» left out; one per
  * supplier and kind (its latest). At most `limit`.
  */
+/** A paper's line fits several models («RIO/ACCENT/VELOSTR», v1.05.2): this car's among them. */
+const fitsCar = (p: PricePoint, line: { make?: string; model?: string }) => !!line.make && !!line.model && !!p.fits?.some((f) => f.trim().toLowerCase() === `${line.make} ${line.model}`.trim().toLowerCase());
+const fitsMake = (p: PricePoint, line: { make?: string }) => !!line.make && !!p.fits?.some((f) => f.toLowerCase().startsWith(`${line.make!.toLowerCase()} `));
+
 export function priceHints(points: PricePoint[], line: { part: string; make?: string; model?: string; vin?: string; itemId?: string }, limit = 5): PriceHint[] {
   const cars = new Set(carWordsOf(line.make, line.model));
   const me = partName(line.part, cars);
@@ -118,7 +122,7 @@ export function priceHints(points: PricePoint[], line: { part: string; make?: st
     .filter((p) => p.itemId !== line.itemId && !p.na && p.costFils !== undefined)
     .map((p) => ({ p, sim: p.part === lineName(line.part) ? 1 : partSimilarity(me, partName(p.part, cars)) }))
     .filter((x) => x.sim >= 0.85)
-    .map(({ p }) => ({ point: p, near: line.vin && p.vin === line.vin ? 3 : same(p.model, line.model) && same(p.make, line.make) ? 2 : same(p.make, line.make) ? 1 : 0 }))
+    .map(({ p }) => ({ point: p, near: line.vin && p.vin === line.vin ? 3 : (same(p.model, line.model) && same(p.make, line.make)) || fitsCar(p, line) ? 2 : same(p.make, line.make) || fitsMake(p, line) ? 1 : 0 }))
     // Another make's part is another part (a Toyota's pads are not a Nissan's): only when the car is not known.
     .filter((h) => !line.make || h.near > 0 || !h.point.make);
   fit.sort((a, b) => b.near - a.near || b.point.at.localeCompare(a.point.at));

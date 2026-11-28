@@ -29,6 +29,8 @@ export interface BoughtLine {
   name?: string;
   /** v1.05.1: the car's model, and what one piece cost (the line's cost, the invoice's price). */
   model?: string;
+  /** v1.05.2: the other models it fits (a paper's line «RIO/ACCENT/VELOSTR»). */
+  models?: string[];
   fils?: number;
   /** v1.05: off a supplier's paper invoice (`orderId` is the paper's): a purchase, not a job. */
   paper?: true;
@@ -241,11 +243,11 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
   const model = modelKey(job.model);
   const parts = job.parts.map((p) => ({ name: p.name, terms: partTerms(p.title) })).filter((p) => p.terms.length);
   // What each supplier sold before, prepared once.
-  const sold = new Map<string, { x: Indexed; name?: string; make?: string; model?: string; fils?: number }[]>();
+  const sold = new Map<string, { x: Indexed; name?: string; make?: string; model?: string; models?: string[]; fils?: number }[]>();
   for (const l of history) {
     let a = sold.get(l.supplierId);
     if (!a) sold.set(l.supplierId, (a = []));
-    a.push({ x: indexText(l.title), name: l.name, make: l.make, model: l.model, fils: l.fils });
+    a.push({ x: indexText(l.title), name: l.name, make: l.make, model: l.model, models: l.models, fils: l.fils });
   }
   // Taken off by the manager (v0.71): not in a job's list (`offOf` — folded under it).
   const ranked = list.filter((s) => s.mark !== 'off').map((s): Ranked => {
@@ -285,7 +287,7 @@ export function rankForJob(list: Supplier[], use: Map<string, SupplierUse>, hist
       if (!same.length) continue;
       partsSold++;
       // v1.05.1 (the owner: «такой же деталь для такого же автомобиля — ты покупал у этого поставщика»): for this very model.
-      const mine = model ? same.filter((h) => modelKey(h.model) === model && (!make || !h.make || makeKey(h.make) === make)) : [];
+      const mine = model ? same.filter((h) => (modelKey(h.model) === model && (!make || !h.make || makeKey(h.make) === make)) || !!h.models?.some((m) => modelKey(m) === model)) : [];
       if (mine.length) {
         carSold++;
         const last = mine[mine.length - 1];

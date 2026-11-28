@@ -43,7 +43,7 @@ export async function boughtLines(): Promise<BoughtLine[]> {
     for (const l of p.lines ?? []) {
       const name = partOfLine(l);
       if (!name) continue;
-      out.push({ supplierId: p.supplierId, orderId: `paper:${p.id}`, at, make: l.make ?? p.make, model: l.model ?? (l.make && l.make !== p.make ? undefined : p.model), fils: l.unitFils, title: [l.name, l.part, l.partNumber, l.brand].filter(Boolean).join(' '), name, paper: true });
+      out.push({ supplierId: p.supplierId, orderId: `paper:${p.id}`, at, make: l.make ?? p.make, model: l.model ?? (l.make && l.make !== p.make ? undefined : p.model), ...(l.fits?.length ? { models: l.fits.map((x) => x.model) } : {}), fils: l.unitFils, title: [l.name, l.part, l.partNumber, l.brand].filter(Boolean).join(' '), name, paper: true });
     }
   }
   return out.sort((a, b) => a.at.localeCompare(b.at));

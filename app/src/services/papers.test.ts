@@ -7,7 +7,7 @@ import { createCustomer } from './customers';
 import { addItem } from './estimate';
 import { addExpense } from './money';
 import { checkIn } from './orders';
-import { addPapers, loadPapers, notePaperPrices, paperToExpense, readPapers, removePaper, rereadFailed, resetPaperReader, supplierPaperStats } from './papers';
+import { addPapers, loadPapers, notePaperPrices, paperToExpense, readPapers, removePaper, rereadFailed, resetPaperReader, setPaperDate, supplierPaperStats, tidyPapers } from './papers';
 import { priceHintsFor } from './priceBook';
 import { ensureSeed } from './seed';
 import { suppliersForJob, suppliersRanked } from './supplierRank';
@@ -177,6 +177,46 @@ describe('the suppliers’ paper invoices read in bulk (v1.05)', () => {
     expect(other.why.find((w) => w.kind === 'sold')).not.toHaveProperty('model');
     delete READS.E;
     delete READS.F;
+  });
+
+  it('v1.05.2: papers learnt by older rules tidied once — each line’s cars, part and kind again, the year by the supplier’s numbering (not a day set by hand), their prices again', async () => {
+    const base = { hash: 'h', mediaId: 'm', state: 'done' as const, supplierId: 's1', createdAt: '', updatedAt: '' };
+    const old = (id: string, invoiceNo: string, date: string, more = {}) => ({ ...base, id, hash: id, invoiceNo, date, dateSure: true, ...more });
+    await db.papers.bulkAdd([
+      old('p1', '5100', '2026-11-20', {
+        lines: [
+          { name: 'CONDENSER RIO/ACCENT D', part: 'CONDENSER RIO/ACCENT D', qty: 1, unitFils: 30000, kind: 'aftermarket' as const, unsure: true as const },
+          { name: 'RD LANCER 2008-2016', qty: 1, unitFils: 45000, kind: 'aftermarket' as const, unsure: true as const, said: { kind: 'oem' as const } },
+        ],
+      }),
+      // a faint 6 read as 4: among November's papers by its number
+      old('p2', '5120', '2024-11-25', { lines: [{ name: 'FRT BRK PAID COROLLA G', qty: 1, unitFils: 12000, kind: 'aftermarket' as const, unsure: true as const }] }),
+      old('p4', '5090', '2026-11-18'),
+      old('p5', '5080', '2026-11-16'),
+      // read as 2024 too, but the day a person set
+      old('p3', '5060', '2024-11-10'),
+    ]);
+    await setPaperDate('p3', '2024-11-10');
+    await db.papers.update('p3', { v: undefined });
+    expect(await tidyPapers()).toBe(5);
+    const [p1, p2, p3] = await Promise.all(['p1', 'p2', 'p3'].map((id) => db.papers.get(id)));
+    expect(p1!.lines!.map((l) => [l.part, l.make, l.model, l.fits, l.kind, !!l.unsure])).toEqual([
+      ['CONDENSER', 'Kia', 'Rio', [{ make: 'Hyundai', model: 'Accent' }], 'aftermarket', false],
+      ['RADIATOR', 'Mitsubishi', 'Lancer', undefined, 'oem', false],
+    ]);
+    expect([p2!.lines![0].part, p2!.lines![0].model, p2!.lines![0].kind]).toEqual(['FRONT BRAKE PAD', 'Corolla', 'oem']);
+    expect([p2!.date, p2!.dateSure, p2!.state]).toEqual(['2026-11-25', false, 'look']);
+    // the day a person set stays
+    expect(p3!.date).toBe('2024-11-10');
+    expect((await db.papers.get('p1'))!.date).toBe('2026-11-20');
+    const prices = await db.priceBook.where('id').startsWith('paper:p1:').toArray();
+    expect(prices.map((x) => [x.part, x.model, x.fits])).toEqual([
+      ['CONDENSER', 'Rio', ['Hyundai Accent']],
+      ['RADIATOR', 'Lancer', undefined],
+    ]);
+    expect((await db.priceBook.get('paper:p2:0'))?.at.slice(0, 10)).toBe('2026-11-25');
+    // once
+    expect(await tidyPapers()).toBe(0);
   });
 
   it('not read (no server): kept, read again later; a picture that is no invoice is said so', async () => {

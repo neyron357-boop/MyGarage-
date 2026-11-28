@@ -1,6 +1,6 @@
 import { db, uid } from '../db/db';
 import { dubaiDate, nowIso } from '../domain/dates';
-import { expenseOf, paperDoubts, paperFields, paperStats, partOfLine, twinOf, type PaperFields, type PaperStats } from '../domain/papers';
+import { carOfText, dateByNumbers, expenseOf, lineOf, PAPER_V, paperDoubts, paperFields, paperStats, partOfLine, setGarageModels, twinOf, type PaperFields, type PaperStats } from '../domain/papers';
 import type { ReceiptRead } from '../domain/receipt';
 import { sellerKey } from '../domain/suppliers';
 import type { PricePoint, Supplier, SupplierPaper } from '../domain/types';
@@ -96,6 +96,7 @@ export function readPapers(): Promise<number> {
   }
   running = (async () => {
     let n = 0;
+    await garageModels().catch(() => undefined);
     for (;;) {
       again = false;
       const me = installId();
@@ -129,6 +130,8 @@ export function startPaperReader() {
   if (started || typeof window === 'undefined') return;
   started = true;
   kick(8000);
+  // v1.05.2: the papers read by older rules — tidied once (no AI), a while after the start.
+  setTimeout(() => void tidyPapers().catch(() => undefined), 12_000);
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && kick(1500));
   setInterval(() => document.visibilityState === 'visible' && kick(0), 5 * 60_000);
 }
@@ -252,8 +255,12 @@ async function learn(id: string, f: PaperFields, by: 'ai' | 'phone' | undefined,
     adds: f.adds,
     expenseId,
     why: undefined,
+    v: PAPER_V,
     updatedAt: nowIso(),
   };
+  // v1.05.2: its year by the supplier's own numbering (a faint 6 read 4 — «2024» among November 2026's numbers).
+  const byNumber = draft.date ? dateByNumbers({ id, supplierId: draft.supplierId, invoiceNo: draft.invoiceNo, date: draft.date }, others) : undefined;
+  if (byNumber) Object.assign(base, { date: byNumber, dateSure: false });
   if (twin) {
     // The same paper twice: the one read with more lines is kept (the other photo may have been cut or blurred).
     if (f.lines.length <= (twin.lines?.length ?? 0)) {
@@ -270,7 +277,51 @@ async function learn(id: string, f: PaperFields, by: 'ai' | 'phone' | undefined,
   const doubts = paperDoubts({ supplierId: base.supplierId, date: base.date, dateSure: base.dateSure, lines: base.lines, adds: base.adds });
   await db.papers.update(id, { ...base, state: doubts.length ? 'look' : 'done', twinOf: undefined });
   await notePaperPrices(id);
+  // …and this one's number may tell an older paper of the supplier its year.
+  if (base.supplierId) await yearsByNumbers(base.supplierId);
   return true;
+}
+
+/** The supplier's papers whose year their numbers say otherwise: that year, to be looked at (v1.05.2). */
+async function yearsByNumbers(supplierId: string): Promise<number> {
+  const list = await db.papers.where('supplierId').equals(supplierId).toArray();
+  let n = 0;
+  for (const p of list) {
+    if ((p.state !== 'done' && p.state !== 'look') || p.dateBy === 'hand') continue;
+    const date = dateByNumbers(p, list);
+    if (!date) continue;
+    await db.papers.update(p.id, { date, dateSure: false, state: 'look', updatedAt: nowIso() });
+    Object.assign(p, { date, dateSure: false });
+    await notePaperPrices(p.id);
+    n++;
+  }
+  return n;
+}
+
+/**
+ * The papers learnt by older rules tidied again by the newer ones (v1.05.2, `PAPER_V`): each line out of what was kept of it —
+ * the line as printed, what the AI said — its car (every model), its part (shorthand written out), its kind; the years by the
+ * suppliers' numbering; its prices again. No AI is asked. Once: the papers carry the version they were tidied by.
+ */
+export async function tidyPapers(): Promise<number> {
+  const old = (await db.papers.toArray()).filter((p) => (p.v ?? 1) < PAPER_V && (p.state === 'done' || p.state === 'look' || p.state === 'twin'));
+  if (!old.length) return 0;
+  await garageModels();
+  for (const p of old) {
+    const paperCar = carOfText(p.car);
+    const lines = (p.lines ?? []).map((l) =>
+      lineOf({ name: l.name, part: l.said?.part ?? l.part, car: l.said?.car, brand: l.said?.brand ?? l.brand, kind: l.said?.kind, partNumber: l.partNumber, qty: l.qty, unitFils: l.unitFils, totalFils: l.totalFils }, paperCar),
+    );
+    await db.papers.update(p.id, { lines, make: paperCar.make, model: paperCar.model, v: PAPER_V, updatedAt: nowIso() });
+    await notePaperPrices(p.id);
+  }
+  for (const supplierId of new Set(old.map((p) => p.supplierId).filter((x): x is string => !!x))) await yearsByNumbers(supplierId);
+  return old.length;
+}
+
+/** The garage's own cars' models (one the catalogue lacks — «XA» — read in the lines too). */
+async function garageModels() {
+  setGarageModels(await db.vehicles.toArray());
 }
 const shift = (day: string, days: number) => new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
@@ -306,6 +357,7 @@ export async function notePaperPrices(id: string): Promise<number> {
               ...(p.invoiceNo ? { invoiceNo: p.invoiceNo } : {}),
               ...(l.partNumber ? { partNumber: l.partNumber } : {}),
               qty: l.qty,
+              ...(l.fits?.length ? { fits: l.fits.map((x) => `${x.make} ${x.model}`) } : {}),
               updatedAt: now,
             },
           ];
@@ -350,14 +402,14 @@ export async function setPaperDate(id: string, date: string): Promise<void> {
   const p = await db.papers.get(id);
   if (!p || date > dubaiDate()) return;
   const doubts = paperDoubts({ ...p, date, dateSure: true });
-  await db.papers.update(id, { date, dateSure: true, state: p.state === 'look' || p.state === 'done' ? (doubts.length ? 'look' : 'done') : p.state, updatedAt: nowIso() });
+  await db.papers.update(id, { date, dateSure: true, dateBy: 'hand', state: p.state === 'look' || p.state === 'done' ? (doubts.length ? 'look' : 'done') : p.state, updatedAt: nowIso() });
   await notePaperPrices(id);
 }
 
 /** Looked at and fine as it is: no more «Проверить». */
 export async function settlePaper(id: string): Promise<void> {
   const p = await db.papers.get(id);
-  if (p?.state === 'look') await db.papers.update(id, { state: 'done', ...(p.date ? { dateSure: true } : {}), updatedAt: nowIso() });
+  if (p?.state === 'look') await db.papers.update(id, { state: 'done', ...(p.date ? { dateSure: true, dateBy: 'hand' as const } : {}), updatedAt: nowIso() });
 }
 
 /** Not a twin after all: counted as a paper of its own. */

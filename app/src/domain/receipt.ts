@@ -22,6 +22,8 @@ export interface ReceiptItem {
   partNumber?: string;
   /** The maker or code written with the line («SAT», «DENSO») — v1.05.1, the server's reading. */
   brand?: string;
+  /** v1.05.2: «oem» (genuine, «… G»), «aftermarket» (duplicate, «… D»), «used» — the server's reading. */
+  kind?: string;
   qty?: number;
   unitPrice?: number;
   total?: number;
@@ -73,7 +75,7 @@ export interface ReceiptExpense {
   /** The paper's number («#98352»); the positions are `items` (v0.77: not in the note). */
   note: string;
   /** The lines, named as the garage names lines (capitals), each with its net price per piece in fils when the paper gives one. */
-  items: { name: string; part?: string; car?: string; qty: number; partNumber?: string; brand?: string; unitNetFils?: number; lineNetFils?: number }[];
+  items: { name: string; part?: string; car?: string; qty: number; partNumber?: string; brand?: string; kind?: 'oem' | 'aftermarket' | 'used'; unitNetFils?: number; lineNetFils?: number }[];
   /** The VAT's share of the net (basis points): a line's own VAT is its net × this. */
   vatShareBp: number;
 }
@@ -180,6 +182,7 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
       qty,
       partNumber: String(i.partNumber ?? '').trim().toUpperCase() || undefined,
       brand: clean(i.brand, 30)?.toUpperCase(),
+      kind: /^(oem|aftermarket|used)$/.test(String(i.kind ?? '')) ? (i.kind as 'oem' | 'aftermarket' | 'used') : undefined,
       lineTotal,
     };
   });
@@ -195,7 +198,7 @@ export function receiptExpense(read: ReceiptRead, today = dubaiDate()): ReceiptE
   const linesGross = !near(itemsSum, net) && near(itemsSum, total) && vat > 0;
   const items = lines.map((l) => {
     const lineNet = l.lineTotal === undefined ? undefined : linesGross ? Math.round((l.lineTotal * net) / total) : l.lineTotal;
-    return { name: l.name, part: l.part, car: l.car, qty: l.qty, partNumber: l.partNumber, brand: l.brand, lineNetFils: lineNet, unitNetFils: lineNet === undefined ? undefined : Math.round(lineNet / l.qty) };
+    return { name: l.name, part: l.part, car: l.car, qty: l.qty, partNumber: l.partNumber, brand: l.brand, kind: l.kind, lineNetFils: lineNet, unitNetFils: lineNet === undefined ? undefined : Math.round(lineNet / l.qty) };
   });
   const pm = String(read.paymentMethod ?? '').toLowerCase();
   const method: ExpenseMethod = /card/.test(pm) ? 'card' : /transfer|bank/.test(pm) ? 'transfer' : /credit|unpaid|due/.test(pm) ? 'credit' : 'cash';

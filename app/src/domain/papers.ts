@@ -5,6 +5,7 @@ import { lineName } from './items';
 import { printedDate, receiptExpense, type ReceiptRead } from './receipt';
 import { brandWord } from './supplierReply';
 import { sellerKey } from './suppliers';
+import { editDistance } from './ai';
 import type { Expense, PaperItem, SupplierPaper } from './types';
 
 /*
@@ -52,40 +53,62 @@ export function paperDate(read: Pick<ReceiptRead, 'dateText' | 'date' | 'dateSur
   return { sure: false };
 }
 
-/* ---------- The car a line names (v1.05.1) ---------- */
+/* ---------- The car a line names (v1.05.1; v1.05.2 — checked on the garage's first 46 invoices) ---------- */
 
 /*
  * The owner (28/11, two of the garage's invoices): «почти всегда они пишут название автомобиля вместе с названием детали в
  * одной строке: SANTAFE AC VALVE … — это к Санта-Фе; CAMRY HIBRID FAN MOTOR … — фан-мотор для Камри». A line is read as a
  * person reads it: the model's name (the catalogue's, written together or apart — «SANTAFE», «SANTA FE»; its own last word —
  * «PRADO»; «LC200»), the make it is of; the rest is the part. A model that is an everyday word («ACCENT», «ROSA», «CANTER»)
- * or a short one («RX», «i10») counts only as the line's first word — that is where these papers write the car.
+ * or a short one («RX», «XA») counts only as the line's first word (or right after another car's name, «RIO/ACCENT») — that
+ * is where these papers write the car.
+ * v1.05.2 (the first 46 papers read): every model a line names («RIO/ACCENT/VELOSTR 2010-2018» fits three — `fits`), a name
+ * a letter or two off («ELENTRA», «SPROTAGE», «MITUSUBISHI»), short makes («MIT»), the garage's own cars' models («XA» —
+ * `setGarageModels`, the catalogue has none).
  */
 const keyOf = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 /** Models that are words of parts too («SPARK PLUG», «MASTER CYLINDER», «PILOT BEARING», «CROWN PINION»): never a car here. */
 const PART_LIKE = new Set(['spark', 'master', 'seal', 'pilot', 'crown', 'charger', 'cooper', 'express', 'partner', 'expert', 'boxer', 'shark', 'ghost', 'phantom']);
 type ModelHit = { make: string; model: string; first: boolean };
 let modelIdx: Map<string, ModelHit[]> | undefined;
+let garageModels: { make: string; model: string }[] = [];
+
+/** The garage's own cars' makes and models (services/papers.ts): a model the catalogue lacks («XA») is read too. */
+export function setGarageModels(list: { make?: string; model?: string }[]): void {
+  const seen = new Set<string>();
+  garageModels = [];
+  for (const v of list) {
+    const make = canonicalMake(v.make ?? '');
+    const model = (v.model ?? '').trim();
+    if (!make || !model || !CAR_CATALOG[make]) continue;
+    const k = `${make}|${keyOf(model)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    garageModels.push({ make, model });
+  }
+  modelIdx = undefined;
+}
+
 function modelIndex(): Map<string, ModelHit[]> {
   if (modelIdx) return modelIdx;
   const out = new Map<string, ModelHit[]>();
   const add = (k: string, v: ModelHit) => {
     if (k.length < 2 || /^\d+$/.test(k)) return;
     const was = out.get(k) ?? [];
-    if (!was.some((x) => x.make === v.make && x.model === v.model)) out.set(k, [...was, v]);
+    if (!was.some((x) => x.make === v.make && keyOf(x.model) === keyOf(v.model))) out.set(k, [...was, v]);
   };
-  for (const [make, models] of Object.entries(CAR_CATALOG))
-    for (const model of models) {
-      const k = keyOf(model);
-      if (PART_LIKE.has(k)) continue;
-      add(k, { make, model, first: k.length < 4 || NOT_MODELS.has(model.toLowerCase()) });
-      // «PRADO» for «Land Cruiser Prado»: the last word of a longer name, when it is a word of its own
-      const words = model.split(/\s+/);
-      if (words.length > 1) {
-        const last = keyOf(words[words.length - 1]);
-        if (last.length >= 4 && !/\d/.test(last)) add(last, { make, model, first: true });
-      }
+  const models = [...Object.entries(CAR_CATALOG).flatMap(([make, list]) => list.map((model) => ({ make, model }))), ...garageModels];
+  for (const { make, model } of models) {
+    const k = keyOf(model);
+    if (PART_LIKE.has(k)) continue;
+    add(k, { make, model, first: k.length < 4 || NOT_MODELS.has(model.toLowerCase()) });
+    // «PRADO» for «Land Cruiser Prado»: the last word of a longer name, when it is a word of its own
+    const words = model.split(/\s+/);
+    if (words.length > 1) {
+      const last = keyOf(words[words.length - 1]);
+      if (last.length >= 4 && !/\d/.test(last)) add(last, { make, model, first: true });
     }
+  }
   modelIdx = out;
   return out;
 }
@@ -93,46 +116,206 @@ const MAKE_WORDS = (() => {
   const m = new Map<string, string>();
   for (const make of Object.keys(CAR_CATALOG)) m.set(keyOf(make), make);
   for (const [k, make] of Object.entries(ALIASES)) m.set(keyOf(k), make);
+  // as the papers shorten them
+  for (const [k, make] of Object.entries({ mit: 'Mitsubishi', mits: 'Mitsubishi', mitsu: 'Mitsubishi', nis: 'Nissan', toy: 'Toyota', hyun: 'Hyundai', chev: 'Chevrolet' })) m.set(k, make);
+  m.delete('mini');
+  m.delete('tank');
   return m;
 })();
+/** A word a letter or two off a name (five letters and more; two off from eight): the name, if only one is that near. */
+function nearName<T>(w: string, names: Map<string, T>, min = 5): T | undefined {
+  if (w.length < min || /\d/.test(w)) return undefined;
+  let hit: T | undefined;
+  let n = 0;
+  for (const [k, v] of names) {
+    if (k.length < min || Math.abs(k.length - w.length) > 2) continue;
+    if (editDistance(w, k) <= (Math.max(k.length, w.length) >= 8 ? 2 : 1)) {
+      if (hit !== v) n++;
+      hit = v;
+    }
+  }
+  return n === 1 ? hit : undefined;
+}
 
-/** The car a line (or a paper's car line) names, and which of its words are the car's. */
-export function carOfLine(text?: string): { make?: string; model?: string; words: number[] } {
+export interface LineCar {
+  make?: string;
+  model?: string;
+  /** Every model the line names («RIO/ACCENT/VELOSTR» — three), the first is `model`. */
+  fits: { make: string; model: string }[];
+  /** Which of its words are the car's (letters and digits, in order). */
+  words: number[];
+  /** Which of them are a model's (not a make's). */
+  models: number[];
+}
+
+/** The cars a line (or a paper's car line) names, and which of its words are the cars'. */
+export function carsOfLine(text?: string): LineCar {
   const words = (text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const idx = modelIndex();
   const made = new Set<string>();
-  const mine: number[] = [];
+  const makeAt = new Set<number>();
   words.forEach((w, i) => {
-    const m = MAKE_WORDS.get(w);
-    if (m && !(w === 'mini' || w === 'tank')) {
+    const m = MAKE_WORDS.get(w) ?? (w.length >= 6 ? nearName(w, MAKE_WORDS, 6) : undefined);
+    if (m) {
       made.add(m);
-      mine.push(i);
+      makeAt.add(i);
     }
   });
-  for (let i = 0; i < words.length; i++) {
-    // «LC200», «LC300», «LC76» — a Land Cruiser
-    if (/^lc\d{2,3}$/.test(words[i])) return { make: 'Toyota', model: 'Land Cruiser', words: [...mine, i] };
-    for (const n of [3, 2, 1]) {
-      if (i + n > words.length) continue;
-      const hits = (idx.get(words.slice(i, i + n).join('')) ?? []).filter((h) => (!h.first || i === 0 || made.has(h.make)) && (!made.size || made.has(h.make)));
-      if (!hits.length) continue;
-      const makes = new Set(hits.map((h) => h.make));
-      if (makes.size > 1) continue;
-      const at = Array.from({ length: n }, (_, k) => i + k);
-      // one model, or several of one make («Cruiser» of two) — the make alone
-      return hits.length === 1 ? { make: hits[0].make, model: hits[0].model, words: [...mine, ...at] } : { make: hits[0].make, words: [...mine, ...at] };
+  const taken = new Set<number>();
+  const hits: { at: number; make: string; model?: string }[] = [];
+  const free = (i: number, n: number) => Array.from({ length: n }, (_, k) => i + k).every((k) => !taken.has(k) && (k === i || !makeAt.has(k) || words[k] === words[i]));
+  const take = (i: number, n: number, make: string, model?: string) => {
+    for (let k = i; k < i + n; k++) taken.add(k);
+    hits.push({ at: i, make, model });
+  };
+  const fit = (h: ModelHit) => !made.size || made.has(h.make);
+  // what stands between the words («/» — a list of cars: «CONDENSER RIO/ACCENT»); seps[k] is before word k
+  const seps = (text ?? '').toLowerCase().split(/[a-z0-9]+/);
+  const weak = (j: number) => j >= 0 && j < words.length && !makeAt.has(j) && (idx.get(words[j]) ?? []).some((h) => h.first && fit(h));
+  // names, not codes: «T1/T2», «A4/A5» may be sizes (a code counts after its make — «BMW X3/X5»)
+  const named = (j: number) => !/\d/.test(words[j] ?? '');
+  const listed = (i: number) => named(i) && ((!!seps[i + 1]?.includes('/') && named(i + 1) && weak(i + 1)) || (!!seps[i]?.includes('/') && named(i - 1) && weak(i - 1)));
+  /** One pass over the words: `strong` — names that are no everyday word; else the everyday and short ones where a car is. */
+  const pass = (strong: boolean) => {
+    let more = false;
+    for (let i = 0; i < words.length; i++) {
+      if (taken.has(i)) continue;
+      // «LC200», «LC300», «LC76» — a Land Cruiser
+      if (strong && /^lc\d{2,3}$/.test(words[i])) {
+        take(i, 1, 'Toyota', 'Land Cruiser');
+        more = true;
+        continue;
+      }
+      // first in the line, next to another car's name («RIO/ACCENT», «CONDENSER RIO/ACCENT»), or after its make («MAZDA 6»)
+      const near = i === 0 || taken.has(i - 1) || taken.has(i + 1) || makeAt.has(i - 1) || listed(i);
+      for (const n of [3, 2, 1]) {
+        if (i + n > words.length || !free(i, n)) continue;
+        const all = (idx.get(words.slice(i, i + n).join('')) ?? []).filter(fit);
+        const hs = all.filter((h) => (strong ? !h.first : h.first && (near || made.has(h.make))));
+        if (!hs.length || new Set(hs.map((h) => h.make)).size > 1) continue;
+        take(i, n, hs[0].make, hs.length === 1 ? hs[0].model : undefined);
+        more = true;
+        i += n - 1;
+        break;
+      }
     }
-  }
-  if (made.size === 1) return { make: [...made][0], words: mine };
-  return { words: [] };
+    return more;
+  };
+  pass(true);
+  // a name a letter or two off («ELENTRA», «SPROTAGE», «VELOSTR»): a long one, only one that near
+  words.forEach((w, i) => {
+    if (taken.has(i) || makeAt.has(i)) return;
+    const one = nearName(w, idx, 6)?.filter(fit);
+    if (one?.length === 1 && (!one[0].first || i === 0 || taken.has(i - 1) || taken.has(i + 1))) take(i, 1, one[0].make, one[0].model);
+  });
+  // the everyday and short names next to those found, again while more are found («RIO/ACCENT/VELOSTR»)
+  for (let k = 0; k < 4 && pass(false); k++);
+  hits.sort((a, b) => a.at - b.at);
+  const fits: { make: string; model: string }[] = [];
+  for (const h of hits) if (h.model && !fits.some((f) => f.make === h.make && keyOf(f.model) === keyOf(h.model!))) fits.push({ make: h.make, model: h.model });
+  const main = hits[0];
+  const make = main?.make ?? (made.size === 1 ? [...made][0] : undefined);
+  const used = [...new Set([...taken, ...makeAt])].sort((a, b) => a - b);
+  return { ...(make ? { make } : {}), ...(main?.model ? { model: main.model } : {}), fits, words: used, models: [...taken].sort((a, b) => a - b) };
 }
 
-/** A line's part without its car (and «HYBRID», a year): «TUCSON AC EXPANSION VALVE QWE» → «AC EXPANSION VALVE QWE». */
+/** The car a line names — its first one (`carsOfLine` for all). */
+export function carOfLine(text?: string): { make?: string; model?: string; words: number[] } {
+  const c = carsOfLine(text);
+  return { ...(c.make ? { make: c.make } : {}), ...(c.model ? { model: c.model } : {}), words: c.words };
+}
+
+/* ---------- What the part is ---------- */
+
+/**
+ * The papers' own shorthand and misspellings (v1.05.2, the first 46 invoices: «RD», «COC ASSY», «FRT BRK PAD», «BREAK FLUID»,
+ * «AC COMPARASSOR», «THARMOSTAT»…): written out, as the price book and the jobs' lines name parts.
+ */
+const PART_FIX: Record<string, string> = {
+  RD: 'RADIATOR',
+  RAD: 'RADIATOR',
+  COC: 'CLUTCH OPERATING CYLINDER',
+  CMC: 'CLUTCH MASTER CYLINDER',
+  CSC: 'CLUTCH SLAVE CYLINDER',
+  FRT: 'FRONT',
+  FR: 'FRONT',
+  RR: 'REAR',
+  BRK: 'BRAKE',
+  BRAK: 'BRAKE',
+  BREAK: 'BRAKE',
+  ENG: 'ENGINE',
+  ALTER: 'ALTERNATOR',
+  ALTNTR: 'ALTERNATOR',
+  ALTR: 'ALTERNATOR',
+  COMPARASSOR: 'COMPRESSOR',
+  COMPRESOR: 'COMPRESSOR',
+  COMPRESURE: 'COMPRESSOR',
+  COMPRASSOR: 'COMPRESSOR',
+  CONDENSOR: 'CONDENSER',
+  AXEL: 'AXLE',
+  HOSH: 'HOSE',
+  SEALENT: 'SEALANT',
+  WINDSHEILD: 'WINDSHIELD',
+  THARMOSTAT: 'THERMOSTAT',
+  TERMOSTAT: 'THERMOSTAT',
+  SUSPENTION: 'SUSPENSION',
+  BEARIN: 'BEARING',
+  ABSORBAR: 'ABSORBER',
+  MOUNTING: 'MOUNT',
+  GENIUNE: '',
+  GENUINE: '',
+  GENUIN: '',
+};
+
+/** Two-digit or four-digit years and their spans («07-09», «99-2004», «2006\11», «2010-2018») — not the part. */
+const YEARS = /(?<![\w.])((19|20)\d{2}|\d{2})\s*[-\\/]\s*((19|20)\d{2}|\d{2})(?![\w.])|(?<![\w.])(19|20)\d{2}(?![\w.])/g;
+const yearSpan = (m: string) =>
+  m
+    .split(/\s*[-\\/]\s*/)
+    .map((x) => Number(x.length === 2 ? (Number(x) > 40 ? `19${x}` : `20${x}`) : x))
+    .every((y) => y >= 1980 && y <= 2040);
+
+/**
+ * A line's part without its car (its models and make, «HYBRID», its years) and without a kind's code at its end («… G»,
+ * «… D»), its shorthand written out: «TUCSON AC EXPANSION VALVE QWE» → «AC EXPANSION VALVE QWE», «RD PAJERO
+ * 08- 12AB» → «RADIATOR 12AB», «CON HONDA CIVIC 07-09 (KOYO)» → «CONDENSER (KOYO)», «1/2" A/C HOSE» keeps its size.
+ */
 export function partWithoutCar(text: string): string {
-  const car = carOfLine(text);
-  // the same words carOfLine counts (letters and digits), in their own case
-  const toks = text.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  return lineName(toks.filter((w, i) => !car.words.includes(i) && !/^(hybrid|hibrid|hyb)$/i.test(w) && !/^(19|20)\d{2}$/.test(w)).join(' '));
+  const car = carsOfLine(text);
+  // the same words carsOfLine counts (letters and digits): taken out where they stand, the rest kept as written
+  let k = 0;
+  let s = text.replace(/[A-Za-z0-9]+/g, (w) => (car.words.includes(k++) || /^(hybrid|hibrid|hyb)$/i.test(w) ? ' ' : w));
+  if (car.words.length) s = s.replace(YEARS, (m) => (yearSpan(m) ? ' ' : m));
+  // «08-» of «08- 12AB»: a lone year's dash left behind
+  s = s.replace(/(?<![\w.])\d{2}\s*-(?=\s|$)/g, (m) => (car.words.length && yearSpan(`${m.trim().slice(0, 2)}-${m.trim().slice(0, 2)}`) ? ' ' : m));
+  const words = s
+    .replace(/\s*[-/\\]\s*(?=\s|$)/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  // a kind's code at the end: «G» genuine, «D» duplicate
+  while (words.length > 1 && /^[GD]$/i.test(words[words.length - 1])) words.pop();
+  const out: string[] = [];
+  words.forEach((w, i) => {
+    const up = w.toUpperCase();
+    if (up === 'CON') return out.push(/^ROD/i.test(words[i + 1] ?? '') ? 'CONNECTING' : 'CONDENSER');
+    if (up === 'PAID' && /BRAKE|BRAK|BRK|BREAK/i.test(words[i - 1] ?? '')) return out.push('PAD');
+    if (up === 'ASS' && i === words.length - 1) return out.push('ASSY');
+    const fix = PART_FIX[up];
+    if (fix !== undefined) {
+      if (fix) out.push(fix);
+      return;
+    }
+    out.push(w);
+  });
+  return lineName(
+    out
+      .join(' ')
+      // «A C», «A/C» — AC, as the garage writes it on its jobs (the price book matches by the words)
+      .replace(/\bA\s*[/\s]\s*C\b/gi, 'AC')
+      .replace(/^[\s,.\-/&]+|[\s,.\-/&]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  );
 }
 
 /** The car some words name: the make (one only), and its model of the catalogue when the words name one. */
@@ -156,19 +339,106 @@ export function carOfText(text?: string): { make?: string; model?: string } {
   return { make, ...(model ? { model } : {}) };
 }
 
-const OEM_WORDS = /\b(genuine|original|orginal|oem|org)\b/i;
+/* ---------- Original or copy ---------- */
+
+const OEM_WORDS = /\b(genuine|geniune|genuin|genune|original|orginal|oem|org)\b/i;
 const COPY_WORDS = /\b(duplicate|dupl?|copy|aftermarket|after\s*market|taiwan|china|commercial)\b/i;
 const USED_WORDS = /\b(used|second\s*hand|scrap)\b/i;
 
-/** What kind a line says it is: the car's own make or «genuine» — original; another maker, «copy» — aftermarket; «used». */
-export function lineKind(name: string, make?: string): { kind: 'oem' | 'aftermarket' | 'used'; said: boolean; brand?: string } {
+/**
+ * What kind a line says it is (v1.05.2, as the garage's suppliers write it): «… G» at its end — genuine, «… D» — duplicate;
+ * «genuine» (misspelt too) — original; a car maker's name as the brand («OIL FILTER 15208 NISSAN», «TOYOTA BRAKE OIL») —
+ * the maker's own part, original; another maker («KYB», «KOYO», «DENSO») — aftermarket; «used». The car the line is for is
+ * not its brand («CON HONDA CIVIC (KOYO)» — KOYO). `brand` — the AI's reading of it.
+ */
+export function lineKind(name: string, opts: { brand?: string; make?: string } | string = {}): { kind: 'oem' | 'aftermarket' | 'used'; said: boolean; brand?: string } {
+  const o = typeof opts === 'string' ? { make: opts } : opts;
   if (USED_WORDS.test(name)) return { kind: 'used', said: true };
-  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  const brand = words.find((w) => brandWord(w) && w.length >= 3);
-  if (OEM_WORDS.test(name)) return { kind: 'oem', said: true, ...(brand ? { brand: brand.toUpperCase() } : {}) };
-  if (COPY_WORDS.test(name)) return { kind: 'aftermarket', said: true, ...(brand ? { brand: brand.toUpperCase() } : {}) };
-  if (brand) return { kind: make && canonicalMake(brand).toLowerCase() === canonicalMake(make).toLowerCase() ? 'oem' : 'aftermarket', said: true, brand: brand.toUpperCase() };
+  const said = (o.brand ?? '').trim().toUpperCase();
+  const toks = name.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  const last = toks[toks.length - 1];
+  const code = said === 'G' || said === 'D' ? said : last === 'G' || last === 'D' ? last : '';
+  // a maker's own name (not a shortening — «MIT» is the car), not the car the line is for (a maker followed by its model)
+  const car = carsOfLine(name);
+  const isMaker = (w: string) => !!CAR_CATALOG[canonicalMake(w)] && keyOf(canonicalMake(w)) === keyOf(w);
+  const carMake = (w: string) => isMaker(w) && toks.some((t, i) => keyOf(t) === keyOf(w) && car.words.includes(i) && car.models.includes(i + 1));
+  // the AI's brand — not «G»/«D» (kind codes), not «genuine» (a kind), not the line's car
+  const ai = said && said !== 'G' && said !== 'D' && !OEM_WORDS.test(said) && !COPY_WORDS.test(said) && !carMake(said) ? said : undefined;
+  const named = toks.find((w, i) => w.length >= 3 && (brandWord(w.toLowerCase()) || isMaker(w)) && !carMake(w) && !(car.words.includes(i) && !isMaker(w)));
+  const brand = ai ?? named;
+  const isMake = (b?: string) => !!b && MAKE_WORDS.has(keyOf(b));
+  const withBrand = (kind: 'oem' | 'aftermarket') => ({ kind, said: true, ...(brand ? { brand } : {}) });
+  if (OEM_WORDS.test(name) || code === 'G') return withBrand('oem');
+  if (COPY_WORDS.test(name) || code === 'D') return withBrand('aftermarket');
+  if (brand) return withBrand(isMake(brand) ? 'oem' : 'aftermarket');
   return { kind: 'aftermarket', said: false };
+}
+
+/**
+ * A paper's line as the garage names it, out of what the paper and the AI said (v1.05.2): its cars (its own words, else the
+ * AI's word for its car, else the paper's car), its part (the AI's name for it, else its own words — shorthand written out,
+ * no car), its kind and brand. Used when a paper is read and when papers read before are tidied again (`PAPER_V`).
+ */
+export function lineOf(l: { name: string; part?: string; car?: string; brand?: string; kind?: PaperItem['kind']; partNumber?: string; qty: number; unitFils?: number; totalFils?: number }, paperCar: { make?: string; model?: string }): PaperItem {
+  const own = carsOfLine(l.name);
+  const said = l.car ? carsOfLine(l.car) : undefined;
+  const best = own.make ? own : said?.make ? said : undefined;
+  const make = best?.make ?? paperCar.make;
+  const model = best?.make ? (best.model ?? (best.make === paperCar.make ? paperCar.model : undefined)) : paperCar.model;
+  const fits = [...(own.fits ?? []), ...(said?.fits ?? [])].filter((f, i, all) => all.findIndex((x) => x.make === f.make && keyOf(x.model) === keyOf(f.model)) === i && !(f.make === make && keyOf(f.model) === keyOf(model ?? '')));
+  // the line's own words first; what the AI read of its kind when they say nothing
+  const own2 = lineKind(l.name, { brand: l.brand, make });
+  const k = own2.said || !l.kind ? own2 : { ...own2, kind: l.kind, said: true };
+  const part = partWithoutCar(l.part || l.name) || partWithoutCar(l.name);
+  return {
+    name: l.name,
+    ...(part ? { part } : {}),
+    ...(l.partNumber ? { partNumber: l.partNumber } : {}),
+    qty: l.qty,
+    ...(l.unitFils !== undefined ? { unitFils: l.unitFils } : {}),
+    ...(l.totalFils !== undefined ? { totalFils: l.totalFils } : {}),
+    ...(make ? { make } : {}),
+    ...(model ? { model } : {}),
+    ...(fits.length ? { fits } : {}),
+    kind: k.kind,
+    ...(k.said ? {} : { unsure: true as const }),
+    ...(k.brand ? { brand: k.brand } : {}),
+    ...(l.part || l.car || l.brand || l.kind ? { said: { ...(l.part ? { part: l.part } : {}), ...(l.car ? { car: l.car } : {}), ...(l.brand ? { brand: l.brand } : {}), ...(l.kind ? { kind: l.kind } : {}) } } : {}),
+  };
+}
+
+/** The version of the reading rules a paper was learnt by: one learnt by older rules is tidied again (services/papers.ts). */
+export const PAPER_V = 2;
+
+/* ---------- The day by its number ---------- */
+
+/**
+ * An invoice's year by the supplier's own numbering (v1.05.2: a faint 6 read as 4 — 2024 for 2026 — its number lying
+ * among the same supplier's papers of that very month). The nearest numbers of the same supplier (3000 apart at most, three at
+ * most, two at least), their days sure, all of one other year: when the same day in that year is within four months of the
+ * nearest, while this one is over ten months from each — that year (not sure: to be looked at). A day set by a person is not
+ * moved (services/papers.ts, `dateBy`).
+ */
+export function dateByNumbers(p: Pick<SupplierPaper, 'id' | 'supplierId' | 'invoiceNo' | 'date'>, others: Pick<SupplierPaper, 'id' | 'supplierId' | 'invoiceNo' | 'date' | 'dateSure' | 'state'>[]): string | undefined {
+  const num = (s?: string) => {
+    const d = (s ?? '').match(/\d{3,}/g);
+    return d ? Number(d[d.length - 1]) : NaN;
+  };
+  const n = num(p.invoiceNo);
+  if (!p.supplierId || !p.date || !Number.isFinite(n)) return undefined;
+  const near = others
+    .filter((o) => o.id !== p.id && o.supplierId === p.supplierId && o.date && o.dateSure !== false && (o.state === 'done' || o.state === 'look') && Number.isFinite(num(o.invoiceNo)))
+    .map((o) => ({ o, d: Math.abs(num(o.invoiceNo) - n) }))
+    .filter((x) => x.d > 0 && x.d <= 3000)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 3)
+    .map((x) => x.o);
+  // the nearest numbers (two at least, three at most) all of one other year: one neighbour alone may be the misread one
+  const year = near[0]?.date?.slice(0, 4);
+  if (near.length < 2 || !year || year === p.date.slice(0, 4) || near.some((o) => o.date?.slice(0, 4) !== year)) return undefined;
+  const moved = `${year}${p.date.slice(4)}`;
+  const gap = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / DAY;
+  return gap(moved, near[0].date!) <= 120 && near.every((o) => gap(p.date!, o.date!) > 300) ? moved : undefined;
 }
 
 /** The paper's own fields out of the server's reading: who sold, when, its number, its sums, each line as the garage names it. */
@@ -202,30 +472,7 @@ export function paperFields(read: ReceiptRead, today = dubaiDate()): PaperFields
   const { date, sure } = paperDate(read, today);
   const car = String(read.carText ?? '').trim().slice(0, 80) || undefined;
   const paperCar = carOfText(car);
-  const lines: PaperItem[] = x.items.map((i) => {
-    // The line's own car (v1.05.1): the AI's reading of it, else the line's own words («SANTAFE AC VALVE»), else the paper's.
-    const said = carOfText(i.car);
-    const own = said.make ? said : carOfText(i.name);
-    const make = own.make ?? paperCar.make;
-    const model = own.make && own.make !== paperCar.make ? own.model : own.model ?? paperCar.model;
-    const brand = i.brand;
-    const k = lineKind(brand ? `${i.name} ${brand}` : i.name, make);
-    // What the part is: the AI's name for it, else the line without its car — never with the car's words in it.
-    const part = partWithoutCar(i.part || i.name);
-    return {
-      name: i.name,
-      ...(part ? { part } : {}),
-      ...(i.partNumber ? { partNumber: i.partNumber } : {}),
-      qty: i.qty,
-      ...(i.unitNetFils !== undefined ? { unitFils: i.unitNetFils } : {}),
-      ...(i.lineNetFils !== undefined ? { totalFils: i.lineNetFils } : {}),
-      ...(make ? { make } : {}),
-      ...(model ? { model } : {}),
-      kind: k.kind,
-      ...(k.said ? {} : { unsure: true as const }),
-      ...(brand || k.brand ? { brand: brand ?? k.brand } : {}),
-    };
-  });
+  const lines: PaperItem[] = x.items.map((i) => lineOf({ name: i.name, part: i.part, car: i.car, brand: i.brand, kind: i.kind, partNumber: i.partNumber, qty: i.qty, unitFils: i.unitNetFils, totalFils: i.lineNetFils }, paperCar));
   const net = x.amountFils - x.vatFils;
   const sum = lines.reduce((s, l) => s + (l.totalFils ?? 0), 0);
   const near = (a: number, b: number) => a > 0 && b > 0 && Math.abs(a - b) <= Math.max(200, Math.round(b * 0.02));

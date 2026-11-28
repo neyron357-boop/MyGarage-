@@ -969,6 +969,8 @@ export interface PricePoint {
   invoiceNo?: string;
   partNumber?: string;
   qty?: number;
+  /** v1.05.2: the other models the paper's line fits («RIO/ACCENT/VELOSTR»: «Hyundai Accent», «Hyundai Veloster»). */
+  fits?: string[];
   updatedAt: string;
   _t?: number;
 }
@@ -991,6 +993,9 @@ export interface PaperItem {
   /** The kind is not said on the paper. */
   unsure?: true;
   brand?: string;
+  /** v1.05.2: every other model the line names («RIO/ACCENT/VELOSTR»), and what the AI said of it (its words are tidied again by newer rules). */
+  fits?: { make: string; model: string }[];
+  said?: { part?: string; car?: string; brand?: string; kind?: 'oem' | 'aftermarket' | 'used' };
 }
 
 /**
@@ -1022,6 +1027,8 @@ export interface SupplierPaper {
   invoiceNo?: string;
   date?: string;
   dateSure?: boolean;
+  /** The day set or accepted by a person (v1.05.2): the suppliers' numbering does not move it. */
+  dateBy?: 'hand';
   totalFils?: number;
   vatFils?: number;
   method?: Expense['method'];
@@ -1032,6 +1039,8 @@ export interface SupplierPaper {
   lines?: PaperItem[];
   /** The lines add up to the paper's sum. */
   adds?: boolean;
+  /** The reading rules it was learnt by (domain/papers.ts `PAPER_V`): older — tidied again. */
+  v?: number;
   twinOf?: string;
   /** The expense it already is (scanned by «Расход» or typed). */
   expenseId?: string;
