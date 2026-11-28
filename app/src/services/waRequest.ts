@@ -1,7 +1,7 @@
 import { db } from '../db/db';
 import { optionable } from '../domain/quoteOptions';
 import { chatRole, kindOf, whoOf, type WaChat, type WaEvent, type WaMessage } from '../domain/whatsapp';
-import { requestPlan, worthAsking, type AiRequest, type RequestPlan } from '../domain/waRequest';
+import { goesOn, namesCar, requestPlan, worthAsking, type AiRequest, type RequestPlan } from '../domain/waRequest';
 import { lineName } from '../domain/items';
 import type { QuoteOption } from '../domain/types';
 import { aiVoiceText, askAi, notifyAi } from './ai';
@@ -36,9 +36,13 @@ import { nowIso } from '../domain/dates';
  * minutes; the boss's voice notes are heard and his pictures and forwards are enough to ask; the registration card goes onto
  * the car (its VIN and expiry read); the same car again — its open job takes the new lines. The job then goes on by itself
  * as far as it may (domain/autopilot.ts).
+ * v1.03 (the owner: «ИИ быстро и моментально прочитал новые входящие сообщения и обрабатывал быстро»): looked at 20 s after the
+ * last message (a minute before), the chats one after another as they come (a second one waited 15 s more); a piece that goes
+ * on with a request just made («also the brakes» 30 s later, a voice note) is looked at with the messages before it
+ * (`goesOn`) — its lines go onto that job.
  */
 
-const WAIT_MS = 60_000;
+const WAIT_MS = 20_000;
 /** The messages of one request: within this of the last one. */
 const BURST_MS = 30 * 60_000;
 const SEEN_KEY = 'mygarage.waRequest.seen';
@@ -163,16 +167,25 @@ async function keepCard(vehicleId: string, card: Blob): Promise<void> {
   })().catch(() => undefined);
 }
 
-let running = false;
+/** The chats to look at, one after another (v1.03: a queue — before, a second chat waited fifteen seconds and tried again). */
+let line: Promise<void> = Promise.resolve();
+const queued = new Map<string, Promise<void>>();
 
 /** The chat's last messages in a row, looked at: a request — a job. */
-export async function considerChat(chatId: string): Promise<void> {
-  // One at a time: another chat's turn comes a little later.
-  if (running) {
-    setTimeout(() => void considerChat(chatId), 15_000);
-    return;
-  }
-  running = true;
+export function considerChat(chatId: string): Promise<void> {
+  // Waiting already: that look reads the newest messages too.
+  const waiting = queued.get(chatId);
+  if (waiting) return waiting;
+  const p = line.then(async () => {
+    queued.delete(chatId);
+    await lookAtChat(chatId);
+  });
+  queued.set(chatId, p);
+  line = p.catch(() => undefined);
+  return p;
+}
+
+async function lookAtChat(chatId: string): Promise<void> {
   try {
     const chat = waStore().chats.find((c) => c.id === chatId);
     if (!chat || chat.group || chat.self) return;
@@ -188,41 +201,58 @@ export async function considerChat(chatId: string): Promise<void> {
     // The messages in a row (not ours), within half an hour of the last one, not looked at yet.
     // (v0.98: the time is the message's own, in ms; and the voice notes are in it — the boss says what to do.)
     const voice = (m: WaMessage) => kindOf(m.type) === 'voice' || kindOf(m.type) === 'audio';
-    const burst = all.filter((m) => !m.me && m.t > was && last.t - m.t <= BURST_MS && (m.text.trim() || m.type === 'image' || (voice(m) && (m.file?.sec ?? 0) <= 180)));
+    const usable = (m: WaMessage) => !m.me && last.t - m.t <= BURST_MS && (m.text.trim() || m.type === 'image' || (voice(m) && (m.file?.sec ?? 0) <= 180));
+    const burst = all.filter((m) => usable(m) && m.t > was);
+    // v1.03: those looked at before — when they made a job (its last message is among them), the new ones may go on with it.
+    const earlier = all.filter((m) => usable(m) && m.t <= was);
     markSeen(chatId, last.t);
+    const job = earlier.length
+      ? await db.orders.filter((o) => o.fromChat?.chat === chatId && o.stage !== 'closed' && o.stage !== 'cancelled' && !o.archivedAt && earlier.some((m) => m.id === o.fromChat?.msg)).first()
+      : undefined;
     const work = role === 'work';
     const forwarded = burst.some((m) => m.fwd);
     const pictures = burst.filter((m) => m.type === 'image');
     const models = new Set((await db.vehicles.toArray()).flatMap((v) => (v.model ?? '').toLowerCase().split(/\s+/)).filter((w) => w.length >= 3));
     const plain = burst.filter((m) => !voice(m)).map((m) => m.text.trim());
+    const hear = (work || !!job) && burst.some(voice);
     // Worth a look at all (the words alone, before a voice note is heard): a customer's chat — its words; the boss's — more.
-    if (!worthAsking(plain, models, { work, forwarded, picture: pictures.length > 0 }) && !(work && burst.some(voice))) return;
+    if (!worthAsking(plain, models, { work, forwarded, picture: pictures.length > 0 }) && !hear && !(job && goesOn(plain, models))) return;
     // v0.98: whichever device of the garage saw it first does it — once (the PC at the desk, the phone when it is open).
     if (!(await claimOnce(`request:${chatId}:${last.id}`))) return;
-    const texts: string[] = [];
-    for (const m of burst) {
-      const tag = m.fwd ? '[fwd] ' : '';
-      if (m.type === 'image') texts.push(`${tag}[photo]${m.text.trim() ? ` ${m.text.trim()}` : ''}`);
-      else if (voice(m)) {
-        const heard = await aiVoiceText(m.id);
-        if (heard?.text.trim()) texts.push(`${tag}[voice] ${(heard.english || heard.text).trim()}`);
-      } else texts.push(`${tag}${m.text.trim()}`);
-    }
-    if (!texts.length || !worthAsking(texts, models, { work, forwarded, picture: pictures.length > 0 })) return;
-    const pic = pictures.at(-1);
+    const words = async (list: WaMessage[], heard: boolean): Promise<string[]> => {
+      const out: string[] = [];
+      for (const m of list) {
+        const tag = m.fwd ? '[fwd] ' : '';
+        if (m.type === 'image') out.push(`${tag}[photo]${m.text.trim() ? ` ${m.text.trim()}` : ''}`);
+        else if (voice(m)) {
+          // (the messages before: their voice notes were heard then — not again)
+          const text = heard ? await aiVoiceText(m.id) : undefined;
+          if (text?.text.trim()) out.push(`${tag}[voice] ${(text.english || text.text).trim()}`);
+        } else out.push(`${tag}${m.text.trim()}`);
+      }
+      return out;
+    };
+    const fresh = await words(burst, true);
+    // Goes on with the job just made (no car of its own): looked at with the messages before it.
+    const carry = !!job && !namesCar(fresh.join('\n'), models) && goesOn(fresh, models);
+    const texts = carry ? [...(await words(earlier, false)), ...fresh] : fresh;
+    const pic = pictures.at(-1) ?? (carry ? earlier.filter((m) => m.type === 'image').at(-1) : undefined);
+    const passed = forwarded || (carry && earlier.some((m) => m.fwd));
+    if (!fresh.length || !worthAsking(texts, models, { work, forwarded: passed, picture: !!pic })) return;
     const image = pic ? await pictureOf(pic) : undefined;
     const said = await askAi<AiRequest>('request', { texts, ...(image ? { image } : {}) }, `request:${chatId}`, 60_000);
     const plan = requestPlan(said);
     if (!plan) return;
     // The registration card goes onto the car (its own file, not the AI's small copy).
     const card = plan.registration && pic ? await waFileBlob(pic).catch(() => undefined) : undefined;
-    const complaint = texts
+    // The words of the new messages only (those before are on the job already).
+    const complaint = fresh
       .filter((x) => !x.startsWith('[photo]') && !x.startsWith('[fwd] [photo]'))
       .map((x) => x.replace(/^\[fwd\] /, '').replace(/^\[voice\] /, '🎤 '))
       .join(' · ')
       .slice(0, 300);
     // Passed on (forwarded, or by the garage's own people — the boss): the chat's person is not the car's owner.
-    const relay = forwarded || work;
+    const relay = passed || work;
     const made = await makeRequestJob(plan, chat, relay, complaint, last.id, card);
     if (!made || (made.merged && !made.added)) return;
     // v0.97: told at once to the other devices — the car, who, how many lines (v0.98: what is next — the prices to ask).
@@ -236,8 +266,6 @@ export async function considerChat(chatId: string): Promise<void> {
     });
   } catch {
     // The AI or the server out of reach: nothing made; the next message looks again.
-  } finally {
-    running = false;
   }
 }
 

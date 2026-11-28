@@ -1,10 +1,10 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db, GarageDB, setDb, uid } from '../db/db';
 import { chatRole, filterChats } from '../domain/whatsapp';
 import type { WaChat, WaMessage } from '../domain/whatsapp';
 import { setAiTransport } from './ai';
-import { chatsMakes, loadChatMakes, olderFromPhone, phoneHistoryChats, resetChatStudy, setChatMakes, setChatPin, studyChats } from './chatStudy';
+import { chatsMakes, loadChatMakes, olderFromPhone, onStudyProgress, phoneHistoryChats, reopenChatStudy, resetChatStudy, setChatMakes, setChatPin, studyChat, studyChats, studyProgress } from './chatStudy';
 import { SyncError } from './sync/api';
 import { createCustomer } from './customers';
 import { addItem } from './estimate';
@@ -57,6 +57,9 @@ let oldServer = false;
 let extra: WaChat[] = [];
 let extraTalk: Record<string, WaMessage[]> = {};
 let aiSays: Record<string, { role: string; confidence: number }> = {};
+/** v1.03: chats the AI says nothing of; the AI not answering at all. */
+let aiSkip = new Set<string>();
+let aiDown = false;
 const talkOf = (id: string) => (id === FAST.id ? fastTalk : id === SILENT.id ? silentTalk : id === NEW_ONE.id ? newTalk : (extraTalk[id] ?? []));
 
 beforeEach(async () => {
@@ -75,6 +78,8 @@ beforeEach(async () => {
   extra = [];
   extraTalk = {};
   aiSays = {};
+  aiSkip = new Set();
+  aiDown = false;
   setWaTransport(async (path: string, init: WaCallInit) => {
     if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 5, unread: 0 };
     if (path === 'chats') return { chats: [FAST, SILENT, NEW_ONE, CUSTOMER, GROUP, ...extra], total: 5 + extra.length, unread: 0 };
@@ -104,9 +109,10 @@ beforeEach(async () => {
   });
   setAiTransport(async (p, body) => {
     if (p !== 'roles') throw new Error('not played');
+    if (aiDown) throw new Error('no key');
     const chats = (body as { chats: { id: string; known?: string; texts: string[] }[] }).chats;
     asked.push(...chats);
-    return { chats: chats.map((c) => ({ id: c.id, role: aiSays[c.id]?.role ?? 'supplier', makes: c.id === NEW_ONE.id ? ['Lexus', 'Toyota'] : c.id === FAST.id ? ['Toyota'] : [], confidence: aiSays[c.id]?.confidence ?? 0.9 })) };
+    return { chats: chats.filter((c) => !aiSkip.has(c.id)).map((c) => ({ id: c.id, role: aiSays[c.id]?.role ?? 'supplier', makes: c.id === NEW_ONE.id ? ['Lexus', 'Toyota'] : c.id === FAST.id ? ['Toyota'] : [], confidence: aiSays[c.id]?.confidence ?? 0.9 })) };
   });
   await refreshWa();
   await loadChats(true);
@@ -295,5 +301,92 @@ describe('studying the chats (v0.91)', () => {
     // Taken off by hand: no longer main.
     await setChatPin([FAST], 'off');
     expect((await loadTop()).chats.has(FAST.id)).toBe(false);
+  });
+});
+
+describe('once through the chats, then only what is new (v1.03)', () => {
+  /** What the WhatsApp list was shown: the pass's totals while it went. */
+  const watch = () => {
+    const shown: number[] = [];
+    const off = onStudyProgress(() => {
+      const p = studyProgress();
+      if (p.running) shown.push(p.total);
+    });
+    return { shown, off };
+  };
+
+  it('the first pass shown; the app opened again — nothing read, nobody asked, nothing shown; a new message — that chat alone, unseen', async () => {
+    const w = watch();
+    await studyChats();
+    expect(Math.max(...w.shown)).toBe(3);
+    // Opened again: nothing came — nothing read again (before: every chat gone through, a quarter second each, shown).
+    reopenChatStudy();
+    w.shown.length = 0;
+    read = [];
+    deepRead = [];
+    const asks = asked.length;
+    await studyChats();
+    expect([read, deepRead, w.shown]).toEqual([[], [], []]);
+    expect(asked.length).toBe(asks);
+    // A message in one chat (the list says so): that chat alone, its last messages — not deep, not shown; read at once
+    // though it was read a moment ago (something came since).
+    reopenChatStudy();
+    await studyChats({ chats: [{ ...FAST, t: NOW }, SILENT, NEW_ONE, CUSTOMER, GROUP] });
+    expect([read, deepRead, w.shown]).toEqual([[FAST.id], [], []]);
+    expect((await db.chatFacts.get(FAST.id))?.through).toBe(NOW);
+    w.off();
+  });
+
+  it('a pass cut short goes on from where it stopped: a chat read is not read again', async () => {
+    setAiTransport(undefined);
+    // As if the app was closed after the first chat of the pass.
+    await studyChat(FAST);
+    expect(deepRead).toEqual([FAST.id]);
+    reopenChatStudy();
+    deepRead = [];
+    const w = watch();
+    await studyChats();
+    expect(deepRead.sort()).toEqual([SILENT.id, NEW_ONE.id].sort());
+    expect(read).toEqual([]);
+    expect(Math.max(...w.shown)).toBe(2);
+    w.off();
+  });
+
+  it('the AI: a chat it said nothing of is asked no more; not answering at all — the pass asks nothing for an hour, then again', async () => {
+    aiSkip = new Set([NEW_ONE.id]);
+    await studyChats();
+    expect(await db.chatFacts.get(NEW_ONE.id)).toMatchObject({ aiRole: 'other', aiV: 3 });
+    reopenChatStudy();
+    asked = [];
+    read = [];
+    await studyChats();
+    expect(asked).toEqual([]);
+    expect(read).toEqual([]);
+
+    // Another garage: the AI does not answer (no key on the server).
+    resetChatStudy(0);
+    await db.chatFacts.clear();
+    aiSkip = new Set();
+    asked = [];
+    aiDown = true;
+    await studyChats();
+    expect((await db.chatFacts.get(NEW_ONE.id))?.aiV).toBeUndefined();
+    // Opened again in a moment, the AI back: the pass does not ask (nor read the chats' words for it).
+    aiDown = false;
+    reopenChatStudy();
+    read = [];
+    await studyChats();
+    expect([asked, read]).toEqual([[], []]);
+    // An hour later — asked.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 61 * MIN);
+      reopenChatStudy();
+      await studyChats();
+      expect(asked.map((a) => a.id).sort()).toEqual([FAST.id, SILENT.id, NEW_ONE.id].sort());
+      expect((await db.chatFacts.get(NEW_ONE.id))?.aiRole).toBe('supplier');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

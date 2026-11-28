@@ -469,11 +469,12 @@ export interface AiChatRole {
   makes?: string[];
   confidence: number;
 }
-export async function aiChatRoles(chats: { id: string; name: string; texts: string[]; known?: 'customer' | 'supplier' }[]): Promise<AiChatRole[]> {
-  if (!aiOn() || !chats.length) return [];
+/** `undefined` — not answered (no server, no key, no network): the chats are asked another time (v1.03). */
+export async function aiChatRoles(chats: { id: string; name: string; texts: string[]; known?: 'customer' | 'supplier' }[]): Promise<AiChatRole[] | undefined> {
+  if (!aiOn() || !chats.length) return undefined;
   try {
     return (await askAi<{ chats: AiChatRole[] }>('roles', { chats }, 'roles', 40_000)).chats ?? [];
   } catch {
-    return [];
+    return undefined;
   }
 }

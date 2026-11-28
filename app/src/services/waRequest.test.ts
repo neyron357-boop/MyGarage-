@@ -123,4 +123,68 @@ describe('a job made of a WhatsApp request', () => {
     setClaimTransport(undefined);
     setWaTransport(undefined);
   });
+
+  it('v1.03: the next piece of the conversation («also the oil filter», no car) goes onto the job just made — looked at with the messages before it', async () => {
+    // The device's storage (what was looked at is kept there).
+    const kept = new Map<string, string>();
+    const was = (globalThis as { localStorage?: unknown }).localStorage;
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
+    try {
+      const BOSS = '971500000009@c.us';
+      let msgs: WaMessage[] = [];
+      setWaTransport(async (path: string, init: WaCallInit) => {
+        if (path === 'status') return { available: true, installed: true, browser: true, on: true, phase: 'ready', linked: true, qr: '', qrAt: 0, code: '', loading: 100, me: { id: '971500000001@c.us', phone: '971500000001', name: 'Garage' }, platform: 'smbi', web: '', error: '', chats: 1, unread: 0 };
+        if (path === 'chats') return { chats: [{ id: BOSS, name: 'Boss', group: false, phone: '971500000009', unread: 2, t: Date.now(), archived: false, pinned: false, muted: false, self: false, last: null }], total: 1, unread: 2 };
+        if (path === 'messages') return { messages: init.query?.chat === BOSS ? msgs : [], more: false };
+        throw new Error('not played: ' + path);
+      });
+      await saveSettings({ waChatTags: { [BOSS]: 'work' } } as never);
+      await refreshWa();
+      const { loadChats } = await import('./whatsapp');
+      await loadChats(true);
+      const asked: { path: string; texts?: string[] }[] = [];
+      setAiTransport(async (path, body) => {
+        asked.push({ path, texts: (body as { texts?: string[] }).texts });
+        if (path === 'voice') return { text: 'Колодки передние', english: 'Front brake pads', from: 'ru' };
+        if (path === 'request') {
+          const texts = (body as { texts: string[] }).texts;
+          const more = texts.some((x) => /oil filter/i.test(x));
+          return { isRequest: true, car: { make: 'Toyota', model: 'Camry', plate: { emirate: 'DXB', code: 'K', number: '55555' } }, items: [{ name: 'Front brake pads', kind: 'part' }, ...(more ? [{ name: 'Oil filter', kind: 'part' as const }] : [])], owner: 'Omar', picture: '', confidence: 0.9 };
+        }
+        throw new Error('not played: ' + path);
+      });
+      setClaimTransport(async () => true);
+      const now = Date.now();
+      msgs = [
+        { id: 'false_c_1', chat: BOSS, t: now - 60_000, me: false, type: 'chat', text: 'My Toyota Camry DXB K 55555 makes noise when braking', ack: 0, fwd: true } as WaMessage,
+        { id: 'false_c_2', chat: BOSS, t: now - 50_000, me: false, type: 'ptt', text: '', ack: 0, file: { sec: 8 } } as WaMessage,
+      ];
+      await considerChat(BOSS);
+      const made = (await db.orders.toArray()).find((o) => o.fromChat?.chat === BOSS)!;
+      expect(made).toBeTruthy();
+      // Thirty seconds later: more work, no car named.
+      asked.length = 0;
+      msgs = [...msgs, { id: 'false_c_3', chat: BOSS, t: now - 20_000, me: false, type: 'chat', text: 'Also change the oil filter', ack: 0 } as WaMessage];
+      await considerChat(BOSS);
+      // Asked once more, with the messages before (the voice note not heard again).
+      expect(asked.map((a) => a.path)).toEqual(['request']);
+      expect(asked[0].texts?.[0]).toMatch(/^\[fwd\] My Toyota Camry/);
+      expect(asked[0].texts?.at(-1)).toBe('Also change the oil filter');
+      const titles = (await db.items.where('orderId').equals(made.id).toArray()).map((i) => i.titleEn);
+      expect(titles.filter((x) => x === 'OIL FILTER')).toHaveLength(1);
+      expect(titles.filter((x) => x === 'FRONT BRAKE PADS')).toHaveLength(1);
+      expect((await db.orders.toArray()).filter((o) => o.fromChat?.chat === BOSS)).toHaveLength(1);
+      expect((await db.notes.where('orderId').equals(made.id).toArray()).map((n) => n.text)).toEqual(['WhatsApp: Also change the oil filter']);
+      // «Thanks» after it — nothing asked.
+      asked.length = 0;
+      msgs = [...msgs, { id: 'false_c_4', chat: BOSS, t: now, me: false, type: 'chat', text: 'thanks', ack: 0 } as WaMessage];
+      await considerChat(BOSS);
+      expect(asked).toEqual([]);
+    } finally {
+      (globalThis as { localStorage?: unknown }).localStorage = was;
+      setAiTransport(undefined);
+      setClaimTransport(undefined);
+      setWaTransport(undefined);
+    }
+  });
 });

@@ -54,6 +54,18 @@ export const KEEP_TURNS = 1000;
  */
 export const STUDY_V = 2;
 
+/**
+ * What a chat needs of the study now (v1.03, the owner: «каждый раз открываю ватсап — ИИ заново проходит все чаты… нужно, чтобы
+ * один раз уже прошёлся по всем чатам, теперь обрабатывать только новые»): `first` — never read, read before it was read as deep
+ * as WhatsApp Web has it (v0.91.1; `deep: false` — a server without it), or read the old way (`STUDY_V`): once; `new` — its
+ * last message is newer than what was read; else nothing — it is not read again, on any device (the record syncs).
+ */
+export function studyDue(chat: { t: number }, fact: { studiedAt?: string; deepAt?: string; turns?: unknown[]; studyV?: number; through?: number } | undefined, opts: { deep?: boolean } = {}): 'first' | 'new' | undefined {
+  if (!fact?.studiedAt) return 'first';
+  if ((fact.turns?.length && (fact.studyV ?? 0) < STUDY_V) || (opts.deep !== false && !fact.deepAt)) return 'first';
+  return chat.t > (fact.through ?? 0) ? 'new' : undefined;
+}
+
 /* ---------- Makes in words ---------- */
 
 const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');

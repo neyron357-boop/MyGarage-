@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { vinCheckDigit } from './vin';
-import { looksLikeRequest, plateOf, requestPlan } from './waRequest';
+import { goesOn, looksLikeRequest, plateOf, requestPlan } from './waRequest';
 
 // A made-up VIN of a Nissan built in the USA, its check digit put right.
 const raw = '1N4AL3AP0FN000123';
@@ -19,6 +19,17 @@ describe('a WhatsApp request (v0.90, #69)', () => {
     expect(looksLikeRequest(['ابغى تغيير فحمات الفرامل كامري 2018'], models)).toBe(true);
     expect(looksLikeRequest(['كم سعر بطارية باترول'], models)).toBe(true);
     expect(looksLikeRequest(['شكرا'], models)).toBe(false);
+  });
+
+  it('v1.03: a piece that goes on with a request — work asked, no car of its own; a car of its own is a request of its own', () => {
+    const models = new Set(['altima', 'patrol']);
+    expect(goesOn(['Also change the front brake pads'], models)).toBe(true);
+    expect(goesOn(['and the engine mount'], models)).toBe(true);
+    expect(goesOn(['front brake pads too'], models)).toBe(true);
+    expect(goesOn(['Okay', 'Thank you'], models)).toBe(false);
+    expect(goesOn(['thanks bro'], models)).toBe(false);
+    expect(goesOn(['Patrol DXB A 77777 needs AC service'], models)).toBe(false);
+    expect(goesOn([''], models)).toBe(false);
   });
 
   it('the plate only whole', () => {

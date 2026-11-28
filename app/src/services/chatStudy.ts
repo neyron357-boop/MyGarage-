@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import { canonicalMake } from '../domain/carCatalog';
-import { AI_ROLES_V, STUDY_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, spliceTurns, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
+import { AI_ROLES_V, STUDY_V, backedRole, chatSigns, mergeSigns, mergeTurns, signsKey, spliceTurns, studyDue, turnsOf, wordsForAi, type ChatSigns, type KnownMake } from '../domain/chatStudy';
 import { knowOf, type SupplierKnow } from '../domain/supplierRank';
 import { nowIso } from '../domain/dates';
 import type { ChatFact, Supplier } from '../domain/types';
@@ -27,6 +27,16 @@ import { askPhoneHistory, fetchChatHistory, fetchChatMessages, knownPeople, load
  * gives this linked device — «All chat history» in its Linked devices), and the chat read deep again when they came.
  * The messages themselves are never kept — only what they came to. Any device with the garage's WhatsApp does it; a chat
  * read on one device in the last ten minutes is not read again on another. Nothing is sent.
+ * v1.03 (the owner: «ИИ быстро и моментально прочитал новые входящие… каждый раз открываю ватсап — ИИ заново проходит все
+ * чаты, а нужно, чтобы один раз уже прошёлся по всем, теперь обрабатывать только новые»): the list was gone through whole every
+ * six hours and at each start that followed an unfinished pass (its mark was written only at the very end — an iPhone closing
+ * the app half-way began again from the first chat), a quarter second on every chat even with nothing to read, and the chats
+ * the AI had not answered about were read and asked again at every start. Now: only what a chat needs (`studyDue`: its first
+ * read — once; what came since it was read), worked out from the kept records before anything is read; a pass cut short goes
+ * on from where it stopped (each chat is kept as it is read); the AI's question is kept answered for every chat asked (one it
+ * said nothing of — «other», asked again once its words show a car or parts), and when it does not answer at all it rests an
+ * hour; the WhatsApp list shows the pass only until the first one is done on the device. A message is studied five seconds
+ * after the chat goes quiet (a minute before).
  */
 
 /** Read this many of a chat's last messages (what is new since it was read). */
@@ -35,11 +45,41 @@ const READ = 80;
 const DEEP = 3000;
 /** A chat studied (here or on another device) this recently is not read again. */
 const FRESH_MS = 10 * 60_000;
-/** The whole list again after this long. */
-const SWEEP_EVERY = 6 * 60 * 60_000;
-// v0.91.1: a key of its own — the chats studied by v0.91 (80 messages each) are read deep at once, not in six hours.
-const SWEPT_KEY = 'mygarage.chatStudy.v2';
+/**
+ * The first pass over the chats done on this device (the key v0.91.1 wrote at the end of a whole pass): after it, the study goes
+ * on unseen — before it, the WhatsApp list shows how far it is.
+ */
+const FIRST_KEY = 'mygarage.chatStudy.v2';
+/** The AI did not answer (no key on the server, no network): the pass asks it nothing for this long. */
+const AI_REST_MS = 60 * 60_000;
+const AI_REST_KEY = 'mygarage.chatStudy.aiRest';
+/** A chat whose read failed is not tried again in a pass for this long (a deep read through the tunnel timing out). */
+const FAILED_MS = 30 * 60_000;
 const AI_BATCH = 12;
+
+/** On this device, kept in its storage — and here (a test, a browser that keeps nothing). */
+const mem = new Map<string, string>();
+function local(key: string): string | null {
+  try {
+    return globalThis.localStorage?.getItem(key) ?? mem.get(key) ?? null;
+  } catch {
+    return mem.get(key) ?? null;
+  }
+}
+function setLocal(key: string, value: string) {
+  mem.set(key, value);
+  try {
+    globalThis.localStorage?.setItem(key, value);
+  } catch {
+    // kept here only
+  }
+}
+const firstPassDone = (): boolean => !!Number(local(FIRST_KEY));
+const aiResting = (): boolean => Date.now() - (Number(local(AI_REST_KEY)) || 0) < AI_REST_MS;
+/** A server without `/history` (before v0.91.1): its chats are not «first» for want of a deep read. */
+let noHistory = false;
+/** Reads that failed here, and when. */
+const failed = new Map<string, number>();
 
 /* ---------- What is going on (the WhatsApp list shows it) ---------- */
 
@@ -106,11 +146,13 @@ async function keep(id: string, patch: Partial<ChatFact>): Promise<ChatFact> {
  */
 export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'>, opts: { force?: boolean; deep?: boolean } = {}): Promise<{ fact: ChatFact; words: string[] } | undefined> {
   const was = await db.chatFacts.get(chat.id);
-  if (!opts.force && was?.studiedAt && Date.now() - Date.parse(was.studiedAt) < FRESH_MS) return undefined;
+  // (read a moment ago and nothing came since — v1.03: something new is read whenever it came)
+  const newer = !!chat.t && chat.t > (was?.through ?? 0);
+  if (!opts.force && !newer && was?.studiedAt && Date.now() - Date.parse(was.studiedAt) < FRESH_MS) return undefined;
   // Read deep once (v0.91.1); after that only when something came since — or when its requests were read the old way
   // (v0.91.6: their kinds of parts and what was offered not known yet).
   const stale = !!was?.turns?.length && (was.studyV ?? 0) < STUDY_V;
-  const deep = opts.deep || !was?.deepAt || stale;
+  const deep = opts.deep || stale || (!was?.deepAt && !noHistory);
   if (!opts.force && !deep && was?.through && chat.t && was.through >= chat.t) return undefined;
   let messages: Pick<WaMessage, 't' | 'me' | 'type' | 'text'>[];
   let end = was?.end;
@@ -126,6 +168,7 @@ export async function studyChat(chat: Pick<WaChat, 'id' | 'phone' | 'name' | 't'
     } catch (e) {
       // A server from before v0.91.1: the last messages, as before.
       if (!(e instanceof SyncError) || e.status !== 404) throw e;
+      noHistory = true;
       messages = await fetchChatMessages(chat.id, READ, { lite: true });
     }
   } else messages = await fetchChatMessages(chat.id, READ, { lite: true });
@@ -173,11 +216,28 @@ const SURE = 0.8;
 async function askAiAbout(list: { chat: WaChat; words: string[]; known?: 'supplier'; signs?: ChatSigns }[]): Promise<number> {
   if (!list.length || !aiOn()) return 0;
   const said = await aiChatRoles(list.map(({ chat, words, known }) => ({ id: chat.id, name: chat.name, texts: words.length ? words : chat.last?.text ? [`${chat.last.me ? 'G' : 'T'}: ${chat.last.text}`] : [], ...(known ? { known } : {}) })));
+  // Not answered at all: asked another time — the pass rests the AI an hour (v1.03: it was asked again at every start).
+  if (!said) {
+    setLocal(AI_REST_KEY, String(Date.now()));
+    return 0;
+  }
   let suppliers = 0;
-  for (const r of said) {
-    const one = list.find((x) => x.chat.id === r.id);
-    if (!one) continue;
-    const signs = one.signs ?? (await db.chatFacts.get(r.id))?.signs;
+  for (const one of list) {
+    const r = said.find((x) => x.id === one.chat.id);
+    const signs = one.signs ?? (await db.chatFacts.get(one.chat.id))?.signs;
+    // v1.03: answered, but nothing said of this one — asked all the same: «other» (asked again once its words show a car or
+    // parts); a supplier's makes — none said.
+    if (!r) {
+      await keep(one.chat.id, {
+        ...(one.chat.phone ? { phone: one.chat.phone } : {}),
+        ...(one.chat.name ? { name: one.chat.name } : {}),
+        ...(one.known ? {} : { aiRole: 'other' as const }),
+        aiAt: nowIso(),
+        aiV: AI_ROLES_V,
+        aiSigns: signsKey(signs),
+      });
+      continue;
+    }
     const role = r.confidence >= SURE ? backedRole(r.role, signs, one.chat.name) : 'other';
     // A server from before v0.91 says no makes: the role is kept, the chat is asked again once it says them.
     const makes = (r.makes ?? []).map((m) => canonicalMake(m)).filter(Boolean);
@@ -198,9 +258,36 @@ async function askAiAbout(list: { chat: WaChat; words: string[]; known?: 'suppli
 
 let sweeping: Promise<{ studied: number; suppliers: number }> | undefined;
 
+/** What a pass would do now: the chats with something to read (what is new first), those the AI is to be asked about. */
+export interface StudyPlan {
+  todo: { chat: WaChat; due?: 'first' | 'new'; ai: boolean }[];
+  first: number;
+}
+
 /**
- * Every chat worth it, one after another (a short pause between): read when something new came, the AI asked about those
- * nobody knows (a dozen at once). The list as the app has it, else read from the server. Stops when WhatsApp goes away.
+ * The chats a pass has work in (v1.03), worked out from the kept records — nothing read: a chat read before and quiet since is
+ * not in it. What is new first (it matters now), then the first reads, newest chats first; then those only the AI waits on.
+ */
+export function studyPlan(chats: WaChat[], x: { people: Map<string, Who>; roles: ChatRoles; facts: Map<string, ChatFact>; suppliers: Map<string, Supplier>; ai: boolean; now?: number }): StudyPlan {
+  const now = x.now ?? Date.now();
+  const todo: StudyPlan['todo'] = [];
+  for (const chat of orderChats(chats)) {
+    if (!worthStudy(chat, x.people, x.roles)) continue;
+    const fact = x.facts.get(chat.id);
+    const tried = failed.get(chat.id);
+    const due = tried && now - tried < FAILED_MS ? undefined : studyDue(chat, fact, { deep: !noHistory });
+    const ai = x.ai && !asked.has(chat.id) && !!aiWanted(chat, fact, x.people, x.roles, x.suppliers);
+    if (due || ai) todo.push({ chat, due, ai });
+  }
+  const rank = (d?: 'first' | 'new') => (d === 'new' ? 0 : d === 'first' ? 1 : 2);
+  todo.sort((a, b) => rank(a.due) - rank(b.due));
+  return { todo, first: todo.filter((t) => t.due === 'first').length };
+}
+
+/**
+ * The chats with work in them, one after another (a short pause after each read): read what they need, the AI asked about
+ * those nobody knows (a dozen at once). The list as the app has it, else read from the server. Stops when WhatsApp goes away;
+ * the next pass goes on from there. The WhatsApp list shows it only while the device's first pass is going (v1.03).
  */
 export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: number; suppliers: number }> {
   sweeping ??= (async () => {
@@ -211,41 +298,48 @@ export function studyChats(opts: { chats?: WaChat[] } = {}): Promise<{ studied: 
       const [people, roles, facts, sups] = await Promise.all([loadPeople(), loadChatRoles(), db.chatFacts.toArray(), db.suppliers.toArray()]);
       const factOf = new Map(facts.map((f) => [f.id, f]));
       const supplierOf = new Map(sups.map((s) => [s.id, s]));
-      const list = orderChats(chats).filter((c) => worthStudy(c, people, roles));
-      tell({ running: true, done: 0, total: list.length, kind: 'study' });
+      const ai = aiOn() && !aiResting();
+      const { todo, first } = studyPlan(chats, { people, roles, facts: factOf, suppliers: supplierOf, ai });
+      // Shown while the device's first pass is going; after it — new messages are studied unseen.
+      const shown = first > 0 && !firstPassDone();
+      if (shown) tell({ running: true, done: 0, total: todo.length, kind: 'study' });
       const queue: { chat: WaChat; words: string[]; known?: 'supplier'; signs?: ChatSigns }[] = [];
-      for (const [k, chat] of list.entries()) {
-        if (!waReady()) break;
-        let words: string[] = [];
-        try {
-          const r = await studyChat(chat);
-          if (r) {
-            studied++;
-            words = r.words;
-            factOf.set(chat.id, r.fact);
-          }
-        } catch {
-          // this one another time
+      let whole = true;
+      for (const [k, { chat, due }] of todo.entries()) {
+        if (!waReady()) {
+          whole = false;
+          break;
         }
-        const want = aiWanted(chat, factOf.get(chat.id), people, roles, supplierOf);
-        if (want && !asked.has(chat.id)) {
+        let words: string[] = [];
+        if (due) {
+          try {
+            const r = await studyChat(chat);
+            failed.delete(chat.id);
+            if (r) {
+              studied++;
+              words = r.words;
+              factOf.set(chat.id, r.fact);
+            }
+          } catch {
+            // this one another time (not again in this half hour)
+            failed.set(chat.id, Date.now());
+          }
+        }
+        const want = ai && !asked.has(chat.id) ? aiWanted(chat, factOf.get(chat.id), people, roles, supplierOf) : undefined;
+        if (want) {
           asked.add(chat.id);
           // Not read just now (nothing new): its last words read for the AI.
           const seen = words.length ? { words, signs: factOf.get(chat.id)?.signs } : await wordsOf(chat);
           queue.push({ chat, words: seen.words, signs: seen.signs, ...(want === 'supplier' ? { known: 'supplier' as const } : {}) });
         }
         if (queue.length >= AI_BATCH) suppliers += await askAiAbout(queue.splice(0)).catch(() => 0);
-        tell({ running: true, done: k + 1, total: list.length, kind: 'study' });
-        await new Promise((r) => setTimeout(r, PAUSE));
+        if (shown) tell({ running: true, done: k + 1, total: todo.length, kind: 'study' });
+        if (due || want) await new Promise((r) => setTimeout(r, PAUSE));
       }
       suppliers += await askAiAbout(queue).catch(() => 0);
-      try {
-        localStorage.setItem(SWEPT_KEY, String(Date.now()));
-      } catch {
-        // not kept
-      }
+      if (whole) setLocal(FIRST_KEY, String(Date.now()));
     } finally {
-      tell({ running: false, done: 0, total: 0 });
+      if (progress.running && progress.kind === 'study') tell({ running: false, done: 0, total: 0 });
       sweeping = undefined;
     }
     return { studied, suppliers };
@@ -365,23 +459,44 @@ export function olderFromPhone(): Promise<PhoneHistoryResult> {
 /** Asked of the AI while the app is open (a chat it could not say is not asked again until the app opens again). */
 const asked = new Set<string>();
 let PAUSE = 250;
-/** The tests: no pause between chats, nobody asked yet. */
+/** The tests: the app opened again — what it keeps in memory gone, the device's marks kept. */
+export function reopenChatStudy() {
+  asked.clear();
+  failed.clear();
+  noHistory = false;
+}
+/** The tests: no pause between chats, nobody asked yet, no pass done, the AI not resting. */
 export function resetChatStudy(pause = 0) {
   PAUSE = pause;
-  asked.clear();
+  reopenChatStudy();
+  mem.clear();
+  try {
+    globalThis.localStorage?.removeItem(FIRST_KEY);
+    globalThis.localStorage?.removeItem(AI_REST_KEY);
+  } catch {
+    // nothing kept
+  }
 }
 
 /* ---------- As messages come ---------- */
 
 const waiting = new Map<string, ReturnType<typeof setTimeout>>();
-/** A chat a minute after its last message (a conversation is read once it rests). */
-const QUIET_MS = 60_000;
+/**
+ * A chat this long after its last message (a few messages in a row are read at once). v1.03: was a minute — the owner: «ИИ
+ * быстро и моментально прочитал новые входящие сообщения».
+ */
+const QUIET_MS = 5000;
+/** A pass after WhatsApp is ready (the app's own reads first), after the list is read again; at most this often for the list. */
+const START_MS = 8000;
+const LIST_MS = 4000;
+const LIST_EVERY = 2 * 60_000;
 
 async function studyNow(chat: WaChat, deep = false) {
   // The garage's people as read once (a busy account speaks often: the whole base is not read for each message).
   const [people, roles] = await Promise.all([knownPeople(), loadChatRoles()]);
   if (!worthStudy(chat, people, roles)) return;
   const r = await studyChat(chat, { force: true, deep });
+  failed.delete(chat.id);
   const who = whoOf(chat, people);
   const [fact, sup] = await Promise.all([db.chatFacts.get(chat.id), who?.kind === 'supplier' ? db.suppliers.get(who.id) : undefined]);
   const want = aiWanted(chat, fact, people, roles, new Map(sup ? [[sup.id, sup]] : []));
@@ -391,7 +506,11 @@ async function studyNow(chat: WaChat, deep = false) {
 }
 
 let started = false;
-/** Once, at the app's start: the whole list when WhatsApp is ready (not studied for six hours), then each chat as it speaks. */
+/**
+ * Once, at the app's start: each chat as it speaks (five seconds after it goes quiet); what came while the app was closed — a
+ * pass when WhatsApp is ready, when the list is read again (the stream back, the app back from the background) and every half
+ * hour: only the chats with something new (v1.03 — not the whole list every six hours).
+ */
 export function startChatStudy() {
   if (started || typeof window === 'undefined') return;
   started = true;
@@ -426,30 +545,56 @@ export function startChatStudy() {
       }, QUIET_MS),
     );
   });
-  let planned = false;
-  // When the list was last gone through (kept on this device); read once — the store speaks at every event.
-  let sweptAt = -1;
-  const maybeSweep = () => {
-    if (planned || !waReady()) return;
-    if (sweptAt < 0) {
-      try {
-        sweptAt = Number(localStorage.getItem(SWEPT_KEY)) || 0;
-      } catch {
-        sweptAt = 0;
-      }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let again = false;
+  const run = () => {
+    timer = undefined;
+    if (!waReady()) return;
+    // One at a time; asked again while one goes — once more after it (what the list brought meanwhile).
+    if (sweeping) {
+      again = true;
+      return;
     }
-    if (Date.now() - sweptAt < SWEEP_EVERY) return;
-    sweptAt = Date.now();
-    planned = true;
-    // A little after the app came up (its own reads first).
-    setTimeout(() => {
-      planned = false;
-      void studyChats().catch(() => undefined);
-    }, 20_000);
+    void studyChats()
+      .catch(() => undefined)
+      .finally(() => {
+        if (!again) return;
+        again = false;
+        plan(LIST_MS);
+      });
   };
-  subscribeWa(maybeSweep);
-  maybeSweep();
-  setInterval(maybeSweep, 30 * 60_000);
+  const plan = (ms: number) => {
+    if (!timer) timer = setTimeout(run, ms);
+  };
+  let ready = false;
+  let listAt = 0;
+  let passAt = 0;
+  // The store speaks at every event: only two numbers looked at.
+  const look = () => {
+    if (!waReady()) {
+      ready = false;
+      return;
+    }
+    const at = waStore().chatsAt;
+    if (!ready) {
+      ready = true;
+      listAt = at;
+      passAt = Date.now();
+      plan(START_MS);
+      return;
+    }
+    if (at && at !== listAt && Date.now() - passAt >= LIST_EVERY) {
+      listAt = at;
+      passAt = Date.now();
+      plan(LIST_MS);
+    }
+  };
+  subscribeWa(look);
+  look();
+  setInterval(() => {
+    passAt = Date.now();
+    plan(0);
+  }, 30 * 60_000);
 }
 
 /* ---------- Makes by hand ---------- */

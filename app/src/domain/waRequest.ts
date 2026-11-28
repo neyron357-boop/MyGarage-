@@ -47,6 +47,37 @@ export function worthAsking(texts: string[], models: Set<string>, burst: { work:
   return looksLikeRequest(texts, models);
 }
 
+/**
+ * v1.03 (the owner: «ИИ быстро и моментально… обрабатывало быстро» — the messages are looked at 20 s after the last one, not a
+ * minute, so a conversation may come in two pieces): a piece that goes on with a request just made of the messages before it
+ * («also the brakes», a voice note) — no car of its own, work asked. It is looked at with those messages, so the AI knows the
+ * car and its job takes the new lines.
+ */
+export function goesOn(texts: string[], models: Set<string>): boolean {
+  const all = texts.join('\n');
+  if (!all.trim() || namesCar(all, models)) return false;
+  return ASK_WORDS.test(all) || texts.some(namesPart);
+}
+
+/**
+ * A part the garage's dictionary knows, anywhere in a short message («and the engine mount», «brake pads too») — as it is
+ * written (a word put right by the dictionary is no part: «thanks» is not a TANK), a word of three letters at least.
+ */
+function namesPart(text: string): boolean {
+  const whole = matchPartName(text);
+  if (whole.known && !whole.changed) return true;
+  const words = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!words.length || words.length > 30) return false;
+  for (let n = Math.min(4, words.length); n >= 1; n--)
+    for (let i = 0; i + n <= words.length; i++) {
+      const piece = words.slice(i, i + n).join(' ');
+      if (!/\p{L}{3,}/u.test(piece)) continue;
+      const m = matchPartName(piece);
+      if (m.known && !m.changed) return true;
+    }
+  return false;
+}
+
 /** What the AI said of the messages (server/src/ai.mjs `request`). */
 export interface AiRequest {
   isRequest: boolean;
